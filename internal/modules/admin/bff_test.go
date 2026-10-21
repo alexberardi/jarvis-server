@@ -335,6 +335,22 @@ func TestSystemInfo(t *testing.T) {
 		ls[1].(map[string]any)["name"] != "admin" || ls[1].(map[string]any)["served"] != true {
 		t.Fatalf("listeners: %v", ls)
 	}
+	// Each listener's prefix on the config port, and whether it has a port of its own.
+	own := func() map[string][2]any {
+		out := map[string][2]any{}
+		for _, l := range decode(t, send(e.mux, "GET", "/api/system/info", "", root...))["listeners"].([]any) {
+			x := l.(map[string]any)
+			out[x["name"].(string)] = [2]any{x["path"], x["own_port"]}
+		}
+		return out
+	}
+	if got := own(); got["auth"] != [2]any{"/auth", true} || got["admin"] != [2]any{"", true} {
+		t.Fatalf("legacy ports: %v", got)
+	}
+	e.m.deps.Config.SinglePort = true
+	if got := own(); got["auth"] != [2]any{"/auth", false} || got["admin"] != [2]any{"", true} {
+		t.Fatalf("single port: %v", got)
+	}
 }
 
 func TestTracesBFF(t *testing.T) {

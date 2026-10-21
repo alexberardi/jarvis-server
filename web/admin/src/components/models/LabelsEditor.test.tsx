@@ -262,3 +262,57 @@ describe('LabelsEditor model directory engine', () => {
     await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ background: { dir_engine: 'transformers' } }))
   })
 })
+
+describe('LabelsEditor model folders', () => {
+  it('lists an installed MLX folder in the model dropdown and shows the text-only note, not the image switch', async () => {
+    const live = status('live', '')
+    live.config = {
+      ...live.config,
+      kind: 'mlx-lm',
+      model: 'qwen3.5-9b-4bit',
+      model_path: '/m/mlx-community--Qwen3.5-9B-4bit',
+      dir_engine: 'auto',
+      note: 'mlx-lm runs this model text-only: vision is off for this label',
+    }
+    const bg = status('background', '')
+    const labels: llm.LabelsResponse = {
+      labels: [live, bg],
+      voice: null,
+      engines: null,
+      proposal: {},
+      recommend: {},
+      warnings: null,
+    }
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    api.listInstalled.mockResolvedValue({
+      models: [
+        {
+          id: 'qwen3.5-9b-4bit',
+          kind: 'llm',
+          display: 'Qwen3.5-9B-4bit',
+          files: [],
+          path: '/m/mlx-community--Qwen3.5-9B-4bit',
+          size: 5_100_000_000,
+          prompt_provider: 'Qwen3_5_9B_Compressed',
+          state: 'ready',
+          bytes_done: 5_100_000_000,
+          external: false,
+          labels: ['live'],
+          directory: true,
+        },
+      ],
+      disk_bytes: 0,
+      dir: '/m',
+    })
+    renderEditor()
+    const card = await screen.findByTestId('label-live')
+    expect(within(card).getByText(/text-only: vision is off/)).toBeInTheDocument()
+    expect(within(card).queryByRole('switch', { name: 'Image input' })).toBeNull()
+    const bgCard = screen.getByTestId('label-background')
+    const option = await within(bgCard).findByRole('option', { name: /Qwen3.5-9B-4bit \(qwen3.5-9b-4bit\) · model folder/ })
+    fireEvent.change(within(bgCard).getByLabelText('Model'), { target: { value: (option as HTMLOptionElement).value } })
+    fireEvent.click(within(bgCard).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ background: { model: 'qwen3.5-9b-4bit' } }))
+  })
+})

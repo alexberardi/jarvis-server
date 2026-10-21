@@ -50,7 +50,7 @@ nothing is hidden from the household.
   GNOME/KDE RemoteDesktop portal (keyboard only), X11, macOS, Windows SendInput. A short fixed key
   set; no modifier shortcuts by design.
 - **Pointer input: none on any platform.**
-- **Window control / app launch:** X11 EWMH, macOS System Events/AX, Windows user32; `desktop_open`
+- **Window control / app launch:** X11 EWMH, macOS Accessibility (AX), Windows user32; `desktop_open`
   with a catalogue policy. Generic Wayland has no window control.
 - **Browser:** 11 `browser_*` tools (tabs, navigate, read_page with untrusted-text markers, scroll,
   find, fill, click by label). DESIGN §10 "basic first, agentic later" has the element-ref plan.

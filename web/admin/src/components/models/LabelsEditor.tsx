@@ -67,6 +67,9 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: str
 const selectClass = fieldControl
 const inputClass = fieldControl
 
+/** Engines that run a Hugging Face model folder (text-only). */
+const PY_ENGINES = ['mlx-lm', 'vllm', 'transformers']
+
 function ModelSelect({
   id,
   value,
@@ -88,6 +91,7 @@ function ModelSelect({
       {models.map((m) => (
         <option key={m.id} value={m.id} disabled={m.state !== 'ready'}>
           {m.display && m.display !== m.id ? `${m.display} (${m.id})` : m.id}
+          {m.directory ? ' · model folder' : ''}
           {m.state !== 'ready' ? ` [${m.state}]` : ''}
         </option>
       ))}
@@ -196,6 +200,8 @@ function EngineLabelCard({
   const isLLM = cfg.model_kind === 'llm'
   const kindModels = models.filter((m) => m.kind === LABEL_KIND[label])
   const projectors = models.filter((m) => m.kind === 'mmproj')
+  // A Python engine (a Hugging Face model folder) takes no projector: the label is text-only.
+  const pyEngine = PY_ENGINES.includes(cfg.kind)
 
   const v = <K extends keyof LabelConfig & keyof LabelUpdate>(k: K) =>
     (draft[k] !== undefined ? draft[k] : cfg[k]) as LabelConfig[K]
@@ -233,7 +239,7 @@ function EngineLabelCard({
         onChange={(e) => set({ fold_system_messages: e.target.value })}
         className={selectClass}
       >
-        <option value="auto">{mode === 'remote' ? 'auto (send as is)' : "auto (the model's catalog entry)"}</option>
+        <option value="auto">{mode === 'remote' ? 'auto (send as is)' : "auto (the model's catalog entry or folder)"}</option>
         <option value="on">fold into the user turn</option>
         <option value="off">send as is</option>
       </select>
@@ -261,6 +267,7 @@ function EngineLabelCard({
       {(status.reason || cfg.problem) && (
         <p className="text-small text-warning">{cfg.problem || status.reason}</p>
       )}
+      {cfg.note && <p className="text-small text-text-muted">{cfg.note}</p>}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Runs" htmlFor={id('engine')}>
@@ -356,7 +363,7 @@ function EngineLabelCard({
         </div>
       )}
 
-      {mode === 'local' && isLLM && (label === 'live' || label === 'background') && (
+      {mode === 'local' && isLLM && !pyEngine && (label === 'live' || label === 'background') && (
         <ImageInputToggle
           id={id('image_input')}
           label={label}
@@ -453,7 +460,7 @@ function EngineLabelCard({
                   />
                 </Field>
               )}
-              {['mlx-lm', 'vllm', 'transformers'].includes(cfg.kind) && (
+              {pyEngine && (
                 <Field label="Directory engine" htmlFor={id('dir_engine')} hint="auto = MLX on Apple Silicon, vLLM on Linux, else Transformers">
                   <select id={id('dir_engine')} value={v('dir_engine') || 'auto'} onChange={(e) => set({ dir_engine: e.target.value })} className={selectClass}>
                     {['auto', 'mlx-lm', 'transformers', 'vllm'].map((f) => (
@@ -489,7 +496,7 @@ function EngineLabelCard({
                   </select>
                 </Field>
               )}
-              {isLLM && (
+              {isLLM && !pyEngine && (
                 <Field label="Vision projector" htmlFor={id('mmproj')} hint="Empty = the model's own, if installed">
                   <select id={id('mmproj')} value={v('mmproj')} onChange={(e) => set({ mmproj: e.target.value })} className={selectClass}>
                     <option value="">(model's own)</option>

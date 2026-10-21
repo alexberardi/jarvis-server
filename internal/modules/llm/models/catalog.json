@@ -138,6 +138,77 @@
     "sha256": "cbb841a9ee0636b2ec172f5bb8df2ea8dfeb01e90fe7c6126581d662a0b4e43e"
   },
   {
+    "id": "qwen3.5-9b-mlx",
+    "display": "Qwen 3.5 9B (MLX 4-bit, Apple Silicon)",
+    "kind": "llm",
+    "repo": "mlx-community/Qwen3.5-9B-4bit",
+    "file": "config.json",
+    "size": 5100000000,
+    "sha256": "",
+    "directory": true,
+    "context_default": 32768,
+    "context_max": 262144,
+    "kv_bytes_per_token": 32768,
+    "prompt_provider": "Qwen3_5_9B_Compressed",
+    "thinking": true,
+    "fold_system_messages": true,
+    "no_recommend": true,
+    "tags": [
+      "live",
+      "background",
+      "mlx"
+    ],
+    "notes": "Runs on MLX (mlx-lm) on Apple Silicon, text-only. Not recommended: it called the tool on 88.8% of the tool bench against 100% for the Qwen 3.5 9B GGUF on the same 16 GB Mac (it answers arithmetic itself), so a 16 GB Mac gets the GGUF."
+  },
+  {
+    "id": "qwen3.5-27b-mlx",
+    "display": "Qwen 3.5 27B (MLX 4-bit, Apple Silicon)",
+    "kind": "llm",
+    "repo": "mlx-community/Qwen3.5-27B-4bit",
+    "file": "config.json",
+    "size": 15200000000,
+    "sha256": "",
+    "directory": true,
+    "min_memory_mb": 32768,
+    "context_default": 16384,
+    "context_max": 262144,
+    "kv_bytes_per_token": 65536,
+    "prompt_provider": "Qwen3_14B_Compressed",
+    "thinking": true,
+    "fold_system_messages": true,
+    "tags": [
+      "live",
+      "background",
+      "mlx",
+      "large"
+    ],
+    "notes": "Runs on MLX (mlx-lm) on Apple Silicon, text-only. Needs a Mac with 32 GB or more."
+  },
+  {
+    "id": "qwen3.5-35b-a3b-mlx",
+    "display": "Qwen 3.5 35B-A3B (MLX 4-bit, Apple Silicon)",
+    "kind": "llm",
+    "repo": "mlx-community/Qwen3.5-35B-A3B-4bit",
+    "file": "config.json",
+    "size": 19700000000,
+    "sha256": "",
+    "directory": true,
+    "min_memory_mb": 32768,
+    "context_default": 16384,
+    "context_max": 262144,
+    "kv_bytes_per_token": 20480,
+    "prompt_provider": "Qwen3_14B_Compressed",
+    "thinking": true,
+    "fold_system_messages": true,
+    "tags": [
+      "live",
+      "background",
+      "mlx",
+      "large"
+    ],
+    "notes": "Runs on MLX (mlx-lm) on Apple Silicon, text-only. Needs a Mac with 32 GB or more."
+  },
+  {
     "id": "all-minilm-l6-v2",
     "display": "all-MiniLM-L6-v2 embeddings (F16, 384 dims)",
     "kind": "embedding",

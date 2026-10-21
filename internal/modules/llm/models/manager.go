@@ -139,6 +139,10 @@ type InstallRequest struct {
 	// GPUBackend picks the engine build to fetch with it ("" or "auto" = the first assigned
 	// label's setting, else detection).
 	GPUBackend string `json:"gpu_backend,omitempty"`
+	// PromptProvider sets the model's prompt provider (one of KeptPromptProviders). A
+	// directory model's is otherwise inferred from its config.json and name, and the install
+	// is refused when that finds none.
+	PromptProvider string `json:"prompt_provider,omitempty"`
 }
 
 // RequestError is a client mistake (HTTP 4xx).
@@ -179,6 +183,95 @@ func (m *Manager) entryRow(e Entry) Model {
 	return mod
 }
 
+// dirRow builds the model row of a repo's directory model: its files under the repo's
+// folder, which is the model's path.
+func (m *Manager) dirRow(id, display, catalogID, repo, rev string, c Choice) Model {
+	files := make([]File, len(c.Shards))
+	for i, s := range c.Shards {
+		files[i] = File{Name: s.Name, Size: s.Size, SHA256: s.SHA256}
+	}
+	mod := m.modelRow(id, engine.ModelLLM, display, catalogID, repo, rev, files)
+	mod.Path = filepath.Join(m.ModelsDir, repoDir(repo))
+	return mod
+}
+
+// isDirRow reports whether a downloaded model is a directory model (dirRow).
+func (m *Manager) isDirRow(mod Model) bool {
+	return mod.Repo != "" && mod.SourceURL == "" && mod.Archive == "" && mod.Path == filepath.Join(m.ModelsDir, repoDir(mod.Repo))
+}
+
+// platform is the host's, as the engine binaries see it.
+func (m *Manager) platform() engine.Platform {
+	if m.Binaries != nil && m.Binaries.Platform != (engine.Platform{}) {
+		return m.Binaries.Platform
+	}
+	return engine.Host()
+}
+
+// checkDirEngine refuses a directory model on a host with no engine for it: MLX for an MLX
+// conversion (mlxRepo), else any directory engine.
+func (m *Manager) checkDirEngine(repo string) error {
+	if mlxRepo(repo) {
+		if why := engine.Unavailable(engine.KindMLX, m.platform()); why != "" {
+			return badRequest("%s is an MLX build, which runs only on Apple Silicon: %s", repo, why)
+		}
+		return nil
+	}
+	if _, err := engine.DirEngine(m.platform(), engine.DirEngineAuto); err != nil {
+		return badRequest("this machine has no engine for a Hugging Face model directory: %v", err)
+	}
+	return nil
+}
+
+// dirEngineFor names the engine a repo's directory model runs on here, or why none can.
+func (m *Manager) dirEngineFor(repo string) (kind, unavailable string) {
+	if err := m.checkDirEngine(repo); err != nil {
+		var re *RequestError
+		if errors.As(err, &re) {
+			return "", re.Msg
+		}
+		return "", err.Error()
+	}
+	if mlxRepo(repo) {
+		return string(engine.KindMLX), ""
+	}
+	k, _ := engine.DirEngine(m.platform(), engine.DirEngineAuto)
+	return string(k), ""
+}
+
+// repoListing lists a repo for an install, mapping Hugging Face errors to request errors.
+func (m *Manager) repoListing(ctx context.Context, repo, rev string) (Repo, error) {
+	r, err := m.HF.Repo(ctx, repo, rev)
+	if errors.Is(err, ErrRepoNotFound) {
+		return Repo{}, &RequestError{Status: http.StatusNotFound, Msg: err.Error()}
+	}
+	if errors.Is(err, ErrGated) {
+		return Repo{}, &RequestError{Status: http.StatusForbidden, Msg: err.Error()}
+	}
+	if err != nil {
+		return Repo{}, &RequestError{Status: http.StatusBadGateway, Msg: err.Error()}
+	}
+	return r, nil
+}
+
+// dirPromptProvider is a directory model's prompt provider: the one asked for, else what its
+// config.json and name say; refused when neither gives one, so a label never runs a model
+// cc can't prompt ("unknown prompt provider").
+func (m *Manager) dirPromptProvider(ctx context.Context, r Repo, asked string) (string, error) {
+	if asked != "" {
+		return asked, nil
+	}
+	cfg, err := m.HF.File(ctx, r.ID, r.Revision, DirChoiceFile, 1<<20)
+	if err != nil {
+		return "", &RequestError{Status: http.StatusBadGateway, Msg: err.Error()}
+	}
+	if p := InferDirModel(path.Base(r.ID), cfg).PromptProvider; p != "" {
+		return p, nil
+	}
+	return "", badRequest("can't tell which prompt provider %s needs: pick one (prompt_provider: %s)",
+		r.ID, strings.Join(KeptPromptProviders, ", "))
+}
+
 // modelRoot is the directory a downloaded model's files live under.
 func (m *Manager) modelRoot(mod Model) string {
 	if mod.SourceURL != "" {
@@ -196,6 +289,25 @@ func (m *Manager) plan(ctx context.Context, req InstallRequest) (Model, *Model, 
 		e, ok := CatalogEntry(req.CatalogID)
 		if !ok {
 			return Model{}, nil, &RequestError{Status: http.StatusNotFound, Msg: "unknown catalog id " + req.CatalogID}
+		}
+		if e.Directory {
+			if err := m.checkDirEngine(e.Repo); err != nil {
+				return Model{}, nil, err
+			}
+			r, err := m.repoListing(ctx, e.Repo, e.Revision)
+			if err != nil {
+				return Model{}, nil, err
+			}
+			c, ok := dirChoice(r)
+			if !ok {
+				return Model{}, nil, &RequestError{Status: http.StatusBadGateway, Msg: e.Repo + " has no model directory (config.json and safetensors)"}
+			}
+			mod := m.dirRow(e.ID, e.Display, e.ID, e.Repo, r.Revision, c)
+			mod.ContextDefault, mod.PromptProvider = e.ContextDefault, e.PromptProvider
+			if req.ContextDefault > 0 {
+				mod.ContextDefault = req.ContextDefault
+			}
+			return mod, nil, nil
 		}
 		mod := m.entryRow(e)
 		mod.ContextDefault, mod.PromptProvider = e.ContextDefault, e.PromptProvider
@@ -220,31 +332,45 @@ func (m *Manager) plan(ctx context.Context, req InstallRequest) (Model, *Model, 
 	if !ValidRepo(req.Repo) {
 		return Model{}, nil, badRequest("invalid repo %q (want owner/name)", req.Repo)
 	}
-	r, err := m.HF.Repo(ctx, req.Repo, req.Revision)
-	if errors.Is(err, ErrRepoNotFound) {
-		return Model{}, nil, &RequestError{Status: http.StatusNotFound, Msg: err.Error()}
+	if req.PromptProvider != "" && !ValidPromptProvider(req.PromptProvider) {
+		return Model{}, nil, badRequest("unknown prompt provider %q (one of %s)", req.PromptProvider, strings.Join(KeptPromptProviders, ", "))
 	}
-	if errors.Is(err, ErrGated) {
-		return Model{}, nil, &RequestError{Status: http.StatusForbidden, Msg: err.Error()}
-	}
+	r, err := m.repoListing(ctx, req.Repo, req.Revision)
 	if err != nil {
-		return Model{}, nil, &RequestError{Status: http.StatusBadGateway, Msg: err.Error()}
+		return Model{}, nil, err
 	}
 	mk := func(file, kind, id, display string) (Model, error) {
-		shards, err := shardSet(r, file)
+		c, err := choiceFor(r, file)
 		if err != nil {
 			return Model{}, badRequest("%v", err)
 		}
+		shards := c.Shards
 		if kind == "" {
 			kind = engine.ModelLLM
-			for _, c := range Choices(r) {
-				if c.File == shards[0].Name {
-					kind = c.Kind
-				}
+			if c.Kind != "" {
+				kind = c.Kind
 			}
 		}
 		if !ValidKind(kind) {
 			return Model{}, badRequest("invalid kind %q", kind)
+		}
+		if c.Directory {
+			if kind != engine.ModelLLM {
+				return Model{}, badRequest("a model directory is an llm model, not %s", kind)
+			}
+			if id == "" {
+				id = Slug(path.Base(req.Repo))
+				if ex, err := m.Store.Get(ctx, id); err == nil && (ex.Repo != req.Repo || !m.isDirRow(ex)) {
+					id = Slug(strings.SplitN(req.Repo, "/", 2)[0]) + "-" + id
+				}
+			}
+			if !ValidID(id) {
+				return Model{}, badRequest("invalid id %q", id)
+			}
+			if display == "" {
+				display = path.Base(req.Repo)
+			}
+			return m.dirRow(id, display, "", req.Repo, r.Revision, c), nil
 		}
 		if id == "" {
 			stem := Slug(path.Base(shardRe.ReplaceAllString(shards[0].Name, "$1")))
@@ -272,7 +398,19 @@ func (m *Manager) plan(ctx context.Context, req InstallRequest) (Model, *Model, 
 	if err != nil {
 		return Model{}, nil, err
 	}
-	mod.ContextDefault = req.ContextDefault
+	mod.ContextDefault, mod.PromptProvider = req.ContextDefault, req.PromptProvider
+	if m.isDirRow(mod) {
+		if req.MMProjFile != "" {
+			return Model{}, nil, badRequest("a model directory runs on a text-only engine: no mmproj_file")
+		}
+		if err := m.checkDirEngine(req.Repo); err != nil {
+			return Model{}, nil, err
+		}
+		if mod.PromptProvider, err = m.dirPromptProvider(ctx, r, req.PromptProvider); err != nil {
+			return Model{}, nil, err
+		}
+		return mod, nil, nil
+	}
 	var proj *Model
 	if req.MMProjFile != "" {
 		p, err := mk(req.MMProjFile, engine.ModelMMProj, "", "")
@@ -372,6 +510,11 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest) (inst Install
 		}
 	}
 	ek, hasEngine := EngineKind(mod.Kind)
+	if m.isDirRow(mod) {
+		// The Python engine (MLX, vLLM, Transformers) is fetched when a label first runs the
+		// model (Resolver.RequestFetch), for the label's dir_engine.
+		ek, hasEngine = "", false
+	}
 	var fl engine.Flavour
 	var note string
 	if hasEngine {
@@ -799,6 +942,9 @@ type RegisterRequest struct {
 	// and sha256 must match, and the model then gets the entry's prompt provider, pinned chat
 	// template and fold flag like a catalog install.
 	CatalogID string `json:"catalog_id,omitempty"`
+	// PromptProvider sets the model's prompt provider. A model directory's is otherwise
+	// inferred (InferDir), and registering one is refused when that finds none.
+	PromptProvider string `json:"prompt_provider,omitempty"`
 }
 
 // fileSHA256 hashes a file, stopping when ctx ends.
@@ -830,8 +976,14 @@ func (m *Manager) Register(ctx context.Context, req RegisterRequest) (Model, err
 	if !filepath.IsAbs(req.Path) {
 		return Model{}, badRequest("path must be absolute")
 	}
+	if req.PromptProvider != "" && !ValidPromptProvider(req.PromptProvider) {
+		return Model{}, badRequest("unknown prompt provider %q (one of %s)", req.PromptProvider, strings.Join(KeptPromptProviders, ", "))
+	}
 	st, err := os.Stat(req.Path)
-	if err != nil || st.IsDir() {
+	if err == nil && st.IsDir() {
+		return m.registerDir(ctx, req)
+	}
+	if err != nil {
 		return Model{}, badRequest("no file at %s", req.Path)
 	}
 	var entry Entry
@@ -895,6 +1047,81 @@ func (m *Manager) Register(ctx context.Context, req RegisterRequest) (Model, err
 	if entry.ID != "" {
 		mod.CatalogID, mod.Repo, mod.Revision, mod.PromptProvider = entry.ID, entry.Repo, entry.Revision, entry.PromptProvider
 	}
+	if req.PromptProvider != "" {
+		mod.PromptProvider = req.PromptProvider
+	}
+	if err := m.Store.Upsert(ctx, mod); err != nil {
+		return Model{}, err
+	}
+	return m.Store.Get(ctx, req.ID)
+}
+
+// registerDir registers a Hugging Face layout model directory in place (an llm model for a
+// Python engine), with the prompt provider asked for or inferred from its config.json.
+func (m *Manager) registerDir(ctx context.Context, req RegisterRequest) (Model, error) {
+	if !IsModelDir(req.Path) {
+		return Model{}, badRequest("%s is not a Hugging Face model directory (needs config.json and *.safetensors)", req.Path)
+	}
+	if req.Kind != "" && req.Kind != engine.ModelLLM {
+		return Model{}, badRequest("a model directory is an llm model, not %s", req.Kind)
+	}
+	if req.MMProjID != "" {
+		return Model{}, badRequest("a model directory runs on a text-only engine: no mmproj_id")
+	}
+	if err := m.checkDirEngine(""); err != nil {
+		return Model{}, err
+	}
+	provider := req.PromptProvider
+	if req.CatalogID != "" {
+		e, ok := CatalogEntry(req.CatalogID)
+		if !ok || !e.Directory {
+			return Model{}, badRequest("catalog entry %q is not a model directory", req.CatalogID)
+		}
+		if provider == "" {
+			provider = e.PromptProvider
+		}
+		if req.Display == "" {
+			req.Display = e.Display
+		}
+		if req.ContextDefault == 0 {
+			req.ContextDefault = e.ContextDefault
+		}
+	}
+	if provider == "" {
+		provider = InferDir(req.Path).PromptProvider
+	}
+	if provider == "" {
+		return Model{}, badRequest("can't tell which prompt provider %s needs: pick one (prompt_provider: %s)",
+			req.Path, strings.Join(KeptPromptProviders, ", "))
+	}
+	if req.ID == "" {
+		req.ID = Slug(filepath.Base(req.Path))
+	}
+	if !ValidID(req.ID) {
+		return Model{}, badRequest("invalid id %q", req.ID)
+	}
+	if _, err := m.Store.Get(ctx, req.ID); err == nil {
+		return Model{}, &RequestError{Status: http.StatusConflict, Msg: "id " + req.ID + " exists"}
+	}
+	entries, err := os.ReadDir(req.Path)
+	if err != nil {
+		return Model{}, badRequest("%s: %v", req.Path, err)
+	}
+	mod := Model{ID: req.ID, Kind: engine.ModelLLM, Display: req.Display, CatalogID: req.CatalogID, Path: req.Path,
+		ContextDefault: req.ContextDefault, PromptProvider: provider, State: StateReady, External: true}
+	if mod.Display == "" {
+		mod.Display = filepath.Base(req.Path)
+	}
+	for _, e := range entries {
+		// Stat, not the entry's Lstat: a Hugging Face cache snapshot links its files to blobs.
+		info, err := os.Stat(filepath.Join(req.Path, e.Name()))
+		if err != nil || !info.Mode().IsRegular() || !dirModelFile(e.Name()) {
+			continue
+		}
+		mod.Files = append(mod.Files, File{Name: e.Name(), Size: info.Size()})
+		mod.Size += info.Size()
+	}
+	mod.BytesDone = mod.Size
 	if err := m.Store.Upsert(ctx, mod); err != nil {
 		return Model{}, err
 	}
@@ -1022,6 +1249,13 @@ func (m *Manager) validateField(ctx context.Context, d labelRef, f string, def s
 					if !fileExists(filepath.Join(s, "config.json")) {
 						return badRequest("%s.%s: %s has no config.json (not a Hugging Face model directory)", d.Name, f, s)
 					}
+					if info, ok := m.Store.LookupPath(ctx, s); ok && info.ID != s {
+						return m.checkPromptProvider(ctx, d, f, info.ID)
+					}
+					if InferDir(s).PromptProvider == "" {
+						return badRequest("%s.%s: can't tell which prompt provider %s needs; register it with a prompt_provider (%s) and pick that model",
+							d.Name, f, s, strings.Join(KeptPromptProviders, ", "))
+					}
 					return nil
 				}
 			}
@@ -1041,6 +1275,7 @@ func (m *Manager) validateField(ctx context.Context, d labelRef, f string, def s
 		if mod.Kind != want {
 			return badRequest("%s.%s: %s is a %s model, not %s", d.Name, f, s, mod.Kind, want)
 		}
+		return m.checkPromptProvider(ctx, d, f, s)
 	case "gpu_backend":
 		if _, err := engine.ParseFlavour(s); err != nil {
 			return badRequest("%s.%s: %v", d.Name, f, err)
@@ -1057,6 +1292,24 @@ func (m *Manager) validateField(ctx context.Context, d labelRef, f string, def s
 	return nil
 }
 
+// checkPromptProvider refuses an installed model directory without a prompt provider for an
+// LLM label: cc couldn't prompt it ("unknown prompt provider"). A GGUF without one is left to
+// llm.prompt_provider, as before.
+func (m *Manager) checkPromptProvider(ctx context.Context, d labelRef, f, id string) error {
+	mod, err := m.Store.Get(ctx, id)
+	if err != nil || f != "model" || mod.Kind != engine.ModelLLM || mod.PromptProvider != "" {
+		return nil
+	}
+	if e, ok := CatalogEntry(mod.CatalogID); ok && e.PromptProvider != "" {
+		return nil
+	}
+	if st, err := os.Stat(mod.Path); err != nil || !st.IsDir() {
+		return nil
+	}
+	return badRequest("%s.%s: model %s has no prompt provider; reinstall or register it with a prompt_provider (%s)",
+		d.Name, f, id, strings.Join(KeptPromptProviders, ", "))
+}
+
 func (m *Manager) log() *slog.Logger {
 	if m.Log == nil {
 		return slog.Default()
@@ -1065,8 +1318,10 @@ func (m *Manager) log() *slog.Logger {
 }
 
 // Recommend suggests a catalog entry per label: the largest LLM that fits one card (else one
-// that fits tightly), MiniLM for embeddings, and whisper large-v3-turbo on a GPU when it fits
-// next to the live model (else small.en).
+// that fits tightly; on Apple Silicon's Metal the largest MLX directory entry, which mlx-lm
+// runs faster than llama.cpp, when one fits; never an entry marked no_recommend), MiniLM for
+// embeddings, and whisper large-v3-turbo on a GPU when it fits next to the live model (else
+// small.en).
 //
 // flavours is the build each label effectively runs (Manager.labelFlavours; a missing label
 // runs detection's). A label on the CPU gets a model sized for CPU inference whatever cards
@@ -1085,10 +1340,16 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour, others []
 	for _, l := range []string{engine.LabelLive, engine.LabelBackground} {
 		lhw := on(l)
 		var best Entry
-		for _, verdict := range []string{"fits", "tight"} {
-			for _, e := range Catalog() {
-				if e.Kind == engine.ModelLLM && entryFitAlongside(lhw, e, others).Verdict == verdict && e.Size > best.Size {
-					best = e
+		// MLX entries only on Metal (Apple Silicon), and there first.
+		for _, dir := range []bool{lhw.Flavour == engine.FlavourMetal, false} {
+			for _, verdict := range []string{"fits", "tight"} {
+				for _, e := range Catalog() {
+					if e.Kind == engine.ModelLLM && e.Directory == dir && !e.NoRecommend && entryFitAlongside(lhw, e, others).Verdict == verdict && e.Size > best.Size {
+						best = e
+					}
+				}
+				if best.ID != "" {
+					break
 				}
 			}
 			if best.ID != "" {
@@ -1353,7 +1614,7 @@ func (m *Manager) entryFit(ctx context.Context, hw engine.Hardware, e Entry, res
 			w += p.Size
 		}
 	}
-	return m.fitFor(ctx, hw, e.Kind, w, e.HostBytes, e.KVBytesPerTok, e.ContextDefault, residents)
+	return minMemory(hw, e, m.fitFor(ctx, hw, e.Kind, w, e.HostBytes, e.KVBytesPerTok, e.ContextDefault, residents))
 }
 
 // FitWarning says when a model being installed for engine labels won't fit on its card next

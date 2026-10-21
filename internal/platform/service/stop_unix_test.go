@@ -135,3 +135,11 @@ func TestSystemdStartAfterAdminStop(t *testing.T) {
 		t.Fatalf("start %v %q", err, f.calls)
 	}
 }
+
+// In a container the restart policy would start jarvisd again, so Stop points at the host.
+func TestContainerStopBlocker(t *testing.T) {
+	reason, cmd := StopBlocker(Container, false)
+	if !strings.Contains(reason, "Unraid's Docker tab") || !strings.Contains(reason, "restart policy") || cmd != "" {
+		t.Fatalf("reason %q cmd %q", reason, cmd)
+	}
+}

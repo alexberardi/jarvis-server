@@ -160,16 +160,18 @@ func TestLoadEnv(t *testing.T) {
 		"JARVIS_OSX_API_URL": "http://mac", "JARVIS_OSX_API_KEY": "mk",
 		"TWILIO_ACCOUNT_SID": "sid", "TWILIO_AUTH_TOKEN": "tt", "TWILIO_FROM_NUMBER": "+1",
 		"JARVIS_PHONE_PUBLIC_URL": "https://p", "JARVIS_PHONE_PUBLIC_WSS_URL": "wss://p",
+		"JARVIS_CONTAINER": " Unraid\n",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// An explicit MQTT address wins over the offset, and "" still disables the listener.
+	// JARVIS_CONTAINER is trimmed and lower-cased.
 	want := Env{ConfigAdminToken: "ct", AdminAPIKey: "ak", RelayHouseholdJWT: "jwt", DevSpeakerHints: true,
 		MQTTAddr: "127.0.0.1:2000", MQTTWSAddr: "", MQTTAllowAnonymous: true, MQTTWSAllowedOrigins: "a.example, b.example", AuthAdminToken: "at",
 		AuthSecretKey: "hs", AdminUIDir: "/ui", AppID: "id", AppKey: "key", OSXAPIURL: "http://mac", OSXAPIKey: "mk",
 		TwilioAccountSID: "sid", TwilioAuthToken: "tt", TwilioFromNumber: "+1",
-		PhonePublicURL: "https://p", PhonePublicWSSURL: "wss://p"}
+		PhonePublicURL: "https://p", PhonePublicWSSURL: "wss://p", Container: "unraid"}
 	if c.Env != want {
 		t.Fatalf("Env = %+v, want %+v", c.Env, want)
 	}

@@ -108,6 +108,58 @@ func TestLivePromptProvider(t *testing.T) {
 	}
 }
 
+// A Hugging Face folder on the live label gets the prompt provider its config.json implies,
+// whether set by path or installed before providers were recorded for folders: without one,
+// every chat failed with `unknown prompt provider ""` (#351).
+func TestLivePromptProviderModelDirectory(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	d, err := db.Open(ctx, filepath.Join(home, "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	if err := db.Migrate(ctx, d, queue.MigrationModule, queue.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, d, "llm", Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := &Module{Auth: fakeAuth{}, Version: "test"}
+	m.Register(http.NewServeMux(), module.Deps{Config: config.Config{Home: home}, DB: d, Log: log, Queue: queue.New(d, log)})
+	if err := m.settings.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "mlx-community--Qwen3.5-9B-4bit")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"model_type":"qwen3_5"}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "model.safetensors"), []byte("w"), 0o644)
+
+	if err := m.settings.Set(ctx, "llm.live.model", dir, settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
+	if p := m.LivePromptProvider(ctx); p != "Qwen3_5_9B_Compressed" {
+		t.Fatalf("by path: %q", p)
+	}
+	store := m.stack.Manager.Store
+	if err := store.Upsert(ctx, models.Model{ID: "q35", Kind: "llm", Display: "q", Path: dir, State: models.StateReady}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.settings.Set(ctx, "llm.live.model", "q35", settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
+	if p := m.LivePromptProvider(ctx); p != "Qwen3_5_9B_Compressed" {
+		t.Fatalf("installed folder without a provider: %q", p)
+	}
+	// The row's own (picked at install) wins, also when the label names its path.
+	store.Upsert(ctx, models.Model{ID: "q35", Kind: "llm", Display: "q", Path: dir, State: models.StateReady, PromptProvider: "Qwen3_14B_Compressed"})
+	m.settings.Set(ctx, "llm.live.model", dir, settings.Scope{})
+	if p := m.LivePromptProvider(ctx); p != "Qwen3_14B_Compressed" {
+		t.Fatalf("installed folder by path: %q", p)
+	}
+}
+
 // writeTestGGUF writes a minimal v3 GGUF header (no tensors) carrying tpl as its
 // tokenizer.chat_template.
 func writeTestGGUF(t *testing.T, tpl string) string {

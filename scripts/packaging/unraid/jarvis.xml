@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Jarvis</Name>
+  <Repository>ghcr.io/alexberardi/jarvisd:latest</Repository>
+  <Registry>https://github.com/alexberardi/jarvis-server/pkgs/container/jarvisd</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Shell>bash</Shell>
+  <Support>https://github.com/alexberardi/jarvis-server/issues</Support>
+  <Project>https://jarvisautomation.io</Project>
+  <Overview>Jarvis Automation: a private voice assistant server for your home. One container runs the whole server (speech-to-text, the language model, text-to-speech, Pi nodes, the mobile app and the recipes app). Open the WebUI to run the setup wizard, which downloads the models. NVIDIA GPU: install the Nvidia Driver plugin, add --runtime=nvidia to Extra Parameters and set NVIDIA_VISIBLE_DEVICES. Host networking also gives mDNS discovery for phones and nodes.</Overview>
+  <Category>HomeAutomation: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:7710]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/alexberardi/jarvis-server/main/scripts/packaging/unraid/jarvis.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/alexberardi/jarvis-server/main/scripts/packaging/unraid/jarvis.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <Config Name="API" Target="7700" Default="7700" Mode="tcp" Description="Nodes, phones and the recipes app" Type="Port" Display="always" Required="true">7700</Config>
+  <Config Name="Admin" Target="7710" Default="7710" Mode="tcp" Description="Admin and setup wizard" Type="Port" Display="always" Required="true">7710</Config>
+  <Config Name="MQTT" Target="1884" Default="1884" Mode="tcp" Description="Voice nodes" Type="Port" Display="always" Required="true">1884</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/jarvis" Mode="rw" Description="Database, models and engines; keep it on a cache pool for speed" Type="Path" Display="always" Required="true">/mnt/user/appdata/jarvis</Config>
+  <Config Name="JARVIS_CONTAINER" Default="unraid" Description="Tells jarvisd it runs in a container" Type="Variable" Display="advanced-hide" Required="false">unraid</Config>
+  <Config Name="PUID" Default="99" Description="User ID" Type="Variable" Display="advanced" Required="false">99</Config>
+  <Config Name="PGID" Default="100" Description="Group ID" Type="Variable" Display="advanced" Required="false">100</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Default="" Description="all, or a GPU UUID from the Nvidia Driver plugin; needs --runtime=nvidia in Extra Parameters" Type="Variable" Display="always" Required="false"></Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Description="NVIDIA driver capabilities" Type="Variable" Display="advanced" Required="false">compute,utility</Config>
+  <Config Name="JARVIS_LEGACY_PORTS" Default="0" Description="1 also opens the old per-service ports; map them yourself" Type="Variable" Display="advanced" Required="false">0</Config>
+</Container>

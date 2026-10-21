@@ -516,6 +516,8 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 				Helper:   helper,
 				UserUnit: userUnit,
 				Source:   updateSource(),
+				// A container is updated by its host (Unraid's Docker tab, a new image).
+				Container: deps.Config.Env.Container,
 			}
 			// AD8b: the Stop button only when the installed definition keeps jarvisd stopped.
 			kind := restarter.Kind()
@@ -555,7 +557,7 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		defer timer.Stop()
 	}
 	var runner *module.Runner
-	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, OnReady: func() {
+	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, Mounts: config.Paths, OnReady: func() {
 		if err := service.Ready(ctx); err != nil {
 			log.Warn("could not notify the service manager", "err", err)
 		}

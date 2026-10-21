@@ -64,9 +64,20 @@ type Entry struct {
 	ChatTemplateSHA256 string `json:"chat_template_sha256,omitempty"`
 	// FoldSystemMessages: the template accepts a system message only first and needs a user
 	// turn, so the llm module folds requests for it (llm.FoldSystemMessages).
-	FoldSystemMessages bool     `json:"fold_system_messages,omitempty"`
-	Tags               []string `json:"tags,omitempty"`
-	Notes              string   `json:"notes,omitempty"`
+	FoldSystemMessages bool `json:"fold_system_messages,omitempty"`
+	// Directory: a Hugging Face layout model (config.json + safetensors) for a Python engine
+	// (MLX on Apple Silicon). File is DirChoiceFile and Size the folder's approximate total;
+	// the install lists the repo at Revision ("" = main) and downloads the folder's files,
+	// each checked against the listing's sha256 (SHA256 is empty).
+	Directory bool `json:"directory,omitempty"`
+	// MinMemoryMB is the least GPU or unified memory the entry needs to be worth installing
+	// (a 27B on a 16 GB Mac would leave too little for anything else); 0 = judged by its fit.
+	MinMemoryMB int64 `json:"min_memory_mb,omitempty"`
+	// NoRecommend keeps the entry out of the hardware recommendation (Recommend) while it stays
+	// installable: a build measured worse than its alternative (the notes say why).
+	NoRecommend bool     `json:"no_recommend,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Notes       string   `json:"notes,omitempty"`
 }
 
 // Template returns the entry's pinned chat template ("" when it pins none), checked against

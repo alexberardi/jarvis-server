@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -178,9 +179,15 @@ type Choice struct {
 	Quant  string     `json:"quant,omitempty"`
 	Size   int64      `json:"size"` // all shards
 	Shards []RepoFile `json:"shards"`
+	// Directory: a Hugging Face layout model (config.json + safetensors) installed as one
+	// folder for a Python engine (MLX, vLLM, Transformers); File is DirChoiceFile and Shards
+	// every file of it. PromptProvider is what its name suggests ("" = unknown).
+	Directory      bool   `json:"directory,omitempty"`
+	PromptProvider string `json:"prompt_provider,omitempty"`
 }
 
-// Choices groups a repo's model files (GGUFs and whisper ggml-*.bin), sorted by size.
+// Choices groups a repo's model files (GGUFs, whisper ggml-*.bin, and a safetensors model
+// directory), sorted by size.
 func Choices(r Repo) []Choice {
 	shards := map[string][]RepoFile{}
 	var out []Choice
@@ -216,6 +223,9 @@ func Choices(r Repo) []Choice {
 		}
 		out = append(out, c)
 	}
+	if c, ok := dirChoice(r); ok {
+		out = append(out, c)
+	}
 	slices.SortFunc(out, func(a, b Choice) int {
 		if a.Size != b.Size {
 			if a.Size < b.Size {
@@ -231,20 +241,57 @@ func Choices(r Repo) []Choice {
 // shardSet returns every file an install of file needs: all shards of a split GGUF, or the
 // file alone.
 func shardSet(r Repo, file string) ([]RepoFile, error) {
-	for _, c := range Choices(r) {
+	c, err := choiceFor(r, file)
+	return c.Shards, err
+}
+
+// choiceFor is the choice an install of file is: the one it names (a split GGUF's shard
+// names the whole set; DirChoiceFile the directory model), else the file alone.
+func choiceFor(r Repo, file string) (Choice, error) {
+	cs := Choices(r)
+	for _, c := range cs {
 		if c.File == file {
-			return c.Shards, nil
+			return c, nil
+		}
+	}
+	for _, c := range cs {
+		if c.Directory {
+			continue
 		}
 		for _, s := range c.Shards {
 			if s.Name == file {
-				return c.Shards, nil
+				return c, nil
 			}
 		}
 	}
 	for _, f := range r.Files {
 		if f.Name == file {
-			return []RepoFile{f}, nil
+			return Choice{File: f.Name, Size: f.Size, Shards: []RepoFile{f}}, nil
 		}
 	}
-	return nil, fmt.Errorf("%s has no file %q", r.ID, file)
+	return Choice{}, fmt.Errorf("%s has no file %q", r.ID, file)
+}
+
+// File fetches a small repo file (a model's config.json), at most max bytes.
+func (h *HF) File(ctx context.Context, repo, revision, file string, max int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.FileURL(repo, revision, file), nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range h.AuthHeader() {
+		req.Header[k] = v
+	}
+	c := h.Client
+	if c == nil {
+		c = http.DefaultClient
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("hugging face: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("hugging face: %s: %s", file, resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, max))
 }

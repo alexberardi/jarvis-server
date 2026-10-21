@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 
@@ -139,6 +141,8 @@ type catalogItem struct {
 	Fit       Fit    `json:"fit"`
 	Installed bool   `json:"installed"`
 	State     string `json:"state,omitempty"` // installed row state, if any
+	// Unavailable says why this machine can't run the entry (an MLX build off Apple Silicon).
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +162,13 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 	for _, e := range Catalog() {
 		// Judged for the labels of its kind: next to the other engines, not to itself or to
 		// the model it would replace.
-		items = append(items, catalogItem{Entry: e, Fit: a.Manager.entryFit(ctx, hw, e, residents), Installed: state[e.ID] == StateReady, State: state[e.ID]})
+		it := catalogItem{Entry: e, Fit: a.Manager.entryFit(ctx, hw, e, residents), Installed: state[e.ID] == StateReady, State: state[e.ID]}
+		if e.Directory {
+			if err := a.Manager.checkDirEngine(e.Repo); err != nil {
+				it.Unavailable = err.Error()
+			}
+		}
+		items = append(items, it)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": a.Manager.Recommend(ctx, hw), "hardware": hw, "residents": residents})
 }
@@ -166,6 +176,10 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 type hfChoice struct {
 	Choice
 	Fit Fit `json:"fit"`
+	// Engine runs a directory choice here (mlx-lm, vllm, transformers); Unavailable says why
+	// none can.
+	Engine      string `json:"engine,omitempty"`
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
@@ -190,9 +204,21 @@ func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
 	residents := a.Manager.Residents(ctx)
 	choices := []hfChoice{}
 	for _, c := range Choices(repo) {
-		choices = append(choices, hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, 0, ctxLen, residents)})
+		hc := hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, 0, ctxLen, residents)}
+		if c.Directory {
+			hc.Engine, hc.Unavailable = a.Manager.dirEngineFor(repo.ID)
+			if hc.PromptProvider == "" {
+				// The name didn't say: its config.json may (the install reads it too).
+				if cfg, err := a.Manager.HF.File(ctx, repo.ID, repo.Revision, DirChoiceFile, 1<<20); err == nil {
+					hc.PromptProvider = InferDirModel(path.Base(repo.ID), cfg).PromptProvider
+				}
+			}
+		}
+		choices = append(choices, hc)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices})
+	// prompt_providers: what a directory choice's install may name when nothing says.
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices,
+		"prompt_providers": KeptPromptProviders})
 }
 
 func (a *API) install(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +296,8 @@ func (a *API) installed(w http.ResponseWriter, r *http.Request) {
 	type item struct {
 		Model
 		Labels []string `json:"labels"`
+		// Directory: a Hugging Face model folder, run by a Python engine (MLX, vLLM, Transformers).
+		Directory bool `json:"directory,omitempty"`
 	}
 	out := []item{}
 	var total int64
@@ -278,7 +306,8 @@ func (a *API) installed(w http.ResponseWriter, r *http.Request) {
 		if l == nil {
 			l = []string{}
 		}
-		out = append(out, item{Model: m, Labels: l})
+		st, err := os.Stat(m.Path)
+		out = append(out, item{Model: m, Labels: l, Directory: m.Kind == engine.ModelLLM && err == nil && st.IsDir()})
 		if !m.External {
 			total += m.BytesDone
 		}
