@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -273,6 +274,11 @@ const (
 
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.deps = deps
+	// Recent warm-ups survive a restart, so the live engine is warm before the first wake.
+	if deps.Config.Home != "" {
+		m.warms.path = filepath.Join(deps.Config.Home, "cc", "recent-warmups.json")
+		m.warms.load()
+	}
 	if m.now == nil {
 		m.now = time.Now
 	}
