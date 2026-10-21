@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,9 @@ func TestDetect(t *testing.T) {
 		{"macOS terminal", map[string]string{"XPC_SERVICE_NAME": "0"}, 1, "", false, None},
 		{"macOS app terminal", map[string]string{"XPC_SERVICE_NAME": "application.com.apple.Terminal.1"}, 512, "", false, None},
 		{"plain shell", nil, 700, termCgroup, false, None},
+		{"container", map[string]string{"JARVIS_CONTAINER": "unraid"}, 0, "", false, Container},
+		{"container under a systemd-like init", map[string]string{"JARVIS_CONTAINER": "unraid", "INVOCATION_ID": "abc"}, 1, unitCgroup, false, Container},
+		{"container env blank", map[string]string{"JARVIS_CONTAINER": " "}, 700, termCgroup, false, None},
 	} {
 		got := detect(probe{
 			getenv:  func(k string) string { return tc.env[k] },
@@ -94,6 +98,35 @@ func TestRestarter(t *testing.T) {
 	}
 	if ExitCode(fmt.Errorf("wrapped: %w", ErrRestart)) != RestartExitCode {
 		t.Fatal("wrapped restart")
+	}
+}
+
+// In a container, restart exits for the container's restart policy, like any supervisor.
+func TestContainerRestarter(t *testing.T) {
+	if !Container.Supervised() {
+		t.Fatal("Container must be supervised")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := NewRestarter(Container, cancel)
+	if err := r.Request(); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("restart did not cancel serve's context")
+	}
+	if err := r.Err(nil); ExitCode(err) != RestartExitCode {
+		t.Fatalf("err %v code %d", err, ExitCode(err))
+	}
+	if StopExitCodeFor(Container) != 0 {
+		t.Fatal("container stop exit code")
+	}
+	for _, s := range []string{RestartCommand(Container, false), StartCommand(Container, false)} {
+		if !strings.Contains(s, "Unraid's Docker tab") || !strings.Contains(s, "docker ") {
+			t.Errorf("container command %q", s)
+		}
+	}
+	if !strings.Contains(StartNote(Container), "restart policy") {
+		t.Errorf("container start note %q", StartNote(Container))
 	}
 }
 

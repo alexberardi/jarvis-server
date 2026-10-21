@@ -6,13 +6,15 @@ package service
 // it can), with the command that fixes it or does the stop instead. Under systemd and launchd
 // it reads the installed unit or LaunchDaemon: one an older version wrote restarts jarvisd on
 // any exit, so stopping would only restart it until `service install` rewrites it.
-// Unsupervised, jarvisd simply exits.
+// In a container the host stops it. Unsupervised, jarvisd simply exits.
 func StopBlocker(kind Kind, user bool) (reason, command string) {
 	switch kind {
 	case Systemd:
 		return newSystemd(user, nil).stopBlocker()
 	case Launchd:
 		return newLaunchd(nil).stopBlocker()
+	case Container:
+		return "Stop jarvisd from Unraid's Docker tab (or `docker stop`); the container's restart policy would start it again.", ""
 	}
 	return "", ""
 }

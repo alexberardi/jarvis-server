@@ -83,6 +83,10 @@ type Env struct {
 	// phone.EnvTwilio* names), JARVIS_PHONE_PUBLIC_URL and JARVIS_PHONE_PUBLIC_WSS_URL.
 	TwilioAccountSID, TwilioAuthToken, TwilioFromNumber string
 	PhonePublicURL, PhonePublicWSSURL                   string
+	// Container is JARVIS_CONTAINER, trimmed and lower-cased: "" (not a container), "docker"
+	// (the image's default) or "unraid" (its template). Updates and Stop then go through the
+	// container host.
+	Container string
 }
 
 // DBPath is the single SQLite database file.
@@ -185,6 +189,7 @@ func loadEnv(lookup func(string) (string, bool), getenv func(string) string, off
 		TwilioFromNumber:     getenv("TWILIO_FROM_NUMBER"),
 		PhonePublicURL:       getenv("JARVIS_PHONE_PUBLIC_URL"),
 		PhonePublicWSSURL:    getenv("JARVIS_PHONE_PUBLIC_WSS_URL"),
+		Container:            strings.ToLower(strings.TrimSpace(getenv("JARVIS_CONTAINER"))),
 	}
 }
 

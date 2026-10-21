@@ -46,6 +46,9 @@ type UpgradeConfig struct {
 	Keys []update.PublicKey
 	// SkipVersionCheck skips running the new binary (tests).
 	SkipVersionCheck bool
+	// Container is config.Env.Container (JARVIS_CONTAINER): set, the container host updates
+	// jarvisd (ContainerHint) and the one-click update is blocked.
+	Container string
 }
 
 // restartDelay lets the 202 reach the browser before serve shuts down.
@@ -165,6 +168,8 @@ func (m *Module) paths() update.Paths {
 func (m *Module) applyBlocker(ctx context.Context) (reason, command string) {
 	kind := m.supervisor()
 	switch {
+	case m.Upgrade.Container != "":
+		return ContainerHint(m.Upgrade.Container), ""
 	case !m.updatesEnabled(ctx):
 		return "Update checks are off. Turn on " + SettingUpdatesEnabled + " first.", ""
 	case m.Upgrade.Exe == "" || m.deps.Config.Home == "":

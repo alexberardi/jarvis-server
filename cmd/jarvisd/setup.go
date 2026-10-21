@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -137,6 +138,10 @@ func setupLinkMessage(cfg config.Config) (url, msg string, err error) {
 // the token (it reaches those logs and the logs DB too). It opens a browser at the link when
 // browser is set and this looks like an interactive desktop session.
 func announceSetup(w io.Writer, tty bool, log *slog.Logger, cfg config.Config, token, path string, browser bool) {
+	if cfg.Env.Container != "" {
+		announceContainerSetup(w, log, cfg, token, path)
+		return
+	}
 	link := setupLink(cfg, token)
 	if tty {
 		fmt.Fprintf(w, "\njarvisd: no admin account yet. Finish setup in a browser:\n\n    %s\n\n", link)
@@ -158,6 +163,22 @@ func announceSetup(w io.Writer, tty bool, log *slog.Logger, cfg config.Config, t
 			log.Debug("could not open a browser", "err", err)
 		}
 	}
+}
+
+// announceContainerSetup is announceSetup in a container (JARVIS_CONTAINER): the token goes to
+// the container log, which only the host's admin reads, and the token file is in their data
+// folder anyway (docs/decisions/2026-10-20-container-setup-token.md). The address jarvisd sees
+// is the container's bridge IP, which the browser can't reach, so it names the WebUI's port
+// instead, in the output and the log.
+func announceContainerSetup(w io.Writer, log *slog.Logger, cfg config.Config, token, path string) {
+	port := cfg.Ports[config.ListenerAdmin]
+	fmt.Fprintf(w, "\njarvisd: no admin account yet. Open the WebUI (port %d on your server) and paste this setup token:\n\n", port)
+	fmt.Fprintf(w, "Setup token: %s\n", token)
+	if path != "" {
+		fmt.Fprintf(w, "(also in %s in the data folder; it is deleted once setup is done)\n", filepath.Base(path))
+	}
+	fmt.Fprintln(w)
+	log.Info("first-run setup", "webui_port", port, "token_file", path)
 }
 
 // stderrIsTerminal reports whether stderr is a person's terminal, not a service manager's
