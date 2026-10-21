@@ -1,5 +1,6 @@
 # jarvisd (the single-binary Jarvis server) in server mode only: `jarvisd serve`, no node agent.
-# Settings are in .env. See README.md.
+# Default network: macvlan, so it has its own address on your LAN (JARVIS_IP) and mDNS discovery works. Edit the network settings in
+# .env first. For a plain bridge with published ports use docker-compose.bridge.yml instead. See README.md.
 name: jarvisd
 
 services:
@@ -20,24 +21,37 @@ services:
     environment:
       JARVIS_HOME: /data
       JARVIS_NO_BROWSER: "1"
+      # The address nodes and phones reach it on; it is what jarvisd registers for its own services, and the only one it listens on.
+      JARVIS_HOST: ${JARVIS_IP:?set JARVIS_IP in .env}
       TZ: ${TZ:-UTC}
-    ports:
-      - "${JARVIS_API_PORT:-7700}:7700"
-      - "${JARVIS_ADMIN_PORT:-7710}:7710"
-      - "${JARVIS_MQTT_PORT:-1884}:1884"
+    networks:
+      lan:
+        ipv4_address: ${JARVIS_IP}
     volumes:
       - ${JARVIS_DATA:-./data}:/data
-    # NVIDIA GPU for the speech and language engines it downloads (needs the NVIDIA Container Toolkit). Uncomment to use it.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    # NVIDIA GPU for the speech-to-text engine (and any local language model). Needs the NVIDIA Container Toolkit on the host.
+    # No GPU? Delete this deploy block and pick a CPU engine in the setup wizard; see "GPU or CPU" in README.md.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:7700/health"]
+      # jarvisd listens on JARVIS_HOST only, never on loopback, so the check must use the container's own address.
+      test: ["CMD-SHELL", "curl -fsS http://$${JARVIS_HOST}:7700/health"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 120s
+
+networks:
+  lan:
+    driver: macvlan
+    driver_opts:
+      parent: ${JARVIS_PARENT_IF:?set JARVIS_PARENT_IF in .env}
+    ipam:
+      config:
+        - subnet: ${JARVIS_SUBNET:?set JARVIS_SUBNET in .env}
+          gateway: ${JARVIS_GATEWAY:?set JARVIS_GATEWAY in .env}
