@@ -99,17 +99,16 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	winID := node.Param{Name: "window_id", Type: "string", Required: true,
 		Description: "Opaque window id exactly as returned by desktop_list_windows"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed app by name: \"open X\" or \"launch X\" on the computer. Pass the name as heard, even if it looks misspelled or unfamiliar: the computer matches near and sound-alike names itself (matched_app says which). If the result is ambiguous or not found, ask the user which of the candidates or suggestions they meant. The launch is not confirmed. " +
-			"\"Open X and type Y\" (or write, jot down) is two steps: open X here, then call desktop_type_text with Y and app X. Y is never a target to open, even when speech ran \"type\" into its first word.",
-			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an app's name as the user said it, e.g. Steam. Only the app or link, never the words to type after it"}},
+		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text.",
+			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "The app's name as said, or a URL"}},
 			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
 			Examples: []node.Example{
 				{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true},
 				{VoiceCommand: "launch steam on my computer", Params: map[string]any{"target": "Steam"}},
 			}},
 			host.CapOpen, t.open},
-		{node.Spec{Name: ToolListApps, Description: "List the apps installed on the user's computer, i.e. the apps desktop_open can open. ALWAYS call this to answer any question about what is installed, available or openable on the computer (\"what apps can you open?\", \"do I have Steam?\", \"which games are installed?\"). Never answer those from general knowledge: only this list is accurate for this computer. With query, it looks a name up (as heard; it may be misheard) and returns the closest apps and best_match.",
-			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional: a name or word to look up, e.g. steam"}},
+		{node.Spec{Name: ToolListApps, Description: "The apps installed on the computer. Use for 'what apps can you open' or 'do I have X', not to open one.",
+			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional name to look up"}},
 			Keywords: []string{"apps", "applications", "programs", "games", "installed", "available", "open", "computer", "desktop"},
 			Examples: []node.Example{
 				{VoiceCommand: "what apps can you open", Params: map[string]any{}, Primary: true},
@@ -117,12 +116,12 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 				{VoiceCommand: "do I have steam installed", Params: map[string]any{"query": "steam"}},
 			}},
 			host.CapOpen, t.listApps},
-		{node.Spec{Name: ToolGetVolume, Description: "Get the computer's master volume (0-100).",
+		{node.Spec{Name: ToolGetVolume, Description: "The computer's volume.",
 			Keywords: []string{"volume", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what's the volume on my computer", Params: map[string]any{}, Primary: true}}},
 			host.CapVolumeGet, t.getVolume},
-		{node.Spec{Name: ToolSetVolume, Description: "Set the computer's master volume. Out-of-range values are clamped to 0-100; the result says the level applied.",
-			Params:   []node.Param{{Name: "volume", Type: "int", Required: true, Description: "Desired volume, 0-100"}},
+		{node.Spec{Name: ToolSetVolume, Description: "Set the computer's volume.",
+			Params:   []node.Param{{Name: "volume", Type: "int", Required: true, Description: "0-100"}},
 			Keywords: []string{"volume", "louder", "quieter", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "set my computer volume to 30", Params: map[string]any{"volume": 30}, Primary: true}}},
 			host.CapVolumeSet, t.setVolume},
