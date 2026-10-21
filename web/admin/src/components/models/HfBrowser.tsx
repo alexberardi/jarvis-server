@@ -25,8 +25,13 @@ function FileRow({
   const [open, setOpen] = useState(false)
   const [assign, setAssign] = useState<Label[]>([])
   const [mmproj, setMMProj] = useState('')
+  const [provider, setProvider] = useState('')
   const { install, isPending } = useInstallAction(onNeedsToken)
-  const installable = choice.kind !== 'mmproj'
+  const folder = !!choice.directory
+  const installable = choice.kind !== 'mmproj' && !choice.unavailable
+  // A folder whose name and config.json don't say which prompt provider it needs: the user picks.
+  const needsProvider = folder && !choice.prompt_provider
+  const name = folder ? repo.repo : choice.file
 
   function start() {
     const req: InstallRequest = {
@@ -36,8 +41,9 @@ function FileRow({
       kind: choice.kind,
       assign,
     }
-    if (mmproj) req.mmproj_file = mmproj
-    void install(req, choice.file, () => setOpen(false))
+    if (mmproj && !folder) req.mmproj_file = mmproj
+    if (needsProvider) req.prompt_provider = provider
+    void install(req, name, () => setOpen(false))
   }
 
   return (
@@ -45,15 +51,24 @@ function FileRow({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-small break-all text-text">{choice.file}</span>
-            <Badge>{choice.kind}</Badge>
+            <span className="font-mono text-small break-all text-text">{folder ? repo.repo : choice.file}</span>
+            {folder ? <Badge>Model folder</Badge> : <Badge>{choice.kind}</Badge>}
             {choice.quant && <Badge>{choice.quant}</Badge>}
-            {choice.shards.length > 1 && <Badge>{choice.shards.length} parts</Badge>}
+            {folder ? (
+              <>
+                <Badge>{choice.shards.length} files</Badge>
+                {choice.engine && <Badge title="The engine that runs this folder here">{choice.engine}</Badge>}
+                <Badge title="This engine reads text only: vision is off for this model">text-only</Badge>
+              </>
+            ) : (
+              choice.shards.length > 1 && <Badge>{choice.shards.length} parts</Badge>
+            )}
             <FitBadge fit={choice.fit} />
           </div>
           <p className="text-small text-text-muted">
             {formatBytes(choice.size)} · {fitSummary(choice.fit)}
           </p>
+          {choice.unavailable && <p className="text-small text-warning">{choice.unavailable}</p>}
         </div>
         {installable && (
           <Button size="sm" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -64,7 +79,24 @@ function FileRow({
       {open && (
         <div className="mt-3 space-y-3 rounded-control bg-surface-alt p-3">
           <AssignPicker kind={choice.kind} value={assign} onChange={setAssign} idPrefix={`hf-${choice.file}`} />
-          {choice.kind === 'llm' && mmprojFiles.length > 0 && (
+          {folder &&
+            (needsProvider ? (
+              <Select
+                label="Prompt provider (this folder doesn't say which one it needs)"
+                wrapperClassName="max-w-md"
+                value={provider}
+                onValueChange={setProvider}
+                options={[
+                  { value: '', label: 'pick one' },
+                  ...(repo.prompt_providers ?? []).map((p) => ({ value: p, label: p })),
+                ]}
+              />
+            ) : (
+              <p className="text-small text-text-muted">
+                Prompt provider: {choice.prompt_provider} (from the folder's name and config.json)
+              </p>
+            ))}
+          {!folder && choice.kind === 'llm' && mmprojFiles.length > 0 && (
             <Select
               label="Vision projector"
               wrapperClassName="max-w-md"
@@ -77,7 +109,7 @@ function FileRow({
             />
           )}
           <div className="flex justify-end">
-            <Button variant="primary" size="sm" loading={isPending} onClick={start}>
+            <Button variant="primary" size="sm" loading={isPending} disabled={needsProvider && !provider} onClick={start}>
               Start install
             </Button>
           </div>
@@ -88,7 +120,8 @@ function FileRow({
 }
 
 /**
- * HfBrowser installs any GGUF (or whisper .bin) from a pasted Hugging Face repo. Gated repos ask
+ * HfBrowser installs any GGUF (or whisper .bin), or a Hugging Face model folder (safetensors, for
+ * MLX on Apple Silicon and vLLM or Transformers elsewhere), from a pasted repo. Gated repos ask
  * for `llm.hf_token`.
  */
 export default function HfBrowser() {
@@ -125,7 +158,7 @@ export default function HfBrowser() {
     <ModelCard
       title="Hugging Face"
       icon={Search}
-      description="Paste a repo to install a model that isn't in the catalog. Only GGUF and whisper files are listed."
+      description="Paste a repo to install a model that isn't in the catalog: its GGUF and whisper files, or its safetensors model folder (MLX on Apple Silicon, vLLM or Transformers elsewhere)."
     >
       <div className="space-y-3">
         <form
@@ -159,10 +192,10 @@ export default function HfBrowser() {
           <div className="space-y-2">
             <p className="text-small text-text-muted">
               <span className="font-mono">{result.repo}</span> at <span className="font-mono">{result.revision.slice(0, 12)}</span>
-              {result.gated && ' · gated'} · {result.files.length} installable file{result.files.length === 1 ? '' : 's'}
+              {result.gated && ' · gated'} · {result.files.length} installable model{result.files.length === 1 ? '' : 's'}
             </p>
             {result.files.length === 0 ? (
-              <p className="text-small text-text-muted">No GGUF or whisper files in this repo. Try its -GGUF variant.</p>
+              <p className="text-small text-text-muted">No GGUF, whisper or safetensors model files in this repo.</p>
             ) : (
               <ul className="divide-y divide-border">
                 {result.files.map((f) => (

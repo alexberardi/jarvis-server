@@ -206,9 +206,15 @@ export interface CatalogEntry {
   thinking?: boolean
   tags?: string[]
   notes?: string
+  /** A Hugging Face model folder (safetensors) for a Python engine: MLX on Apple Silicon. */
+  directory?: boolean
+  /** The least memory (MB) the entry is worth installing on; its fit is too_big below it. */
+  min_memory_mb?: number
   fit: Fit
   installed: boolean
   state?: string
+  /** Why this machine can't run the entry (an MLX build off Apple Silicon). */
+  unavailable?: string
 }
 
 export interface CatalogResponse {
@@ -238,6 +244,14 @@ export interface HfChoice {
   size: number
   shards: RepoFile[]
   fit: Fit
+  /** A Hugging Face model folder (config.json + safetensors), installed as one model. */
+  directory?: boolean
+  /** The folder's prompt provider from its name and config.json; "" = the install must name one. */
+  prompt_provider?: string
+  /** The engine that runs the folder here (mlx-lm, vllm, transformers). */
+  engine?: string
+  /** Why no engine here can run the folder. */
+  unavailable?: string
 }
 
 export interface HfRepoResponse {
@@ -245,6 +259,8 @@ export interface HfRepoResponse {
   revision: string
   gated: boolean
   files: HfChoice[]
+  /** The prompt providers a folder's install may name. */
+  prompt_providers?: string[]
 }
 
 /** browseRepo lists a pasted repo's installable files. 403 = gated (needs llm.hf_token). */
@@ -275,6 +291,8 @@ export interface InstallRequest {
   with_mmproj?: boolean
   assign?: Label[]
   gpu_backend?: string
+  /** A model folder's prompt provider when its config.json doesn't imply one. */
+  prompt_provider?: string
 }
 
 export type InstallState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
@@ -348,6 +366,8 @@ export interface InstalledModel {
   error?: string
   external: boolean
   labels: string[]
+  /** A Hugging Face model folder, run by a Python engine (MLX, vLLM, Transformers). */
+  directory?: boolean
 }
 
 export interface InstalledResponse {
@@ -425,6 +445,8 @@ export interface LabelConfig {
   /** What remote_api resolves to for remote_url: openai or anthropic. */
   remote_api_effective?: string
   problem?: string
+  /** Something to know that isn't a problem (a Python engine runs the model text-only). */
+  note?: string
 }
 
 export interface Endpoint {

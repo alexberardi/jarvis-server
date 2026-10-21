@@ -182,6 +182,30 @@ describe('Models install flow', () => {
     expect(screen.queryByTestId('catalog-qwen3.5-9b-mmproj')).toBeNull()
   })
 
+  it('lists an MLX folder next to the GGUFs, and says why it cannot run off Apple Silicon', async () => {
+    api.getCatalog.mockResolvedValue({
+      ...catalog,
+      models: [
+        ...catalog.models,
+        entry({ id: 'qwen3.5-9b-mlx', display: 'Qwen 3.5 9B (MLX)', file: 'config.json', directory: true }),
+        entry({
+          id: 'qwen3.5-27b-mlx',
+          display: 'Qwen 3.5 27B (MLX)',
+          file: 'config.json',
+          directory: true,
+          unavailable: 'mlx-community/Qwen3.5-27B-4bit is an MLX build, which runs only on Apple Silicon',
+        }),
+      ],
+    })
+    renderFlow()
+    const ok = await screen.findByTestId('catalog-qwen3.5-9b-mlx')
+    expect(within(ok).getByText('MLX')).toBeInTheDocument()
+    expect(within(ok).getByRole('button', { name: 'Install' })).toBeInTheDocument()
+    const off = screen.getByTestId('catalog-qwen3.5-27b-mlx')
+    expect(within(off).getByText(/runs only on Apple Silicon/)).toBeInTheDocument()
+    expect(within(off).queryByRole('button', { name: 'Install' })).toBeNull()
+  })
+
   it('shows the fit warning but still installs (warn, never refuse)', async () => {
     api.startInstall.mockResolvedValue({ install: install({}), existing: false, warning: 'GPU 0 would be over by 1.2 GB' })
     renderFlow()

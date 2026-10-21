@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +25,15 @@ func TestCatalogChatTemplates(t *testing.T) {
 		if e.Kind != engine.ModelLLM {
 			if e.ChatTemplate != "" || e.FoldSystemMessages {
 				t.Errorf("%s (%s) pins a chat template", e.ID, e.Kind)
+			}
+			continue
+		}
+		if e.Directory {
+			// A Python engine renders with the folder's own template: the entry says what
+			// inference would for the folder, so an installed copy behaves the same.
+			tr := InferDirModel(path.Base(e.Repo), nil)
+			if e.ChatTemplate != "" || tr.FoldSystemMessages != e.FoldSystemMessages || tr.PromptProvider != e.PromptProvider {
+				t.Errorf("%s: entry (template %q, fold %v, %s) vs inferred %+v", e.ID, e.ChatTemplate, e.FoldSystemMessages, e.PromptProvider, tr)
 			}
 			continue
 		}

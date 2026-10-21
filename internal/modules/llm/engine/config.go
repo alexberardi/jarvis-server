@@ -308,6 +308,8 @@ type LabelConfig struct {
 
 	// Problem says why the label can't run as configured (missing model file, …).
 	Problem string `json:"problem,omitempty"`
+	// Note is something to know that isn't a problem (a Python engine runs text-only).
+	Note string `json:"note,omitempty"`
 }
 
 // ModelInfo is what the model manager knows about an installed model.
@@ -332,6 +334,12 @@ var ErrModelNotFound = errors.New("model not installed")
 // ModelLookup resolves installed model ids (the model manager's store).
 type ModelLookup interface {
 	LookupModel(ctx context.Context, id string) (ModelInfo, error)
+}
+
+// PathLookup is an optional ModelLookup extension: the traits of a model given by absolute
+// path (an installed model's, or a model directory's own); false = none known.
+type PathLookup interface {
+	LookupPath(ctx context.Context, path string) (ModelInfo, bool)
 }
 
 // ConfigSource yields label configurations.
@@ -460,6 +468,12 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 			return
 		}
 		info = ModelInfo{ID: ref, Path: ref}
+		if pl, ok := s.Models.(PathLookup); ok {
+			if i, ok := pl.LookupPath(ctx, ref); ok {
+				info.Engine, info.ContextDefault, info.FoldSystemMessages = i.Engine, i.ContextDefault, i.FoldSystemMessages
+				info.MMProjID, info.ChatTemplate = i.MMProjID, i.ChatTemplate
+			}
+		}
 	} else {
 		if s.Models == nil {
 			c.Problem = "model " + ref + " is not installed"
@@ -501,6 +515,9 @@ func (s SettingsSource) resolveModels(ctx context.Context, d LabelDef, c *LabelC
 	}
 	if d.ModelKind != ModelLLM || py {
 		// No projector: a Python engine takes none.
+		if py && d.ModelKind == ModelLLM {
+			c.Note = fmt.Sprintf("%s runs this model text-only: vision is off for this label", c.Kind)
+		}
 		c.MMProj = ""
 		return
 	}

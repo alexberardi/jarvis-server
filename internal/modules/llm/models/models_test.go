@@ -283,8 +283,10 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	h := newHub()
-	srv := httptest.NewServer(h)
-	t.Cleanup(srv.Close)
+	srv, client := newTestServer(h)
+	if client == nil {
+		t.Cleanup(srv.Close)
+	}
 	set.Set(ctx, engine.KeyHFEndpoint, srv.URL, settings.Scope{})
 	set.Set(ctx, engine.KeyLlamaBaseURL, srv.URL+"/llama", settings.Scope{})
 	set.Set(ctx, engine.KeyWhisperBaseURL, srv.URL+"/whisper", settings.Scope{})
@@ -316,6 +318,9 @@ func newEnv(t *testing.T) *env {
 	deps := module.Deps{Config: config.Config{Home: home}, DB: d, Log: quiet(), Queue: q}
 	str := func(k string) string { return set.String(context.Background(), k, settings.Scope{}) }
 	bins := engine.NewBinaries(home, quiet())
+	if client != nil {
+		bins.Client = client
+	}
 	bins.BaseURL = func(k engine.Kind) string { return str(engine.BaseURLKey(k)) }
 	bins.Override = func(k engine.Kind) string { return str(engine.PathKey(k)) }
 	labels := &fakeLabels{}
@@ -325,6 +330,9 @@ func newEnv(t *testing.T) *env {
 		Labels:    labels,
 		HF:        &HF{Endpoint: func() string { return str(engine.KeyHFEndpoint) }, Token: func() string { return str(engine.KeyHFToken) }},
 		ModelsDir: filepath.Join(home, "models"), Log: quiet(), ProgressEvery: time.Millisecond,
+	}
+	if client != nil {
+		mgr.Client, mgr.HF.Client = client, client
 	}
 	e := &env{t: t, ctx: ctx, home: home, hub: h, srv: srv, db: d, set: set, q: q, mgr: mgr, labels: labels, deps: deps}
 	return e
@@ -362,7 +370,10 @@ func TestCatalogLint(t *testing.T) {
 		ids[e.ID] = true
 		hfOK := ValidRepo(e.Repo) && len(e.Revision) == 40
 		urlOK := strings.HasPrefix(e.URL, "https://") && e.Repo == ""
-		if !ValidID(e.ID) || !ValidKind(e.Kind) || !(hfOK || urlOK) || len(e.SHA256) != 64 || e.Size <= 0 {
+		// A directory entry is listed at install (its files carry their own sha256).
+		dirOK := e.Directory && ValidRepo(e.Repo) && (e.Revision == "" || len(e.Revision) == 40) && e.File == DirChoiceFile &&
+			e.SHA256 == "" && e.Kind == "llm" && e.MMProj == "" && e.ChatTemplate == ""
+		if !ValidID(e.ID) || !ValidKind(e.Kind) || !(hfOK || urlOK || dirOK) || (!dirOK && len(e.SHA256) != 64) || e.Size <= 0 {
 			t.Errorf("bad entry %+v", e)
 		}
 		if e.Kind == "llm" {
