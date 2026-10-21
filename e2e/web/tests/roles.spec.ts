@@ -19,7 +19,7 @@ const ADMIN_PAGES = [
   { label: 'Settings', path: '/admin/settings', heading: 'Settings', api: '/api/settings/' },
   { label: 'Connections', path: '/admin/connections', heading: 'Connections', api: '/api/connections' },
   { label: 'Logs', path: '/admin/logs', heading: 'Logs', api: '/api/logs?limit=1' },
-  { label: 'Traces', path: '/admin/traces', heading: 'Request Traces', api: '/api/traces?limit=1' },
+  { label: 'Traces', path: '/admin/traces', heading: 'Traces', api: '/api/traces?limit=1' },
   { label: 'Nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
   { label: 'Users', path: '/admin/users', heading: 'Users', api: '/api/admin/users' },
   { label: 'Updates', path: '/admin/update', heading: 'Updates', api: '/api/update' },

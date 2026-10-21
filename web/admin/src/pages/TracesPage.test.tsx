@@ -82,3 +82,26 @@ describe('TraceCards (the traces table below lg)', () => {
     expect(screen.getByText('No traces yet')).toBeInTheDocument()
   })
 })
+
+describe('TraceCards empty state', () => {
+  it('shows what the page passes in place of the default', () => {
+    render(
+      <TraceCards
+        groups={[]}
+        expanded={new Set()}
+        onToggle={vi.fn()}
+        onOpen={vi.fn()}
+        nodeLabel={() => '-'}
+        householdName={() => ''}
+        empty={<p>No traces match these filters</p>}
+      />,
+    )
+    expect(screen.getByText('No traces match these filters')).toBeInTheDocument()
+    expect(screen.queryByText('No traces yet')).toBeNull()
+  })
+
+  it('names the source with an icon, not an emoji', () => {
+    renderCards(new Set())
+    expect(screen.getByTestId('trace-cards').textContent).not.toMatch(/📱|🔊/u)
+  })
+})

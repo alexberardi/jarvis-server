@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import SettingRow from './SettingRow'
 import type { SettingResponse } from '@/types/settings'
@@ -11,20 +11,24 @@ interface CategoryGroupProps {
 
 export default function CategoryGroup({ category, settings, serviceName }: CategoryGroupProps) {
   const [expanded, setExpanded] = useState(true)
+  const panel = useId()
 
   return (
     <div>
       <button
+        type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        aria-expanded={expanded}
+        aria-controls={panel}
+        className="flex min-h-10 w-full items-center gap-2 bg-surface-alt px-4 text-left text-small font-medium text-text-muted transition-colors duration-(--duration-hover) hover:text-text"
       >
-        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {category}
-        <span className="font-normal">({settings.length})</span>
+        {expanded ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
+        <span className="capitalize">{category}</span>
+        <span className="font-normal tabular-nums">{settings.length}</span>
       </button>
 
       {expanded && (
-        <div className="space-y-0.5">
+        <div id={panel} className="divide-y divide-border">
           {settings.map((setting) => (
             <SettingRow key={setting.key} setting={setting} serviceName={serviceName} />
           ))}

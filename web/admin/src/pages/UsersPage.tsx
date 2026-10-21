@@ -1,23 +1,11 @@
 import { useState } from 'react'
-import { RefreshCw, KeyRound, Copy, ShieldCheck, UserX, Clock } from 'lucide-react'
+import { Clock, Copy, KeyRound, RefreshCw, ShieldCheck, UserX, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAllUsers, useIssueTempPassword } from '@/hooks/useUsers'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, SkeletonList } from '@/components/ui'
+import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { AdminUser, TempPasswordResult } from '@/api/admin'
-
-function Badge({ tone, children }: { tone: 'green' | 'red' | 'amber' | 'blue'; children: React.ReactNode }) {
-  const tones = {
-    green: 'bg-green-500/10 text-green-500',
-    red: 'bg-red-500/10 text-red-500',
-    amber: 'bg-amber-500/10 text-amber-500',
-    blue: 'bg-blue-500/10 text-blue-500',
-  }
-  return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', tones[tone])}>
-      {children}
-    </span>
-  )
-}
 
 function TempPasswordResultPanel({
   result,
@@ -33,38 +21,28 @@ function TempPasswordResultPanel({
       await navigator.clipboard.writeText(result.temp_password)
       toast.success('Temporary password copied')
     } catch {
-      toast.error('Copy failed — select it manually')
+      toast.error("Couldn't copy it. Select the password and copy it yourself.")
     }
   }
 
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-      <p className="text-sm font-medium text-[var(--color-text)]">
-        Temporary password for {email}
-      </p>
+    <div role="status" className="rounded-card bg-warning-soft p-4">
+      <p className="text-subheading text-text">Temporary password for {email}</p>
       <div className="mt-2 flex items-center gap-2">
-        <code className="rounded bg-[var(--color-surface-alt)] px-3 py-1.5 font-mono text-base tracking-wide text-[var(--color-text)]">
+        <code className="min-w-0 rounded-control border border-border bg-surface px-3 py-2 font-mono text-body tracking-wide break-all text-text">
           {result.temp_password}
         </code>
-        <button
-          onClick={copy}
-          className="rounded-lg p-1.5 hover:bg-[var(--color-surface-alt)]"
-          title="Copy to clipboard"
-        >
-          <Copy size={14} className="text-[var(--color-text-muted)]" />
-        </button>
+        <Button variant="ghost" size="icon" onClick={copy} aria-label="Copy the temporary password" title="Copy">
+          <Copy size={16} aria-hidden />
+        </Button>
       </div>
-      <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-        Shown once — it is not stored anywhere. Valid until{' '}
-        {new Date(result.expires_at).toLocaleString()}. All of the user's sessions were signed
-        out; on their next login they'll be asked to set a new password.
+      <p className="mt-2 max-w-prose text-small text-text">
+        Shown once and not stored anywhere. It works until {new Date(result.expires_at).toLocaleString()}. All of
+        their sessions were signed out, and they'll be asked to set a new password when they next sign in.
       </p>
-      <button
-        onClick={onDismiss}
-        className="mt-3 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
-      >
+      <Button variant="primary" size="sm" className="mt-3" onClick={onDismiss}>
         Done
-      </button>
+      </Button>
     </div>
   )
 }
@@ -84,49 +62,28 @@ function ResetConfirm({
   const tooShort = customPassword.length > 0 && customPassword.length < 8
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] p-4">
-      <p className="text-sm text-[var(--color-text)]">
-        Reset the password for <span className="font-medium">{user.email}</span>? This signs the
-        user out everywhere and replaces their password with a temporary one they must change at
-        next login.
+    <div className="rounded-card bg-surface-alt p-4">
+      <p className="max-w-prose text-body text-text">
+        Reset the password for <span className="font-medium">{user.email}</span>? They're signed out everywhere and
+        get a temporary password that they must change when they next sign in.
       </p>
-      <div className="mt-3">
-        <input
-          type="text"
-          value={customPassword}
-          onChange={(e) => setCustomPassword(e.target.value)}
-          placeholder="Custom temp password (optional — leave blank to generate)"
-          className="w-full max-w-md rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]"
-        />
-        {tooShort && <p className="mt-1 text-xs text-red-500">Must be at least 8 characters</p>}
-      </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={() => onConfirm(customPassword || null)}
-          disabled={isPending || tooShort}
-          className={cn(
-            'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-            isPending || tooShort
-              ? 'cursor-not-allowed bg-[var(--color-surface)] text-[var(--color-text-muted)]'
-              : 'bg-red-500 text-white hover:opacity-90',
-          )}
-        >
-          {isPending ? (
-            <span className="flex items-center gap-1.5">
-              <RefreshCw size={12} className="animate-spin" />
-              Resetting...
-            </span>
-          ) : (
-            'Reset password'
-          )}
-        </button>
-        <button
-          onClick={onCancel}
-          disabled={isPending}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-surface)]"
-        >
+      <Input
+        wrapperClassName="mt-3 max-w-md"
+        label="Temporary password (optional)"
+        hint={tooShort ? undefined : 'Leave it blank to generate one.'}
+        error={tooShort ? 'Use at least 8 characters' : undefined}
+        value={customPassword}
+        onChange={(e) => setCustomPassword(e.target.value)}
+        placeholder="Custom temp password"
+        autoComplete="off"
+      />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="danger" loading={isPending} disabled={tooShort} onClick={() => onConfirm(customPassword || null)}>
+          Reset password
+        </Button>
+        <Button variant="ghost" disabled={isPending} onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -148,71 +105,69 @@ function UserRow({ user }: { user: AdminUser }) {
           setPanel('idle')
           setResult(data)
         },
-        onError: (err) => toast.error(`Reset failed: ${err.message}`),
+        onError: (err) => toast.error(`Couldn't reset the password: ${errorMessage(err)}`),
       },
     )
   }
 
+  const name = user.display_name || user.username
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid={`user-${user.id}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-[var(--color-text)]">{user.email}</span>
+    <li className="px-4 py-4" data-testid={`user-${user.id}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 text-subheading break-all text-text">{user.email}</span>
             {user.is_superuser && (
-              <Badge tone="blue">
-                <ShieldCheck size={10} />
+              <Badge tone="primary">
+                <ShieldCheck size={12} aria-hidden />
                 Superuser
               </Badge>
             )}
             {!user.is_active && (
-              <Badge tone="red">
-                <UserX size={10} />
+              <Badge tone="danger">
+                <UserX size={12} aria-hidden />
                 Deactivated
               </Badge>
             )}
             {user.must_change_password && (
-              <Badge tone="amber">
-                <Clock size={10} />
+              <Badge tone="warning">
+                <Clock size={12} aria-hidden />
                 Temp password
               </Badge>
             )}
           </div>
-          <div className="mt-1 space-y-0.5 text-xs text-[var(--color-text-muted)]">
-            <p>
-              <span className="font-medium">Name:</span> {user.display_name || user.username}
+          <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-small text-text-muted">
+            <dt>Name</dt>
+            <dd className="text-text">
+              {name}
               {user.display_name && user.display_name !== user.username && (
-                <span> ({user.username})</span>
+                <span className="text-text-muted"> ({user.username})</span>
               )}
-            </p>
+            </dd>
             {user.households.length > 0 && (
-              <p>
-                <span className="font-medium">Households:</span>{' '}
-                {user.households.map((h) => `${h.household_name} (${h.role})`).join(', ')}
-              </p>
+              <>
+                <dt>{user.households.length === 1 ? 'Household' : 'Households'}</dt>
+                <dd className="text-text">{user.households.map((h) => `${h.household_name} (${h.role})`).join(', ')}</dd>
+              </>
             )}
-            <p>
-              <span className="font-medium">Created:</span>{' '}
-              {new Date(user.created_at).toLocaleDateString()}
-            </p>
-          </div>
+            <dt>Joined</dt>
+            <dd className="text-text">{new Date(user.created_at).toLocaleDateString()}</dd>
+          </dl>
         </div>
 
         {panel === 'idle' && !result && (
-          <button
-            onClick={() => setPanel('confirm')}
-            disabled={!user.is_active}
-            title={user.is_active ? undefined : 'Reactivate the account first'}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-              user.is_active
-                ? 'bg-[var(--color-surface-alt)] text-[var(--color-text)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)]'
-                : 'cursor-not-allowed bg-[var(--color-surface-alt)] text-[var(--color-text-muted)]',
-            )}
-          >
-            <KeyRound size={12} />
-            Reset password
-          </button>
+          <div className="flex flex-col items-start gap-1 sm:items-end">
+            <Button
+              size="sm"
+              icon={<KeyRound size={14} aria-hidden />}
+              onClick={() => setPanel('confirm')}
+              disabled={!user.is_active}
+              title={user.is_active ? undefined : 'Reactivate the account first'}
+            >
+              Reset password
+            </Button>
+            {!user.is_active && <p className="text-caption text-text-muted">Reactivate the account first</p>}
+          </div>
         )}
       </div>
 
@@ -229,71 +184,51 @@ function UserRow({ user }: { user: AdminUser }) {
 
       {result && (
         <div className="mt-3">
-          <TempPasswordResultPanel
-            result={result}
-            email={user.email}
-            onDismiss={() => setResult(null)}
-          />
+          <TempPasswordResultPanel result={result} email={user.email} onDismiss={() => setResult(null)} />
         </div>
       )}
-    </div>
+    </li>
   )
 }
 
 export default function UsersPage() {
   const { data: users, isLoading, isError, error, refetch, isFetching } = useAllUsers()
 
+  let body
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw className="animate-spin text-[var(--color-primary)]" size={24} />
-      </div>
+    body = <SkeletonList rows={4} label="Loading users" />
+  } else if (isError) {
+    body = <ErrorState title="Couldn't load users" message={errorMessage(error)} onRetry={() => refetch()} />
+  } else if (!users || users.length === 0) {
+    body = (
+      <EmptyState
+        icon={<Users size={20} />}
+        title="No users yet"
+        description="People appear here once they have an account, from setup or an invitation."
+      />
     )
-  }
-
-  if (isError) {
-    return (
-      <div className="py-20 text-center">
-        <p className="mb-2 text-red-500">Failed to load users</p>
-        <p className="mb-4 text-sm text-[var(--color-text-muted)]">
-          {(error as Error)?.message ?? 'Unknown error'}
-        </p>
-        <button
-          onClick={() => refetch()}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white hover:opacity-90"
-        >
-          Retry
-        </button>
-      </div>
+  } else {
+    body = (
+      <ul aria-label="Users" className="divide-y divide-border">
+        {users.map((user) => (
+          <UserRow key={user.id} user={user} />
+        ))}
+      </ul>
     )
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Users</h1>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className={cn(
-            'rounded-lg p-1.5 hover:bg-[var(--color-surface-alt)]',
-            isFetching && 'animate-spin',
-          )}
-          title="Refresh"
-        >
-          <RefreshCw size={14} className="text-[var(--color-text-muted)]" />
-        </button>
-      </div>
-
-      {users && users.length === 0 && (
-        <div className="py-12 text-center">
-          <p className="text-sm text-[var(--color-text-muted)]">No users found.</p>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {users?.map((user) => <UserRow key={user.id} user={user} />)}
-      </div>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Users"
+        description="Everyone with an account on this install. Reset a password here when someone can't sign in."
+        actions={
+          <Button variant="ghost" size="icon" aria-label="Refresh" title="Refresh" disabled={isFetching} onClick={() => refetch()}>
+            <RefreshCw size={16} aria-hidden className={cn(isFetching && 'motion-safe:animate-spin')} />
+          </Button>
+        }
+      />
+      <Card flush>{body}</Card>
     </div>
   )
 }

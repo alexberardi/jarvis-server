@@ -1,19 +1,27 @@
 import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { AlertTriangle, ArrowLeft } from 'lucide-react'
 import { fetchTrace, type TraceSpan } from '@/api/traces'
+import { Button, Card, CardHeader, ErrorState, PageHeader, Skeleton } from '@/components/ui'
+import { SourceIcon, TraceStatus } from '@/components/traces/TraceBits'
+import { errorMessage, errorStatus } from '@/lib/errors'
 import { formatServerTime } from '@/lib/time'
+import { formatDuration, sourceLabel } from '@/lib/traces'
+import { cn } from '@/lib/utils'
 
-function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
-}
-
+// Each service's colour in the flow and the spans, from the theme's tokens so both themes hold.
 const SERVICE_COLORS: Record<string, string> = {
-  cc: '#9e9e9e',
-  llm_proxy: '#42a5f5',
-  node: '#66bb6a',
-  tts: '#ffa726',
-  whisper: '#ab47bc',
+  cc: 'var(--color-border-strong)',
+  llm_proxy: 'var(--color-primary)',
+  node: 'var(--color-success)',
+  tts: 'var(--color-warning)',
+  whisper: 'var(--color-tertiary)',
+}
+const ERROR_COLOR = 'var(--color-danger)'
+
+function spanColor(service: string, status: string): string {
+  return status === 'error' ? ERROR_COLOR : (SERVICE_COLORS[service] ?? 'var(--color-border-strong)')
 }
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -67,13 +75,27 @@ function buildServiceHops(spans: TraceSpan[]): ServiceHop[] {
   return hops
 }
 
+function BackButton() {
+  const navigate = useNavigate()
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="-ml-3 mb-3"
+      icon={<ArrowLeft size={16} aria-hidden />}
+      onClick={() => navigate('/admin/traces')}
+    >
+      Back to traces
+    </Button>
+  )
+}
+
 export default function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const [showRawSpans, setShowRawSpans] = useState(false)
   const [selectedSpan, setSelectedSpan] = useState<TraceSpan | null>(null)
 
-  const { data: trace, isLoading, error } = useQuery({
+  const { data: trace, isLoading, error, refetch } = useQuery({
     queryKey: ['trace', id],
     queryFn: () => fetchTrace(id!),
     enabled: !!id,
@@ -86,199 +108,199 @@ export default function TraceDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex justify-center py-12">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+      <div className="mx-auto max-w-6xl" role="status" aria-label="Loading the trace">
+        <BackButton />
+        <Skeleton className="mb-2 h-7 w-2/3" />
+        <Skeleton className="mb-6 h-4 w-1/3" />
+        <Card className="space-y-3">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-6" />
+          ))}
+        </Card>
       </div>
     )
   }
 
   if (error || !trace) {
+    const missing = errorStatus(error) === 404 || !error
     return (
-      <div className="space-y-4">
-        <button
-          className="text-sm text-[var(--color-primary)] hover:underline"
-          onClick={() => navigate('/admin/traces')}
-        >
-          Back to traces
-        </button>
-        <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
-          Trace not found
-        </div>
+      <div className="mx-auto max-w-6xl">
+        <BackButton />
+        <Card>
+          <ErrorState
+            title={missing ? 'Trace not found' : "Couldn't load this trace"}
+            message={missing ? 'It may have been cleaned up, or the link is wrong.' : errorMessage(error)}
+            onRetry={missing ? undefined : () => refetch()}
+          />
+        </Card>
       </div>
     )
   }
 
+  const total = trace.total_duration_ms || 1
+
   return (
-    <div className="space-y-6">
-      <button
-        className="text-sm text-[var(--color-primary)] hover:underline"
-        onClick={() => navigate('/admin/traces')}
-      >
-        Back to traces
-      </button>
+    <div className="mx-auto max-w-6xl">
+      <BackButton />
+      <PageHeader
+        className="items-start"
+        title={<span className="break-words">{trace.user_command ?? 'Request trace'}</span>}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5 break-words">
+            <SourceIcon source={trace.source} />
+            {sourceLabel(trace.source)}
+            {trace.node_id && ` (${trace.node_id})`}
+            <span aria-hidden>·</span>
+            {trace.request_type}
+            <span aria-hidden>·</span>
+            {formatServerTime(trace.created_at)}
+          </span>
+        }
+        actions={
+          <div className="flex items-center gap-3">
+            <TraceStatus status={trace.status} />
+            <span className="text-title text-text tabular-nums">{formatDuration(trace.total_duration_ms)}</span>
+          </div>
+        }
+      />
 
-      {/* Header */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1 basis-60">
-            <h1 className="break-words text-lg font-bold text-[var(--color-text)]">
-              {trace.user_command ?? 'Request Trace'}
-            </h1>
-            <p className="mt-1 break-words text-sm text-[var(--color-text-muted)]">
-              {trace.source === 'mobile' ? '📱 Mobile' : '🔊 Node'}
-              {trace.node_id && ` (${trace.node_id})`}
-              {' · '}
-              {trace.request_type}
-              {' · '}
-              {formatServerTime(trace.created_at)}
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold tabular-nums text-[var(--color-text)]">
-              {formatDuration(trace.total_duration_ms)}
-            </div>
-            <div className="flex items-center justify-end gap-1 mt-1">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  trace.status === 'ok' ? 'bg-green-500' : 'bg-red-500'
-                }`}
-              />
-              <span className="text-sm text-[var(--color-text-muted)]">{trace.status}</span>
-            </div>
-          </div>
-        </div>
+      <div className="space-y-4">
         {trace.error_message && (
-          <div className="mt-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
-            {trace.error_message}
+          <div role="alert" className="flex items-start gap-2 rounded-card bg-danger-soft p-3 text-small text-text">
+            <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-danger" />
+            <p className="min-w-0 break-words">{trace.error_message}</p>
           </div>
         )}
-        <p className="mt-2 break-all text-xs text-[var(--color-text-muted)] font-mono">
-          {trace.conversation_id}
-        </p>
-      </div>
 
-      {/* Service flow */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <h2 className="mb-3 text-sm font-medium text-[var(--color-text-muted)]">
-          Service Flow
-        </h2>
+        <Card as="section" aria-labelledby="trace-flow">
+          <CardHeader
+            id="trace-flow"
+            title="Service flow"
+            description={serviceHops.map((h) => SERVICE_LABELS[h.service] ?? h.service).join(' → ')}
+          />
+          {serviceHops.length === 0 ? (
+            <p className="text-small text-text-muted">No timed steps were recorded for this request.</p>
+          ) : (
+            <ol className="space-y-3">
+              {serviceHops.map((hop, i) => {
+                const pct = Math.min((hop.duration_ms / total) * 100, 100)
+                const color = spanColor(hop.service, hop.status)
+                const label = SERVICE_LABELS[hop.service] ?? hop.service
+                return (
+                  <li
+                    key={`${hop.service}-${i}`}
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[10rem_minmax(0,1fr)_4.5rem]"
+                  >
+                    <span className="flex min-w-0 items-center gap-2 text-small font-medium text-text">
+                      <span aria-hidden className="size-2.5 shrink-0 rounded-pill" style={{ backgroundColor: color }} />
+                      <span className="truncate">{label}</span>
+                      {hop.status === 'error' && <span className="text-caption text-danger">error</span>}
+                    </span>
+                    <span className="text-right text-small text-text tabular-nums sm:col-start-3">
+                      {formatDuration(hop.duration_ms)}
+                    </span>
+                    <span className="col-span-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+                      <span aria-hidden className="block h-2 overflow-hidden rounded-pill bg-surface-alt">
+                        <span className="block h-full rounded-pill" style={{ width: `${Math.max(pct, 1)}%`, backgroundColor: color }} />
+                      </span>
+                      <span className="mt-1 block truncate text-caption text-text-muted" title={hop.steps.join(', ')}>
+                        {hop.steps.join(', ')}
+                      </span>
+                    </span>
+                  </li>
+                )
+              })}
+            </ol>
+          )}
+          <p className="mt-4 font-mono text-caption break-all text-text-muted">
+            <span className="font-sans">Conversation </span>
+            {trace.conversation_id}
+          </p>
+        </Card>
 
-        {/* Flow arrow */}
-        <p className="mb-4 break-words text-xs text-[var(--color-text-muted)] opacity-60">
-          {serviceHops.map((h) => SERVICE_LABELS[h.service] ?? h.service).join(' → ')}
-        </p>
+        <Card as="section" aria-labelledby="trace-spans">
+          <CardHeader
+            id="trace-spans"
+            className={showRawSpans ? undefined : 'mb-0'}
+            title="Raw spans"
+            description={`${trace.spans.length} ${trace.spans.length === 1 ? 'span' : 'spans'}, on the request's own timeline`}
+            actions={
+              <Button
+                size="sm"
+                aria-expanded={showRawSpans}
+                onClick={() => {
+                  setShowRawSpans((v) => !v)
+                  setSelectedSpan(null)
+                }}
+              >
+                {showRawSpans ? 'Hide spans' : 'Show spans'}
+              </Button>
+            }
+          />
 
-        <div className="space-y-2">
-          {serviceHops.map((hop, i) => {
-            const pct = Math.min((hop.duration_ms / trace.total_duration_ms) * 100, 100)
-            const color = hop.status === 'error' ? '#ef4444' : (SERVICE_COLORS[hop.service] ?? '#9e9e9e')
-            const label = SERVICE_LABELS[hop.service] ?? hop.service
+          {showRawSpans && (
+            <ul className="space-y-0.5">
+              {trace.spans.map((span, i) => {
+                const pct = Math.min((span.duration_ms / total) * 100, 100)
+                const leftPct = (span.start_ms / total) * 100
+                const isSelected = selectedSpan === span
+                return (
+                  <li key={`${span.name}-${i}`}>
+                    <button
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => setSelectedSpan(isSelected ? null : span)}
+                      className={cn(
+                        'grid min-h-10 w-full grid-cols-[6rem_minmax(0,1fr)_3.5rem] items-center gap-2 rounded-control px-2 text-left transition-colors duration-(--duration-hover) hover:bg-surface-alt sm:grid-cols-[9rem_minmax(0,1fr)_3.5rem_5rem]',
+                        isSelected && 'bg-primary-soft hover:bg-primary-soft',
+                      )}
+                    >
+                      <span className="truncate text-right text-caption text-text-muted" title={span.name}>
+                        {span.name}
+                      </span>
+                      <span aria-hidden className="relative block h-3 overflow-hidden rounded-pill bg-surface-alt">
+                        <span
+                          className="absolute top-0 h-full rounded-pill"
+                          style={{
+                            left: `${leftPct}%`,
+                            width: `${Math.max(pct, 0.5)}%`,
+                            minWidth: '2px',
+                            backgroundColor: spanColor(span.service, span.status),
+                          }}
+                        />
+                      </span>
+                      <span className="text-right text-caption text-text tabular-nums">{formatDuration(span.duration_ms)}</span>
+                      <span className="hidden truncate text-caption text-text-muted sm:inline">{span.service}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
 
-            return (
-              <div key={`${hop.service}-${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: color }}
-                />
-                <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)] sm:w-32 sm:flex-none sm:shrink-0">
-                  {label}
-                </span>
-                <div className="relative order-last h-6 min-w-0 basis-full overflow-hidden rounded bg-[var(--color-surface-alt)] sm:order-none sm:flex-1 sm:basis-auto">
-                  <div
-                    className="absolute top-0 left-0 h-full rounded"
-                    style={{
-                      width: `${Math.max(pct, 1)}%`,
-                      backgroundColor: color,
-                      opacity: 0.7,
-                    }}
-                  />
-                  <span className="absolute inset-0 flex items-center truncate px-2 text-xs text-[var(--color-text)] opacity-70" title={hop.steps.join(', ')}>
-                    {hop.steps.join(', ')}
-                  </span>
-                </div>
-                <span className="w-16 text-sm text-[var(--color-text)] text-right tabular-nums shrink-0">
-                  {formatDuration(hop.duration_ms)}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Raw spans (collapsible) */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <button
-          className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          onClick={() => { setShowRawSpans((v) => !v); setSelectedSpan(null) }}
-        >
-          {showRawSpans ? 'Hide' : 'Show'} raw spans ({trace.spans.length})
-        </button>
-
-        {showRawSpans && (
-          <div className="mt-3 space-y-1">
-            {trace.spans.map((span, i) => {
-              const pct = Math.min((span.duration_ms / trace.total_duration_ms) * 100, 100)
-              const leftPct = (span.start_ms / trace.total_duration_ms) * 100
-              const color = span.status === 'error' ? '#ef4444' : (SERVICE_COLORS[span.service] ?? '#9e9e9e')
-              const isSelected = selectedSpan === span
-
-              return (
-                <div
-                  key={`${span.name}-${i}`}
-                  className={`flex items-center gap-2 cursor-pointer rounded px-1 py-0.5 max-md:min-h-10 ${isSelected ? 'bg-[var(--color-surface-alt)]' : ''}`}
-                  onClick={() => setSelectedSpan(isSelected ? null : span)}
-                >
-                  <span className="w-24 truncate text-xs text-[var(--color-text-muted)] text-right shrink-0 sm:w-36" title={span.name}>
-                    {span.name}
-                  </span>
-                  <div className="min-w-0 flex-1 relative h-4 overflow-hidden rounded bg-[var(--color-surface-alt)]">
-                    <div
-                      className="absolute top-0 h-full rounded"
-                      style={{
-                        left: `${leftPct}%`,
-                        width: `${Math.max(pct, 0.5)}%`,
-                        backgroundColor: color,
-                        minWidth: '2px',
-                      }}
-                    />
+          {selectedSpan && showRawSpans && (
+            <div className="mt-3 border-t border-border pt-3">
+              <dl className="grid max-w-md grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-small [&_dd]:break-words">
+                <dt className="text-text-muted">Service</dt>
+                <dd className="text-text">{selectedSpan.service}</dd>
+                <dt className="text-text-muted">Duration</dt>
+                <dd className="text-text tabular-nums">{formatDuration(selectedSpan.duration_ms)}</dd>
+                <dt className="text-text-muted">Start</dt>
+                <dd className="text-text tabular-nums">{formatDuration(selectedSpan.start_ms)}</dd>
+                <dt className="text-text-muted">End</dt>
+                <dd className="text-text tabular-nums">{formatDuration(selectedSpan.end_ms)}</dd>
+                <dt className="text-text-muted">Status</dt>
+                <dd className={selectedSpan.status === 'ok' ? 'text-success' : 'text-danger'}>{selectedSpan.status}</dd>
+                {Object.entries(selectedSpan.metadata || {}).map(([key, value]) => (
+                  <div key={key} className="contents">
+                    <dt className="text-text-muted">{key}</dt>
+                    <dd className="text-text tabular-nums">{String(value)}</dd>
                   </div>
-                  <span className="w-14 text-xs text-[var(--color-text-muted)] text-right shrink-0 tabular-nums">
-                    {formatDuration(span.duration_ms)}
-                  </span>
-                  <span className="hidden w-16 truncate text-xs text-[var(--color-text-muted)] opacity-60 shrink-0 sm:inline">
-                    {span.service}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Span detail */}
-        {selectedSpan && showRawSpans && (
-          <div className="mt-3 border-t border-[var(--color-border)] pt-3">
-            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm max-w-md [&_dd]:break-words">
-              <dt className="text-[var(--color-text-muted)]">Service</dt>
-              <dd className="text-[var(--color-text)]">{selectedSpan.service}</dd>
-              <dt className="text-[var(--color-text-muted)]">Duration</dt>
-              <dd className="text-[var(--color-text)] tabular-nums">{formatDuration(selectedSpan.duration_ms)}</dd>
-              <dt className="text-[var(--color-text-muted)]">Start</dt>
-              <dd className="text-[var(--color-text)] tabular-nums">{formatDuration(selectedSpan.start_ms)}</dd>
-              <dt className="text-[var(--color-text-muted)]">End</dt>
-              <dd className="text-[var(--color-text)] tabular-nums">{formatDuration(selectedSpan.end_ms)}</dd>
-              <dt className="text-[var(--color-text-muted)]">Status</dt>
-              <dd className={selectedSpan.status === 'ok' ? 'text-green-600' : 'text-red-600'}>
-                {selectedSpan.status}
-              </dd>
-              {Object.entries(selectedSpan.metadata || {}).map(([key, value]) => (
-                <div key={key} className="contents">
-                  <dt className="text-[var(--color-text-muted)]">{key}</dt>
-                  <dd className="text-[var(--color-text)] tabular-nums">{String(value)}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        )}
+                ))}
+              </dl>
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   )
