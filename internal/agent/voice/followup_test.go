@@ -540,3 +540,63 @@ func TestVoiceCommandWire(t *testing.T) {
 		t.Fatalf("%+v, %v", c, err)
 	}
 }
+
+// reqTools is a Toolset that keeps the node.Request each call came with.
+type reqTools struct {
+	mu   sync.Mutex
+	reqs []node.Request
+}
+
+func (f *reqTools) Available(context.Context) []node.ToolDef {
+	return []node.ToolDef{node.Spec{Name: "lights", Description: "lights"}.Render()}
+}
+func (f *reqTools) Call(_ context.Context, _ string, _ map[string]any, req node.Request) (map[string]any, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqs = append(f.reqs, req)
+	return map[string]any{"success": true}, true
+}
+
+func TestFollowUpBeepIsStrippedBeforeTheServerAndTools(t *testing.T) {
+	srv := newServer()
+	srv.texts, srv.speakPCM = []string{"(beep) turn off the lights"}, pcmOf(50)
+	srv.followUp = func(req StreamRequest) (*Control, error) {
+		return &Control{StopReason: "tool_calls", ToolCalls: []ToolCall{call("c1", "lights", `{"on":false}`)}}, nil
+	}
+	srv.cont = steps(t, complete("Lights off."))
+	tools := &reqTools{}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = tools
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+
+	if len(srv.commands) != 1 || srv.commands[0].VoiceCommand != "turn off the lights" {
+		t.Fatalf("follow-up commands %+v, want the words without (beep)", srv.commands)
+	}
+	if len(tr.FollowUps) != 1 || tr.FollowUps[0].Transcript != "(beep) turn off the lights" {
+		t.Fatalf("follow-ups %+v, want the raw transcript logged", tr.FollowUps)
+	}
+	if len(tools.reqs) != 1 || tools.reqs[0].VoiceCommand != "turn off the lights" {
+		t.Fatalf("tool requests %+v, want voice_command without (beep)", tools.reqs)
+	}
+}
+
+func TestValidationAnswerBeepIsStripped(t *testing.T) {
+	srv := newServer()
+	srv.texts, srv.speakPCM = []string{"[BLANK_AUDIO] The oven one."}, pcmOf(10)
+	ask := &Control{StopReason: "validation_required", Validation: &ValidationRequest{Question: "Which timer?", ParameterName: "name"}}
+	srv.reply = func(context.Context) (Reply, error) { return Reply{Control: ask}, nil }
+	srv.cont = steps(t, complete("Cancelled the oven timer."))
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if !slices.Equal(tr.Validations, []Validation{{"Which timer?", "The oven one."}}) {
+		t.Fatalf("validations %+v", tr.Validations)
+	}
+}

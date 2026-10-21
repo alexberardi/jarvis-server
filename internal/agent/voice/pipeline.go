@@ -282,11 +282,11 @@ func flush(chunks <-chan []int16) {
 	}
 }
 
-// takePreRoll empties the queue, keeping its last n chunks (the most recent audio) in order.
 // chimeTailChunks is how far into the recording the wake chime can still reach: the
 // microphone's own buffering delivers its last frames after the speaker has drained.
 const chimeTailChunks = 2
 
+// takePreRoll empties the queue, keeping its last n chunks (the most recent audio) in order.
 func takePreRoll(chunks <-chan []int16, n int) []int16 {
 	var kept [][]int16
 	for {
