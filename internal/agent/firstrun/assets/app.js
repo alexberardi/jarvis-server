@@ -404,7 +404,16 @@ function wire() {
   }, "remove-error"));
 }
 
+// The agent serves icon.png only when it has icon bytes; without them the image is a 404, so it
+// goes rather than showing a broken-image box.
+function dropMissingIcon() {
+  const icon = $("icon");
+  if (icon.complete && !icon.naturalWidth) icon.remove();
+  else icon.addEventListener("error", () => icon.remove());
+}
+
 async function start() {
+  dropMissingIcon();
   wire();
   try {
     render(await api("state"));
