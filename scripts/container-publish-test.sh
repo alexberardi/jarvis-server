@@ -40,6 +40,7 @@ rm "$t/img/jarvisd-image-arm64.tar.gz"
 "$ROOT/scripts/container-publish.sh" "$t/img" dev dev > /dev/null 2>&1
 if [ $? -ne 2 ] || [ -s "$LOG" ]; then echo "FAIL: missing arm64"; fail=1; fi
 : > "$LOG"
+echo x | gzip > "$t/img/jarvisd-image-arm64.tar.gz"
 "$ROOT/scripts/container-publish.sh" "$t/img" dev > /dev/null 2>&1
-if [ $? -ne 2 ]; then echo "FAIL: usage"; fail=1; fi
+if [ $? -ne 2 ] || [ -s "$LOG" ]; then echo "FAIL: usage"; fail=1; fi
 exit "$fail"
