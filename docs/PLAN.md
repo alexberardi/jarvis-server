@@ -155,7 +155,7 @@ Platforms: linux/amd64, linux/arm64, darwin/arm64 and **windows/amd64**, all nat
   - one code path everywhere
 - **One-time cost:** mirror the sherpa C-API config structs in Go, exactly matching their layout. This is guarded by a test that round-trips every config struct, and it is **Phase 0 task #1**.
 - **Fallback if purego proves fragile on a platform:** static cgo on linux/darwin (already proven: a 41 MB binary) and DLLs-beside-exe on Windows.
-- **Release outputs** (as built): one archive per target, `jarvisd-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows), plus `SHA256SUMS`, its minisign signature, and the install scripts `install.sh` (systemd/launchd) and `install.ps1` (a Windows service). No container image is published.
+- **Release outputs** (as built): one archive per target, `jarvisd-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows), plus `SHA256SUMS`, its minisign signature, and the install scripts `install.sh` (systemd/launchd) and `install.ps1` (a Windows service). The container image `ghcr.io/alexberardi/jarvisd:<version>` (and `:latest` for non-prerelease tags) is built from the linux-amd64 archive and published with each release.
 - **Windows notes:**
   - extracted DLLs may need code-signing to avoid antivirus friction; plan an Authenticode step in Phase 6
   - GPU engines (`llama-server`, whisper) have official Windows CUDA and Vulkan builds
