@@ -365,13 +365,7 @@ func (t *Tools) awaitWindow(ctx context.Context, asked string, l launches.Launch
 			}
 		}
 		if l.Before != nil {
-			var fresh []Window
-			for _, w := range ws {
-				if !l.Before[w.ID] {
-					fresh = append(fresh, w)
-				}
-			}
-			if len(fresh) == 1 {
+			if fresh := t.freshSince(ctx, ws, l); len(fresh) == 1 {
 				t.log().Info("dictation: the launched app's new window", "app", l.Name, "polls", i)
 				tg := t.targetOf(fresh[0], asked, false)
 				tg.name, tg.app = l.Name, l.Name
@@ -387,6 +381,34 @@ func (t *Tools) awaitWindow(ctx context.Context, asked string, l launches.Launch
 	}
 	return nil, &appError{code: CodeNotReady, app: l.Name,
 		msg: fmt.Sprintf("%s was opened, but its window hasn't appeared yet", l.Name)}
+}
+
+// freshSince is the listed windows that weren't there at launch l. A snapshot from a faster
+// source than the window list (macOS's window server) names the apps with a new window
+// instead; each one's front window in ws is taken as the new one.
+func (t *Tools) freshSince(ctx context.Context, ws []Window, l launches.Launch) []Window {
+	var fresh []Window
+	if !l.ByOwner {
+		for _, w := range ws {
+			if !l.Before[w.ID] {
+				fresh = append(fresh, w)
+			}
+		}
+		return fresh
+	}
+	owners, err := t.Launched.NewOwners(ctx, l)
+	if err != nil {
+		return nil
+	}
+	for _, o := range owners {
+		for _, w := range ws {
+			if t.Win.Same(w.ID, o) {
+				fresh = append(fresh, w)
+				break
+			}
+		}
+	}
+	return fresh
 }
 
 // notOpen turns "no window matches" into "that app is installed but not open" when the
