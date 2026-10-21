@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
@@ -90,6 +92,7 @@ type Tools struct {
 	// Launched records each app launch, so typing into it can wait for its window (nil: not
 	// recorded).
 	Launched *launches.Tracker
+	Log      *slog.Logger // nil: no logs
 	tools    []tool
 }
 
@@ -206,7 +209,19 @@ func code(err error) string {
 
 var errBadArgs = errors.New("bad arguments")
 
+// slowOutsideLaunch: desktop_open spending longer than this outside the launch itself is
+// logged (the catalogue lookup and the launch record should take milliseconds).
+var slowOutsideLaunch = time.Second
+
+func (t *Tools) log() *slog.Logger {
+	if t.Log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return t.Log
+}
+
 func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, error) {
+	start := time.Now()
 	target, _ := args["target"].(string)
 	kind, err := t.Policy.Classify(target)
 	if err != nil {
@@ -229,7 +244,12 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	app := p.App
 	t.Launched.Record(ctx, app.Name, app.ID)
 	// The path launched is the catalogue's, never the model's.
-	if err := t.Host.LaunchApp(ctx, app.Path); err != nil {
+	launchStart := time.Now()
+	err = t.Host.LaunchApp(ctx, app.Path)
+	if other := time.Since(start) - time.Since(launchStart); other > slowOutsideLaunch {
+		t.log().Warn("desktop_open: slow outside the launch", "app", app.Name, "took", other.Round(time.Millisecond))
+	}
+	if err != nil {
 		return nil, err
 	}
 	out := map[string]any{"launched": app.Name, "matched_app": app.Name, "note": "requested; launch is not confirmed"}
