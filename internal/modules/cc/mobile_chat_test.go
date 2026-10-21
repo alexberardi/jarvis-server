@@ -206,7 +206,7 @@ func TestMobileChatGoldenProse(t *testing.T) {
 	ts := event(t, frames[len(frames)-1])["trace_summary"].(map[string]any)
 	// process_command > cache_lookups, tool_execution_loop > llm_call_iter_1, as legacy's
 	// engine recorded into the chat's timing.
-	if ts["span_count"] != 4.0 || ts["status"] != "ok" {
+	if ts["span_count"] != 5.0 || ts["status"] != "ok" { // + the agent_context span, on by default (#408)
 		t.Fatalf("trace summary %v", ts)
 	}
 	hops := ts["service_hops"].([]any)
@@ -257,7 +257,7 @@ func TestMobileChatColdStart(t *testing.T) {
 		t.Fatalf("done %v", done)
 	}
 	ts := done["trace_summary"].(map[string]any)
-	if ts["span_count"] != 6.0 { // + warmup, warmup_inference
+	if ts["span_count"] != 7.0 { // + warmup, warmup_inference; + agent_context, on by default (#408)
 		t.Fatalf("spans %v", ts)
 	}
 	// The cold warmup asked the (online) node for its tools.

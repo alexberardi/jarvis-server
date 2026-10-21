@@ -333,17 +333,31 @@ func TestMemoryAgentContextHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	conv := &conversation{householdID: voiceHH}
-	if h := me.m.agentContextHint(ctx, conv, "what's the weather this afternoon"); h != "" {
-		t.Fatalf("advanced_context is off by default: %q", h)
-	}
-	me.set(settingAdvancedContext, true, settings.Scope{HouseholdID: voiceHH})
+	// advanced_context is on by default (#408), so the hint is present with no setting stored.
 	h := me.m.agentContextHint(ctx, conv, "what's the weather this afternoon")
 	if h != agentContextHeader+"\n- current weather: rain all afternoon" {
 		t.Fatalf("hint %q", h)
 	}
+	// A household that explicitly stored false keeps it (defaults resolve at read time).
+	me.set(settingAdvancedContext, false, settings.Scope{HouseholdID: voiceHH})
+	if h := me.m.agentContextHint(ctx, conv, "what's the weather this afternoon"); h != "" {
+		t.Fatalf("advanced_context stored false must stay off: %q", h)
+	}
 	if formatAgentContext([]string{"x"}, 10) != "" {
 		t.Fatal("budget")
 	}
+}
+
+func TestAdvancedContextDefaultOn(t *testing.T) {
+	for _, d := range memoryDefinitions() {
+		if d.Key == settingAdvancedContext {
+			if d.Default != true {
+				t.Fatalf("model.advanced_context default is %v, want true", d.Default)
+			}
+			return
+		}
+	}
+	t.Fatal("model.advanced_context not in memoryDefinitions")
 }
 
 func TestParseExtractionResponse(t *testing.T) {

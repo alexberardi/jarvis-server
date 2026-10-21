@@ -172,7 +172,7 @@ There is one table, `user_memories`, and the scope is encoded by `user_id`:
 
 **C. Agent context** (per turn, appended to the user message).
 
-- **Gate:** `model.advanced_context` must be true for the household (CH:3087-3100). The default is **False**.
+- **Gate:** `model.advanced_context` must be true for the household (CH:3087-3100). The default is **True** (changed by #408; a household that explicitly stored false keeps it).
 - **Settings:** `memory.agent_context_enabled` (True), `_max_results` (5), `_max_chars` (500) and `_similarity_threshold` (0.25) (CH:3126-3147).
 - **Search** (`AgentContextService.get_relevant_context`, `agent_context_service.py:43-108`):
   1. it embeds the utterance;
@@ -391,7 +391,7 @@ The system-prompt text "you MUST call quick_search…" is contributed through `i
 | `memory.transcript_ttl_days` | 7 | global | Transcript deletion. |
 | `memory.embedding_enabled` / `embedding_interval_seconds` | (undefined) on / 60 | global | Sweep. |
 | `memory.agent_context_enabled` / `_max_results` / `_max_chars` / `_similarity_threshold` | True / 5 / 500 / 0.25 | household | Agent context block. |
-| `model.advanced_context` | **False** | household | Master switch for agent context **and for whether inject stores anything**. |
+| `model.advanced_context` | **True** (#408) | household | Master switch for agent context **and for whether inject stores anything**. |
 | `ambient_context.enabled` | False | household | Ambient bundle (01/10). |
 | `characterization.synthesis_enabled` / `_interval_seconds` / `max_transcripts` | False / 3600 / 50 | global | Synthesis. |
 | `characterization.injection_enabled` | False | household, fail-closed | `<person_view>` tail. |
@@ -400,6 +400,8 @@ The system-prompt text "you MUST call quick_search…" is contributed through `i
 | `network.public_url` | — | global | The callback URL. It goes away in Go. |
 
 None of the `memory.*` or `characterization.*` keys are in the mobile household-settings allowlist (`mobile_household_settings.py:38-61`). Households can only change them through the superuser `/settings` API.
+
+> **Changed by #408:** `model.advanced_context` now defaults to **True**. Defaults resolve at read time and are never seeded into the settings table, so a household that explicitly stored `false` keeps it.
 
 ## 6. Dependencies
 
@@ -514,7 +516,7 @@ None of the `memory.*` or `characterization.*` keys are in the mobile household-
     - nothing persists the job before the enqueue;
     - the tool description says thorough is "5-8 sources", while the code uses 6.
 12. **`recall`'s comment says it falls back when vector search "returns nothing", but it doesn't** (`recall_tool.py:108-109`).
-13. **The inject gate couples two features.** With default settings (`model.advanced_context=False`), `/memories/inject` returns 200 with zeros and stores nothing. The ambient bundle therefore only ever sees weather and calendar if `advanced_context` is also on, even though only `ambient_context.enabled` gates the ambient feature itself.
+13. **The inject gate couples two features.** In the legacy stack, with default settings (`model.advanced_context=False`), `/memories/inject` returned 200 with zeros and stored nothing; the ambient bundle therefore only ever saw weather and calendar if `advanced_context` was also on, even though only `ambient_context.enabled` gates the ambient feature itself. In Go the coupling is gone (D40 04.Q10: inject always stores) and the default is now **on** (#408), so both paths are live out of the box.
 14. **Inject trusts the item's `user_id`.** A node or app can write personal memories for any `user_id`; there is no membership check (`memories.py:185,357-365`).
 15. **Smaller items:**
     - characterization synthesis does not set `reasoning_budget: 0`, so it thinks on the shared GPU;

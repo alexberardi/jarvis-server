@@ -1,7 +1,7 @@
-# Custom agents' context: through the memory path, not the system prompt (proposed)
+# Custom agents' context: through the memory path, not the system prompt (accepted)
 
-- **Date:** 2026-10-21 (proposed by the build agent on item #405; **awaiting the user's answer**,
-  nothing is built yet)
+- **Date:** 2026-10-21 (proposed by the build agent on item #405; **accepted by the user
+  2026-10-21** — see the Decision below)
 
 The SDK's `IJarvisAgent.get_context_data()` docstring and the extending/agents tutorial
 (jarvis-docs#202, #398) promise that an agent's context is given to the LLM. On jarvisd that is
@@ -16,7 +16,8 @@ A second path exists: `agentContextHint` (`internal/modules/cc/memory_agent.go`,
 deduplicated per key) that match the utterance to the user message, after the turn hints. It is
 bounded by `memory.agent_context_max_results` (5) and `memory.agent_context_max_chars` (500
 chars, ~125 tokens) and adds nothing when nothing matches. `memory.agent_context_enabled`
-defaults on; `model.advanced_context` (the per-household switch) defaults **off**. The Python
+defaults on; `model.advanced_context` (the per-household switch) defaults **off** (now on, #408).
+The Python
 node reportedly never calls `inject_memories` (jarvis-node-setup `clients/rest_client.py:190` has
 no callers; not checked here, that repo is not in this worktree).
 
@@ -86,15 +87,18 @@ tokens, not accuracy. One model, one payload; the 4B was not measured.
   should say that `get_context_data()` is read by the node's commands, and that only the
   smart-home agent's data reaches the model, so nobody builds on the promise.
 
-## Open question for the user
+## Decision (user, 2026-10-21)
 
-1. Go with B (node injects custom agents' context as memory rows; jarvisd retrieves per turn)
-   and C for the docs in the meantime? Or C alone, dropping the promise for good?
-2. If B: should `model.advanced_context` default to on (it gates agent context per household),
-   or should custom agent context get its own default-on switch, leaving `advanced_context` off?
-3. If B: an optional SDK method that returns the agent's facts as sentences, or the node
-   flattening `get_context_data()`'s dict itself?
+1. **B**: custom agents' context goes through the memory/inject path — the node turns each
+   custom agent's `get_context_data()` into inject rows, and jarvisd retrieves them per turn by
+   relevance (not the system prompt). **C for the docs meanwhile**, until B ships.
+2. **`model.advanced_context` defaults on** (no separate switch). It was flipped in #408; a
+   household that explicitly stored `false` keeps it (defaults resolve at read time, never
+   seeded).
+3. **No new SDK method**: the node flattens `get_context_data()`'s dict itself — easiest for
+   third-party agent authors.
 
-Follow-up items (the node and SDK change, the docs fix) come after the answer. Links:
+Follow-up items: #409 (jarvis-node-setup: the node's inject call and flattening), #410
+(jarvis-docs: the SDK docstring and tutorial). Links:
 `../cc/prompt-contract.md` (the `agents` section), `../cc/04-memory-and-knowledge.md` §3.3,
 `2026-10-20-prompt-diet.md`.
