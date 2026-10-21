@@ -18,7 +18,7 @@ extension (server, extension, password, caller ID: one credential set resolved l
 Twilio set, the password a secret). FreePBX setup is "add a PJSIP extension and enter its details
 in Jarvis"; it also works with FreeSWITCH, 3CX or a SIP trunk pointed at Jarvis. Rejected:
 Asterisk's ARI and AudioSocket, which are Asterisk-only and need custom dialplan the user would
-have to write. Pure Go (`emiago/sipgo`, `pion/rtp`) so `CGO_ENABLED=0` holds; G.711 μ-law/A-law
+have to write. Pure Go (`emiago/diago` on `emiago/sipgo`, pinned, behind our own package) so `CGO_ENABLED=0` holds; G.711 μ-law/A-law
 with `live/mulaw.go`, RFC 2833 DTMF. On a LAN no public URL or tunnel is needed.
 Line-type lookup has no SIP equivalent and returns `unknown` (the plan already handles it).
 
@@ -37,6 +37,9 @@ Transfer to a person (SIP REFER to a configured extension, e.g. for a known call
 reason) is a later step, not the first.
 
 **Order.** (1) Provider refactor with Twilio behind it, no behaviour change. (2) SIP outbound,
-tested against Asterisk in a container (harness + CI integration test; never the user's PBX).
+tested against Asterisk 22 in a container configured like FreePBX 17 (harness + CI lane; never
+the user's PBX), with in-product self-tests (`*43` echo) and an exportable SIP trace for support.
 (3) Inbound receptionist. Inbound adds a new caller class, so its PR is held for the user's
 review under the merge rules.
+
+Design, gotchas and test strategy: [../cc/phone-sip.md](../cc/phone-sip.md).
