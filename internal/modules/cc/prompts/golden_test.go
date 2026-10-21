@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -143,6 +144,7 @@ func TestG1PromptsGolden(t *testing.T) {
 
 		got, _ := SystemPrompt(text, Inputs{Context: ctx, Tools: tools, Flags: flags, ToolCalling: mode.ToolCalling}, ch)
 		want := og(fx, "system_prompt").(string)
+		goldenDump(t, map[string]string{"file": file, "system_prompt": got})
 		ok := true
 		if got != want {
 			ok = false
@@ -306,6 +308,9 @@ func TestPerTurnBlocksGolden(t *testing.T) {
 	if blocks.Len() != len(got) {
 		t.Errorf("fixture has %d blocks, test covers %d", blocks.Len(), len(got))
 	}
+	for k, v := range got {
+		goldenDump(t, map[string]string{"file": "_blocks.json", "block": k, "value": v})
+	}
 	for _, k := range blocks.Keys() {
 		v, _ := blocks.Get(k)
 		if got[k] != v.(string) {
@@ -396,5 +401,25 @@ func TestG5ParseGolden(t *testing.T) {
 	}
 	for _, n := range []string{Qwen3_8B, Qwen3_5_9B, ChatGPT} {
 		t.Logf("G5 %s: %d/13 parse_response and %d/13 sanitize_text rows differ from legacy", n, parseDiff[n], sanDiff[n])
+	}
+}
+
+// goldenDump appends what the Go side renders to $JARVIS_GOLDEN_DUMP (JSON lines), so a
+// deliberate prompt change can re-baseline the fixtures (tools/golden/rebaseline.py) instead of
+// hand-editing them. The fixtures came from the legacy Python stack until the prompt diet of
+// 2026-10-20 (decision 2026-10-20-prompt-diet); since then the Go builder is the reference.
+func goldenDump(t *testing.T, row map[string]string) {
+	path := os.Getenv("JARVIS_GOLDEN_DUMP")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	b, _ := json.Marshal(row)
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		t.Fatal(err)
 	}
 }

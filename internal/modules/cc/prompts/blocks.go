@@ -36,23 +36,13 @@ func WithCharacterization(base, text string) string {
 	return base
 }
 
-// PersonalityReminder is core_rules.build_personality_reminder: the end-of-prompt voice
-// restatement, or "" for an empty persona.
+// PersonalityReminder is the end-of-prompt reminder of the persona set at the top, or "" for an
+// empty persona (decision 2026-10-20-prompt-diet: it repeated the whole persona and a paragraph).
 func PersonalityReminder(persona string) string {
-	persona = parse.PyStrip(persona)
-	if persona == "" {
+	if parse.PyStrip(persona) == "" {
 		return ""
 	}
-	return "YOUR VOICE — this is how you sound in every spoken reply " +
-		"(acknowledgments, answers, even one-liners, even when told to be brief):\n" +
-		persona + "\n" +
-		"Talk this way every time. It shapes only your wording and tone — never " +
-		"which function you call, the rules above, the decision to stay silent, or " +
-		"whether to act: it never turns a request into a clarifying question, never " +
-		"withholds or delays a tool call, and never asks the user for an optional " +
-		"parameter the tool can default (e.g. omit location for local time). It only " +
-		"reshapes the words of a reply you were already going to give. Don't announce " +
-		"or describe the voice; just speak in it."
+	return "Keep that voice in every reply; it never changes which tool you call."
 }
 
 // CharacterizationSection is core_rules.build_characterization_section ("" for empty input).

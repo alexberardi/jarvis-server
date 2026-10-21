@@ -21,6 +21,15 @@ type Inputs struct {
 	ToolCalling ToolCalling
 }
 
+// notForMeInstruction is how the model stays silent: the not_for_me tool with native tool
+// calling, the <not_for_me/> sentinel with text tool calling (decision 2026-10-20-prompt-diet).
+func notForMeInstruction(tc ToolCalling) string {
+	if tc == ToolsText {
+		return "reply with <not_for_me/> alone."
+	}
+	return "call not_for_me and nothing else."
+}
+
 // para reduces a legacy "\n"-framed section to its paragraph.
 func para(s string) string { return strings.TrimSuffix(strings.TrimPrefix(s, "\n"), "\n") }
 
@@ -44,7 +53,8 @@ func (in Inputs) Values() map[string]string {
 		"tools_compact":    tools(false),
 		"date_keys":        para(dtKeysLine(c.DateKeys)),
 		"tool_guidance":    para(toolGuidanceSection(in.Tools)),
-		"direct_answers":   para(directAnswerSection(in.Flags)),
+		"direct_answers":   para(directAnswerSection(in.Flags, in.Tools)),
+		"not_for_me":       notForMeInstruction(in.ToolCalling),
 		"agents":           para(agentContextSummary(c)),
 		"rooms":            para(roomHierarchySection(c.RoomHierarchy)),
 	}
