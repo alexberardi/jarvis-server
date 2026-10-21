@@ -1,13 +1,15 @@
 # jarvis-server
 
-The single-binary Go server for Jarvis, a private, self-hosted voice assistant, and its Go node
-agent.
+Jarvis Automation's server: one Go executable, `jarvisd`, that runs Jarvis, a private,
+self-hosted voice assistant, plus its Go node agent, `jarvis-agent`.
 
-> **Status: very beta.** Only pre-releases exist (`v0.1.0-rc1` … `v0.1.0-rc14`, see
-> [Releases](https://github.com/alexberardi/jarvis-server/releases)). Expect rough edges and
-> breaking changes between release candidates. If you run the Python stack today, keep it and keep
-> a database backup until you are happy with jarvisd: the installer stops the legacy containers but
-> deletes nothing, so you can go back.
+> **Status: pre-release.** Only release candidates exist so far (see
+> [Releases](https://github.com/alexberardi/jarvis-server/releases)); there is no `v0.1.0` yet.
+> Expect rough edges and breaking changes between release candidates. jarvisd is the way to install
+> Jarvis Automation. The old Docker/microservice stack is retired for new installs (see
+> [Legacy](#legacy-docker--microservices)). If you run it today, keep a database backup until you
+> are happy with jarvisd: the installer stops the legacy containers but deletes nothing, so you can
+> go back.
 
 Questions, bug reports and quick help: the project [Discord](https://discord.gg/9SuQFVexxJ), or a
 [GitHub issue](https://github.com/alexberardi/jarvis-server/issues).
@@ -36,12 +38,13 @@ Questions, bug reports and quick help: the project [Discord](https://discord.gg/
   enter"). On Linux and macOS it also listens for "Hey Jarvis" and shows a small on-screen
   indicator, the island. Its status icon (menu bar, tray) turns listening on and off and quits it.
 - **On a Raspberry Pi** with the ReSpeaker 2-mics HAT it runs the voice pipeline, LEDs and button.
-  This is the newest part and is still experimental: there is no Pi installer, provisioning
-  hotspot, self-update or Pantry/Home Assistant package support yet. **The Python
-  [jarvis-node-setup](https://github.com/alexberardi/jarvis-node-setup) node remains the supported
-  Pi node for now**, and it works against jarvisd.
+  This is the newest part and is a **preview**: `install-pi.sh` installs it (below), but it is not
+  yet at parity with the Python node (provisioning hotspot and Pantry/Home Assistant packages,
+  among others). **The Python [jarvis-node-setup](https://github.com/alexberardi/jarvis-node-setup)
+  node remains the supported Pi node for now**, and it works against jarvisd.
 
-`jarvis-agent` ships in the release archives (and, for Debian and Ubuntu, as a `.deb`, below); building it from source is described further down.
+Both ship with each release: as installers for macOS, Windows and Debian/Ubuntu, as install scripts
+and as archives. Building them from source is described further down.
 
 ## Supported platforms (jarvisd)
 
@@ -51,78 +54,135 @@ Questions, bug reports and quick help: the project [Discord](https://discord.gg/
 | macOS | Apple silicon (arm64) only | LaunchDaemon | Metal. Intel Macs are not supported. Developer ID signed and notarized |
 | Windows | amd64 | Windows service | Unsigned. Built and smoke-tested in CI; not yet rehearsed on real hardware |
 
-## Install jarvisd
+## Install
 
-While only release candidates exist, install from the release's own URL. GitHub's
-`releases/latest` skips pre-releases, so the `latest` links 404. Each published install script
-installs the release it came from.
+Download from the [Releases](https://github.com/alexberardi/jarvis-server/releases) page: take
+the newest release (at the top). Each release has these files, with `<v>` its version:
 
-**Linux and macOS:**
+| | Server (jarvisd) | Desktop agent |
+|---|---|---|
+| macOS (Apple silicon) | `Jarvis-Automation-Server-<v>.dmg` | `Jarvis-Automation-Agent-<v>.dmg` |
+| Windows | `Jarvis-Automation-Server-Setup-<v>.exe` | `Jarvis-Automation-Agent-Setup-<v>.exe` |
+| Debian, Ubuntu | `jarvis-automation-server_<v>_<arch>.deb` | `jarvis-automation-agent_<v>_<arch>.deb` |
+| From a terminal | `install.sh` (Linux, macOS), `install.ps1` (Windows) | `install-agent.sh` (any Linux) |
+| Raspberry Pi (preview) | | `install-pi.sh` |
+
+`<arch>` is `amd64` or `arm64`. `SHA256SUMS` (signed by `SHA256SUMS.minisig`) covers the
+archives, the `.deb`, `.exe` and `.dmg` installers, and `install-pi.sh`. `install.sh`,
+`install.ps1` and `install-agent.sh` are not in it: they are fetched over TLS from the release,
+so read them before you run them. The install scripts check the archive they download against
+`SHA256SUMS`.
+
+While only pre-releases exist, use the release's own URL. GitHub's `releases/latest` skips
+pre-releases, so `releases/latest/download/...` links give a 404. The commands below use
+`v0.1.0-rc18` as the example tag: replace it with the newest tag. Each install script installs
+the release it came from.
+
+### The server
+
+Install jarvisd on one computer that stays on: it is the server for your whole household.
+
+**macOS:** open `Jarvis-Automation-Server-<v>.dmg` and drag **Jarvis Automation Server** to
+Applications, then open it. It asks whether devices on your network may reach it (ticked), asks
+for your password, installs the background service and opens the setup page in your browser.
+Opening the app again later opens the setup page or the admin. To uninstall, hold Option while
+opening it and choose **Uninstall…** (it keeps your data unless you say otherwise).
+
+**Windows:** download `Jarvis-Automation-Server-Setup-<v>.exe` and open it. Windows may say
+*Windows protected your PC*: Jarvis Automation is safe and open source, and Windows shows this for
+any installer that isn't signed with a paid code-signing certificate, which we don't buy. Click
+**More info**, then **Run anyway** (to check the file first, compare its SHA-256 with
+`SHA256SUMS`). Setup asks for administrator rights, installs the service, opens the firewall for
+your local network (a ticked box), and opens the setup page in your browser. Uninstalling it
+(Settings → Apps) asks whether to delete the data too; the default keeps it in
+`%ProgramData%\jarvisd`.
+
+**Debian and Ubuntu:** download `jarvis-automation-server_<v>_<arch>.deb` and open it: App Center
+or Software installs it after your password, and the setup page opens in your browser (a computer
+without a screen prints the link and a QR code; `sudo apt install ./jarvis-automation-server_….deb`
+works too). It runs the same `jarvisd service install` and LAN-only firewall fix as the script.
+Removing the package stops the service and keeps the data in `/var/lib/jarvisd`;
+`sudo apt purge jarvis-automation-server` deletes it.
+
+**From a terminal, Linux and macOS:**
 
 ```sh
-curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc14/install.sh
+curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install.sh
 less install.sh          # read it first
 sh install.sh            # asks for sudo
 ```
 
-Useful options (`sh install.sh --help`): `--stop-legacy` stops a legacy Python stack on the same
-host (Docker containers and macOS LaunchAgents; no data is removed), `--user` (Linux: a per-user
-service without root, data in `~/.jarvisd`), `--yes` (apply the firewall fix without asking),
-`--uninstall [--purge]`.
+Options (`sh install.sh --help`):
 
-**Debian and Ubuntu, without a terminal:** download `jarvis-automation-server_<version>_<arch>.deb`
-(amd64 or arm64) from the release and open it: App Center or Software installs it after your
-password, and the setup page opens in your browser (a computer without a screen prints the link and
-a QR code; `sudo apt install ./jarvis-automation-server_….deb` works too). It runs the same
-`jarvisd service install` and LAN-only firewall fix as the script, and jarvisd updates itself from
-the admin page afterwards. Removing the package stops the service and keeps the data in
-`/var/lib/jarvisd`; `sudo apt purge jarvis-automation-server` deletes it.
-`jarvis-automation-agent_<version>_<arch>.deb` adds "Jarvis Automation Agent" to the app menu: each
-person who opens it gets their own self-updating copy and the setup page. Removing the package
-leaves those copies; each person removes theirs from its setup page ("Remove Jarvis Automation
-Agent") or with `~/.local/lib/jarvis-agent/jarvis-agent uninstall --purge`.
+- `--user` (Linux): a per-user service without root, data in `~/.jarvisd`.
+- `--stop-legacy`: stops a legacy Docker stack on the same host (its containers and macOS
+  LaunchAgents; no data is removed).
+- `--uninstall`: removes the service and the binary and keeps the data; add `--purge` to delete
+  the data too.
+- `--yes` applies the firewall fix without asking; `--version <tag>` installs another release.
 
-**Windows, without a terminal:** download `Jarvis-Automation-Server-Setup-<version>.exe` from the
-release and open it. Windows may say *Windows protected your PC*: Jarvis Automation is safe and open
-source, and Windows shows this for any installer that isn't signed with a paid code-signing
-certificate, which we don't buy. Click **More info**, then **Run anyway** (to check the file first,
-compare its SHA-256 with `SHA256SUMS`). Setup asks for administrator rights, installs the service,
-opens the firewall for your local network (a ticked box), and opens the setup page in your browser.
-jarvisd updates itself from the admin page afterwards. Uninstalling it (Settings → Apps) asks
-whether to delete the data too; the default keeps it in `%ProgramData%\jarvisd`.
-`Jarvis-Automation-Agent-Setup-<version>.exe` installs the desktop agent for you only, with no
-administrator rights: it starts when you sign in, and opens its setup page the first time.
-
-**Windows from a terminal** (PowerShell, as Administrator or it asks for elevation):
+**From a terminal, Windows** (PowerShell, as Administrator or it asks for elevation):
 
 ```powershell
-irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc14/install.ps1 | iex
+irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install.ps1 | iex
 ```
 
-Options (`-StopLegacy`, `-Yes`, `-Uninstall`, …) need the downloaded file:
+Options (`-StopLegacy`, `-Yes`, `-Uninstall`, `-Purge`, `-Version`) need the downloaded file:
 `powershell -ExecutionPolicy Bypass -File install.ps1 -StopLegacy`.
 
-The installer verifies the archive against `SHA256SUMS` (and its minisign signature when `minisign`
-is installed), places the binary, registers the service with `jarvisd service install`, runs
-`jarvisd doctor`, offers to open the host firewall for private LAN subnets, and prints the setup
-link. Data lives in `/var/lib/jarvisd` (Linux system service), `~/.jarvisd` (Linux `--user`, and the
-service account's home on macOS) or `%ProgramData%\jarvisd` (Windows).
+The scripts verify the archive against `SHA256SUMS` (and its minisign signature when `minisign`
+is installed), place the binary, register the service with `jarvisd service install`, run
+`jarvisd doctor`, offer to open the host firewall for private LAN subnets, and print the setup
+link. Data lives in `/var/lib/jarvisd` (Linux system service), `~/.jarvisd` (Linux `--user`, and
+the service account's home on macOS) or `%ProgramData%\jarvisd` (Windows).
 
-Day to day:
+### The desktop agent
+
+Install the agent on each computer you want Jarvis to control or listen on, after the server. It
+is per user: each person who wants it installs their own, without administrator rights. Its
+first-run page pairs it with your server and sets up browser control (and, on a Mac, the
+permissions it needs).
+
+- **macOS:** open `Jarvis-Automation-Agent-<v>.dmg`, drag **Jarvis Automation Agent** to
+  Applications and open it.
+- **Windows:** open `Jarvis-Automation-Agent-Setup-<v>.exe` (the same *Windows protected your PC*
+  note as above applies). It installs for you only, starts when you sign in, and opens its setup
+  page the first time.
+- **Debian and Ubuntu:** `jarvis-automation-agent_<v>_<arch>.deb` adds "Jarvis Automation Agent"
+  to the app menu: each person who opens it gets their own self-updating copy and the setup page.
+  Removing the package leaves those copies; each person removes theirs from its setup page
+  ("Remove Jarvis Automation Agent") or with `~/.local/lib/jarvis-agent/jarvis-agent uninstall --purge`.
+- **Any other Linux** (Fedora, Bazzite, Arch, …), as yourself, not with sudo:
+
+  ```sh
+  curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install-agent.sh
+  sh install-agent.sh      # --no-start, --version <tag>, --uninstall [--purge]
+  ```
+
+The agent updates itself to follow its server's version.
+
+### Raspberry Pi node (preview)
+
+`install-pi.sh` installs the Go node on a Raspberry Pi with 64-bit Raspberry Pi OS (arm64) and the
+ReSpeaker 2-mics HAT v2.0, next to or instead of the Python node. It does the system setup the
+Python node's installer does (HAT overlay, ALSA, PulseAudio, networking) and installs
+`jarvis-agent.service`, **disabled**: only one node may own the HAT.
 
 ```sh
-jarvisd service status            # also: sudo jarvisd service start|stop|restart
-jarvisd doctor                    # can nodes and phones reach it? (sudo jarvisd doctor --fix)
-sudo jarvisd upgrade --version v0.1.0-rcN   # signed upgrade with a DB snapshot and rollback
-jarvisd --help
+curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install-pi.sh
+sudo sh install-pi.sh                 # --user NAME (default pi), --version <tag>
+/opt/jarvis-agent/jarvis-agent enroll --server <server> --room kitchen   # as the node's user; approve the code in the app or admin
+sudo sh install-pi.sh --activate      # make the Go node the one that runs (--deactivate goes back)
 ```
 
-Upgrading to another RC can also be done from the admin UI, or by re-running that RC's install
-script.
+Reboot when the script says so (HAT or audio changes). This is a preview: the Python
+[jarvis-node-setup](https://github.com/alexberardi/jarvis-node-setup) node is still the supported
+Pi node. See [docs/agent/go-pi-node.md](docs/agent/go-pi-node.md).
 
 ## First run
 
-Open the setup link the installer printed (`sudo jarvisd setup-link` prints it again; it looks like
+The installers open the setup wizard, `http://<server>:7710/setup`, in your browser. If yours
+didn't, `sudo jarvisd setup-link` prints the link again (it looks like
 `http://<server>:7710/setup#token=…`). The wizard checks that nodes can reach the server, creates the
 first account, picks hardware and a model, and asks the privacy questions; nothing large is
 downloaded until you choose a model there. After setup the admin UI stays on port 7710.
@@ -130,7 +190,31 @@ downloaded until you choose a model there. After setup the admin UI stays on por
 Point nodes and the mobile app at `http://<server>:7700` (the config service); jarvisd also
 advertises itself over mDNS (`_jarvis-config._tcp`).
 
-## Migrating from the Python stack
+## Day to day and upgrades
+
+```sh
+jarvisd service status            # also: sudo jarvisd service start|stop|restart
+jarvisd doctor                    # can nodes and phones reach it? (sudo jarvisd doctor --fix)
+sudo jarvisd upgrade --version v0.1.0-rc18   # signed upgrade with a DB snapshot and rollback
+jarvisd --help
+```
+
+`jarvisd doctor` is the first thing to run when a node or phone can't reach the server.
+
+To upgrade, use the admin UI (it offers new releases and updates jarvisd in place), run
+`sudo jarvisd upgrade --version <tag>`, or install the newer release's installer or script over
+the old one. `jarvisd upgrade` checks the release's signature and snapshots the database first;
+`sudo jarvisd upgrade --rollback` goes back. Desktop agents follow their server's version by
+themselves.
+
+## Legacy (Docker / microservices)
+
+The original Jarvis was a set of Python microservices run with Docker Compose (Postgres, Redis,
+MinIO, Mosquitto, …). **It is retired for new installs as of `v0.1.0-rc18`:** it no longer installs
+out of the box (MinIO is gone), and its documentation is frozen as it was. Install jarvisd instead.
+
+If you already run the legacy stack, move to jarvisd: install it on the same host with
+`--stop-legacy` (or on another host), then import your data before the setup wizard.
 
 `jarvisd import-legacy` copies a legacy install's users (with their passwords), households, nodes
 (with their keys, so Pi nodes reconnect without re-provisioning), rooms, devices, settings,
@@ -151,9 +235,10 @@ carried over, which node versions recover, refusals) and the worked sequence in
 [docs/install/cutover-runbook.md](docs/install/cutover-runbook.md) §4.3a before you run it. Recipes
 come over separately with `jarvisd import-recipes`.
 
-## Install the agent (from source)
+## Running the agent from source
 
-Needs Go 1.27 (see `go.mod`) and a clone of this repository.
+Needs Go 1.27 (see `go.mod`) and a clone of this repository. For development; everyone else
+installs the agent from a release (above).
 
 **Desktop (Linux, macOS):** `scripts/agent-dev-run.sh` fetches the native voice libraries, builds,
 enrolls and runs the agent. On macOS it builds a signed `~/Applications/Jarvis Agent.app` so
@@ -193,7 +278,7 @@ CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent
 ./jarvis-agent status                         # what this host can do right now
 ```
 
-**Raspberry Pi (experimental):** 64-bit Raspberry Pi OS (arm64) only. Cross-compile on another
+**Raspberry Pi, by hand:** 64-bit Raspberry Pi OS (arm64) only. Cross-compile on another
 machine with `scripts/fetch-sherpa-libs.sh linux-arm64` and
 `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent`, copy the binary
 over, enroll it as above (`--room` names the room), stop the Python node so the microphone is free
@@ -201,7 +286,8 @@ over, enroll it as above (`--room` names the room), stop the Python node so the 
 `./jarvis-agent run --voice --voice-input dsnoopmic --voice-output output`. The ALSA devices
 `dsnoopmic`/`output` come from the Python node's installer. The HAT's LEDs and button are used when
 it is detected (`--hat auto|on|off`; holding the button 3 s powers the Pi off unless
-`--button-poweroff=false`). There is no service unit for it yet. See
+`--button-poweroff=false`). `install-pi.sh` (above) does the system setup for you and installs a
+service unit. See
 [docs/agent/go-pi-node.md](docs/agent/go-pi-node.md).
 
 Some flags are not in `jarvis-agent --help` yet (`--no-overlay`, `--hat`, `--led-brightness`,
