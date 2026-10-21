@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 
@@ -205,10 +207,18 @@ func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
 		hc := hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, 0, ctxLen, residents)}
 		if c.Directory {
 			hc.Engine, hc.Unavailable = a.Manager.dirEngineFor(repo.ID)
+			if hc.PromptProvider == "" {
+				// The name didn't say: its config.json may (the install reads it too).
+				if cfg, err := a.Manager.HF.File(ctx, repo.ID, repo.Revision, DirChoiceFile, 1<<20); err == nil {
+					hc.PromptProvider = InferDirModel(path.Base(repo.ID), cfg).PromptProvider
+				}
+			}
 		}
 		choices = append(choices, hc)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices})
+	// prompt_providers: what a directory choice's install may name when nothing says.
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices,
+		"prompt_providers": KeptPromptProviders})
 }
 
 func (a *API) install(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +296,8 @@ func (a *API) installed(w http.ResponseWriter, r *http.Request) {
 	type item struct {
 		Model
 		Labels []string `json:"labels"`
+		// Directory: a Hugging Face model folder, run by a Python engine (MLX, vLLM, Transformers).
+		Directory bool `json:"directory,omitempty"`
 	}
 	out := []item{}
 	var total int64
@@ -294,7 +306,8 @@ func (a *API) installed(w http.ResponseWriter, r *http.Request) {
 		if l == nil {
 			l = []string{}
 		}
-		out = append(out, item{Model: m, Labels: l})
+		st, err := os.Stat(m.Path)
+		out = append(out, item{Model: m, Labels: l, Directory: m.Kind == engine.ModelLLM && err == nil && st.IsDir()})
 		if !m.External {
 			total += m.BytesDone
 		}

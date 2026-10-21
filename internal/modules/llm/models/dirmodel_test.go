@@ -408,3 +408,65 @@ func TestHFRepoAPIDirectoryChoice(t *testing.T) {
 		t.Fatalf("linux: %+v", cs)
 	}
 }
+
+// A folder whose name doesn't say its family gets its provider from the repo's config.json,
+// and Browse lists the providers to pick from when nothing says.
+func TestHFRepoAPIDirectoryProviderFromConfig(t *testing.T) {
+	e := newEnv(t)
+	e.mgr.Binaries.Platform = mac
+	e.addDirRepo("acme/my-finetune-mlx", "r1", `{"model_type":"qwen3","hidden_size":4096,"num_hidden_layers":36,"intermediate_size":12288,"vocab_size":151936}`)
+	e.addDirRepo("acme/llama-mlx", "r2", `{"model_type":"llama"}`)
+	mux := http.NewServeMux()
+	(&API{Manager: e.mgr, Resolver: e.labels}).Mount(mux, func(http.ResponseWriter, *http.Request) bool { return true })
+	get := func(repo string) (cs []hfChoice, providers []string) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models/hf/"+repo, nil))
+		var body struct {
+			Files     []hfChoice `json:"files"`
+			Providers []string   `json:"prompt_providers"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		return body.Files, body.Providers
+	}
+	if cs, _ := get("acme/my-finetune-mlx"); len(cs) != 1 || cs[0].PromptProvider != "Qwen3_8B_Compressed" {
+		t.Fatalf("%+v", cs)
+	}
+	if cs, ps := get("acme/llama-mlx"); len(cs) != 1 || cs[0].PromptProvider != "" || !slices.Equal(ps, KeptPromptProviders) {
+		t.Fatalf("%+v %v", cs, ps)
+	}
+}
+
+// The installed list says which models are folders (the Models page marks them).
+func TestInstalledAPIDirectoryFlag(t *testing.T) {
+	e := newEnv(t)
+	dir := filepath.Join(t.TempDir(), "Qwen3.5-9B-4bit")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"model_type":"qwen3_5"}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "model.safetensors"), []byte("w"), 0o644)
+	gguf := filepath.Join(t.TempDir(), "m.gguf")
+	os.WriteFile(gguf, []byte("g"), 0o644)
+	e.mgr.Store.Upsert(e.ctx, Model{ID: "folder", Kind: "llm", Display: "f", Path: dir, State: StateReady, External: true})
+	e.mgr.Store.Upsert(e.ctx, Model{ID: "file", Kind: "llm", Display: "g", Path: gguf, State: StateReady, External: true})
+	mux := http.NewServeMux()
+	(&API{Manager: e.mgr, Resolver: e.labels}).Mount(mux, func(http.ResponseWriter, *http.Request) bool { return true })
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models/installed", nil))
+	var body struct {
+		Models []struct {
+			ID        string `json:"id"`
+			Directory bool   `json:"directory"`
+		} `json:"models"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	got := map[string]bool{}
+	for _, m := range body.Models {
+		got[m.ID] = m.Directory
+	}
+	if !got["folder"] || got["file"] {
+		t.Fatalf("%+v", body.Models)
+	}
+}
