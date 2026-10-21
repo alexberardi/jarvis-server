@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -1094,8 +1095,13 @@ func dictationTools(h *host.Host, mode string, log *slog.Logger) (*dictate.Tools
 // openThenType shares one launch record between desktop_open and dictation, so "open X and
 // type Y" waits for X's window (DESIGN.md §14).
 func openThenType(d *desktop.Tools, dt *dictate.Tools) *desktop.Tools {
-	tr := &launches.Tracker{}
-	if dt.Win != nil {
+	tr := &launches.Tracker{Log: dt.Log}
+	d.Log = dt.Log
+	if dt.Win != nil && runtime.GOOS == "darwin" {
+		// The window list is AppleScript there, seconds on a busy Mac and behind the Automation
+		// grant; the window server answers in milliseconds with no grant.
+		tr.Owners = windowOwners(screen.MacWindows)
+	} else if dt.Win != nil {
 		win := dt.Win
 		tr.Windows = func(ctx context.Context) ([]string, error) {
 			if ok, why := win.Available(ctx); !ok {
@@ -1111,6 +1117,27 @@ func openThenType(d *desktop.Tools, dt *dictate.Tools) *desktop.Tools {
 	}
 	d.Launched, dt.Launched = tr, tr
 	return d
+}
+
+// windowOwners is the launch snapshot from macOS's window server: each app window's
+// CoreGraphics number and its app's pid, the part of the window list's pid/index ids
+// (dictate.SameMacPid) it can be matched by.
+func windowOwners(list func() ([]screen.MacWindow, error)) func(context.Context) ([]launches.Owned, error) {
+	return func(context.Context) ([]launches.Owned, error) {
+		ws, err := list()
+		if err != nil {
+			return nil, err
+		}
+		out := []launches.Owned{}
+		for _, w := range ws {
+			// Layer 0 is apps' own windows; tiny ones are helpers, never the app's window.
+			if w.Layer != 0 || w.PID <= 0 || w.W < 50 || w.H < 50 {
+				continue
+			}
+			out = append(out, launches.Owned{ID: strconv.FormatUint(uint64(w.ID), 10), Owner: strconv.Itoa(w.PID)})
+		}
+		return out, nil
+	}
 }
 
 // dictationStatus is status's line: the typing backend and whether named apps work.
