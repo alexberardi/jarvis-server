@@ -52,6 +52,11 @@ Updates come back in the heartbeat response, not over MQTT, so even nodes that c
 broker can be updated. `allow_updates` (since v0.1.131) defaults to off, and the app can turn it on
 with a K2 config push. Prod's four 0.1.x nodes (exact versions unknown) were last seen Jun–Aug.
 
+The import turns `server.legacy_ports` on (it reports it), so nodes that call the old per-service
+ports (7701, 7703, …) keep reaching the server; in a container, map those ports too. Nodes from 0.3.4
+resolve every service through `/services` and work on 7700 alone (from reading the code, not tried on
+hardware); turn the setting off in the admin once every node is there.
+
 ## 4. The rest of the data, by category
 
 - **B: the node works as before.** `cc_rooms` (before nodes and devices), `cc_devices`,

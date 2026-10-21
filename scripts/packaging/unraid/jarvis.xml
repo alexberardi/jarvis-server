@@ -8,7 +8,7 @@
   <Shell>bash</Shell>
   <Support>https://github.com/alexberardi/jarvis-server/issues</Support>
   <Project>https://jarvisautomation.io</Project>
-  <Overview>Jarvis Automation: a private voice assistant server for your home. One container runs the whole server (speech-to-text, the language model, text-to-speech, Pi nodes, the mobile app and the recipes app). Open the WebUI to run the setup wizard, which downloads the models. NVIDIA GPU: install the Nvidia Driver plugin, add --runtime=nvidia to Extra Parameters and set NVIDIA_VISIBLE_DEVICES. Host networking also gives mDNS discovery for phones and nodes.</Overview>
+  <Overview>Jarvis Automation: a private voice assistant server for your home. One container runs the whole server (speech-to-text, the language model, text-to-speech, Pi nodes, the mobile app and the recipes app). Open the WebUI to run the setup wizard, which downloads the models. NVIDIA GPU: install the Nvidia Driver plugin, add --runtime=nvidia to Extra Parameters and set NVIDIA_VISIBLE_DEVICES. Host networking also lets the desktop agent find the server over mDNS; phones and nodes are given its address. Migrating from the legacy Docker stack: run jarvisd import-legacy before the first start; it turns the legacy ports on for older nodes, so also map 7701-7704, 7706, 7707, 7712, 7030, 7031 and 9883 to the same host ports (see JARVIS_LEGACY_PORTS).</Overview>
   <Category>HomeAutomation: Productivity:</Category>
   <WebUI>http://[IP]:[PORT:7710]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/alexberardi/jarvis-server/main/scripts/packaging/unraid/jarvis.xml</TemplateURL>
@@ -23,5 +23,5 @@
   <Config Name="PGID" Default="100" Description="Group ID" Type="Variable" Display="advanced" Required="false">100</Config>
   <Config Name="NVIDIA_VISIBLE_DEVICES" Default="" Description="all, or a GPU UUID from the Nvidia Driver plugin; needs --runtime=nvidia in Extra Parameters" Type="Variable" Display="always" Required="false"></Config>
   <Config Name="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Description="NVIDIA driver capabilities" Type="Variable" Display="advanced" Required="false">compute,utility</Config>
-  <Config Name="JARVIS_LEGACY_PORTS" Default="0" Description="1 also opens the old per-service ports; map them yourself" Type="Variable" Display="advanced" Required="false">0</Config>
+  <Config Name="JARVIS_LEGACY_PORTS" Default="" Description="Empty: the server.legacy_ports setting decides (off on a new install, on after import-legacy). 1 or 0 overrides it. With them on, map the old ports yourself (7701-7704, 7706, 7707, 7712, 7030, 7031, 9883), same host and container port" Type="Variable" Display="advanced" Required="false"></Config>
 </Container>

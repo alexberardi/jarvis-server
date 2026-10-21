@@ -178,6 +178,9 @@ func runImportLegacy(ctx context.Context, args []string, stdout io.Writer) error
 
 	rep, runErr := legacyimport.Run(ctx, d, src, legacyimport.Options{
 		Apply: *apply, AcceptHeads: accept, Settings: importSettingDefs(),
+		Force: []legacyimport.ForcedSetting{{Module: "config", Key: configmod.LegacyPortsKey, Value: true,
+			Why: "legacy nodes and apps may still call the per-service ports (7701-7712, 7030, 7031, 9883); " +
+				"turn it off in the admin once every node is on 0.3.4 or later"}},
 		PromptProvider: prompts.CheckBuiltin,
 	})
 	rep.Write(stdout)

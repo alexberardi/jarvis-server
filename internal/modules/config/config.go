@@ -68,7 +68,7 @@ var Definitions = []settings.Definition{
 		Description: "Whether health checks are enabled"},
 	{Key: LegacyPortsKey, Category: "server", Type: settings.Bool, Default: false, RequiresReload: true,
 		Description: "Also listen on the old per-service ports (7701–7712, 7030, 7031) and the MQTT WebSocket port 9883, " +
-			"for clients that don't follow /services URLs. New installs start with it off; upgraded installs with it on. " +
+			"for clients that don't follow /services URLs. New installs start with it off; upgraded installs and import-legacy turn it on. " +
 			"JARVIS_LEGACY_PORTS overrides it."},
 }
 

@@ -118,6 +118,13 @@ func TestTemplate(t *testing.T) {
 		if cfg.Name == "NVIDIA_VISIBLE_DEVICES" && cfg.Required != "false" {
 			t.Errorf("NVIDIA_VISIBLE_DEVICES Required = %q, want false", cfg.Required)
 		}
+		// Set, it overrides server.legacy_ports, which import-legacy turns on for older nodes.
+		if cfg.Name == "JARVIS_LEGACY_PORTS" && (cfg.Default != "" || cfg.Value != "") {
+			t.Errorf("JARVIS_LEGACY_PORTS = default %q value %q, want both empty", cfg.Default, cfg.Value)
+		}
+	}
+	if strings.Contains(c.Overview, "phones and nodes find") || strings.Contains(c.Overview, "discovery for phones") {
+		t.Errorf("Overview says phones find the server over mDNS; only the desktop agent does: %q", c.Overview)
 	}
 
 	icon, err := os.ReadFile(filepath.Join("jarvis.png"))

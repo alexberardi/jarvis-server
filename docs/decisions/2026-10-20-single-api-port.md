@@ -35,7 +35,9 @@ binds as before. Off: only 7700, 7710 and 1884 (plus the engines' loopback ports
 answer: **on** when `config_services` already holds rows an earlier jarvisd synced
 (`description = 'served by jarvisd'`), i.e. an upgrade whose clients know the old ports, and
 **off** on a fresh database. An upgraded install changes nothing until its admin turns the
-setting off.
+setting off. `jarvisd import-legacy --apply` stores it **on** too, over any value an earlier start
+stored (the documented migration starts jarvisd once on the empty database, which stores off):
+an import means legacy nodes and apps exist.
 
 **9883 follows the switch.** The MQTT WebSocket isn't used by LAN clients, but prod publishes
 the broker as `wss://mqtt.jarvisautomation.io` through its tunnel and the dockerized demo node

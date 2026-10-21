@@ -230,7 +230,7 @@ sudo jarvisd service start
 ```
 
 The legacy Postgres must be running for the import, and the service account must be able to read the
-compose `.env`. Read [docs/install/legacy-import.md](docs/install/legacy-import.md) (what is
+compose `.env`. The import turns the legacy per-service ports on for older nodes (`server.legacy_ports`). Read [docs/install/legacy-import.md](docs/install/legacy-import.md) (what is
 carried over, which node versions recover, refusals) and the worked sequence in
 [docs/install/cutover-runbook.md](docs/install/cutover-runbook.md) §4.3a before you run it. Recipes
 come over separately with `jarvisd import-recipes`.
