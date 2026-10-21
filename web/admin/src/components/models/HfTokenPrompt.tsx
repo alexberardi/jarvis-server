@@ -36,9 +36,9 @@ export default function HfTokenPrompt({
   }
 
   return (
-    <div className={compact ? 'space-y-2' : 'space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3'}>
+    <div className={compact ? 'space-y-2' : 'space-y-2 rounded-lg bg-warning-soft p-3'}>
       <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
-        <KeyRound size={14} className="text-amber-500" />
+        <KeyRound size={14} className="text-warning" />
         Hugging Face token
         <span className="text-xs font-normal text-[var(--color-text-muted)]">
           {isSet ? '(set; enter a new one to replace it)' : '(not set)'}

@@ -78,7 +78,7 @@ function EngineRow({ e }: { e: EngineInstance }) {
           </button>
         </div>
       </div>
-      {e.last_error && <p className="mt-1 text-xs text-red-500">{e.last_error}</p>}
+      {e.last_error && <p className="mt-1 text-xs text-danger">{e.last_error}</p>}
       {e.gave_up && (
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
           <span className="text-[var(--color-text-muted)]">
@@ -135,7 +135,7 @@ export default function HardwarePanel() {
       }
     >
       {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Detecting…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the hardware')}</p>}
+      {isError && <p className="text-sm text-danger">{errorMessage(error, 'Could not read the hardware')}</p>}
       {data && (
         <div className="space-y-4">
           <GpuFaultBanner fault={data.gpu_fault ?? data.hardware.gpu_fault} />

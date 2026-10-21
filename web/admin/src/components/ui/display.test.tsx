@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import Alert from './Alert'
 import Badge from './Badge'
 import Banner from './Banner'
 import Card, { CardHeader } from './Card'
@@ -94,7 +95,28 @@ describe('PageHeader', () => {
   })
 })
 
+describe('Alert', () => {
+  it('announces a danger alert at once, on the danger tokens', () => {
+    render(<Alert tone="danger" title="Couldn't sign in">Check the email and password.</Alert>)
+    const a = screen.getByRole('alert')
+    expect(a).toHaveTextContent("Couldn't sign in")
+    expect(a).toHaveTextContent('Check the email and password.')
+    expect(a).toHaveClass('bg-danger-soft')
+  })
+
+  it('is a polite status for the other tones', () => {
+    render(<Alert tone="warning">Some checks failed.</Alert>)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('status')).toHaveClass('bg-warning-soft')
+  })
+})
+
 describe('EmptyState', () => {
+  it('can make its title the page heading', () => {
+    render(<EmptyState titleAs="h1" title="Page not found" />)
+    expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toHaveClass('text-heading')
+  })
+
   it('shows the title, description and the action', () => {
     const onAdd = vi.fn()
     render(<EmptyState title="No nodes yet" description="Pair one" action={<button onClick={onAdd}>Pair a node</button>} />)

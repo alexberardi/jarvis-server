@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Check } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { setupKeys, useSetupState } from '@/hooks/useSetup'
@@ -13,7 +13,9 @@ import DoneStep from '@/components/wizard/DoneStep'
 import HardwareStep from '@/components/wizard/HardwareStep'
 import JobStep from '@/components/wizard/JobStep'
 import PrivacyStep from '@/components/wizard/PrivacyStep'
-import { buttonClass } from '@/components/models/styles'
+import { AuthLoading } from '@/components/auth/AuthScreen'
+import { Button, Card } from '@/components/ui'
+import { StepActions } from '@/components/wizard/StepFrame'
 import { jobDef } from '@/components/setup/jobs'
 import {
   JOB_STEPS,
@@ -29,55 +31,72 @@ import {
 } from '@/components/wizard/steps'
 
 /**
- * The step list. From `sm` up it is a row of labelled pills that wraps. Eleven labels can't fit a
- * phone, so there each step is a numbered marker (a check once done) spread across the width,
- * and the current step's name is spelled out under them. The name stays in every marker
- * (screen-reader only on a phone), so each one is announced by its step either way.
+ * The step list. From `sm` up it is a row of labelled pills that wraps. Eleven don't fit a
+ * phone (audit 2026-10 #7: numbered dots that said nothing), so there the wizard says
+ * "Step 6 of 11: Voice" over a progress line, and that line opens the same list, one step per
+ * row, for going back to an earlier step.
  */
 function Stepper({ step, onPick }: { step: Step; onPick: (s: Step) => void }) {
   const at = idx(step)
+  const [open, setOpen] = useState(false)
+  const pick = (s: Step) => {
+    setOpen(false)
+    onPick(s)
+  }
   return (
-    <div className="mb-4">
-      <ol className="flex items-center justify-between gap-1 text-xs sm:flex-wrap sm:justify-start" aria-label="Setup steps">
+    <nav aria-label="Setup progress" className="mb-4">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 rounded-control py-1 text-left text-small text-text-muted sm:hidden"
+        aria-expanded={open}
+        aria-controls="setup-steps"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span data-testid="setup-step-position">
+          Step {at + 1} of {STEPS.length}: <span className="font-semibold text-text">{TITLES[step]}</span>
+        </span>
+        <ChevronDown size={16} aria-hidden className={cn('shrink-0 transition-transform duration-(--duration-menu) ease-out motion-reduce:transition-none', open && 'rotate-180')} />
+      </button>
+      <div aria-hidden className="mt-1 h-1 overflow-hidden rounded-pill bg-surface-alt sm:hidden">
+        <div className="h-full rounded-pill bg-primary" style={{ width: `${((at + 1) / STEPS.length) * 100}%` }} />
+      </div>
+      <ol
+        id="setup-steps"
+        aria-label="Setup steps"
+        className={cn(
+          'flex gap-1 text-small max-sm:mt-2 max-sm:flex-col max-sm:rounded-card max-sm:border max-sm:border-border max-sm:bg-surface max-sm:p-1 sm:flex-wrap',
+          !open && 'max-sm:hidden',
+        )}
+      >
         {STEPS.map((s, i) => {
           const done = i < at
           const current = s === step
           // Steps from Hardware on can be revisited; Check and Account are behind us for good.
           const canPick = done && idx(s) >= idx('hardware')
           return (
-            <li key={s} className="flex shrink-0 items-center gap-1">
-              {i > 0 && <span className="mx-1 hidden h-px w-4 bg-[var(--color-border)] sm:block" aria-hidden />}
+            <li key={s} className="flex">
               <button
                 type="button"
                 disabled={!canPick}
-                onClick={() => onPick(s)}
+                onClick={() => pick(s)}
                 aria-current={current ? 'step' : undefined}
                 className={cn(
-                  // 28px circles: eleven of the 40px touch-floor size (index.css) don't fit a 390px phone.
-                  'flex items-center justify-center gap-1 whitespace-nowrap rounded-full max-sm:h-7 max-sm:min-h-7 max-sm:w-7 sm:px-2.5 sm:py-1',
-                  current && 'bg-[var(--color-primary)] text-white',
-                  done && 'text-[var(--color-text)]',
-                  !done && !current && 'text-[var(--color-text-muted)]',
-                  !current && 'max-sm:border max-sm:border-[var(--color-border)]',
-                  canPick && 'hover:bg-[var(--color-surface-alt)]',
+                  'flex min-h-8 items-center gap-1.5 rounded-pill px-3 whitespace-nowrap max-sm:w-full max-sm:min-h-10 max-sm:rounded-control',
+                  'transition-colors duration-(--duration-hover)',
+                  current && 'bg-primary font-medium text-on-primary',
+                  done && 'text-text',
+                  !done && !current && 'text-text-muted',
+                  canPick && 'hover:bg-surface-alt',
                 )}
               >
-                {done && <Check size={12} className="text-green-500" />}
-                {!done && (
-                  <span className="sm:hidden" aria-hidden>
-                    {i + 1}
-                  </span>
-                )}
-                <span className="sr-only sm:not-sr-only">{TITLES[s]}</span>
+                {done && <Check size={14} aria-hidden className="text-success" />}
+                {TITLES[s]}
               </button>
             </li>
           )
         })}
       </ol>
-      <p className="mt-2 text-center text-xs text-[var(--color-text-muted)] sm:hidden" data-testid="setup-step-position">
-        Step {at + 1} of {STEPS.length}: <span className="font-medium text-[var(--color-text)]">{TITLES[step]}</span>
-      </p>
-    </div>
+    </nav>
   )
 }
 
@@ -110,16 +129,10 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
     void qc.invalidateQueries({ queryKey: setupKeys.state })
   }
 
-  if (step === 'wait') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-primary)] border-t-transparent" />
-      </div>
-    )
-  }
+  if (step === 'wait') return <AuthLoading label="Finding where setup left off" />
   // No `state.isLoading` gate: the session is restored synchronously, so isLoading is only
   // ever true during the setup call itself, and unmounting then wiped the Account form and
-  // the reason a refused setup gives (A10). AccountStep shows its own "Creating...".
+  // the reason a refused setup gives (A10). AccountStep's button shows its own progress.
   if (!step) return <Navigate to={finished ? '/admin/dashboard' : state.isAuthenticated ? '/' : '/login'} replace />
   // Past Account without a session (it expired, or was signed out): sign in first.
   if (idx(step) > idx('account') && !state.isAuthenticated) return <Navigate to="/login" replace />
@@ -136,19 +149,19 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
   const job = jobDef(step)
 
   return (
-    <div className="flex min-h-screen justify-center bg-[var(--color-background)] p-4 sm:items-center">
+    <main className="flex min-h-dvh justify-center bg-background px-4 py-6 sm:items-center sm:py-10">
       <div className={cn('w-full', wide ? 'max-w-3xl' : 'max-w-2xl')}>
-        <div className="mb-2 text-center text-lg font-bold text-[var(--color-primary)]">Jarvis Automation setup</div>
+        <h1 className="mb-3 text-subheading text-primary">Jarvis Automation setup</h1>
         <Stepper step={step} onPick={go} />
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-lg sm:p-6">
+        <Card className="md:p-6">
           {step === 'check' && (
             <>
               <CheckStep />
-              <div className="mt-4 flex justify-end">
-                <button type="button" className={buttonClass.primary} onClick={next}>
+              <StepActions className="mt-6">
+                <Button variant="primary" onClick={next}>
                   Continue
-                </button>
-              </div>
+                </Button>
+              </StepActions>
             </>
           )}
           {step === 'account' && (
@@ -171,8 +184,8 @@ export default function SetupWizard({ needsSuperuser }: { needsSuperuser: boolea
           {step === 'privacy' && <PrivacyStep onDone={next} />}
           {step === 'computer' && <ComputerStep onNext={next} onBack={back} />}
           {step === 'done' && <DoneStep onFinish={finish} />}
-        </div>
+        </Card>
       </div>
-    </div>
+    </main>
   )
 }

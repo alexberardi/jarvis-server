@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { Pause, Play, RefreshCw, ScrollText } from 'lucide-react'
+import { ChevronDown, ChevronRight, Pause, Play, RefreshCw, ScrollText, SearchX } from 'lucide-react'
 import { getLogs, getLogSources, LOG_LEVELS, tailLogs, type LogEntry, type LogFilters, type TailState } from '@/api/logs'
-import { buttonClass, inputClass } from '@/components/models/styles'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Select, SkeletonList, type BadgeTone } from '@/components/ui'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 
@@ -17,42 +17,52 @@ const SINCE_OPTIONS: { label: string; ms: number | null }[] = [
   { label: 'Last 7 days', ms: 7 * 24 * 60 * 60_000 },
 ]
 
+// Levels are coloured text, not chips: a chip on each of 200 rows would be the loudest thing on the page.
 const levelTone: Record<string, string> = {
-  DEBUG: 'text-[var(--color-text-muted)]',
-  INFO: 'text-blue-500',
-  WARNING: 'text-amber-500',
-  ERROR: 'text-red-500',
-  CRITICAL: 'text-red-600 font-semibold',
+  DEBUG: 'text-text-muted',
+  INFO: 'text-text-muted',
+  WARNING: 'text-warning font-semibold',
+  ERROR: 'text-danger font-semibold',
+  CRITICAL: 'text-danger font-bold',
 }
-
-const selectClass =
-  'min-w-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1.5 text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]'
 
 function formatTime(ts: string): string {
   const d = new Date(ts)
-  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString(undefined, { hour12: false })
+  return Number.isNaN(d.getTime())
+    ? ts
+    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function LogRow({ e }: { e: LogEntry }) {
   const [open, setOpen] = useState(false)
   const hasContext = e.context && Object.keys(e.context).length > 0
+  const source = e.node_id ? `${e.service}@${e.node_id}` : e.service
   return (
-    <li className="border-b border-[var(--color-border)] px-2 py-1 font-mono text-xs last:border-0">
+    <li className="text-small">
       <button
         type="button"
-        className="flex w-full flex-wrap items-start gap-x-2 text-left lg:flex-nowrap"
+        className={cn(
+          'grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 px-4 py-1.5 text-left lg:py-1',
+          'lg:grid-cols-[9.5rem_5.5rem_9rem_minmax(0,1fr)_1rem]',
+          hasContext ? 'transition-colors duration-(--duration-hover) hover:bg-surface-alt' : 'cursor-default',
+        )}
         onClick={() => hasContext && setOpen(!open)}
         aria-expanded={hasContext ? open : undefined}
       >
-        <span className="shrink-0 text-[var(--color-text-muted)]">{formatTime(e.timestamp)}</span>
-        <span className={cn('shrink-0 lg:w-16', levelTone[e.level] ?? '')}>{e.level}</span>
-        <span className="min-w-0 truncate text-[var(--color-text-muted)] max-lg:flex-1 lg:w-28 lg:shrink-0" title={e.node_id ? `node ${e.node_id}` : e.service}>
-          {e.node_id ? `${e.service}@${e.node_id}` : e.service}
+        <span className="text-caption whitespace-nowrap text-text-muted tabular-nums">{formatTime(e.timestamp)}</span>
+        <span className={cn('text-caption', levelTone[e.level] ?? 'text-text-muted')}>{e.level}</span>
+        <span className="min-w-0 truncate text-caption text-text-muted" title={e.node_id ? `node ${e.node_id}` : e.service}>
+          {source}
         </span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--color-text)] max-lg:basis-full">{e.message}</span>
+        <span className="col-span-4 row-start-2 min-w-0 font-mono text-small break-words whitespace-pre-wrap text-text lg:col-span-1 lg:col-start-4 lg:row-start-1">
+          {e.message}
+        </span>
+        <span className="col-start-4 row-start-1 flex justify-end self-center text-text-muted lg:col-start-5" aria-hidden>
+          {hasContext && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+        </span>
       </button>
       {open && hasContext && (
-        <pre className="mt-1 overflow-x-auto rounded bg-[var(--color-surface-alt)] p-2 text-[11px] text-[var(--color-text-muted)]">
+        <pre className="mx-4 mb-2 overflow-x-auto rounded-control bg-surface-alt p-3 font-mono text-caption text-text">
           {JSON.stringify(e.context, null, 2)}
         </pre>
       )}
@@ -60,11 +70,18 @@ function LogRow({ e }: { e: LogEntry }) {
   )
 }
 
+const TAIL_TONE: Record<TailState, BadgeTone> = {
+  connecting: 'warning',
+  live: 'success',
+  reconnecting: 'warning',
+  stopped: 'neutral',
+}
+
 const TAIL_TEXT: Record<TailState, string> = {
-  connecting: 'connecting…',
-  live: 'live',
-  reconnecting: 'reconnecting…',
-  stopped: 'stopped',
+  connecting: 'Connecting…',
+  live: 'Live',
+  reconnecting: 'Reconnecting…',
+  stopped: 'Stopped',
 }
 
 /**
@@ -138,113 +155,128 @@ export default function LogsPage() {
     return [...live.filter((e) => !seen.has(e.id)), ...fetched]
   }, [pages.data, tail, session])
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
-            <ScrollText size={20} /> Logs
-          </h1>
-          <p className="text-sm text-[var(--color-text-muted)]">jarvisd's modules and the nodes that report to it.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {live && (
-            <span
-              className={cn('text-xs', tailState === 'live' ? 'text-green-500' : 'text-amber-500')}
-              data-testid="tail-state"
-            >
-              ● {TAIL_TEXT[tailState]}
-            </span>
-          )}
-          <button type="button" className={live ? buttonClass.secondary : buttonClass.primary} onClick={() => setLive(!live)}>
-            {live ? <Pause size={12} /> : <Play size={12} />} {live ? 'Stop live tail' : 'Live tail'}
-          </button>
-          <button
-            type="button"
-            className={buttonClass.icon}
-            title="Refresh"
-            aria-label="Refresh"
-            onClick={() => {
-              setTail({ session: '', entries: [] })
-              void pages.refetch()
-            }}
-          >
-            <RefreshCw size={14} className={cn(pages.isFetching && 'animate-spin')} />
-          </button>
-        </div>
-      </div>
+  const filtered = Boolean(service || node || minLevel || sinceMs || q)
+  const clearFilters = () => {
+    setService('')
+    setNode('')
+    setMinLevel('')
+    setSinceMs(null)
+    setSince(undefined)
+    setText('')
+    setQ('')
+  }
 
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-        <label className="sr-only" htmlFor="log-service">Module</label>
-        <select id="log-service" className={selectClass} value={service} onChange={(e) => setService(e.target.value)}>
-          <option value="">All modules</option>
-          {(sources.data?.services ?? []).map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        <label className="sr-only" htmlFor="log-node">Node</label>
-        <select id="log-node" className={selectClass} value={node} onChange={(e) => setNode(e.target.value)}>
-          <option value="">All nodes</option>
-          {(sources.data?.nodes ?? []).map((n) => (
-            <option key={n} value={n}>{n}</option>
-          ))}
-        </select>
-        <label className="sr-only" htmlFor="log-level">Minimum level</label>
-        <select id="log-level" className={selectClass} value={minLevel} onChange={(e) => setMinLevel(e.target.value)}>
-          <option value="">Any level</option>
-          {LOG_LEVELS.map((l) => (
-            <option key={l} value={l}>{l} and worse</option>
-          ))}
-        </select>
-        <label className="sr-only" htmlFor="log-since">Time</label>
-        <select
+  let body
+  if (pages.isLoading) {
+    body = <SkeletonList rows={8} label="Loading logs" />
+  } else if (pages.isError) {
+    body = <ErrorState title="Couldn't read the logs" message={errorMessage(pages.error)} onRetry={() => pages.refetch()} />
+  } else if (rows.length === 0) {
+    body = filtered ? (
+      <EmptyState
+        icon={<SearchX size={20} />}
+        title="No log entries match"
+        description="Try a lower level, a longer time or another module."
+        action={<Button onClick={clearFilters}>Clear filters</Button>}
+      />
+    ) : (
+      <EmptyState icon={<ScrollText size={20} />} title="Nothing logged yet" description="Entries appear here as the server and its nodes run." />
+    )
+  } else {
+    body = (
+      <ul aria-label="Log entries" className="divide-y divide-border">
+        {rows.map((e) => (
+          <LogRow key={e.id} e={e} />
+        ))}
+      </ul>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Logs"
+        description="What Jarvis Automation's modules, and the nodes that report to it, have logged."
+        actions={
+          <>
+            {live && (
+              <Badge tone={TAIL_TONE[tailState]} dot role="status" data-testid="tail-state">
+                {TAIL_TEXT[tailState]}
+              </Badge>
+            )}
+            <Button
+              variant={live ? 'secondary' : 'primary'}
+              icon={live ? <Pause size={16} aria-hidden /> : <Play size={16} aria-hidden />}
+              onClick={() => setLive(!live)}
+            >
+              {live ? 'Stop live tail' : 'Live tail'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Refresh"
+              aria-label="Refresh"
+              onClick={() => {
+                setTail({ session: '', entries: [] })
+                void pages.refetch()
+              }}
+            >
+              <RefreshCw size={16} aria-hidden className={cn(pages.isFetching && 'motion-safe:animate-spin')} />
+            </Button>
+          </>
+        }
+      />
+
+      <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.5fr)]">
+        <Select
+          id="log-service"
+          aria-label="Module"
+          value={service}
+          onValueChange={setService}
+          options={[{ value: '', label: 'All modules' }, ...(sources.data?.services ?? []).map((s) => ({ value: s, label: s }))]}
+        />
+        <Select
+          id="log-node"
+          aria-label="Node"
+          value={node}
+          onValueChange={setNode}
+          options={[{ value: '', label: 'All nodes' }, ...(sources.data?.nodes ?? []).map((n) => ({ value: n, label: n }))]}
+        />
+        <Select
+          id="log-level"
+          aria-label="Minimum level"
+          value={minLevel}
+          onValueChange={setMinLevel}
+          options={[{ value: '', label: 'Any level' }, ...LOG_LEVELS.map((l) => ({ value: l, label: `${l} and worse` }))]}
+        />
+        <Select
           id="log-since"
-          className={selectClass}
-          value={sinceMs ?? ''}
-          onChange={(e) => {
-            const ms = e.target.value ? Number(e.target.value) : null
+          aria-label="Time"
+          value={sinceMs == null ? '' : String(sinceMs)}
+          onValueChange={(v) => {
+            const ms = v ? Number(v) : null
             setSinceMs(ms)
             setSince(ms ? new Date(Date.now() - ms).toISOString() : undefined)
           }}
-        >
-          {SINCE_OPTIONS.map((o) => (
-            <option key={o.label} value={o.ms ?? ''}>{o.label}</option>
-          ))}
-        </select>
-        <input
+          options={SINCE_OPTIONS.map((o) => ({ value: o.ms == null ? '' : String(o.ms), label: o.label }))}
+        />
+        <Input
+          type="search"
           aria-label="Search logs"
-          className={cn(inputClass, 'col-span-2 sm:w-56')}
-          placeholder="Search text"
+          wrapperClassName="col-span-2 lg:col-span-1"
+          placeholder="Search messages"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
       </div>
 
-      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-        {pages.isLoading && <p className="p-4 text-sm text-[var(--color-text-muted)]">Loading…</p>}
-        {pages.isError && <p className="p-4 text-sm text-red-500">{errorMessage(pages.error, 'Could not read the logs')}</p>}
-        {!pages.isLoading && rows.length === 0 && !pages.isError && (
-          <p className="p-4 text-sm text-[var(--color-text-muted)]">No log entries match.</p>
-        )}
-        {rows.length > 0 && (
-          <ul aria-label="Log entries">
-            {rows.map((e) => (
-              <LogRow key={e.id} e={e} />
-            ))}
-          </ul>
-        )}
-      </div>
+      <Card flush>{body}</Card>
 
       {pages.hasNextPage && (
-        <div className="flex justify-center">
-          <button
-            type="button"
-            className={buttonClass.secondary}
-            disabled={pages.isFetchingNextPage}
-            onClick={() => void pages.fetchNextPage()}
-          >
-            {pages.isFetchingNextPage ? 'Loading…' : 'Load older'}
-          </button>
+        <div className="mt-4 flex justify-center">
+          <Button loading={pages.isFetchingNextPage} onClick={() => void pages.fetchNextPage()}>
+            Load older entries
+          </Button>
         </div>
       )}
     </div>

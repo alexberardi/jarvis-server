@@ -1,9 +1,9 @@
 import { RefreshCw, Stethoscope } from 'lucide-react'
 import DoctorChecks from '@/components/doctor/DoctorChecks'
+import { Alert, Button } from '@/components/ui'
 import { useDoctor, useRerunDoctor } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
-import { cn } from '@/lib/utils'
-import { buttonClass } from '@/components/models/styles'
+import { StepHeader, StepLoading } from './StepFrame'
 
 /**
  * CheckStep runs `jarvisd doctor` (GET /api/doctor, open until the first superuser exists):
@@ -15,43 +15,42 @@ export default function CheckStep() {
   const rerun = useRerunDoctor()
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
-            <Stethoscope size={20} /> Check this machine
-          </h2>
-          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            jarvisd checks that its ports answer and that devices on your network can reach them. Anything flagged
-            here can be fixed later; it does not stop setup.
-          </p>
-        </div>
-        <button
-          type="button"
-          className={buttonClass.secondary}
-          disabled={rerun.isPending}
-          onClick={() => rerun.mutate()}
-        >
-          <RefreshCw size={12} className={cn(rerun.isPending && 'animate-spin')} /> Run again
-        </button>
-      </div>
+    <div className="space-y-5">
+      <StepHeader
+        icon={<Stethoscope size={22} />}
+        title="Check this machine"
+        actions={
+          <Button size="sm" icon={<RefreshCw size={14} aria-hidden />} loading={rerun.isPending} onClick={() => rerun.mutate()}>
+            Run again
+          </Button>
+        }
+      >
+        jarvisd checks that its ports answer and that devices on your network can reach them. Anything flagged here can
+        be fixed later; it does not stop setup.
+      </StepHeader>
 
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Running checks…</p>}
+      {isLoading && <StepLoading>Running the checks</StepLoading>}
       {isError && (
-        <p className="text-sm text-amber-500">
-          {errorMessage(error, 'The checks could not run')}. You can continue; run <code>jarvisd doctor</code> on the
+        <Alert tone="warning" title="The checks could not run">
+          {errorMessage(error, 'The server did not answer')}. You can continue; run <code>jarvisd doctor</code> on the
           server to see them.
-        </p>
+        </Alert>
       )}
       {data && (
         <>
-          <p className="text-sm text-[var(--color-text)]" data-testid="doctor-summary">
-            {data.status === 'ok'
-              ? 'Everything looks good.'
-              : data.status === 'fail'
-                ? 'Some checks failed. Jarvis will still work on this machine, but other devices may not reach it until they are fixed.'
-                : 'A few things are worth a look.'}
-          </p>
+          {data.status === 'ok' ? (
+            <Alert tone="success">
+              <span data-testid="doctor-summary">Everything looks good.</span>
+            </Alert>
+          ) : (
+            <Alert tone="warning">
+              <span data-testid="doctor-summary">
+                {data.status === 'fail'
+                  ? 'Some checks failed. Jarvis will still work on this machine, but other devices may not reach it until they are fixed.'
+                  : 'A few things are worth a look.'}
+              </span>
+            </Alert>
+          )}
           <DoctorChecks checks={data.checks} />
         </>
       )}

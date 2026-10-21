@@ -105,7 +105,7 @@ describe('updates honesty rule (I1)', () => {
   it('only a real comparable check says up to date', async () => {
     current = info({ up_to_date: true })
     renderPage()
-    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+    expect(await screen.findByText('Jarvis Automation is up to date')).toBeInTheDocument()
   })
 
   it('toggles the opt-in through PUT /api/update/settings', async () => {
@@ -126,7 +126,7 @@ describe('updates honesty rule (I1)', () => {
     post.mockResolvedValue({ data: info({ up_to_date: true }) })
     renderPage()
     fireEvent.click(await screen.findByRole('switch', { name: 'Check for updates' }))
-    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+    expect(await screen.findByText('Jarvis Automation is up to date')).toBeInTheDocument()
   })
 
   it('turning checks off does not check', async () => {
@@ -141,7 +141,7 @@ describe('updates honesty rule (I1)', () => {
   it('up to date on a pre-release says so (A10b)', async () => {
     current = info({ up_to_date: true, current_version: 'v0.1.0-rc1', latest_version: 'v0.1.0-rc1', prerelease: true })
     renderPage()
-    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+    expect(await screen.findByText('Jarvis Automation is up to date')).toBeInTheDocument()
     expect(screen.getByText(/v0\.1\.0-rc1 is the latest pre-release/)).toBeInTheDocument()
   })
 })
@@ -155,7 +155,8 @@ describe('update apply (AD5, feature-detected)', () => {
     )
     renderPage(true)
     // Both the dashboard banner and the page say so.
-    expect(await screen.findAllByText('jarvisd v0.2.0 is available')).toHaveLength(2)
+    expect(await screen.findByText('jarvisd v0.2.0 is available')).toBeInTheDocument()
+    expect(screen.getByText('Jarvis Automation v0.2.0 is available')).toBeInTheDocument()
     expect(screen.getByText('curl -fsSLo install.sh https://x/install.sh && sh install.sh')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Update now/ }))
@@ -223,7 +224,7 @@ describe('last upgrade (#109)', () => {
     current = info({ up_to_date: true })
     applyStatus = Object.assign(new Error('404'), { isAxiosError: true, response: { status: 404, data: { detail: 'Not found' } } })
     renderPage()
-    expect(await screen.findByText('jarvisd is up to date')).toBeInTheDocument()
+    expect(await screen.findByText('Jarvis Automation is up to date')).toBeInTheDocument()
     await waitFor(() => expect(get).toHaveBeenCalledWith('/api/update/apply'))
     expect(screen.queryByTestId('last-upgrade')).toBeNull()
   })

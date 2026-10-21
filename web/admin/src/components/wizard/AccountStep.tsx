@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, AlertCircle, KeyRound } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { UserRound } from 'lucide-react'
+import { Alert, Button, Input } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { getSetupState } from '@/api/auth'
 import { clearSetupToken, getSetupToken, setSetupToken } from '@/auth/setupToken'
+import { StepActions, StepHeader } from './StepFrame'
 
 interface AccountStepProps {
   /** Called once the superuser exists and the session is stored. */
@@ -79,158 +80,104 @@ export default function AccountStep({ onCreated }: AccountStepProps) {
 
   if (created) {
     return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-xl font-bold text-[var(--color-text)]">Account Created</h2>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-          <CheckCircle2 size={20} className="text-green-500" />
-          <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Superuser account created</p>
-            <p className="text-xs text-[var(--color-text-muted)]">{state.user?.email ?? email}</p>
-          </div>
-        </div>
-        <p className="text-sm text-[var(--color-text-muted)]">You're signed in.</p>
+      <div className="space-y-5">
+        <StepHeader icon={<UserRound size={22} />} title="Account created" />
+        <Alert tone="success" title="Superuser account created">
+          {state.user?.email ?? email}
+        </Alert>
+        <p className="text-body text-text-muted">You're signed in.</p>
       </div>
     )
   }
 
-  const inputClass = cn(
-    'w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2',
-    'text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]',
-    'outline-none focus:ring-2 focus:ring-[var(--color-primary)]',
-  )
-
   return (
     <form
-      className="space-y-6"
+      className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault()
         void handleCreate()
       }}
     >
-      <div>
-        <h2 className="text-xl font-bold text-[var(--color-text)]">Create Account</h2>
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Create your superuser account. This will be the admin for your Jarvis instance.
-        </p>
-      </div>
-
-      {needToken && (
-        <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
-            <KeyRound size={14} className="text-amber-500" />
-            Setup token
-          </div>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            jarvisd printed a setup link when it started. If you opened this page another way, copy the
-            token from{' '}
-            {tokenFile ? (
-              <code className="break-all font-mono text-[var(--color-text)]">{tokenFile}</code>
-            ) : (
-              <>the <code className="font-mono">setup-token</code> file in jarvisd's home directory</>
-            )}{' '}
-            on the server and paste it here.
-          </p>
-          <label htmlFor="setup-token" className="sr-only">
-            Setup token
-          </label>
-          <input
-            id="setup-token"
-            type="password"
-            autoComplete="off"
-            value={pastedToken}
-            onChange={(e) => setPastedToken(e.target.value)}
-            className={cn(inputClass, 'font-mono')}
-            placeholder="Paste the setup token"
-          />
-        </div>
-      )}
+      <StepHeader icon={<UserRound size={22} />} title="Create account">
+        The first account is the superuser: it runs this install and adds everyone else.
+      </StepHeader>
 
       <div className="space-y-4">
-        <div>
-          <label htmlFor="display-name" className="mb-1 block text-sm text-[var(--color-text-muted)]">
-            Display Name
-          </label>
-          <input
-            id="display-name"
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className={inputClass}
-            placeholder="Alex"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="email" className="mb-1 block text-sm text-[var(--color-text-muted)]">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className={inputClass}
-            placeholder="admin@example.com"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="password" className="mb-1 block text-sm text-[var(--color-text-muted)]">
-            Password
-          </label>
-          <input
-            id="password"
+        {needToken && (
+          <Input
+            id="setup-token"
+            label="Setup token"
             type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={inputClass}
-            placeholder="At least 8 characters"
+            autoComplete="off"
+            className="font-mono"
+            value={pastedToken}
+            onChange={(e) => setPastedToken(e.target.value)}
+            placeholder="Paste the setup token"
+            hint={
+              <>
+                jarvisd printed a setup link when it started. If you opened this page another way, copy the token from{' '}
+                {tokenFile ? (
+                  <code className="font-mono break-all text-text">{tokenFile}</code>
+                ) : (
+                  <>
+                    the <code className="font-mono">setup-token</code> file in jarvisd's home directory
+                  </>
+                )}{' '}
+                on the server and paste it here.
+              </>
+            }
           />
-        </div>
-
-        <div>
-          <label htmlFor="confirm-password" className="mb-1 block text-sm text-[var(--color-text-muted)]">
-            Confirm Password
-          </label>
-          <input
-            id="confirm-password"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            className={cn(inputClass, confirmPassword && !passwordsMatch && 'ring-2 ring-red-500')}
-            placeholder="Confirm password"
-          />
-          {confirmPassword && !passwordsMatch && (
-            <p className="mt-1 text-xs text-red-500">Passwords don't match</p>
-          )}
-          {password && !longEnough && (
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">At least 8 characters</p>
-          )}
-        </div>
+        )}
+        <Input
+          id="display-name"
+          label="Display name"
+          hint="What Jarvis calls you."
+          type="text"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="Alex"
+        />
+        <Input
+          id="email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="admin@example.com"
+        />
+        <Input
+          id="password"
+          label="Password"
+          hint="At least 8 characters."
+          error={password && !longEnough && confirmPassword ? 'Use at least 8 characters.' : undefined}
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <Input
+          id="confirm-password"
+          label="Confirm password"
+          error={confirmPassword && !passwordsMatch ? "The passwords don't match." : undefined}
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+        />
       </div>
 
       {error && (
-        <div role="alert" className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2">
-          <AlertCircle size={14} className="shrink-0 text-red-500" />
-          <span className="text-sm text-red-500">{error}</span>
-        </div>
+        <Alert tone="danger" title="Couldn't create the account">
+          {error}
+        </Alert>
       )}
 
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className={cn(
-          'w-full rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-white',
-          'transition-opacity hover:opacity-90 disabled:opacity-50',
-        )}
-      >
-        {creating ? 'Creating...' : 'Create Superuser Account'}
-      </button>
+      <StepActions>
+        <Button type="submit" variant="primary" loading={creating} disabled={!canSubmit}>
+          Create superuser account
+        </Button>
+      </StepActions>
     </form>
   )
 }
