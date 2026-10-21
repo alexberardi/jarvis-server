@@ -7,6 +7,7 @@ import {
   everythingRecommended,
   jobDef,
   jobFor,
+  jobOptions,
   jobStateText,
   joinTitles,
   missingRequired,
@@ -65,6 +66,26 @@ describe('model jobs (AD3b)', () => {
       defaultChoice(llm, catalog, {}, job('llm', 'downloading', { install: { id: 1, model_id: 'qwen3-4b', state: 'running', phase: 'model', bytes_done: 1, bytes_total: 2 } })),
     ).toBe('qwen3-4b')
     expect(defaultChoice(jobDef('stt')!, catalog, { stt: 'whisper-base.en' }, job('stt', 'ready'))).toBe('whisper-base.en')
+  })
+
+  it('offers only what this machine runs: no unavailable or too-big MLX builds, the MLX ones first (#354)', () => {
+    const llm = jobDef('llm')!
+    const tooBig = { ...fit, verdict: 'too_big' }
+    const cat: CatalogResponse = {
+      ...catalog,
+      models: [
+        e('linux-mlx', 'llm', { directory: true, unavailable: 'Apple Silicon only' }),
+        e('qwen3-4b', 'llm'),
+        e('big-mlx', 'llm', { directory: true, fit: tooBig }),
+        e('big-gguf', 'llm', { fit: tooBig }),
+        e('small-mlx', 'llm', { directory: true }),
+      ],
+      recommended: {},
+    }
+    expect(jobOptions(llm, cat).map((m) => m.id)).toEqual(['small-mlx', 'qwen3-4b', 'big-gguf'])
+    // No recommendation: the first entry it offers, never an unavailable one.
+    expect(defaultChoice(llm, cat, {}, job('llm', 'missing'))).toBe('small-mlx')
+    expect(defaultChoice(llm, { ...cat, recommended: { live: 'linux-mlx' } }, {}, job('llm', 'missing'))).toBe('small-mlx')
   })
 
   it('installs an llm with its projector, and for background while it has no model', () => {
