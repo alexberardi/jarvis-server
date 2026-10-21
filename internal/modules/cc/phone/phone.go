@@ -2,11 +2,12 @@
 // jarvis-phone-gateway absorbed into jarvisd (D16): AI outbound calls to businesses, the
 // household phonebook, per-user call context, the web number lookup, the make_phone_call
 // server tool, the confirm/cancel/escalation card callbacks, the reaper, and the live call
-// loop (telephony provider + Media Streams WebSocket + in-process STT, LLM and TTS).
+// loop (a telephony Provider's Call + in-process STT, LLM and TTS).
 //
 // Everything is gated behind phone_calls.enabled (household, default off, fail closed). The
-// telephony vendor sits behind Provider so tests run against a fake; nothing here talks to a
-// real provider unless main wires the Twilio client with real credentials.
+// telephony vendor sits behind Provider and Call (provider.go) so tests run against fakes;
+// the one real provider is Twilio (REST + the Media Streams WebSocket), chosen per household
+// by phone.provider and built per call from the household's credentials (telephony.go).
 //
 // The /internal/phone/* routes are not ported (D48): nothing outside jarvisd called them, and
 // the call loop now talks to session state in process.
@@ -20,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
@@ -111,9 +111,9 @@ type Options struct {
 	// /cc, it must end in /cc. PublicWSSURL overrides the derived wss base.
 	PublicURL    string
 	PublicWSSURL string
-	// AuthToken is the signing key for the single-provider path only (Service.Provider set);
-	// otherwise each call verifies with its household's resolved auth token. Empty rejects
-	// every media WebSocket on that path.
+	// AuthToken is the signing key for the single-Twilio-account path only (Service.Twilio
+	// set); otherwise each call verifies with its household's resolved auth token. Empty
+	// rejects every media WebSocket on that path.
 	AuthToken string
 }
 
@@ -129,15 +129,18 @@ type Service struct {
 	Notify   Notifier
 	Names    NameResolver
 	Blobs    blob.Store
-	// Provider, when set, places and ends every household's calls, signed with
-	// Options.AuthToken (the single-provider path: tests, a fake). Nil (production) resolves a
-	// provider per call from the household's credentials (Telephony): household settings →
-	// system default → EnvCredentials; none anywhere is a clear "phone not configured".
+	// Provider, when set, places every household's calls (tests: a fake Call). Twilio, when
+	// set and Provider is not, is the one Twilio account every household's calls go through,
+	// signed with Options.AuthToken (tests: a fake REST API behind the real media WebSocket).
+	// With neither (production) Telephony resolves phone.provider and a provider per call from
+	// the household's credentials: household settings → system default → EnvCredentials; none
+	// anywhere is a clear "phone not configured".
 	Provider Provider
+	Twilio   TwilioAPI
 	// EnvCredentials are the TWILIO_* environment values, the last fallback.
 	EnvCredentials Credentials
-	// NewProvider builds a provider from resolved credentials; nil builds the Twilio client.
-	NewProvider func(Credentials) Provider
+	// NewTwilio builds the Twilio REST client from resolved credentials; nil builds *Twilio.
+	NewTwilio func(Credentials) TwilioAPI
 	// Search finds a business's number on the web (gated on web_search.enabled).
 	Search   servertools.WebSearcher
 	Fetch    *servertools.Fetcher
@@ -157,7 +160,7 @@ type Service struct {
 	base     context.Context
 	mu       sync.Mutex
 	runtimes map[string]*callRuntime
-	tokens   *live.TokenRegistry
+	twilio   *twilioMedia
 	wg       sync.WaitGroup
 	planWG   sync.WaitGroup
 }
@@ -182,8 +185,8 @@ func (s *Service) init() {
 	if s.runtimes == nil {
 		s.runtimes = map[string]*callRuntime{}
 	}
-	if s.tokens == nil {
-		s.tokens = &live.TokenRegistry{}
+	if s.twilio == nil {
+		s.twilio = newTwilioMedia(s)
 	}
 	if s.base == nil {
 		s.base = context.Background()
@@ -227,8 +230,7 @@ func (s *Service) baseCtx() context.Context {
 // UserHandler is a route handler for an authenticated user (cc's verify_user_jwt wrapper).
 type UserHandler func(w http.ResponseWriter, r *http.Request, u authn.User)
 
-// Mount registers the mobile routes (wrapped by user auth) and the provider's media
-// WebSocket on mux.
+// Mount registers the mobile routes (wrapped by user auth) and Twilio's media WebSocket on mux.
 func (s *Service) Mount(mux *http.ServeMux, user func(UserHandler) http.HandlerFunc) {
 	s.init()
 	const mob = "/api/v0/mobile"
@@ -238,5 +240,5 @@ func (s *Service) Mount(mux *http.ServeMux, user func(UserHandler) http.HandlerF
 	mux.HandleFunc("DELETE "+mob+"/household/{household_id}/phone-contacts/{contact_id}", user(s.handleDeleteContact))
 	mux.HandleFunc("GET "+mob+"/call-context", user(s.handleGetCallContext))
 	mux.HandleFunc("PUT "+mob+"/call-context", user(s.handlePutCallContext))
-	mux.HandleFunc("GET "+MediaPath+"{token}", s.handleMediaWS)
+	mux.HandleFunc("GET "+MediaPath+"{token}", s.twilio.handleWS)
 }

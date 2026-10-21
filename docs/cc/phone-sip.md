@@ -114,6 +114,12 @@ Risks and what we do about them:
 1. **Provider refactor** (no behaviour change): `Call` interface, Twilio adapter over today's
    WS, `mediaSession` split, neutral call id column. Existing tests (`call_test.go` `twilioSim`,
    goldens) must stay green unchanged; they become the Twilio adapter's tests.
+   **Done** (`refactor/phone-provider-seam`): `Provider`/`Call` in `phone/provider.go`, the
+   Twilio adapter in `phone/twilio.go` + `phone/twilio_media.go`, the transport-neutral loop
+   in `phone/media.go` (turns see only `callLine`), `phone.provider` (`twilio` only; system
+   scope, not yet in the mobile household settings). Playback position replaces marks
+   (Twilio's marks still go out named `t<turn>`). Left for step 2: the `twilio_call_sid` →
+   neutral column rename and a `provider` column (migrations; the Go field is `CallID`).
 2. **SIP outbound**: `phone/sip` (registration supervisor, OPTIONS, outbound INVITE, pacer,
    watchdog, re-INVITE/UPDATE), settings, status in admin, self-tests (§6).
 3. **Inbound receptionist**: answer, prompt, `take_message`, notification, `phone_inbound_calls`,

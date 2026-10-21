@@ -24,15 +24,17 @@ import (
 // PhoneConfig configures phone calls. The zero value serves the phonebook, call context and
 // the tool's refusals, and places calls for households whose credentials are in settings.
 type PhoneConfig struct {
-	// Provider, when set, is the one provider every household uses, signed with
-	// Options.AuthToken (a fake in tests). Nil resolves a Twilio client per call from the
-	// household's credentials.
+	// Provider, when set, is the one provider every household uses (a fake in tests). Nil
+	// resolves the household's phone.provider (Twilio) and its credentials per call.
 	Provider phone.Provider
+	// Twilio, when set (and Provider is not), is the one Twilio account every household uses,
+	// signed with Options.AuthToken (a fake in tests).
+	Twilio phone.TwilioAPI
 	// EnvCredentials are TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER, the last
 	// fallback after household and system settings.
 	EnvCredentials phone.Credentials
-	// NewProvider builds the provider from resolved credentials (nil: phone.Twilio).
-	NewProvider func(phone.Credentials) phone.Provider
+	// NewTwilio builds the Twilio REST client from resolved credentials (nil: phone.Twilio).
+	NewTwilio func(phone.Credentials) phone.TwilioAPI
 	// Options carry the public URL (env) and the single-provider path's signing key.
 	Options phone.Options
 	// Calendar is the node availability provider (doc 05); nil keeps the fill-in placeholder.
@@ -63,7 +65,7 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 	p.DB, p.Log, p.Settings, p.Roles = m.deps.DB, m.deps.Log, m.settings, m.Auth
 	p.LLM, p.STT, p.Notify, p.Names, p.Blobs = m.LLM, m.STT, m.Notify, m.Names, m.deps.Blobs
 	p.Provider, p.Search, p.Calendar, p.Errands = m.Phone.Provider, search, m.Phone.Calendar, m.Phone.Errands
-	p.EnvCredentials, p.NewProvider = m.Phone.EnvCredentials, m.Phone.NewProvider
+	p.Twilio, p.EnvCredentials, p.NewTwilio = m.Phone.Twilio, m.Phone.EnvCredentials, m.Phone.NewTwilio
 	p.Options, p.Now, p.Go = m.Phone.Options, m.now, m.tasks.Go
 	if m.TTS != nil {
 		p.TTS = phoneTTS{m.TTS}

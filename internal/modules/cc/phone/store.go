@@ -65,15 +65,17 @@ type Session struct {
 	OutcomeJSON    string
 	AudioKey       string
 	HeartbeatAt    time.Time
-	CallSID        string
-	Duration       *int64
-	ErrandID       string
-	ErrandStep     *int64
-	CreatedAt      time.Time
-	ConfirmedAt    time.Time
-	InCallAt       time.Time
-	ExpiresAt      time.Time
-	EndedAt        time.Time
+	// CallID is the provider's call id (Twilio's call SID). Its column is still
+	// twilio_call_sid: the name predates other providers, and renaming it is a migration.
+	CallID      string
+	Duration    *int64
+	ErrandID    string
+	ErrandStep  *int64
+	CreatedAt   time.Time
+	ConfirmedAt time.Time
+	InCallAt    time.Time
+	ExpiresAt   time.Time
+	EndedAt     time.Time
 }
 
 // Contact is one phonebook row.
@@ -124,7 +126,7 @@ func scanSession(r scanner) (*Session, error) {
 	s.ContactID, s.ContactName, s.ContactAddress = cid.String, cname.String, caddr.String
 	s.Details, s.ResolvedNumber, s.DialedNumber, s.LineType = det.String, res.String, dial.String, lt.String
 	s.ErrorMessage, s.TranscriptJSON, s.OutcomeJSON, s.AudioKey = em.String, tj.String, oj.String, ak.String
-	s.CallSID, s.ErrandID = sid.String, eid.String
+	s.CallID, s.ErrandID = sid.String, eid.String
 	s.NumberEdited = edited != 0
 	s.HeartbeatAt, s.CreatedAt, s.ConfirmedAt = parseTS(hb.String), parseTS(ca.String), parseTS(cf.String)
 	s.InCallAt, s.ExpiresAt, s.EndedAt = parseTS(ic.String), parseTS(ex.String), parseTS(en.String)
