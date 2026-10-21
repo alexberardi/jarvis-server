@@ -65,6 +65,13 @@ func (m *Module) attachStack() {
 	}
 	m.stack = st
 	m.Resolver = stackResolver{st.Resolver}
+	st.Resolver.OnReady = func(labels []string) {
+		chat := func(ctx context.Context, r ChatRequest) error {
+			_, err := m.Service().Chat(ctx, r)
+			return err
+		}
+		warmEngine(context.Background(), chat, labels, m.OnEngineReady, m.log())
+	}
 }
 
 // ModelPath reports where the model assigned to a voice label ("tts", "speaker") is

@@ -317,11 +317,15 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		creq.ReasoningBudget = m.thinkingBudget(ctx, hh)
 		tr := traceFrom(ctx)
 		llmStart := tr.since()
-		resp, err := m.LLM.Chat(wctx, creq)
+		// Identical warm-ups in flight share one call (warmFlight): the others wait for it.
 		var meta map[string]any
-		if err == nil {
-			meta = map[string]any{"prompt_tokens": resp.Usage.PromptTokens}
-		}
+		err := m.warms.do(wctx, creq, func(ctx context.Context) error {
+			resp, err := m.LLM.Chat(ctx, creq)
+			if err == nil {
+				meta = map[string]any{"prompt_tokens": resp.Usage.PromptTokens}
+			}
+			return err
+		})
 		tr.span("warmup_inference", "llm_proxy", llmStart, tr.since(), err, meta)
 		if err != nil {
 			m.deps.Log.Warn("cc: warmup inference failed (non-fatal)", "conversation_id", conv.id, "err", err)
