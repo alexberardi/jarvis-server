@@ -165,6 +165,21 @@ func Normalize(pcm []int16) []int16 {
 // bracketed is N:core/voice_filters.py _BRACKETED_ANNOTATION_RE.
 var bracketed = regexp.MustCompile(`^\s*(?:[\*\[\(\<][^\*\]\)\>]+[\*\]\)\>]\s*[\.,!?\-]?\s*)+\.?\s*$`)
 
+// leadingAnnotations are the bracketed annotations at the start of a transcript.
+var leadingAnnotations = regexp.MustCompile(`^\s*(?:[\*\[\(\<][^\*\]\)\>]+[\*\]\)\>]\s*[\.,!?\-]?\s*)+`)
+
+// StripNonSpeech drops the bracketed annotations whisper puts in front of words ("(beep)
+// Open Google Chrome.": the wake chime, #358), which can steer the model to the wrong tool.
+// A transcript of annotations only is kept as is, for IsNonSpeech and the silence path.
+func StripNonSpeech(text string) string {
+	text = strings.TrimSpace(text)
+	rest := strings.TrimSpace(leadingAnnotations.ReplaceAllString(text, ""))
+	if rest == "" || IsNonSpeech(rest) {
+		return text
+	}
+	return rest
+}
+
 // IsNonSpeech is voice_filters.is_non_speech: empty, whitespace, "..." or only bracketed
 // annotations ([BLANK_AUDIO], (wind blowing), *sniff*). Anything that looks like words goes to
 // command-center, whose not_for_me classifier decides.

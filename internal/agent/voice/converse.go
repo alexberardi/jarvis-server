@@ -266,7 +266,7 @@ func (p *Pipeline) askValidation(ctx context.Context, s *session, ex *Exchange, 
 		if err != nil {
 			return "", fmt.Errorf("transcribe: %w", err)
 		}
-		text = strings.TrimSpace(tr.Text)
+		text = StripNonSpeech(tr.Text)
 	}
 	if IsNonSpeech(text) {
 		text = notCaught

@@ -158,8 +158,8 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			s.log.Warn("follow-up: transcription failed", "err", err)
 			return
 		}
-		text := strings.TrimSpace(tr.Text)
-		ex.Transcript = text
+		ex.Transcript = strings.TrimSpace(tr.Text)
+		text := StripNonSpeech(tr.Text)
 		if IsNonSpeech(text) {
 			ex.Outcome = OutcomeNonSpeech
 			t.FollowUps, t.FollowUpEnd = append(t.FollowUps, ex), EndNonSpeech
