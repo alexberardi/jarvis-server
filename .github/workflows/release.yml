@@ -52,6 +52,14 @@ name: release
 # package (archives, .debs, install-pi.sh, SHA256SUMS, minisign) → verify (each OS) and
 # install-agent, install-pi, container → publish. Signing
 # happens before packaging so SHA256SUMS and its signature cover the notarized files.
+#
+# publish also tells the installer site to rebuild: a repository_dispatch (event type
+# jarvisd-release, payload {tag}) to alexberardi/jarvis-installer, whose deploy workflow
+# rebuilds the landing page with this run's release. It uses the repo secret
+# INSTALLER_DISPATCH_TOKEN — a fine-grained PAT for alexberardi/jarvis-installer only,
+# Contents: read and write (the workflow's own token can't dispatch to another repo) — and
+# skips with a warning when the secret is unset or the dispatch fails: by then the release
+# and the image are already out, and the site picks the tag up on its daily rebuild.
 
 on:
   push:
@@ -904,3 +912,16 @@ jobs:
             *-*) ;;
             *) docker tag jarvisd:release "$img:latest"; docker push "$img:latest" ;;
           esac
+      - name: Tell the installer site to rebuild
+        env:
+          TOKEN: ${{ secrets.INSTALLER_DISPATCH_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::INSTALLER_DISPATCH_TOKEN is not set; the installer site picks up $VERSION on its daily rebuild"
+            exit 0
+          fi
+          GH_TOKEN="$TOKEN" gh api repos/alexberardi/jarvis-installer/dispatches \
+            -f event_type=jarvisd-release -f "client_payload[tag]=$VERSION" \
+            || echo "::warning::could not notify jarvis-installer (the release itself is published)"
