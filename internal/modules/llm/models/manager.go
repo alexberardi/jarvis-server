@@ -1319,7 +1319,7 @@ func (m *Manager) log() *slog.Logger {
 
 // Recommend suggests a catalog entry per label: the largest LLM that fits one card (else one
 // that fits tightly; on Apple Silicon's Metal the largest MLX directory entry, which mlx-lm
-// runs faster than llama.cpp, when one fits), MiniLM for embeddings, and whisper large-v3-turbo on a GPU when it fits
+// runs faster than llama.cpp, when one fits; never an entry marked no_recommend), MiniLM for embeddings, and whisper large-v3-turbo on a GPU when it fits
 // next to the live model (else small.en).
 //
 // flavours is the build each label effectively runs (Manager.labelFlavours; a missing label
@@ -1343,7 +1343,7 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour, others []
 		for _, dir := range []bool{lhw.Flavour == engine.FlavourMetal, false} {
 			for _, verdict := range []string{"fits", "tight"} {
 				for _, e := range Catalog() {
-					if e.Kind == engine.ModelLLM && e.Directory == dir && entryFitAlongside(lhw, e, others).Verdict == verdict && e.Size > best.Size {
+					if e.Kind == engine.ModelLLM && e.Directory == dir && !e.NoRecommend && entryFitAlongside(lhw, e, others).Verdict == verdict && e.Size > best.Size {
 						best = e
 					}
 				}

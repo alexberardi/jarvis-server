@@ -30,4 +30,6 @@ The catalog lists MLX entries beside the GGUFs (`directory: true`, listed at ins
 file checked against the listing's sha256). `min_memory_mb` marks an entry too big below that
 much memory, so the 27B and 35B-A3B builds need a 32 GB Mac and the recommendation for a 16 GB
 Apple Silicon machine is `mlx-community/Qwen3.5-9B-4bit` (about 5.1 GB). On Metal, the
-recommendation prefers a fitting MLX entry over a GGUF.
+recommendation prefers a fitting MLX entry over a GGUF. (Changed by
+[2026-10-21-mlx-9b-not-recommended](2026-10-21-mlx-9b-not-recommended.md): the MLX 9B 4-bit is not
+recommended, so a 16 GB Mac gets the 9B GGUF.)

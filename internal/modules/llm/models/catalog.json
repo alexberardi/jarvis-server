@@ -152,12 +152,13 @@
     "prompt_provider": "Qwen3_5_9B_Compressed",
     "thinking": true,
     "fold_system_messages": true,
+    "no_recommend": true,
     "tags": [
       "live",
       "background",
       "mlx"
     ],
-    "notes": "Runs on MLX (mlx-lm) on Apple Silicon, text-only. The pick for a 16 GB Mac."
+    "notes": "Runs on MLX (mlx-lm) on Apple Silicon, text-only. Not recommended: it called the tool on 88.8% of the tool bench against 100% for the Qwen 3.5 9B GGUF on the same 16 GB Mac (it answers arithmetic itself), so a 16 GB Mac gets the GGUF."
   },
   {
     "id": "qwen3.5-27b-mlx",
