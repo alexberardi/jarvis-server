@@ -76,6 +76,7 @@ function CatalogRow({
             <FitBadge fit={entry.fit} />
             {entry.mmproj && <Pill>vision</Pill>}
             {entry.thinking && <Pill>thinking</Pill>}
+            {entry.directory && <Pill title="A Hugging Face model folder run by mlx-lm, text-only">MLX</Pill>}
           </div>
           <p className="text-xs text-[var(--color-text-muted)]">
             {formatBytes(entry.size)}
@@ -83,6 +84,7 @@ function CatalogRow({
             {entry.prompt_provider ? ` · prompt ${entry.prompt_provider}` : ''} · {fitSummary(entry.fit)}
           </p>
           {entry.notes && <p className="text-xs text-[var(--color-text-muted)]">{entry.notes}</p>}
+          {entry.unavailable && <p className="text-xs text-amber-500">{entry.unavailable}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {entry.installed ? (
@@ -91,7 +93,7 @@ function CatalogRow({
             </Pill>
           ) : installing ? (
             <Pill tone="warn">Installing…</Pill>
-          ) : (
+          ) : entry.unavailable ? null : (
             <button type="button" className={buttonClass.secondary} onClick={toggle} aria-expanded={open}>
               {open ? 'Close' : 'Install'}
             </button>

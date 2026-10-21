@@ -20,8 +20,8 @@ func newTestServer(h http.Handler) (*httptest.Server, *http.Client) {
 }
 
 // inproc is a RoundTripper that serves requests with a handler in this process, streaming
-// the body through a pipe. A handler panic (http.ErrAbortHandler: a cut connection) ends the
-// body with an error.
+// the body through a pipe. A handler panic (http.ErrAbortHandler: a cut connection) or the
+// request's cancellation ends the body with an error.
 type inproc struct{ h http.Handler }
 
 func (t inproc) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -33,6 +33,12 @@ func (t inproc) RoundTrip(r *http.Request) (*http.Response, error) {
 			rw.WriteHeader(http.StatusOK)
 			if p != nil {
 				pw.CloseWithError(io.ErrUnexpectedEOF)
+				return
+			}
+			// A cancelled request ends its body with the context's error, as a real
+			// connection does, not with a clean (short) EOF.
+			if err := r.Context().Err(); err != nil {
+				pw.CloseWithError(err)
 				return
 			}
 			pw.Close()
