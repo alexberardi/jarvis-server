@@ -154,8 +154,9 @@ the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depen
   Remove Existing = yes; Firewall Trusted + IDS whitelist for the Jarvis IP; route an inbound
   number / No Answer destination to the extension.
 
-## 7. Open questions
+## 7. Answered (user, 2026-10-21)
 
-- Barge-in before inbound ships (recommended), or ship half-duplex first?
-- L2 on the dev box: OK to run a FreePBX VM there weekly?
-- Inbound message delivery: notification only, or also the recording and a transcript in the inbox?
+- **Barge-in ships before inbound** (part of step 3).
+- **L2 runs weekly on the dev box** (a FreePBX VM).
+- **Inbound messages**: a notification with caller, reason and summary, as outbound outcome cards
+  do today; the recording is kept the same way (`audio_available`). No inbox transcript for now.

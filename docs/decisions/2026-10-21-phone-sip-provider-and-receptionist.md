@@ -43,3 +43,4 @@ the user's PBX), with in-product self-tests (`*43` echo) and an exportable SIP t
 review under the merge rules.
 
 Design, gotchas and test strategy: [../cc/phone-sip.md](../cc/phone-sip.md).
+Follow-up answers (barge-in first, weekly FreePBX VM, notification + summary) are in §7 there.
