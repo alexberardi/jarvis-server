@@ -23,3 +23,5 @@ opt-in, superuser-only, and the setting says what leaves the house.
 
 Supersedes nothing. Builds on
 [2026-10-12-remote-labels-can-speak-the-anthropic-messages-api.md](2026-10-12-remote-labels-can-speak-the-anthropic-messages-api.md).
+
+Design: [../llm/07-remote-speech.md](../llm/07-remote-speech.md).
