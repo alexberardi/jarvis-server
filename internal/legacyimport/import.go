@@ -31,8 +31,18 @@ type Options struct {
 	Settings map[string][]settings.Definition
 	// PromptProvider validates llm.prompt_provider (renamed from llm.interface); nil accepts any.
 	PromptProvider func(name string) error
+	// Force are settings the import writes over whatever the target holds, after the legacy
+	// settings; each must be defined in Settings.
+	Force []ForcedSetting
 	// Now is the clock for "unexpired" (default time.Now).
 	Now func() time.Time
+}
+
+// ForcedSetting is a global setting an import implies (Why says what, in the report).
+type ForcedSetting struct {
+	Module, Key string
+	Value       any
+	Why         string
 }
 
 // settingsBlocked are defined in jarvisd but never carried over.
@@ -155,6 +165,9 @@ func Run(ctx context.Context, d *db.DB, src Source, opt Options) (*Report, error
 				return rep, err
 			}
 		}
+	}
+	if err := im.forced(); err != nil {
+		return rep, err
 	}
 	if len(rep.Superusers) == 0 {
 		rep.notef("no active superuser imported: setup stays open and the wizard's Account step creates one")
@@ -1002,4 +1015,38 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// forced writes opt.Force at global scope, replacing a value jarvisd stored on an earlier
+// start (an upsert, as settings.Service.Set does).
+func (im *importer) forced() error {
+	for _, f := range im.opt.Force {
+		def, ok := settings.Definition{}, false
+		for _, d := range im.opt.Settings[f.Module] {
+			if d.Key == f.Key {
+				def, ok = d, true
+			}
+		}
+		if !ok {
+			return fmt.Errorf("forced setting %s.%s is not defined", f.Module, f.Key)
+		}
+		ser, err := settings.Serialize(f.Value, def.Type)
+		if err != nil {
+			return fmt.Errorf("forced setting %s: %w", f.Key, err)
+		}
+		var envFallback any
+		if def.EnvFallback != "" {
+			envFallback = def.EnvFallback
+		}
+		if _, err := im.tx.ExecContext(im.ctx, `INSERT INTO `+f.Module+`_settings (key, value, value_type, category, description,
+			requires_reload, is_secret, env_fallback) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (key, COALESCE(household_id, ''), COALESCE(node_id, ''), COALESCE(user_id, 0))
+			DO UPDATE SET value = excluded.value, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+			f.Key, ser, string(def.Type), def.Category, def.Description, boolInt(def.RequiresReload),
+			boolInt(def.IsSecret), envFallback); err != nil {
+			return fmt.Errorf("forced setting %s: %w (is the settings table migrated?)", f.Key, err)
+		}
+		im.rep.notef("%s = %v: %s", f.Key, f.Value, f.Why)
+	}
+	return nil
 }

@@ -6,8 +6,12 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+
+	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
 type config struct {
@@ -118,6 +122,36 @@ func TestTemplate(t *testing.T) {
 		if cfg.Name == "NVIDIA_VISIBLE_DEVICES" && cfg.Required != "false" {
 			t.Errorf("NVIDIA_VISIBLE_DEVICES Required = %q, want false", cfg.Required)
 		}
+		// Set, it overrides server.legacy_ports, which import-legacy turns on for older nodes.
+		if cfg.Name == "JARVIS_LEGACY_PORTS" && (cfg.Default != "" || cfg.Value != "") {
+			t.Errorf("JARVIS_LEGACY_PORTS = default %q value %q, want both empty", cfg.Default, cfg.Value)
+		}
+	}
+	// A migrating user maps every legacy listener by hand: all but config (7700, already
+	// mapped) and admin (7710), plus the MQTT WebSocket.
+	var legacy []string
+	for name, port := range pconfig.DefaultPorts {
+		if name != pconfig.ListenerConfig && name != pconfig.ListenerAdmin {
+			legacy = append(legacy, strconv.Itoa(port))
+		}
+	}
+	legacy = append(legacy, strings.TrimPrefix(pconfig.DefaultMQTTWSAddr, ":"))
+	var legacyDesc string
+	for _, cfg := range c.Configs {
+		if cfg.Name == "JARVIS_LEGACY_PORTS" {
+			legacyDesc = cfg.Description
+		}
+	}
+	for _, text := range []struct{ where, s string }{{"Overview", c.Overview}, {"JARVIS_LEGACY_PORTS", legacyDesc}} {
+		for _, p := range legacy {
+			if !regexp.MustCompile(`\b` + p + `\b`).MatchString(text.s) {
+				t.Errorf("%s does not name legacy port %s: %q", text.where, p, text.s)
+			}
+		}
+	}
+
+	if strings.Contains(c.Overview, "phones and nodes find") || strings.Contains(c.Overview, "discovery for phones") {
+		t.Errorf("Overview says phones find the server over mDNS; only the desktop agent does: %q", c.Overview)
 	}
 
 	icon, err := os.ReadFile(filepath.Join("jarvis.png"))
