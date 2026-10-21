@@ -53,7 +53,8 @@ broker can be updated. `allow_updates` (since v0.1.131) defaults to off, and the
 with a K2 config push. Prod's four 0.1.x nodes (exact versions unknown) were last seen Jun–Aug.
 
 The import turns `server.legacy_ports` on (it reports it), so nodes that call the old per-service
-ports (7701, 7703, …) keep reaching the server; in a container, map those ports too. Nodes from 0.3.4
+ports keep reaching the server; in a container, map those ports too (7701, 7702, 7703, 7704, 7706,
+7707, 7712, 7030, 7031 and 9883, same host and container port). Nodes from 0.3.4
 resolve every service through `/services` and work on 7700 alone (from reading the code, not tried on
 hardware); turn the setting off in the admin once every node is there.
 

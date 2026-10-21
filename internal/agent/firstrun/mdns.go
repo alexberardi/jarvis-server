@@ -12,8 +12,9 @@ import (
 )
 
 // BrowseMDNS looks for Jarvis Automation servers on the network: the _jarvis-config._tcp
-// service jarvisd advertises (the mobile app finds it the same way). Each address of each
-// server is reported; the page probes them and lists each server once.
+// service jarvisd advertises (only the agent browses for it; phones and nodes are given the
+// address). Each address of each server is reported; the page probes them and lists each
+// server once.
 func BrowseMDNS(ctx context.Context, found func(url, name string)) {
 	ctx, cancel := context.WithCancel(ctx)
 	ch := make(chan *zeroconf.ServiceEntry)

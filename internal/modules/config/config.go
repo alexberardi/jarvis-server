@@ -1,6 +1,6 @@
 // Package config is the jarvisd config module: the service registry that every Jarvis client
-// reads first (jarvis-config-service, legacy port 7700). Mobile finds it over mDNS, checks
-// GET /info, then reads GET /services for every other service's URL.
+// reads first (jarvis-config-service, legacy port 7700). The desktop agent finds it over mDNS,
+// checks GET /info, then reads GET /services for every other service's URL.
 //
 // jarvisd registers its own modules here at startup (same host, legacy ports), so discovery
 // stays correct with no setup. Rows for things outside the process (jarvis-web, the
@@ -123,7 +123,8 @@ type Module struct {
 	AdminToken string
 	// HealthTimeout bounds each health probe (legacy health_check.timeout, default 5 s).
 	HealthTimeout time.Duration
-	// Advertise announces _jarvis-config._tcp over mDNS so the mobile app finds this server.
+	// Advertise announces _jarvis-config._tcp over mDNS so the desktop agent finds this server
+	// (phones and nodes are given its address).
 	Advertise bool
 	// SettingsGuard protects /settings (legacy: superuser JWT for reads and writes). Nil
 	// leaves /settings unmounted.
