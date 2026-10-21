@@ -3,12 +3,16 @@
 package httpx
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -77,7 +81,75 @@ func (s *statusRecorder) Flush() {
 	}
 }
 
+// Hijack lets WebSocket upgrades through the wrapper: gorilla's upgrader type-asserts
+// http.Hijacker (cc's Twilio media stream).
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(s.ResponseWriter).Hijack()
+}
+
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+type mountPrefixKey struct{}
+
+// WithMountPrefix returns r carrying the prefix its listener is mounted under on the config
+// port.
+func WithMountPrefix(r *http.Request, prefix string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), mountPrefixKey{}, prefix))
+}
+
+// MountPrefix is the prefix the request came in under on the config port, or "" on a
+// listener's own port.
+func MountPrefix(r *http.Request) string {
+	p, _ := r.Context().Value(mountPrefixKey{}).(string)
+	return p
+}
+
+// Mount serves next under prefix: it strips the prefix from the path, records it
+// (MountPrefix), and puts it back in front of a host-relative Location header, so ServeMux's
+// own redirects (/media -> /media/) stay under the mount.
+func Mount(prefix string, next http.Handler) http.Handler {
+	strip := http.StripPrefix(prefix, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		strip.ServeHTTP(&prefixLocation{ResponseWriter: w, prefix: prefix}, WithMountPrefix(r, prefix))
+	})
+}
+
+// prefixLocation prepends a mount's prefix to a Location header that is a path on this host.
+type prefixLocation struct {
+	http.ResponseWriter
+	prefix      string
+	wroteHeader bool
+}
+
+func (p *prefixLocation) WriteHeader(code int) {
+	if !p.wroteHeader {
+		p.wroteHeader = true
+		h := p.ResponseWriter.Header()
+		if loc := h.Get("Location"); strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, "//") {
+			h.Set("Location", p.prefix+loc)
+		}
+	}
+	p.ResponseWriter.WriteHeader(code)
+}
+
+func (p *prefixLocation) Write(b []byte) (int, error) {
+	if !p.wroteHeader {
+		p.WriteHeader(http.StatusOK)
+	}
+	return p.ResponseWriter.Write(b)
+}
+
+func (p *prefixLocation) Flush() {
+	if f, ok := p.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (p *prefixLocation) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(p.ResponseWriter).Hijack()
+}
+
+func (p *prefixLocation) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
 // ServerName is the Server header every jarvisd listener sends.
 const ServerName = "jarvisd"

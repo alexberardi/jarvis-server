@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
@@ -35,6 +36,9 @@ type Runner struct {
 	// AllowDowngrade skips the downgrade guard (serve --allow-downgrade): run even though a
 	// newer jarvisd migrated the database.
 	AllowDowngrade bool
+	// Mounts maps listeners to the prefix they are also served under on config.ListenerConfig's
+	// port. Nil: no mounts (each listener only on its own port, as before).
+	Mounts map[string]string
 
 	mu    sync.Mutex
 	addrs map[string]string         // listener -> bound address, filled once listening
@@ -153,6 +157,22 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	slices.Sort(names)
 
+	// The config listener also serves every mounted listener under its prefix.
+	handlers := map[string]http.Handler{}
+	for _, n := range names {
+		handlers[n] = httpx.Middleware(r.Deps.Log, n, muxes[n])
+	}
+	if r.Mounts != nil && muxes[config.ListenerConfig] != nil {
+		front := http.NewServeMux()
+		front.Handle("/", handlers[config.ListenerConfig])
+		for _, l := range names {
+			if prefix := r.Mounts[l]; prefix != "" && l != config.ListenerConfig {
+				front.Handle(prefix+"/", httpx.Mount(prefix, handlers[l]))
+			}
+		}
+		handlers[config.ListenerConfig] = front
+	}
+
 	var lc net.ListenConfig
 	listeners := map[string]net.Listener{}
 	closeAll := func() {
@@ -188,7 +208,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for _, n := range names {
 		srv := &http.Server{
-			Handler:           httpx.Middleware(r.Deps.Log, n, muxes[n]),
+			Handler:           handlers[n],
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       2 * time.Minute,
 			// No WriteTimeout: SSE streams stay open. Requests get the run context instead, so

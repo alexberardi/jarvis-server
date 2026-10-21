@@ -457,3 +457,10 @@ func TestHardware(t *testing.T) {
 		}
 	}
 }
+
+// A single-port command-center URL (config port + /cc) still gives config's own address.
+func TestConfigURLFromAMountedCommandCenter(t *testing.T) {
+	if got := configURL(ProvisionRequest{CommandCenterURL: "http://h:7700/cc"}); got != "http://h:7700" {
+		t.Fatalf("configURL = %q", got)
+	}
+}

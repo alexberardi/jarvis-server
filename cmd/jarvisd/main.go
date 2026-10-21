@@ -552,7 +552,7 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		defer timer.Stop()
 	}
 	var runner *module.Runner
-	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, OnReady: func() {
+	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, Mounts: config.Paths, OnReady: func() {
 		if err := service.Ready(ctx); err != nil {
 			log.Warn("could not notify the service manager", "err", err)
 		}

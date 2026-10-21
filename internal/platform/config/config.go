@@ -42,6 +42,20 @@ var DefaultPorts = map[string]int{
 	ListenerAdmin:         7710,
 }
 
+// Paths is the prefix each listener is also served under on the config port; admin is not
+// mounted.
+var Paths = map[string]string{
+	ListenerAuth:          "/auth",
+	ListenerLogs:          "/logs",
+	ListenerCC:            "/cc",
+	ListenerLLM:           "/llm",
+	ListenerSTT:           "/stt",
+	ListenerTTS:           "/tts",
+	ListenerNotifications: "/notifications",
+	ListenerRecipes:       "/recipes",
+	ListenerOCR:           "/ocr",
+}
+
 type Config struct {
 	// Home is the data directory (~/.jarvisd by default): database, blobs, extracted libs, engines.
 	Home string
@@ -54,6 +68,9 @@ type Config struct {
 	MDNSInterfaces []string
 	// Env is what cmd/jarvisd wires into the modules from the environment.
 	Env Env
+	// SinglePort: the mounted listeners have no port of their own (legacy ports off); the
+	// registry and node URLs use the config port + Paths. Set by the runner before Register.
+	SinglePort bool
 }
 
 // Env holds the modules' bootstrap values from the environment: secrets, dev switches and the
