@@ -391,7 +391,7 @@ These are read per household unless noted. Definitions are in `services/settings
 | `conversation.max_turns` | 10 | Sliding history window; ≤0 disables it |
 | `cc.compaction.threshold` / `cc.compaction.hard_threshold` | 0.75 / 0.90 | **jarvisd, new (2026-10-09).** Fraction of the live endpoint's context at which a conversation (voice or chat) is compacted in the background / synchronously before the turn; see [chat-images.md](chat-images.md) §7 |
 | `model.include_thinking` | false | Sets the provider suffix to `/think` or `/no_think`. Synced onto the **shared provider object** every turn (`3047-3068`). |
-| `model.advanced_context` | false | Enables agent-context vector retrieval on the blocking path only |
+| `model.advanced_context` | true | Enables agent-context vector retrieval on the blocking path only (default on since #408; a household that explicitly stored false keeps it) |
 | `memory.enabled` / `memory.recall_enabled` | true / true | Gate the memory tools and memory loading. Fail **open**. |
 | `memory.pinned_max_chars` | 500 | Memory text cap. Read **globally**, not per household (`411-412,3601`). |
 | `memory.agent_context_enabled` / `_max_results` / `_max_chars` / `_similarity_threshold` | true / 5 / 500 / 0.25 | Agent context retrieval |

@@ -272,5 +272,6 @@ func TestMemoryInject(t *testing.T) {
 	me.do("POST", path, map[string]any{"memories": many}, h).want(400)
 	me.set(settingMemoryEnabled, false, settings.Scope{HouseholdID: voiceHH})
 	me.do("POST", path, map[string]any{"memories": []any{}}, h).detail(409, "Memory system is disabled for this household")
-	// Always stored regardless of model.advanced_context (D40 04.Q10): it was off throughout.
+	// Always stored regardless of model.advanced_context (D40 04.Q10); it is on by default
+	// now (#408) and the test never touches it, which covers the default-on case.
 }
