@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""Tool-selection benchmark: does the model pick the right tool, with the right arguments, from
+the exact prompt and tool list command-center sends?
+
+    scripts/toolbench capture [--name toolbench]           # base requests from this checkout
+    scripts/toolbench run [--base DIR] [--repeat N] [--only REGEX] [--out FILE]
+                          [--url URL --model NAME | --env FILE]
+
+capture starts a sandbox from this checkout (scripts/sandbox, with JARVIS_HARNESS_ENV as set),
+says "hello" as the seeded voice node and as a desktop node through tools/pipeline, and saves
+each LLM request the tap logged (system messages, tools, sampling parameters) to
+.toolbench/base-voice.json and base-desktop.json. Those are byte-for-byte what the model saw.
+
+run replays every case against that base: the base's system messages, the case's utterance in
+place of "hello" in the user message, the base's tools and parameters. A case is
+  - an example from tools/pipeline/toolsets/desktop.json (desktop node): its tool and
+    expected_parameters, or
+  - the first turn of a tools/pipeline/scenarios/*.json scenario: its tool / server_tool /
+    any_tool / no_tool / not_tool, args and args_match. Scenarios with settings, results,
+    another home or a voice-only node are skipped (single-turn, no setup, here).
+It scores the first tool call: right tool, then right arguments (args compared loosely: numbers
+by value, strings case-insensitively; args_match by regexp). Prompt tokens and latency come from
+the response. The endpoint is the installed jarvisd's LLM API by default (the harness env's
+INSTALLED_LLM_URL, label and app credentials), or any OpenAI-compatible --url.
+
+Standard library only, so it runs on the Macs as is.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import shlex
+import statistics
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, ".toolbench")
+
+
+def sh(cmd, **kw):
+    return subprocess.run(cmd, shell=True, cwd=ROOT, check=True, text=True, **kw)
+
+
+def capture(args):
+    os.makedirs(OUT, exist_ok=True)
+    name = args.name
+    log = os.path.join(ROOT, ".sandbox", name, "llm.jsonl")
+    sh("scripts/fetch-sherpa-libs.sh >/dev/null")
+    sh(f"scripts/sandbox down --name {name} --purge >/dev/null 2>&1 || true")
+    sh(f"scripts/sandbox up --name {name} >/dev/null")
+    try:
+        for kind, flags in (("voice", ""), ("desktop", '--node desktop --speaker ""')):
+            before = sum(1 for _ in open(log)) if os.path.exists(log) else 0
+            sh(f"go run ./tools/pipeline say --sandbox {name} {flags} hello >/dev/null")
+            rows = [json.loads(l) for l in open(log)][before:]
+            chats = [r for r in rows if r.get("path", "").endswith("/chat/completions")
+                     and any(m.get("role") == "user" and "hello" in str(m.get("content", "")).lower()
+                             for m in r["request"].get("messages", []))]
+            if not chats:
+                sys.exit(f"capture: no 'hello' request in {log} for the {kind} node")
+            req = chats[-1]["request"]
+            with open(os.path.join(OUT, f"base-{kind}.json"), "w") as f:
+                json.dump(req, f, indent=1)
+            print(f"{kind}: {len(req.get('tools') or [])} tools, "
+                  f"{size(req)} chars of system+tools (~{size(req)//4} tok)")
+    finally:
+        sh(f"scripts/sandbox down --name {name} --purge >/dev/null 2>&1 || true")
+
+
+def size(req):
+    sysc = sum(len(str(m.get("content"))) for m in req["messages"] if m.get("role") == "system")
+    return sysc + len(json.dumps(req.get("tools") or [], separators=(",", ":")))
+
+
+def cases():
+    out = []
+    ts = json.load(open(os.path.join(ROOT, "tools/pipeline/toolsets/desktop.json")))
+    for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
+        fn = t.get("function", t)
+        for ex in t.get("examples") or fn.get("examples") or []:
+            out.append({"id": f"ex:{fn['name']}:{ex['voice_command']}", "node": "desktop",
+                        "say": ex["voice_command"], "tool": fn["name"],
+                        "args": ex.get("expected_parameters") or {}})
+    for path in sorted(glob.glob(os.path.join(ROOT, "tools/pipeline/scenarios/*.json"))):
+        for sc in json.load(open(path)):
+            if sc.get("skip") or sc.get("settings") or sc.get("results") or sc.get("voice") \
+                    or sc.get("home") not in (None, "", "avery") or sc.get("also_heard_by") is not None \
+                    or sc.get("tools") or sc.get("owner"):
+                continue
+            turn = sc["turns"][0]
+            if turn.get("source") or turn.get("results") or turn.get("computer_activity"):
+                continue
+            e = turn.get("expect", {})
+            c = {"id": f"sc:{os.path.basename(path)}:{sc['name']}",
+                 "node": "desktop" if sc.get("node") == "desktop" else "voice", "say": turn["say"]}
+            tool = e.get("tool") or e.get("server_tool")
+            if tool:
+                c["tool"] = tool
+            elif e.get("any_tool"):
+                c["any_tool"] = e["any_tool"]
+            elif e.get("no_tool"):
+                c["no_tool"] = True
+            else:
+                continue
+            if e.get("not_tool"):
+                c["not_tool"] = e["not_tool"]
+            c["args"] = e.get("args") or {}
+            c["args_match"] = e.get("args_match") or {}
+            out.append(c)
+    return out
+
+
+def endpoint(args):
+    if args.url:
+        return args.url.rstrip("/") + "/v1/chat/completions", args.model or "live", {}
+    env = {}
+    path = args.env or os.environ.get("JARVIS_HARNESS_ENV") or os.path.expanduser("~/.config/jarvis-harness/installed.env")
+    out = subprocess.run(["bash", "-c", f"set -a; . {shlex.quote(path)}; env"], text=True, capture_output=True, check=True).stdout
+    for line in out.splitlines():
+        k, _, v = line.partition("=")
+        env[k] = v
+    url = env.get("INSTALLED_LLM_URL", "http://127.0.0.1:7704").rstrip("/")
+    hdr = {"X-Jarvis-App-Id": env.get("INSTALLED_APP_ID", ""), "X-Jarvis-App-Key": env.get("INSTALLED_APP_KEY", "")}
+    return url + "/v1/chat/completions", env.get("INSTALLED_LLM_LABEL", "live"), hdr
+
+
+def same(want, got):
+    if isinstance(want, bool) or isinstance(got, bool):
+        return str(want).lower() == str(got).lower()
+    if isinstance(want, (int, float)):
+        try:
+            return float(got) == float(want)
+        except (TypeError, ValueError):
+            return False
+    return str(want).strip().lower() == str(got).strip().lower()
+
+
+def score(case, call):
+    name = call["name"] if call else None
+    args = call["args"] if call else {}
+    if case.get("no_tool"):
+        return name is None, True
+    if name in (case.get("not_tool") or []):
+        return False, False
+    if "any_tool" in case:
+        ok = name in case["any_tool"]
+    else:
+        ok = name == case.get("tool")
+    if not ok:
+        return False, False
+    a_ok = all(k in args and same(v, args[k]) for k, v in (case.get("args") or {}).items())
+    a_ok = a_ok and all(k in args and re.search(rx, str(args[k])) for k, rx in (case.get("args_match") or {}).items())
+    return True, a_ok
+
+
+def run(args):
+    url, model, hdr = endpoint(args)
+    bases = {}
+    for kind in ("voice", "desktop"):
+        p = os.path.join(args.base, f"base-{kind}.json")
+        if os.path.exists(p):
+            bases[kind] = json.load(open(p))
+    cs = [c for c in cases() if c["node"] in bases and (not args.only or re.search(args.only, c["id"]))]
+    print(f"{len(cs)} cases x {args.repeat} against {url} (model {model})", file=sys.stderr)
+    results = []
+    for c in cs:
+        base = bases[c["node"]]
+        msgs = []
+        for m in base["messages"]:
+            m = dict(m)
+            if m.get("role") == "user":
+                m["content"] = re.sub(r"(?i)hello", lambda _: c["say"], str(m["content"]), count=1)
+            msgs.append(m)
+        if args.fold:
+            first, rest = msgs[0], msgs[1:]
+            extra = "\n\n".join(str(m["content"]) for m in rest if m.get("role") == "system")
+            rest = [dict(m) for m in rest if m.get("role") != "system"]
+            for m in rest:
+                if m.get("role") == "user" and extra:
+                    m["content"] = extra + "\n\n" + str(m["content"])
+                    extra = ""
+            msgs = [first] + rest
+        body = {k: v for k, v in base.items() if k not in ("messages",)}
+        body["messages"], body["model"], body["stream"] = msgs, model, False
+        for i in range(args.repeat):
+            req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json", **hdr})
+            t0 = time.time()
+            try:
+                resp = json.load(urllib.request.urlopen(req, timeout=args.timeout))
+                err = None
+            except urllib.error.HTTPError as e:
+                resp, err = {}, f"HTTP {e.code}: {e.read()[:200]!r}"
+            except Exception as e:  # noqa: BLE001 - a bench reports and moves on
+                resp, err = {}, str(e)
+            dt = time.time() - t0
+            msg = ((resp.get("choices") or [{}])[0]).get("message") or {}
+            tc = (msg.get("tool_calls") or [None])[0]
+            call = None
+            if tc:
+                try:
+                    a = json.loads(tc["function"].get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    a = {}
+                call = {"name": tc["function"]["name"], "args": a}
+            tool_ok, args_ok = (False, False) if err else score(c, call)
+            usage = resp.get("usage") or {}
+            results.append({"id": c["id"], "run": i, "tool_ok": tool_ok, "args_ok": tool_ok and args_ok,
+                            "got": call, "reply": (msg.get("content") or "")[:120], "error": err,
+                            "prompt_tokens": usage.get("prompt_tokens"), "seconds": round(dt, 2)})
+            mark = "ok " if tool_ok and args_ok else ("arg" if tool_ok else "BAD")
+            print(f"{mark} {dt:5.1f}s {c['id'][:90]}  -> {call['name'] if call else (err or 'no tool')}", file=sys.stderr)
+    n = len(results)
+    t_ok = sum(r["tool_ok"] for r in results)
+    a_ok = sum(r["args_ok"] for r in results)
+    pt = [r["prompt_tokens"] for r in results if r["prompt_tokens"]]
+    secs = [r["seconds"] for r in results if not r["error"]]
+    summary = {"cases": len(cs), "runs": n, "tool_accuracy": round(t_ok / n, 3) if n else 0,
+               "tool_and_args_accuracy": round(a_ok / n, 3) if n else 0,
+               "prompt_tokens_median": statistics.median(pt) if pt else None,
+               "seconds_median": statistics.median(secs) if secs else None,
+               "errors": sum(1 for r in results if r["error"]),
+               "failures": sorted({r["id"] for r in results if not r["args_ok"]})}
+    if args.out:
+        with open(args.out, "w") as f:
+            json.dump({"summary": summary, "results": results}, f, indent=1)
+    print(json.dumps({k: v for k, v in summary.items() if k != "failures"}, indent=1))
+    print(f"{len(summary['failures'])} failing case(s):")
+    for fid in summary["failures"]:
+        print("  " + fid)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("capture")
+    c.add_argument("--name", default="toolbench")
+    r = sub.add_parser("run")
+    r.add_argument("--base", default=OUT)
+    r.add_argument("--repeat", type=int, default=1)
+    r.add_argument("--only")
+    r.add_argument("--out")
+    r.add_argument("--url")
+    r.add_argument("--model")
+    r.add_argument("--env")
+    r.add_argument("--timeout", type=int, default=180)
+    r.add_argument("--fold", action="store_true", help="fold later system messages into the user turn (strict chat templates, direct engines)")
+    a = ap.parse_args()
+    {"capture": capture, "run": run}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()

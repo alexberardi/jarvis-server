@@ -41,34 +41,28 @@ func toolByName(tools []any, name string) map[string]any {
 	return nil
 }
 
-// Blueprint §6 (a): every native tool gets an optional failure_message argument; the cached
-// tools and prompts.NativeTools (the G1 goldens) don't change, and the warmup sends the engine's
-// bytes so the prefix cache holds.
-func TestNativePayloadAddsFailureMessage(t *testing.T) {
+// The native payload is prompts.NativeTools as is: no failure_message property is added to the
+// tools (decision 2026-10-20-prompt-diet), the cached tools don't change, and the warmup sends the
+// engine's bytes so the prefix cache holds.
+func TestNativePayloadSendsNativeTools(t *testing.T) {
 	tools := toolsFrom(t, searchTools)
 	before := prompts.CompactASCII(tools[0])
-	nativeBefore := prompts.CompactASCII(prompts.NativeTools(tools)[0])
 
 	out := nativePayload(tools)
-	if len(out) != 2 {
-		t.Fatalf("got %d tools", len(out))
+	want := llmTools(prompts.NativeTools(tools))
+	if len(out) != len(want) {
+		t.Fatalf("got %d tools, want %d", len(out), len(want))
 	}
-	want := `{"type":"function","function":{"name":"web_lookup","description":"Look it up.",` +
-		`"parameters":{"type":"object","properties":{"query":{"type":"string"},` +
-		`"failure_message":{"type":"string","description":"` + failureMessageDescription + `"}},"required":["query"]}}}`
-	if got := string(out[0].Raw); got != want {
-		t.Fatalf("payload:\n got %s\nwant %s", got, want)
+	for i := range out {
+		if string(out[i].Raw) != string(want[i].Raw) {
+			t.Fatalf("tool %d:\n got %s\nwant %s", i, out[i].Raw, want[i].Raw)
+		}
 	}
-	if got, want := string(out[1].Raw), string(llmTools(prompts.NativeTools(tools))[1].Raw); got != want {
-		t.Fatalf("a tool with its own failure_message changed:\n got %s\nwant %s", got, want)
+	if strings.Contains(string(out[0].Raw), failureMessageParam) {
+		t.Fatalf("failure_message added: %s", out[0].Raw)
 	}
-	if prompts.CompactASCII(tools[0]) != before || prompts.CompactASCII(prompts.NativeTools(tools)[0]) != nativeBefore {
-		t.Fatal("nativePayload changed the cached tool or NativeTools")
-	}
-	// Not an object schema: passed through.
-	odd := toolsFrom(t, `[{"type": "function", "function": {"name": "odd", "parameters": {"type": "string"}}}]`)
-	if got, want := string(nativePayload(odd)[0].Raw), string(llmTools(prompts.NativeTools(odd))[0].Raw); got != want {
-		t.Fatalf("non-object schema changed: %s", got)
+	if prompts.CompactASCII(tools[0]) != before {
+		t.Fatal("nativePayload changed the cached tool")
 	}
 
 	// The warmup and the turn send the same tools.
@@ -86,11 +80,8 @@ func TestNativePayloadAddsFailureMessage(t *testing.T) {
 	}
 	f := toolByName(reqs[0]["tools"].([]any), "web_lookup")
 	params := f["parameters"].(map[string]any)
-	if _, ok := params["properties"].(map[string]any)["failure_message"]; !ok {
-		t.Fatalf("no failure_message sent: %v", params)
-	}
-	if strings.Contains(jsonOf(params["required"]), "failure_message") {
-		t.Fatal("failure_message is required")
+	if _, ok := params["properties"].(map[string]any)["failure_message"]; ok {
+		t.Fatalf("failure_message sent: %v", params)
 	}
 }
 
