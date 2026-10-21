@@ -14,6 +14,7 @@ import {
   everythingRecommended,
   defaultChoice,
   jobFor,
+  jobOptions,
   jobPercent,
   jobStateText,
   recommendedEntry,
@@ -100,7 +101,7 @@ export default function JobStep({
 
   const current = useMemo(() => currentModels(labels.data), [labels.data])
   const job = jobFor(state.data?.jobs, def.id)
-  const options = catalog.data?.models.filter((m) => m.kind === def.kind) ?? []
+  const options = jobOptions(def, catalog.data)
   const choice = picked ?? defaultChoice(def, catalog.data, current, job)
   const entry = options.find((m) => m.id === choice)
   const recommended = recommendedEntry(def, catalog.data)
@@ -240,6 +241,7 @@ export default function JobStep({
                     )}
                     <FitBadge fit={m.fit} />
                     {m.mmproj && <Badge>vision</Badge>}
+                    {m.directory && <Badge title="A Hugging Face model folder run by mlx-lm, text-only">MLX</Badge>}
                     {inUse ? (
                       <Badge tone="success">
                         <CheckCircle2 size={12} aria-hidden /> In use

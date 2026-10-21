@@ -606,3 +606,85 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     expect(await screen.findByText('home page')).toBeInTheDocument()
   })
 })
+
+// #354: on Apple Silicon the Language model step offers the MLX builds next to the GGUFs, sized
+// by the Mac's memory (the server's fit and recommendation); elsewhere it lists none of them.
+describe('setup wizard: MLX models on a Mac', () => {
+  const tooBig = { verdict: 'too_big', needed_mb: 17000, context: 32768, kv_estimated: false }
+  const mlx = (id: string, display: string, over: Partial<CatalogEntry> = {}) =>
+    entry(id, 'llm', display, { directory: true, prompt_provider: 'qwen3.5', ...over })
+  function macCatalog(gb: 16 | 32): CatalogResponse {
+    const big = gb >= 32 ? {} : { fit: tooBig }
+    return {
+      ...catalog,
+      models: [
+        ...catalog.models,
+        mlx('qwen3.5-9b-mlx', 'Qwen 3.5 9B (MLX)'),
+        mlx('qwen3.5-27b-mlx', 'Qwen 3.5 27B (MLX)', big),
+        mlx('qwen3.5-35b-a3b-mlx', 'Qwen 3.5 35B-A3B (MLX)', big),
+      ],
+      recommended: {
+        ...catalog.recommended,
+        live: gb >= 32 ? 'qwen3.5-27b-mlx' : 'qwen3.5-9b-mlx',
+        background: gb >= 32 ? 'qwen3.5-27b-mlx' : 'qwen3.5-9b-mlx',
+      },
+      hardware: { os: 'darwin', arch: 'arm64', devices: [], sources: [], flavour: 'metal', detected_at: '' },
+    }
+  }
+
+  function atLlmStep(cat: CatalogResponse) {
+    signIn()
+    sessionStorage.setItem(STEP_STORAGE_KEY, 'llm')
+    auth.getSetupState.mockResolvedValue(superState)
+    api.getCatalog.mockResolvedValue(cat)
+    renderWizard()
+  }
+
+  const names = () => screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label'))
+
+  it('16 GB: recommends the 9B MLX build, lists it first with an MLX badge, keeps the GGUFs, and installs it with no more questions', async () => {
+    atLlmStep(macCatalog(16))
+    const rec = await screen.findByRole('radio', { name: 'Qwen 3.5 9B (MLX)' })
+    await waitFor(() => expect(rec).toBeChecked())
+    const row = rec.closest('label')!
+    expect(within(row).getByText('Recommended')).toBeInTheDocument()
+    expect(within(row).getByText('MLX')).toBeInTheDocument()
+    // The 27B and 35B need 32 GB: not offered here.
+    expect(names()).toEqual(['Qwen 3.5 9B (MLX)', 'Qwen 3 4B', 'Qwen 3.5 9B'])
+    expect(within(screen.getByRole('radio', { name: 'Qwen 3.5 9B' }).closest('label')!).queryByText('MLX')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install and continue' }))
+    await waitFor(() =>
+      expect(api.startInstall).toHaveBeenCalledWith({ catalog_id: 'qwen3.5-9b-mlx', assign: ['live', 'background'] }),
+    )
+    expect(await screen.findByRole('heading', { name: /Speech-to-text/ })).toBeInTheDocument()
+  })
+
+  it('32 GB: also offers the 27B and 35B MLX builds, the 27B recommended', async () => {
+    atLlmStep(macCatalog(32))
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Qwen 3.5 27B (MLX)' })).toBeChecked())
+    expect(within(screen.getByRole('radio', { name: 'Qwen 3.5 27B (MLX)' }).closest('label')!).getByText('Recommended')).toBeInTheDocument()
+    expect(names()).toEqual([
+      'Qwen 3.5 9B (MLX)',
+      'Qwen 3.5 27B (MLX)',
+      'Qwen 3.5 35B-A3B (MLX)',
+      'Qwen 3 4B',
+      'Qwen 3.5 9B',
+    ])
+  })
+
+  it('off Apple Silicon: lists no MLX entries and pre-selects a GGUF', async () => {
+    const why = 'mlx-community/Qwen3.5-9B-4bit is an MLX build, which runs only on Apple Silicon'
+    atLlmStep({
+      ...catalog,
+      models: [
+        mlx('qwen3.5-9b-mlx', 'Qwen 3.5 9B (MLX)', { unavailable: why }),
+        ...catalog.models,
+        mlx('qwen3.5-27b-mlx', 'Qwen 3.5 27B (MLX)', { unavailable: why }),
+      ],
+    })
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Qwen 3.5 9B' })).toBeChecked())
+    expect(names()).toEqual(['Qwen 3 4B', 'Qwen 3.5 9B'])
+    expect(screen.queryByText('MLX')).toBeNull()
+  })
+})

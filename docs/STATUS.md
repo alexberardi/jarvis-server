@@ -69,7 +69,7 @@ Done together with the `v0.1.0` release, not before, because the legacy Python s
 
 Decision: [2026-10-19-mlx-engine](decisions/2026-10-19-mlx-engine.md) (llm LD9); built as a generic Python engine layer that vLLM (#300) and Transformers (#301) reuse.
 
-- [ ] **MLX engine:** Python engine layer + mlx-lm install and supervision ✓ (llm 01 §3.11), model manager repo-directory models + mlx-community catalog entries + prompt provider/fold inference + admin folder install and label choice ✓ (#351, [2026-10-20-model-folders](decisions/2026-10-20-model-folders.md)), engine install progress + explicit tool/JSON limits, live Mac check (install mlx-community/Qwen3.5-9B-4bit from the page, chat, tool call, streamed turn; tokens/s next to llama-server on Metal)
+- [ ] **MLX engine:** Python engine layer + mlx-lm install and supervision ✓ (llm 01 §3.11), model manager repo-directory models + mlx-community catalog entries + prompt provider/fold inference + admin folder install and label choice ✓ (#351, [2026-10-20-model-folders](decisions/2026-10-20-model-folders.md)), setup wizard's Language model step offers the MLX entries on Apple Silicon (first, with an MLX badge, the 27B/35B only from 32 GB; the GGUFs stay as the alternative) and none elsewhere ✓ (#354), engine install progress + explicit tool/JSON limits, live Mac check (install mlx-community/Qwen3.5-9B-4bit from the page, chat, tool call, streamed turn; tokens/s next to llama-server on Metal)
 
 ### vLLM on Linux + NVIDIA (#300, in parallel)
 

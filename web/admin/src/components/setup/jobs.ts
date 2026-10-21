@@ -142,15 +142,27 @@ export function requestFor(def: JobDef, entry: CatalogEntry, current: Partial<Re
   return req
 }
 
-/** recommendedEntry is the hardware-fit recommendation for a job, if the catalog has one. */
+/**
+ * jobOptions is what a step offers: the catalog's models of its kind this machine can run. An
+ * MLX build (a model folder) is left out off Apple Silicon (unavailable) and below the memory it
+ * needs (too_big); the ones that remain come first, the GGUFs after them as the alternative.
+ */
+export function jobOptions(def: JobDef, catalog: CatalogResponse | undefined): CatalogEntry[] {
+  const options = (catalog?.models ?? []).filter(
+    (m) => m.kind === def.kind && !m.unavailable && !(m.directory && m.fit.verdict === 'too_big'),
+  )
+  return [...options.filter((m) => m.directory), ...options.filter((m) => !m.directory)]
+}
+
+/** recommendedEntry is the hardware-fit recommendation for a job, if the step offers it. */
 export function recommendedEntry(def: JobDef, catalog: CatalogResponse | undefined): CatalogEntry | undefined {
   const id = catalog?.recommended[def.label]
-  return id ? catalog?.models.find((m) => m.id === id && m.kind === def.kind) : undefined
+  return id ? jobOptions(def, catalog).find((m) => m.id === id) : undefined
 }
 
 /**
  * defaultChoice pre-fills a step: what the job already runs, else what is downloading for it,
- * else the recommendation, else the first catalog entry of its kind.
+ * else the recommendation, else the first entry the step offers.
  */
 export function defaultChoice(
   def: JobDef,
@@ -158,7 +170,7 @@ export function defaultChoice(
   current: Partial<Record<Label, string>>,
   job: SetupJob,
 ): string {
-  const options = catalog?.models.filter((m) => m.kind === def.kind) ?? []
+  const options = jobOptions(def, catalog)
   for (const id of [current[def.label], job.install?.model_id, recommendedEntry(def, catalog)?.id]) {
     if (id && options.some((m) => m.id === id)) return id
   }
