@@ -34,10 +34,11 @@ no callers; not checked here, that repo is not in this worktree).
 
 `scripts/toolbench` on this branch's captured prompts (sandbox `loop-405`, the installed jarvisd's
 live model, qwen3.5-9b), the 69 standard cases (desktop toolset examples plus first turns of the
-pipeline scenarios), 3 repeats each (207 calls per side). "After" is the captured prompt plus one
-system message, before the user turn, carrying three realistic custom agents (weather with a
-3-day forecast, a calendar with 5 events, 2 package shipments): 1,163 chars, under a plausible
-600-per-agent / 1,200-total cap.
+pipeline scenarios), 3 repeats each (207 calls per variant), in two rounds. The payload is three
+realistic custom agents (weather with a 3-day forecast, a calendar with 5 events, 2 package
+shipments), in an `<agent_context>` block under a plausible 600-per-agent / 1,200-total cap.
+
+Round 1: the block as compact JSON (1,163 chars) in a second system message before the user turn.
 
 | | before | after (option A) |
 |---|---|---|
@@ -46,12 +47,26 @@ system message, before the user turn, carrying three realistic custom agents (we
 | tool + args accuracy | 77.8 % | 72.0 % |
 | median latency (warm) | 0.67 s | 0.64 s |
 
-The +458 tokens is the same on every turn (the block does not depend on the utterance), so it
-undoes about a tenth of the prompt diet (`2026-10-20-prompt-diet.md`) and is paid cold on every
-uncached turn, on the slow Macs most of all. The accuracy drop held across the single run and the
-3-repeat run (a single run: 89.9 → 81.2 % tool), mostly desktop and browser commands that have
-nothing to do with the data: unrelated context distracts the 9B. One model, one payload; the 4B
-was not measured.
+Round 2 (after review): a fresh capture, the same before, and the block inside the main system
+prompt right after the `agents` section, where a renderer would put it, as JSON and as the same
+facts written as sentences (583 chars).
+
+| | before | JSON, second system message | JSON, in the system prompt | sentences, in the system prompt |
+|---|---|---|---|---|
+| prompt tokens, median per turn | 4,753 | 5,211 (+458) | 5,211 (+458) | 4,940 (+187, +3.9 %) |
+| tool accuracy | 90.8 % | 87.9 % | 89.4 % | 89.4 % |
+| tool + args accuracy | 78.3 % | 76.3 % | 80.7 % | 77.8 % |
+| median latency (warm) | 0.35 s | 0.37 s | 0.36 s | 0.35 s |
+
+The token cost is exact and the same on every turn (the block does not depend on the utterance):
++458 as JSON, +187 as sentences, i.e. a tenth or a twenty-fifth of the prompt, undoing part of
+the prompt diet (`2026-10-20-prompt-diet.md`), paid cold on every uncached turn, on the slow Macs
+most of all, and growing with every agent a household installs. The accuracy cost is **not**
+robust: round 1's drop (88.9 → 82.6 %) shrank to 90.8 → 87.9 % in round 2 with the same
+placement, and in the system prompt the block costs 1.4 points of tool accuracy and no tool + args
+accuracy, within the run-to-run spread (the same "before" scored 88.9 and 90.8 %). So the second
+system message explains some of round 1's drop, and noise the rest; the case against A is the
+tokens, not accuracy. One model, one payload; the 4B was not measured.
 
 ## Recommendation: B, and fix the docs now
 
@@ -63,8 +78,10 @@ was not measured.
   `get_context_facts() -> list[str]` so an agent author writes the sentences rather than the node
   guessing from a dict), and a decision on `model.advanced_context`'s default, which gates it
   today.
-- **A** is rejected on the numbers above. A cap small enough to protect the prompt is too small
-  to be useful for a calendar or forecast.
+- **A** is rejected on its token cost: every turn pays for every agent, relevant or not, and a
+  cap small enough to protect the prompt is too small to be useful for a calendar or forecast.
+  Accuracy is not the argument (round 2). If the user prefers A anyway, it should render
+  sentences, not JSON (+187 instead of +458 tokens here), inside the system prompt.
 - **C now, regardless**: until B ships, the SDK docstring and the tutorial (jarvis-docs#398)
   should say that `get_context_data()` is read by the node's commands, and that only the
   smart-home agent's data reaches the model, so nobody builds on the promise.
