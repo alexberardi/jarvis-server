@@ -623,11 +623,11 @@ describe('setup wizard: MLX models on a Mac', () => {
         mlx('qwen3.5-27b-mlx', 'Qwen 3.5 27B (MLX)', big),
         mlx('qwen3.5-35b-a3b-mlx', 'Qwen 3.5 35B-A3B (MLX)', big),
       ],
-      recommended: {
-        ...catalog.recommended,
-        live: gb >= 32 ? 'qwen3.5-27b-mlx' : 'qwen3.5-9b-mlx',
-        background: gb >= 32 ? 'qwen3.5-27b-mlx' : 'qwen3.5-9b-mlx',
-      },
+      // What Recommend sends on main: the 9B GGUF at 16 GB (the MLX 9B is
+      // no_recommend, #371), the 27B MLX from 32 GB.
+      recommended: gb >= 32
+        ? { ...catalog.recommended, live: 'qwen3.5-27b-mlx', background: 'qwen3.5-27b-mlx' }
+        : { ...catalog.recommended, live: 'qwen3.5-9b', background: 'qwen3.5-9b' },
       hardware: { os: 'darwin', arch: 'arm64', devices: [], sources: [], flavour: 'metal', detected_at: '' },
     }
   }
@@ -642,17 +642,21 @@ describe('setup wizard: MLX models on a Mac', () => {
 
   const names = () => screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label'))
 
-  it('16 GB: recommends the 9B MLX build, lists it first with an MLX badge, keeps the GGUFs, and installs it with no more questions', async () => {
+  it('16 GB: offers the 9B MLX build first with an MLX badge, recommends the GGUF, and installs the MLX pick with no more questions', async () => {
     atLlmStep(macCatalog(16))
-    const rec = await screen.findByRole('radio', { name: 'Qwen 3.5 9B (MLX)' })
-    await waitFor(() => expect(rec).toBeChecked())
-    const row = rec.closest('label')!
-    expect(within(row).getByText('Recommended')).toBeInTheDocument()
-    expect(within(row).getByText('MLX')).toBeInTheDocument()
+    const gguf = await screen.findByRole('radio', { name: 'Qwen 3.5 9B' })
+    await waitFor(() => expect(gguf).toBeChecked())
+    const ggufRow = gguf.closest('label')!
+    expect(within(ggufRow).getByText('Recommended')).toBeInTheDocument()
+    expect(within(ggufRow).queryByText('MLX')).toBeNull()
+    const mlxRow = screen.getByRole('radio', { name: 'Qwen 3.5 9B (MLX)' }).closest('label')!
+    expect(within(mlxRow).getByText('MLX')).toBeInTheDocument()
+    expect(within(mlxRow).queryByText('Recommended')).toBeNull()
     // The 27B and 35B need 32 GB: not offered here.
     expect(names()).toEqual(['Qwen 3.5 9B (MLX)', 'Qwen 3 4B', 'Qwen 3.5 9B'])
-    expect(within(screen.getByRole('radio', { name: 'Qwen 3.5 9B' }).closest('label')!).queryByText('MLX')).toBeNull()
 
+    fireEvent.click(screen.getByRole('radio', { name: 'Qwen 3.5 9B (MLX)' }))
+    expect(screen.getByRole('radio', { name: 'Qwen 3.5 9B (MLX)' })).toBeChecked()
     fireEvent.click(screen.getByRole('button', { name: 'Install and continue' }))
     await waitFor(() =>
       expect(api.startInstall).toHaveBeenCalledWith({ catalog_id: 'qwen3.5-9b-mlx', assign: ['live', 'background'] }),
