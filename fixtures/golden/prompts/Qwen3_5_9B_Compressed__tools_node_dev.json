@@ -426,7 +426,7 @@
    "type": "function",
    "function": {
     "name": "chat",
-    "description": "Small talk and greetings. Put your own spoken reply in message. Facts: answer_question.",
+    "description": "Chat: small talk and greetings. Put your own spoken reply in message. Facts: answer_question.",
     "parameters": {
      "type": "object",
      "properties": {
@@ -445,7 +445,7 @@
    "type": "function",
    "function": {
     "name": "check_timers",
-    "description": "Time left on running timers.",
+    "description": "Check the time left on running timers.",
     "parameters": {
      "type": "object",
      "properties": {
