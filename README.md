@@ -67,8 +67,11 @@ the newest release (at the top). Each release has these files, with `<v>` its ve
 | From a terminal | `install.sh` (Linux, macOS), `install.ps1` (Windows) | `install-agent.sh` (any Linux) |
 | Raspberry Pi (preview) | | `install-pi.sh` |
 
-`<arch>` is `amd64` or `arm64`. `SHA256SUMS` and its minisign signature `SHA256SUMS.minisig`
-cover every file. The install scripts check the archive they download against them.
+`<arch>` is `amd64` or `arm64`. `SHA256SUMS` (signed by `SHA256SUMS.minisig`) covers the
+archives, the `.deb`, `.exe` and `.dmg` installers, and `install-pi.sh`. `install.sh`,
+`install.ps1` and `install-agent.sh` are not in it: they are fetched over TLS from the release,
+so read them before you run them. The install scripts check the archive they download against
+`SHA256SUMS`.
 
 While only pre-releases exist, use the release's own URL. GitHub's `releases/latest` skips
 pre-releases, so `releases/latest/download/...` links give a 404. The commands below use
