@@ -1,24 +1,22 @@
 import type { ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, CircleDashed, Download, Loader2, XCircle } from 'lucide-react'
 import type { SetupJob } from '@/api/auth'
-import { badgeTone } from '@/components/models/tone'
 import { ProgressBar } from '@/components/models/ui'
-import { Badge } from '@/components/ui'
-import type { Tone } from '@/components/models/styles'
+import { Badge, type BadgeTone } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { JOBS, jobFor, jobPercent, jobStateText, underWay, type JobDef } from './jobs'
 
-function tone(job: SetupJob): Tone {
+function tone(job: SetupJob): BadgeTone {
   switch (job.state) {
     case 'ready':
-      return 'ok'
+      return 'success'
     case 'loading':
     case 'downloading':
-      return 'warn'
+      return 'warning'
     case 'failed':
-      return 'bad'
+      return 'danger'
     default:
-      return job.required ? 'bad' : 'muted'
+      return job.required ? 'danger' : 'neutral'
   }
 }
 
@@ -75,7 +73,7 @@ export default function JobChecklist({
                 )}
               </div>
               <div className="ml-auto flex items-center gap-2">
-                <Badge tone={badgeTone[tone(job)]}>{jobStateText(job, wizard)}</Badge>
+                <Badge tone={tone(job)}>{jobStateText(job, wizard)}</Badge>
                 {action?.(def, job)}
               </div>
             </div>

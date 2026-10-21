@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/theme/ThemeProvider'
 import { AuthProvider, useAuth } from '@/auth/AuthContext'
 import { appRoutes } from '@/routes'
 import SessionCacheGuard from '@/auth/SessionCacheGuard'
+import { AuthLoading } from '@/components/auth/AuthScreen'
 import { getSetupState } from '@/api/auth'
 
 const queryClient = new QueryClient()
@@ -29,13 +30,8 @@ export function AppRoutes() {
   // on (signing out after setup must reach the login page, not bounce back into the wizard).
   if (needsSuperuser && auth.isAuthenticated) setNeedsSuperuser(false)
 
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-primary)] border-t-transparent" />
-      </div>
-    )
-  }
+  // The app's first frame: the wordmark and what it waits for, not a bare spinner (audit #6).
+  if (checking) return <AuthLoading label="Checking this install" />
 
   if (needsSuperuser && !auth.isAuthenticated && location.pathname !== '/setup') {
     return <Navigate to="/setup" replace />

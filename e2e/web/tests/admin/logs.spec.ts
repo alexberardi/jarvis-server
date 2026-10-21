@@ -34,6 +34,6 @@ test.describe('admin logs', () => {
     await expect(line).toContainText('"e2e": true')
 
     await page.getByLabel('Search logs').fill(unique('nothing'))
-    await expect(page.getByText('No log entries match.')).toBeVisible()
+    await expect(page.getByText('No log entries match')).toBeVisible()
   })
 })

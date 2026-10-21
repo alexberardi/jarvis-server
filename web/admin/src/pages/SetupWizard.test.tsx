@@ -264,11 +264,11 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     // Account.
-    fireEvent.change(await screen.findByLabelText('Display Name'), { target: { value: 'Op' } })
+    fireEvent.change(await screen.findByLabelText('Display name'), { target: { value: 'Op' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@example.com' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } })
-    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
     await waitFor(() => expect(auth.setup).toHaveBeenCalledWith('op@example.com', 'password123', 'Op', 'tok'))
 
     // Hardware: pre-filled to detection; one click accepts without writing anything.
@@ -356,19 +356,19 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     )
     renderWizard()
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    fireEvent.change(await screen.findByLabelText('Display Name'), { target: { value: 'Op' } })
+    fireEvent.change(await screen.findByLabelText('Display name'), { target: { value: 'Op' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@jarvis.local' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } })
-    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/special-use or reserved name/)
     expect(screen.getByLabelText('Email')).toHaveValue('op@jarvis.local')
-    expect(screen.getByLabelText('Display Name')).toHaveValue('Op')
+    expect(screen.getByLabelText('Display name')).toHaveValue('Op')
 
     // Corrected, it goes through on the same form.
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'op@example.com' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Superuser Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create superuser account' }))
     await waitFor(() => expect(auth.setup).toHaveBeenLastCalledWith('op@example.com', 'password123', 'Op', 'tok'))
     expect(await screen.findByText('RTX 3080 Ti')).toBeInTheDocument()
   })
@@ -574,6 +574,28 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     steps.forEach((b, i) => expect(b).toHaveAccessibleName(names[i]))
     expect(steps[5]).toHaveAttribute('aria-current', 'step')
     expect(screen.getByTestId('setup-step-position')).toHaveTextContent('Step 6 of 11: Voice')
+  })
+
+  // On a phone the "Step N of 11" line is the only way back to an earlier step: it opens the
+  // list, and picking a step closes it again.
+  it('opens the step list from the progress line and closes it after a pick', async () => {
+    signIn()
+    auth.getSetupState.mockResolvedValue({ ...superState, models_configured: true, setup_completed: false, setup_step: 'voice' })
+    renderWizard(false)
+    await screen.findByRole('heading', { name: /^Voice Required/ })
+    const toggle = screen.getByRole('button', { name: /^Step 6 of 11: Voice/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'setup-steps')
+    expect(screen.getByRole('list', { name: 'Setup steps' })).toHaveClass('max-sm:hidden')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('list', { name: 'Setup steps' })).not.toHaveClass('max-sm:hidden')
+
+    fireEvent.click(within(screen.getByRole('list', { name: 'Setup steps' })).getByRole('button', { name: 'Hardware' }))
+    expect(await screen.findByRole('heading', { name: /^Hardware/ })).toBeInTheDocument()
+    const after = screen.getByRole('button', { name: /^Step 3 of 11: Hardware/ })
+    expect(after).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('list', { name: 'Setup steps' })).toHaveClass('max-sm:hidden')
   })
 
   // Home then picks Chat or, while something needs the operator, the dashboard (HomeRedirect).

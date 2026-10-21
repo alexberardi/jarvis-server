@@ -45,7 +45,7 @@ test('edits a workflow and the server keeps the edit', async ({ page }) => {
     await params.getByLabel('Name for checking').fill('account')
     await expect(steps.nth(3)).toContainText('Choose {account}')
     await page.getByRole('button', { name: 'Move step 5 up' }).click()
-    await page.getByRole('switch', { name: 'Ask first before step 1' }).check()
+    await page.getByRole('switch', { name: 'Ask me first before step 1' }).check()
     await page.getByRole('switch', { name: 'Share with the household' }).check()
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page.getByText('Saved')).toBeVisible()

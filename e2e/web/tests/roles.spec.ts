@@ -19,7 +19,7 @@ const ADMIN_PAGES = [
   { label: 'Settings', path: '/admin/settings', heading: 'Settings', api: '/api/settings/' },
   { label: 'Connections', path: '/admin/connections', heading: 'Connections', api: '/api/connections' },
   { label: 'Logs', path: '/admin/logs', heading: 'Logs', api: '/api/logs?limit=1' },
-  { label: 'Traces', path: '/admin/traces', heading: 'Request Traces', api: '/api/traces?limit=1' },
+  { label: 'Traces', path: '/admin/traces', heading: 'Traces', api: '/api/traces?limit=1' },
   { label: 'Nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
   { label: 'Users', path: '/admin/users', heading: 'Users', api: '/api/admin/users' },
   { label: 'Updates', path: '/admin/update', heading: 'Updates', api: '/api/update' },
@@ -61,8 +61,7 @@ test.describe('superuser', () => {
   test('an unknown path shows the not-found page, in the shell and under /admin', async ({ page }) => {
     for (const p of ['/no-such-page', '/admin/no-such-page']) {
       await page.goto(p)
-      await expect(page.getByRole('heading', { name: '404' }), p).toBeVisible()
-      await expect(page.getByText('Page not found')).toBeVisible()
+      await expect(page.getByRole('heading', { level: 1, name: 'Page not found' }), p).toBeVisible()
     }
     // Home is Chat, or the dashboard while the install needs attention (HomeRedirect).
     await page.getByRole('link', { name: 'Go home' }).click()

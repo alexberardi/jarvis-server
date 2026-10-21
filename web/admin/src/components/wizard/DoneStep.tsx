@@ -2,10 +2,12 @@ import { CheckCircle2, PartyPopper, RefreshCw, Smartphone } from 'lucide-react'
 import DoctorChecks from '@/components/doctor/DoctorChecks'
 import JobChecklist from '@/components/setup/JobChecklist'
 import { joinTitles, missingRequired } from '@/components/setup/jobs'
-import { buttonClass } from '@/components/models/styles'
+import { Alert, Button } from '@/components/ui'
 import { useDoctor, useRerunDoctor, useSetupState } from '@/hooks/useSetup'
 import { useSystemInfo } from '@/hooks/useSystem'
-import { cn } from '@/lib/utils'
+import { StepActions, StepHeader, StepLoading } from './StepFrame'
+
+const sectionTitle = 'flex items-center gap-2 text-subheading text-text'
 
 /**
  * DoneStep sums up: the per-job model checklist (AD3b), with what voice still lacks named and
@@ -23,74 +25,80 @@ export default function DoneStep({ onFinish }: { onFinish: () => void }) {
   const missing = missingRequired(s?.jobs)
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
-          <PartyPopper size={20} /> Jarvis is set up
-        </h2>
+    <div className="space-y-6">
+      <div className="space-y-4">
+        <StepHeader icon={<PartyPopper size={22} />} title="Jarvis is set up" />
         {missing.length > 0 && (
-          <p className="mt-1 text-sm text-amber-500" role="status">
-            Voice requests won't work until {joinTitles(missing.map((m) => m.title))}{' '}
-            {missing.length === 1 ? 'is' : 'are'} installed. You can finish now and add{' '}
-            {missing.length === 1 ? 'it' : 'them'} from the Models page; the dashboard will remind you.
-          </p>
+          <Alert tone="warning">
+            <p>
+              Voice requests won't work until {joinTitles(missing.map((m) => m.title))}{' '}
+              {missing.length === 1 ? 'is' : 'are'} installed. You can finish now and add{' '}
+              {missing.length === 1 ? 'it' : 'them'} from the Models page; the dashboard will remind you.
+            </p>
+          </Alert>
         )}
         {missing.length === 0 && s?.jobs?.some((j) => j.state === 'downloading' || j.state === 'loading') && (
-          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+          <p className="text-body text-text-muted">
             Some models are still downloading or starting. They carry on in the background; the dashboard shows their
             progress.
           </p>
         )}
       </div>
 
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-[var(--color-text)]">Models</h3>
+      <section className="space-y-2" aria-labelledby="done-models">
+        <h3 id="done-models" className={sectionTitle}>
+          Models
+        </h3>
         <JobChecklist jobs={s?.jobs} wizard />
         {s?.prompt_provider && (
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Prompt provider: <code className="text-[var(--color-text)]">{s.prompt_provider.effective || 'none'}</code>
+          <p className="text-small text-text-muted">
+            Prompt provider: <code className="text-text">{s.prompt_provider.effective || 'none'}</code>
             {s.prompt_provider.source === 'model' && ' (from the live model)'}
             {s.prompt_provider.source === 'setting' && ' (set by you)'}
             {!s.prompt_provider.valid && s.models_configured && (
-              <span className="text-amber-500"> — pick one on the Models page, or voice requests will fail</span>
+              <span className="text-warning">. Pick one on the Models page, or voice requests will fail.</span>
             )}
           </p>
         )}
       </section>
 
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[var(--color-text)]">Health check</h3>
-          <button type="button" className={buttonClass.secondary} disabled={rerun.isPending} onClick={() => rerun.mutate()}>
-            <RefreshCw size={12} className={cn(rerun.isPending && 'animate-spin')} /> Run again
-          </button>
+      <section className="space-y-2" aria-labelledby="done-health">
+        <div className="flex items-center justify-between gap-3">
+          <h3 id="done-health" className={sectionTitle}>
+            Health check
+          </h3>
+          <Button size="sm" icon={<RefreshCw size={14} aria-hidden />} loading={rerun.isPending} onClick={() => rerun.mutate()}>
+            Run again
+          </Button>
         </div>
         {doctor.data ? (
           <DoctorChecks checks={doctor.data.checks} onlyProblems />
+        ) : doctor.isLoading ? (
+          <StepLoading>Running the checks</StepLoading>
         ) : (
-          <p className="text-xs text-[var(--color-text-muted)]">{doctor.isLoading ? 'Running checks…' : 'Checks unavailable.'}</p>
+          <p className="text-small text-text-muted">The checks could not run. Run again, or run jarvisd doctor on the server.</p>
         )}
       </section>
 
-      <section className="space-y-2 rounded-lg border border-[var(--color-border)] p-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
-          <Smartphone size={14} /> Next steps
+      <section className="space-y-2" aria-labelledby="done-next">
+        <h3 id="done-next" className={sectionTitle}>
+          <Smartphone size={16} aria-hidden className="text-text-muted" /> Next steps
         </h3>
-        <ol className="list-decimal space-y-1 pl-5 text-sm text-[var(--color-text)]">
+        <ol className="list-decimal space-y-1.5 pl-5 text-body text-text marker:text-text-muted">
           <li>
             Install the Jarvis mobile app and sign in with the account you just made. On the same network it finds this
-            server by itself; if not, enter <code>http://{host}:{configPort}</code>.
+            server by itself; if not, enter <code className="break-all">http://{host}:{configPort}</code>.
           </li>
           <li>Add a voice node from the app: it provisions the node with a QR code.</li>
           <li>Say “Jarvis” to the node and ask something.</li>
         </ol>
       </section>
 
-      <div className="flex justify-end">
-        <button type="button" className={buttonClass.primary} onClick={onFinish}>
-          <CheckCircle2 size={14} /> Go to the dashboard
-        </button>
-      </div>
+      <StepActions>
+        <Button variant="primary" icon={<CheckCircle2 size={16} aria-hidden />} onClick={onFinish}>
+          Go to the dashboard
+        </Button>
+      </StepActions>
     </div>
   )
 }

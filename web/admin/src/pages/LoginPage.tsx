@@ -2,7 +2,8 @@ import { type FormEvent, useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { getSetupStatus } from '@/api/auth'
-import { cn } from '@/lib/utils'
+import AuthScreen, { AuthLoading } from '@/components/auth/AuthScreen'
+import { Alert, Button, Input } from '@/components/ui'
 
 export default function LoginPage() {
   const { state, mustChangePassword, login } = useAuth()
@@ -29,8 +30,6 @@ export default function LoginPage() {
   }, [navigate])
 
   if (state.isAuthenticated) {
-    // /setup resumes an unfinished wizard from the server's state (A10 F9) and otherwise
-    // forwards to the dashboard.
     // A superuser goes through /setup, which resumes an unfinished wizard (A10 F9) and
     // otherwise forwards home; a member has no setup to resume.
     const next = mustChangePassword ? '/change-password' : state.user?.is_superuser ? '/setup' : '/'
@@ -42,80 +41,41 @@ export default function LoginPage() {
     login(email, password)
   }
 
-  const inputClass = cn(
-    'w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-2',
-    'text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]',
-    'outline-none focus:ring-2 focus:ring-[var(--color-primary)]',
-  )
-
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
-        <div className="w-full max-w-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-lg">
-          <div className="flex justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-border)] border-t-[var(--color-primary)]" />
-          </div>
-        </div>
-      </div>
-    )
-  }
+  if (checking) return <AuthLoading label="Checking this install" />
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
-      <div className="w-full max-w-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-lg">
-        <h1 className="mb-6 text-center text-2xl font-bold text-[var(--color-text)]">Jarvis Automation</h1>
+    <AuthScreen title="Sign in">
+      <form onSubmit={handleLogin} className="space-y-4">
+        <Input
+          id="email"
+          label="Email"
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+        />
+        <Input
+          id="password"
+          label="Password"
+          type="password"
+          required
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="mb-1 block text-sm text-[var(--color-text-muted)]">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className={inputClass}
-              placeholder="you@example.com"
-            />
-          </div>
+        {state.error && (
+          <Alert tone="danger" title="Couldn't sign in">
+            {state.error}
+          </Alert>
+        )}
 
-          <div>
-            <label htmlFor="password" className="mb-1 block text-sm text-[var(--color-text-muted)]">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-
-          {state.error && (
-            <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-500">
-              {state.error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={state.isLoading}
-            className={cn(
-              'w-full rounded-lg bg-[var(--color-primary)] px-4 py-2 font-medium text-white',
-              'hover:opacity-90 disabled:opacity-50',
-              'transition-opacity',
-            )}
-          >
-            {state.isLoading ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" loading={state.isLoading} className="w-full">
+          Sign in
+        </Button>
+      </form>
+    </AuthScreen>
   )
 }

@@ -104,7 +104,24 @@ describe('RecordingsPage', () => {
     })
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(api.deleteRecording.mock.calls[0][0]).toBe('rec_1')
-    expect(await screen.findByText('No recordings.')).toBeInTheDocument()
+    expect(await screen.findByText('No recordings yet')).toBeInTheDocument()
+  })
+
+  it('says how to make a recording when there are none', async () => {
+    api.listRecordings.mockResolvedValue([])
+    renderPage()
+    expect(await screen.findByText('No recordings yet')).toBeInTheDocument()
+    expect(screen.getByText(/Record a macro/)).toBeInTheDocument()
+  })
+
+  it('says what failed and loads again on Try again', async () => {
+    api.listRecordings.mockRejectedValueOnce(new Error('boom')).mockResolvedValue([rec()])
+    renderPage()
+    expect(await screen.findByText("Couldn't load your recordings")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    })
+    expect(await screen.findAllByTestId('recording')).toHaveLength(1)
   })
 
   it('shows retention read-only to a member', async () => {
