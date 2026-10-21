@@ -48,5 +48,6 @@ field). On: exactly the old rows, so an upgraded install answers what its client
 know. Every client builds requests by concatenating onto `url`, so a path survives.
 
 `jarvisd doctor` reads the stored decision without migrating (no database or no row reads as
-off) and checks only the ports that bind. The harness (`scripts/sandbox`) keeps the legacy
+off) and checks only the ports that bind. A fresh `install.sh` refuses another program only on
+those, but still refuses the legacy stack on any legacy port: that install is a move off it. The harness (`scripts/sandbox`) keeps the legacy
 ports unless `--single-port` is given.

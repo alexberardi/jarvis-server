@@ -655,7 +655,10 @@ func TestRunnerLegacyError(t *testing.T) {
 	cfg := &fakeModule{name: "config", listener: config.ListenerConfig}
 	r := &Runner{Deps: deps(t), Modules: []Module{cfg}, Mounts: map[string]string{config.ListenerCC: "/cc"},
 		Legacy: func(context.Context) (bool, error) { return false, boom }}
-	if err := r.Run(context.Background()); !errors.Is(err, boom) {
+	// A Run that ignores the error serves until ctx ends, so the test fails fast instead of hanging.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := r.Run(ctx); !errors.Is(err, boom) {
 		t.Fatalf("Run = %v, want %v", err, boom)
 	}
 	if r.Addr(config.ListenerConfig) != "" {

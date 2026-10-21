@@ -341,8 +341,12 @@ fi
 if [ -z "$CUR" ]; then
   # A fresh install next to the legacy stack (ID7): jarvisd needs its ports, and its GPUs
   # (the legacy llama-servers hold whole cards), so --stop-legacy stops the stack even when
-  # its ports are free, and only then looks at what still holds them.
+  # its ports are free, and only then looks at what still holds them. A fresh jarvisd binds
+  # only the API, admin and MQTT ports (ports_held), but the legacy stack on any port jarvisd
+  # binds with server.legacy_ports on (legacy_ports_held) is still refused: it is the one an
+  # upgrade from it turns on, and it holds the GPUs.
   ports_held() { "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; }
+  legacy_ports_held() { JARVIS_LEGACY_PORTS=1 "$NEW" doctor --json 2>/dev/null | grep -q '"name": "ports"'; }
   holders() { # "  COMMAND (pid N) on PORT" for each listener on a jarvisd port (all of them as root)
     jp='p = port + 0; if ((p >= 7700 && p <= 7712) || p == 7030 || p == 7031 || p == 1884 || p == 9883)'
     if command -v lsof >/dev/null; then
@@ -365,16 +369,17 @@ $h}
       i=0; while [ $i -lt 15 ] && ports_held; do sleep 1; i=$((i + 1)); done
     fi
     if ports_held; then other_die; fi
-  elif ports_held; then
+  elif legacy_ports_held; then
     docker_init
     legacy=$(legacy_containers) agents=$(legacy_agents)
-    [ -n "$legacy$agents" ] || other_die
-    die "the legacy Jarvis stack is running and holds jarvisd's ports:${legacy:+
+    if [ -n "$legacy$agents" ]; then
+      die "the legacy Jarvis stack is running and holds jarvisd's ports:${legacy:+
   Docker containers: $legacy}${agents:+
   LaunchAgents: $agents}
   Re-run with --stop-legacy to stop it (containers: docker stop + restart policy off; LaunchAgents: stopped
   and off at login; its admin's user unit off; its data is kept). It prints how to go back${legacy:+;
   for the containers: jarvisd service stop && docker start $legacy}"
+    elif ports_held; then other_die; fi
   fi
 fi
 
