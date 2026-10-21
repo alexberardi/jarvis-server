@@ -136,6 +136,38 @@ is installed), place the binary, register the service with `jarvisd service inst
 link. Data lives in `/var/lib/jarvisd` (Linux system service), `~/.jarvisd` (Linux `--user`, and
 the service account's home on macOS) or `%ProgramData%\jarvisd` (Windows).
 
+### In Docker (Unraid, a NAS, docker compose)
+
+`ghcr.io/alexberardi/jarvisd` is published for linux/amd64 and linux/arm64: `:<version>` (e.g.
+`:v0.1.0`) and `:latest` for each release, and `:dev` for every change merged to main. In the
+image jarvisd runs in container mode: update it by pulling a new image, not with
+`jarvisd upgrade`.
+
+```sh
+docker run -d --name jarvis --restart unless-stopped \
+  -p 7700:7700 -p 7710:7710 -p 1884:1884 \
+  -v /srv/jarvis:/data ghcr.io/alexberardi/jarvisd:latest
+docker logs jarvis   # "Setup token: ..." for the setup wizard on http://<host>:7710/
+```
+
+**NVIDIA GPU:** with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+on the host, add `--gpus all`:
+
+```sh
+docker run -d --name jarvis --restart unless-stopped --gpus all \
+  -p 7700:7700 -p 7710:7710 -p 1884:1884 \
+  -v /srv/jarvis:/data ghcr.io/alexberardi/jarvisd:latest
+```
+
+jarvisd finds the card with `nvidia-smi` and downloads the CUDA engine into `/data` the first
+time a model needs it. Without `--gpus` the same image runs on the CPU. Engines and models live
+in `/data`, so they survive pulling a new image.
+
+**Unraid:** Docker tab → Add Container, Repository `ghcr.io/alexberardi/jarvisd:latest`, a path
+`/data` → `/mnt/user/appdata/jarvis`, ports 7700, 7710 and 1884. For an NVIDIA card install the
+Nvidia Driver plugin, add `--runtime=nvidia` to Extra Parameters and a variable
+`NVIDIA_VISIBLE_DEVICES` = `all`. More in [docs/install/container.md](docs/install/container.md).
+
 ### The desktop agent
 
 Install the agent on each computer you want Jarvis to control or listen on, after the server. It

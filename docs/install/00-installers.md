@@ -262,7 +262,8 @@ the firewall rules it added (§6.1, identified by the `jarvisd` comment), and ke
 
 **TrueNAS SCALE / other appliance distros** (the admin installer special-cased TrueNAS, `install.sh:44-51,144-173`):
 `/usr/local` is read-only there and apps are expected as containers. Out of scope for the first cut; the
-minimal container image in PLAN §3.4 is the answer for NAS users (I8 notes it).
+container image `ghcr.io/alexberardi/jarvisd` ([container.md](container.md), linux/amd64 and arm64) is the
+answer for NAS users.
 
 **Distros without systemd** (Alpine/OpenRC, WSL1): the script refuses with "run `jarvisd serve` under your
 own supervisor", printing the one-line command.
