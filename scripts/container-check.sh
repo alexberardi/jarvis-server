@@ -1,19 +1,38 @@
 #!/usr/bin/env bash
 # Build the jarvisd image from a release archive and check that it works (PLAN P4 test plan 5).
-# Usage: scripts/container-check.sh DIST VERSION
-#   DIST/jarvisd-VERSION-linux-amd64.tar.gz is the archive, packed as the release packs it.
+# Usage: scripts/container-check.sh DIST VERSION [ARCH]
+#   DIST/jarvisd-VERSION-linux-ARCH.tar.gz is the archive, packed as the release packs it. ARCH is
+#   amd64 or arm64, by default this machine's: the image is run, so it must be the machine's.
 # Runs the image as jarvisd:check, container jc, on host ports 37700/37710/31884 and a temp data
 # dir; exits 1 naming the first check that fails. Needs docker and curl.
 set -euo pipefail
 
-if [ $# -ne 2 ]; then
-	echo "usage: $0 DIST VERSION" >&2
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+	echo "usage: $0 DIST VERSION [ARCH]" >&2
 	exit 2
 fi
 DIST=$1
 VERSION=$2
+ARCH=${3:-}
+if [ -z "$ARCH" ]; then
+	case "$(uname -m)" in
+	x86_64) ARCH=amd64 ;;
+	aarch64 | arm64) ARCH=arm64 ;;
+	*)
+		echo "unsupported machine $(uname -m); pass ARCH (amd64 or arm64)" >&2
+		exit 2
+		;;
+	esac
+fi
+case "$ARCH" in
+amd64 | arm64) ;;
+*)
+	echo "usage: $0 DIST VERSION [ARCH]: ARCH is amd64 or arm64, got '$ARCH'" >&2
+	exit 2
+	;;
+esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ARCHIVE="jarvisd-$VERSION-linux-amd64.tar.gz"
+ARCHIVE="jarvisd-$VERSION-linux-$ARCH.tar.gz"
 IMAGE=jarvisd:check
 NAME=jc
 API=http://localhost:37700
@@ -23,7 +42,6 @@ API=http://localhost:37700
 	exit 2
 }
 
-ctx=$(mktemp -d "${TMPDIR:-/tmp}/jarvisd-ctx.XXXXXX")
 data=$(mktemp -d "${TMPDIR:-/tmp}/jarvisd-data.XXXXXX")
 built=""
 
@@ -35,7 +53,6 @@ cleanup() {
 			-c 'rm -rf /data/* /data/.[!.]*' >/dev/null 2>&1 || true
 		docker rmi -f "$IMAGE" >/dev/null 2>&1 || true
 	fi
-	rm -rf "$ctx"
 	rmdir "$data" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -83,12 +100,13 @@ wait_healthy() {
 }
 
 # --- build
-cp "$DIST/$ARCHIVE" "$ROOT/scripts/packaging/container/entrypoint.sh" "$ctx/"
-docker build -q -t "$IMAGE" -f "$ROOT/scripts/packaging/container/Dockerfile" \
-	--build-arg ARCHIVE="$ARCHIVE" --build-arg VERSION="$VERSION" "$ctx" >/dev/null ||
+"$ROOT/scripts/container-build.sh" "$DIST" "$VERSION" "$ARCH" "$IMAGE" >/dev/null ||
 	fail "docker build"
 built=1
 ok "built $IMAGE from $ARCHIVE"
+arch=$(docker image inspect -f '{{.Architecture}}' "$IMAGE") || fail "docker image inspect"
+[ "$arch" = "$ARCH" ] || fail "image architecture is '$arch', want '$ARCH'"
+ok "image architecture is $ARCH"
 
 # --- first run
 run
