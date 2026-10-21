@@ -13,7 +13,10 @@ opt-in, superuser-only, and the setting says what leaves the house.
   another box. Vendor-specific APIs are dialects behind the same setting, as Anthropic is for
   LLM labels.
 - **Speaker recognition stays local** whatever the STT provider is; only transcription moves.
-- **Fallback:** when the remote provider fails, fall back to the local engine **on CPU**.
+- **Fallback:** when the remote provider fails, fall back to the local engine **on CPU**. It is a
+  setting, off by default: turning it on uses a local model the user installs from the Models
+  page (a Whisper model for STT, Kokoro for TTS) and nothing is downloaded behind their back.
+  On with no model installed is shown as a warning in settings, not a silent failure.
 - **Voice:** a remote voice setting per provider (picked from the provider's list where it has
   one). **One voice for everything**, phone calls included; a separate phone voice can come later.
 - **Known drawbacks, accepted:** added latency on every voice turn and phone turn.
