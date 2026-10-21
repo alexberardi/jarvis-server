@@ -106,6 +106,29 @@ describe('InboxPage (list)', () => {
     renderAt('/inbox')
     expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument()
   })
+
+  it('marks an unread confirmation as waiting for an answer', async () => {
+    const actions = [{ button_text: 'Send', button_action: 'send_click', button_type: 'primary' }]
+    api.listInbox.mockResolvedValue([
+      it1({ id: 'c1', title: 'Send it?', category: 'confirmation', metadata: { node_id: 'n1', command_name: 'email', actions } }),
+      it1({ id: 'c2', title: 'Sent', category: 'confirmation', is_read: true, metadata: { node_id: 'n1', command_name: 'email', actions } }),
+      it1(),
+    ])
+    renderAt('/inbox')
+    await screen.findByText('Send it?')
+    expect(within(screen.getByRole('link', { name: /Send it\?/ })).getByText('Needs your answer')).toBeInTheDocument()
+    expect(screen.getAllByText('Needs your answer')).toHaveLength(1)
+  })
+
+  it('says what failed and loads again on Try again', async () => {
+    api.listInbox.mockRejectedValueOnce(new Error('boom')).mockResolvedValue([it1()])
+    renderAt('/inbox')
+    expect(await screen.findByText("Couldn't load your inbox")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    })
+    expect(await screen.findByText('Best coffee beans')).toBeInTheDocument()
+  })
 })
 
 describe('InboxItemPage (detail)', () => {

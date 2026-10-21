@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowLeft, ArrowUp, GripVertical, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { saveWorkflow } from '@/api/workflows'
 import type { ParamKind, SuccessCheck, TaughtWorkflow, WStep } from '@/api/workflows'
+import { Badge, Button, Card, CardHeader, ErrorState, Input, PageHeader, Select, Skeleton, Switch } from '@/components/ui'
+import { FieldFrame } from '@/components/ui/Field'
+import { fieldControl } from '@/components/ui/fieldStyles'
 import { useWorkflow, workflowKeys } from '@/hooks/useWorkflows'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, errorStatus } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
   RISKS,
@@ -22,14 +25,11 @@ import {
 import type { Candidate, DraftStep } from '@/lib/workflows'
 import Sentence from '@/components/workflows/Sentence'
 
-const button =
-  'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50'
-const iconButton =
-  'inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-alt)] hover:text-[var(--color-text)] disabled:opacity-30'
-const input =
-  'w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-3 py-1.5 text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-70'
-const section = 'rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-6'
 const KINDS: ParamKind[] = ['text', 'date', 'month', 'number', 'file']
+const TARGETS = [
+  { value: 'browser', label: 'the browser' },
+  { value: 'desktop', label: 'the desktop' },
+]
 
 /** WorkflowEditPage is a taught workflow as a readable step list its owner (or an admin) edits. */
 export default function WorkflowEditPage() {
@@ -37,15 +37,26 @@ export default function WorkflowEditPage() {
   const wf = useWorkflow(id)
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <Link to="/workflows" className="inline-flex items-center gap-1 text-sm text-[var(--color-primary)] hover:underline">
-        <ArrowLeft size={14} aria-hidden="true" /> Workflows
+      <Link
+        to="/workflows"
+        className="inline-flex min-h-10 items-center gap-1 rounded-control text-small text-text-muted transition-colors duration-(--duration-hover) hover:text-text"
+      >
+        <ArrowLeft size={16} aria-hidden /> Workflows
       </Link>
       {wf.isError ? (
-        <p role="alert" className="text-sm text-red-500">
-          {errorMessage(wf.error, 'Could not load the workflow')}
-        </p>
+        <Card>
+          <ErrorState
+            title="Couldn't load this workflow"
+            message={errorMessage(wf.error, 'Check your connection and try again.')}
+            onRetry={errorStatus(wf.error) === 404 ? undefined : () => wf.refetch()}
+          />
+        </Card>
       ) : !wf.data ? (
-        <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
+        <div role="status" aria-label="Loading the workflow" className="space-y-4">
+          <Skeleton className="h-7 w-2/3" />
+          <Skeleton className="h-28 w-full rounded-card" />
+          <Skeleton className="h-64 w-full rounded-card" />
+        </div>
       ) : (
         <Editor key={`${wf.data.id}:${wf.data.updated_at}`} wf={wf.data} />
       )}
@@ -113,42 +124,52 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
         if (edit && !problem) save.mutate()
       }}
     >
-      <h1 className="text-xl font-semibold text-[var(--color-text)]">{wf.name}</h1>
-      {!edit && (
-        <p className="rounded-lg bg-[var(--color-surface-alt)] px-3 py-2 text-sm text-[var(--color-text-muted)]">
-          Shared with you. Only the member who taught it, or a household admin, can change it.
-        </p>
-      )}
+      <PageHeader
+        className="mb-2"
+        title={<span className="[overflow-wrap:anywhere]">{wf.name}</span>}
+        description={edit ? undefined : 'Shared with you. Only the member who taught it, or a household admin, can change it.'}
+      />
 
-      <section aria-labelledby="wf-about" className={cn(section, 'space-y-3')}>
+      <Card as="section" aria-labelledby="wf-about" className="space-y-4">
         <h2 id="wf-about" className="sr-only">
           Name and sharing
         </h2>
-        <label className="block text-sm font-medium text-[var(--color-text)]">
-          Name
-          <input className={cn(input, 'mt-1')} value={name} disabled={!edit} maxLength={100} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label className="flex items-center gap-3 text-sm text-[var(--color-text)]">
-          <input
-            type="checkbox"
-            role="switch"
-            checked={shared}
-            disabled={!edit}
-            onChange={(e) => setShared(e.target.checked)}
-            className="h-4 w-4 accent-[var(--color-primary)]"
-          />
-          Share with the household
-        </label>
-      </section>
+        <Input label="Name" value={name} disabled={!edit} maxLength={100} onChange={(e) => setName(e.target.value)} />
+        <Switch label="Share with the household" checked={shared} disabled={!edit} onCheckedChange={setShared} />
+      </Card>
 
-      <section aria-labelledby="wf-steps" className={section}>
-        <h2 id="wf-steps" className="text-lg font-medium text-[var(--color-text)]">
-          Steps
-        </h2>
-        <ol className="mt-3 space-y-2">
+      <Card as="section" aria-labelledby="wf-steps">
+        <CardHeader id="wf-steps" title="Steps" className="mb-1" />
+        <ol className="divide-y divide-border">
           {shown.map((d, i) => {
             const raw = steps[i]
             const risky = !!d.step.risk
+            // One row of icons: beside the switch on a phone, beside the intent from sm (grid placement).
+            const icons = edit && (
+              <div className="col-start-2 row-start-3 flex shrink-0 items-center self-center sm:row-start-2">
+                <Button size="icon" variant="ghost" aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, i - 1)}>
+                  <ArrowUp size={16} aria-hidden />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={`Move step ${i + 1} down`}
+                  disabled={i === steps.length - 1}
+                  onClick={() => move(i, i + 1)}
+                >
+                  <ArrowDown size={16} aria-hidden />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="hover:bg-danger-soft hover:text-danger"
+                  aria-label={`Delete step ${i + 1}`}
+                  onClick={() => setSteps((cur) => cur.filter((s) => s.uid !== raw.uid))}
+                >
+                  <Trash2 size={16} aria-hidden />
+                </Button>
+              </div>
+            )
             return (
               <li
                 key={d.uid}
@@ -162,261 +183,192 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
                   setDragFrom(null)
                 }}
                 onDragEnd={() => setDragFrom(null)}
-                className={cn(
-                  'rounded-lg border border-[var(--color-border)] p-3',
-                  dragFrom === i && 'opacity-50',
-                  risky && 'border-amber-500/60',
-                )}
+                className={cn('flex items-start gap-2 py-3', dragFrom === i && 'opacity-50')}
               >
-                <div className="flex items-start gap-2">
-                  {edit && <GripVertical size={16} className="mt-0.5 shrink-0 cursor-grab text-[var(--color-text-muted)]" aria-hidden="true" />}
-                  <span className="mt-px w-5 shrink-0 text-sm text-[var(--color-text-muted)]">{i + 1}.</span>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <p className="text-sm text-[var(--color-text)] [overflow-wrap:anywhere]">
-                      <Sentence parts={stepSentence(d.step)} />
-                      {risky && (
-                        <span
-                          title={riskLabel(d.step.risk)}
-                          className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
-                        >
-                          <ShieldAlert size={12} aria-hidden="true" /> Asks first
-                        </span>
-                      )}
-                    </p>
-                    {edit ? (
-                      <label className="block text-xs text-[var(--color-text-muted)]">
-                        What it does
-                        <input
-                          className={cn(input, 'mt-0.5')}
-                          aria-label={`Step ${i + 1} intent`}
-                          value={d.step.intent}
-                          onChange={(e) => {
-                            const v = e.target.value
-                            patch(raw.uid, (s) => ({ ...s, intent: v, action: { ...s.action, intent: v } }))
-                          }}
-                        />
-                      </label>
-                    ) : (
-                      <p className="text-xs text-[var(--color-text-muted)]">{d.step.intent}</p>
+                {edit && <GripVertical size={16} className="mt-1 hidden shrink-0 cursor-grab text-text-muted sm:block" aria-hidden />}
+                <span className="mt-px w-5 shrink-0 text-body text-text-muted tabular-nums">{i + 1}.</span>
+                <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-2">
+                  <p className="col-span-2 text-body text-text [overflow-wrap:anywhere]">
+                    <Sentence parts={stepSentence(d.step)} />
+                    {risky && (
+                      <Badge tone="warning" title={riskLabel(d.step.risk)} className="ml-2 align-middle">
+                        <ShieldAlert size={12} aria-hidden /> Asks first
+                      </Badge>
                     )}
-                    {edit && (
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
-                        <label className="inline-flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            role="switch"
-                            aria-label={`Ask first before step ${i + 1}`}
-                            checked={risky}
-                            disabled={raw.lockedRisk}
-                            onChange={(e) => {
-                              const on = e.target.checked
-                              patch(raw.uid, (s) => ({ ...s, risk: on ? 'submit_third_party' : '' }))
-                            }}
-                            className="h-4 w-4 accent-[var(--color-primary)]"
-                          />
-                          {raw.lockedRisk ? `Always asks: ${riskLabel(d.step.risk).toLowerCase()}` : 'Ask me first'}
-                        </label>
-                        {risky && !raw.lockedRisk && (
-                          <select
-                            aria-label={`Why step ${i + 1} asks`}
-                            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1 text-xs text-[var(--color-text)]"
-                            value={d.step.risk}
-                            onChange={(e) => {
-                              const v = e.target.value
-                              patch(raw.uid, (s) => ({ ...s, risk: v }))
-                            }}
-                          >
-                            {RISKS.map((r) => (
-                              <option key={r.value} value={r.value}>
-                                {r.label}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  </p>
+                  {edit ? (
+                    <Input
+                      aria-label={`Step ${i + 1} intent`}
+                      placeholder="What it does"
+                      wrapperClassName="col-span-2 sm:col-span-1"
+                      value={d.step.intent}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        patch(raw.uid, (s) => ({ ...s, intent: v, action: { ...s.action, intent: v } }))
+                      }}
+                    />
+                  ) : (
+                    <p className="col-span-2 text-small text-text-muted">{d.step.intent}</p>
+                  )}
                   {edit && (
-                    <div className="flex shrink-0 flex-col sm:flex-row">
-                      <button type="button" className={iconButton} aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, i - 1)}>
-                        <ArrowUp size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        className={iconButton}
-                        aria-label={`Move step ${i + 1} down`}
-                        disabled={i === steps.length - 1}
-                        onClick={() => move(i, i + 1)}
-                      >
-                        <ArrowDown size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(iconButton, 'hover:text-red-500')}
-                        aria-label={`Delete step ${i + 1}`}
-                        onClick={() => setSteps((cur) => cur.filter((s) => s.uid !== raw.uid))}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                    <div className="col-start-1 row-start-3 flex flex-wrap items-center gap-x-3 gap-y-2 sm:col-span-2">
+                      <Switch
+                        label={
+                          <span className="text-small text-text-muted">
+                            {raw.lockedRisk ? `Always asks: ${riskLabel(d.step.risk).toLowerCase()}` : 'Ask me first'}
+                            <span className="sr-only"> before step {i + 1}</span>
+                          </span>
+                        }
+                        checked={risky}
+                        disabled={raw.lockedRisk}
+                        onCheckedChange={(on) => patch(raw.uid, (s) => ({ ...s, risk: on ? 'submit_third_party' : '' }))}
+                      />
+                      {risky && !raw.lockedRisk && (
+                        <Select
+                          aria-label={`Why step ${i + 1} asks`}
+                          className="h-8 text-small"
+                          options={RISKS}
+                          value={d.step.risk}
+                          onValueChange={(v) => patch(raw.uid, (s) => ({ ...s, risk: v }))}
+                        />
+                      )}
                     </div>
                   )}
+                  {icons}
                 </div>
               </li>
             )
           })}
         </ol>
         {edit && (
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-            <label className="flex-1 text-xs text-[var(--color-text-muted)]">
-              New step
-              <input
-                className={cn(input, 'mt-0.5')}
-                placeholder="e.g. Open the statements page"
-                value={newIntent}
-                onChange={(e) => setNewIntent(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    addStep()
-                  }
-                }}
-              />
-            </label>
-            <label className="text-xs text-[var(--color-text-muted)]">
-              On
-              <select
-                className={cn(input, 'mt-0.5')}
-                value={newTarget}
-                onChange={(e) => setNewTarget(e.target.value as WStep['target'])}
-              >
-                <option value="browser">the browser</option>
-                <option value="desktop">the desktop</option>
-              </select>
-            </label>
-            <button type="button" className={button} disabled={!newIntent.trim()} onClick={addStep}>
-              <Plus size={14} aria-hidden="true" /> Add step
-            </button>
+          <div className="mt-2 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-end">
+            <Input
+              label="New step"
+              wrapperClassName="flex-1"
+              placeholder="e.g. Open the statements page"
+              value={newIntent}
+              onChange={(e) => setNewIntent(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addStep()
+                }
+              }}
+            />
+            <Select
+              label="On"
+              wrapperClassName="sm:w-40"
+              options={TARGETS}
+              value={newTarget}
+              onValueChange={(v) => setNewTarget(v as WStep['target'])}
+            />
+            <Button icon={<Plus size={16} aria-hidden />} disabled={!newIntent.trim()} onClick={addStep}>
+              Add step
+            </Button>
           </div>
         )}
-      </section>
+      </Card>
 
-      <section aria-labelledby="wf-params" className={section}>
-        <h2 id="wf-params" className="text-lg font-medium text-[var(--color-text)]">
-          Which of these change each time?
-        </h2>
-        {live.length === 0 ? (
-          <p className="mt-1 text-sm text-[var(--color-text-muted)]">Nothing this workflow types changes between runs.</p>
-        ) : (
-          <ul className="mt-3 space-y-3">
+      <Card as="section" aria-labelledby="wf-params">
+        <CardHeader
+          id="wf-params"
+          title="Which of these change each time?"
+          description={live.length === 0 ? 'Nothing this workflow types changes between runs.' : undefined}
+          className={live.length === 0 ? 'mb-0' : undefined}
+        />
+        {live.length > 0 && (
+          <ul className="space-y-3">
             {live.map((c) => (
               <li key={c.key} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <label className="flex min-w-0 flex-1 items-center gap-3 text-sm text-[var(--color-text)]">
-                  <input
-                    type="checkbox"
-                    role="switch"
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <Switch
                     aria-label={`${c.example || c.name} changes each time`}
                     checked={c.on}
                     // A param with no example has nothing to fall back to.
                     disabled={!edit || (c.on && !c.example)}
-                    onChange={(e) => patchCand(c.key, { on: e.target.checked })}
-                    className="h-4 w-4 shrink-0 accent-[var(--color-primary)]"
+                    onCheckedChange={(on) => patchCand(c.key, { on })}
                   />
-                  <span className="truncate font-mono text-xs">{c.example || `{${c.name}}`}</span>
-                </label>
+                  <span className="truncate font-mono text-small text-text">{c.example || `{${c.name}}`}</span>
+                </div>
                 {c.on && (
                   <div className="flex gap-2">
-                    <input
-                      className={cn(input, 'sm:w-40')}
+                    <Input
                       aria-label={`Name for ${c.example || c.name}`}
+                      wrapperClassName="flex-1 sm:w-40 sm:flex-none"
                       value={c.name}
                       disabled={!edit}
                       onChange={(e) => patchCand(c.key, { name: e.target.value.trim() })}
                     />
-                    <select
-                      className={cn(input, 'w-28')}
+                    <Select
                       aria-label={`Kind of ${c.example || c.name}`}
+                      wrapperClassName="w-28"
+                      options={KINDS.map((k) => ({ value: k, label: k }))}
                       value={c.kind}
                       disabled={!edit}
-                      onChange={(e) => patchCand(c.key, { kind: e.target.value as ParamKind })}
-                    >
-                      {KINDS.map((k) => (
-                        <option key={k} value={k}>
-                          {k}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={(v) => patchCand(c.key, { kind: v as ParamKind })}
+                    />
                   </div>
                 )}
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
-      <section aria-labelledby="wf-success" className={cn(section, 'space-y-3')}>
-        <h2 id="wf-success" className="text-lg font-medium text-[var(--color-text)]">
-          I'll know it worked when …
-        </h2>
-        <p className="text-sm text-[var(--color-text)]" data-testid="success-sentence">
+      <Card as="section" aria-labelledby="wf-success" className="space-y-4">
+        <CardHeader id="wf-success" title="I'll know it worked when …" className="mb-2" />
+        <p className="text-body text-text" data-testid="success-sentence">
           {clauses.length ? clauses.join(', and ') + '.' : 'Nothing is checked yet: Jarvis will ask you.'}
         </p>
         {edit && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs text-[var(--color-text-muted)]">
-              A file downloads named like
-              <input
-                className={cn(input, 'mt-0.5')}
-                placeholder="statement*.csv"
-                value={success.download?.name_like ?? ''}
-                onChange={(e) => setSuccess((s) => ({ ...s, download: { ...s.download, name_like: e.target.value } }))}
-              />
-            </label>
-            <label className="text-xs text-[var(--color-text-muted)]">
-              The address contains
-              <input
-                className={cn(input, 'mt-0.5')}
-                value={success.url_contains ?? ''}
-                onChange={(e) => setSuccess((s) => ({ ...s, url_contains: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs text-[var(--color-text-muted)]">
-              The page shows (one per line)
-              <textarea
-                className={cn(input, 'mt-0.5')}
-                rows={2}
-                value={(success.text_present ?? []).join('\n')}
-                onChange={(e) => setSuccess((s) => ({ ...s, text_present: e.target.value.split('\n') }))}
-              />
-            </label>
-            <label className="text-xs text-[var(--color-text-muted)]">
-              A yes/no question about the screen
-              <textarea
-                className={cn(input, 'mt-0.5')}
-                rows={2}
-                value={success.screen ?? ''}
-                onChange={(e) => setSuccess((s) => ({ ...s, screen: e.target.value }))}
-              />
-            </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="A file downloads named like"
+              placeholder="statement*.csv"
+              value={success.download?.name_like ?? ''}
+              onChange={(e) => setSuccess((s) => ({ ...s, download: { ...s.download, name_like: e.target.value } }))}
+            />
+            <Input
+              label="The address contains"
+              value={success.url_contains ?? ''}
+              onChange={(e) => setSuccess((s) => ({ ...s, url_contains: e.target.value }))}
+            />
+            <TextArea
+              label="The page shows (one per line)"
+              value={(success.text_present ?? []).join('\n')}
+              onChange={(v) => setSuccess((s) => ({ ...s, text_present: v.split('\n') }))}
+            />
+            <TextArea
+              label="A yes/no question about the screen"
+              value={success.screen ?? ''}
+              onChange={(v) => setSuccess((s) => ({ ...s, screen: v }))}
+            />
           </div>
         )}
-      </section>
+      </Card>
 
       {edit && (
         <div className="flex flex-wrap items-center justify-end gap-3">
           {problem && (
-            <p role="alert" className="text-sm text-red-500">
+            <p role="alert" className="text-small text-danger">
               {problem}
             </p>
           )}
-          <button
-            type="submit"
-            disabled={!!problem || save.isPending}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {save.isPending ? 'Saving...' : 'Save'}
-          </button>
+          <Button type="submit" variant="primary" disabled={!!problem} loading={save.isPending}>
+            Save
+          </Button>
         </div>
       )}
     </form>
+  )
+}
+
+/** TextArea is a two-line field on the base components' frame and field style. */
+function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const id = useId()
+  return (
+    <FieldFrame id={id} label={label}>
+      <textarea id={id} rows={2} className={cn(fieldControl, 'h-auto py-2')} value={value} onChange={(e) => onChange(e.target.value)} />
+    </FieldFrame>
   )
 }
