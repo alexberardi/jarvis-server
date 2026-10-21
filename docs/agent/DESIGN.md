@@ -1047,8 +1047,11 @@ nothing to do. Started by a login item it waits for setup instead (below).
   `node.json`) keeps later logins quiet. The menu entry, the app and `jarvis-agent://start` still
   open the page.
 - **Then the agent.** The waiting `run` checks every second for the credentials the page saves,
-  and once they're there it becomes the agent in place (`exec` of the same binary and arguments,
-  so the PID and its supervisor stay; Windows spawns a new `run`). The page's own start finds
+  and once they're there it becomes the agent: on Linux in place (`exec` of the same binary and
+  arguments, so the PID and its supervisor stay); on macOS it asks launchd for a fresh process
+  (`launchctl kickstart -k gui/<uid>/net.jarvisautomation.agent`, or a detached `run` outside
+  launchd), because an AppKit process that execs itself shows no menu-bar icon (#407); Windows
+  spawns a new `run`. The page's own start finds
   the unit already active, and waits for that agent's control socket. Quit in the waiting menu
   exits 0, which no supervisor restarts. Code: `cmd/jarvis-agent/setupwait.go`. The island
 now runs whenever `--no-overlay` isn't given, voice or not, so the pill can show; voice states
