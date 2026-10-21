@@ -351,11 +351,15 @@ func macHW(gb int64) engine.Hardware {
 		{Backend: engine.FlavourMetal, ID: "MTL0", Name: "Apple M3", TotalMB: usable, FreeMB: usable}}}
 }
 
-// On a Mac the MLX build is recommended, sized by memory: the 9B for 16 GB (the 27B and 35B
-// need 32 GB), a bigger one with more. Elsewhere the MLX entries are never recommended.
+// On a Mac the MLX build is recommended, sized by memory: a 27B or 35B from 32 GB. The 9B MLX
+// 4-bit isn't recommended (88.8% tool accuracy against the GGUF's 100%, #371), so a 16 GB Mac
+// gets the 9B GGUF; the MLX 9B stays installable. Elsewhere the MLX entries are never recommended.
 func TestRecommendMLXByMemory(t *testing.T) {
-	if r := Recommend(macHW(16), nil, nil); r["live"] != "qwen3.5-9b-mlx" || r["background"] != "qwen3.5-9b-mlx" {
+	if r := Recommend(macHW(16), nil, nil); r["live"] != "qwen3.5-9b" || r["background"] != "qwen3.5-9b" {
 		t.Fatalf("16 GB Mac: %v", r)
+	}
+	if e9, ok := CatalogEntry("qwen3.5-9b-mlx"); !ok || !e9.NoRecommend || EntryFit(macHW(16), e9).Verdict != "fits" {
+		t.Fatalf("9B MLX: %+v", e9)
 	}
 	e27, _ := CatalogEntry("qwen3.5-27b-mlx")
 	e35, _ := CatalogEntry("qwen3.5-35b-a3b-mlx")
