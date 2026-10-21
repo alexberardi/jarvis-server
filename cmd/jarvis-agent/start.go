@@ -127,6 +127,7 @@ type starter struct {
 	enrolled func() bool
 	install  func() error                    // this user's first launch of a packaged copy
 	firstRun func(ctx context.Context) error // nothing set up yet: the setup page
+	window   func()                          // an agent already running: its setup page, which says so (nil: none)
 }
 
 func newStarter(e install.Env, s install.Sys) starter {
@@ -146,18 +147,23 @@ func newStarter(e install.Env, s install.Sys) starter {
 			return install.Apply(context.Background(), ops, s, install.ApplyOptions{})
 		},
 		firstRun: firstRun,
+		window:   openSetupPage(logger()),
 	}
 }
 
-// start: an agent already running flashes its pill (and nothing else happens); otherwise a
-// packaged copy sets this user up on its first launch, a computer that isn't set up goes to the
-// first-run page, and the agent starts the way its login item would, then shows the pill.
+// start: an agent already running flashes its pill and opens the setup page, which says it is
+// running (opening the app again must show something); otherwise a packaged copy sets this
+// user up on its first launch, a computer that isn't set up goes to the first-run page, and the
+// agent starts the way its login item would, then shows the pill.
 func (st starter) start(ctx context.Context, login bool) error {
 	probe := control.ShowRunning
 	if login {
 		probe = control.Ping
 	}
 	if st.send(probe) == nil {
+		if !login && st.window != nil {
+			st.window()
+		}
 		return nil
 	}
 	if !install.Installed(st.env, st.sys) && install.SetsUpOnFirstLaunch(st.env) {

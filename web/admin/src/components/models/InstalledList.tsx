@@ -5,8 +5,9 @@ import type { InstalledModel } from '@/api/llm'
 import { useDeleteModel, useInstalled } from '@/hooks/useModelManager'
 import { errorMessage, errorStatus } from '@/lib/errors'
 import { formatBytes } from '@/lib/format'
-import { buttonClass, stateTone } from './styles'
-import { Pill, Section } from './ui'
+import { Badge, Banner, Button, EmptyState, ErrorState, SkeletonList } from '@/components/ui'
+import ModelCard from './ModelCard'
+import { stateBadge } from './tone'
 
 /**
  * A pending delete. `force` is set once the server answered 409 because labels use the model:
@@ -30,36 +31,40 @@ function ConfirmDelete({
 }) {
   const { model, conflict } = pending
   return (
-    <div role="alertdialog" aria-label={`Delete ${model.id}`} className="mt-2 space-y-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-      <p className="text-xs text-[var(--color-text)]">
-        {conflict ? (
-          <>
-            <span className="font-medium">{conflict}.</span> Delete anyway? Those labels will have no model until you
-            assign another.
-          </>
-        ) : model.external ? (
-          <>Forget {model.id}? The file stays on disk (it was registered in place).</>
-        ) : (
-          <>
-            Delete {model.id} and its files ({formatBytes(model.bytes_done || model.size)})?
-          </>
-        )}
-      </p>
-      <div className="flex justify-end gap-2">
-        <button type="button" className={buttonClass.secondary} onClick={onCancel} disabled={busy}>
-          Keep it
-        </button>
-        <button type="button" className={buttonClass.danger} onClick={onConfirm} disabled={busy}>
-          {busy ? 'Deleting…' : conflict ? 'Delete and unassign' : 'Delete'}
-        </button>
-      </div>
-    </div>
+    <Banner
+      tone="danger"
+      role="alertdialog"
+      aria-label={`Delete ${model.id}`}
+      className="mt-3"
+      icon={<Trash2 size={16} />}
+      actions={
+        <>
+          <Button size="sm" onClick={onCancel} disabled={busy}>
+            Keep it
+          </Button>
+          <Button size="sm" variant="danger" onClick={onConfirm} loading={busy}>
+            {conflict ? 'Delete and unassign' : 'Delete'}
+          </Button>
+        </>
+      }
+    >
+      {conflict ? (
+        <>
+          <span className="font-medium">{conflict}.</span> Delete anyway? Those labels will have no model until you
+          assign another.
+        </>
+      ) : model.external ? (
+        <>Forget {model.id}? The file stays on disk (it was registered in place).</>
+      ) : (
+        <>Delete {model.id} and its files ({formatBytes(model.bytes_done || model.size)})?</>
+      )}
+    </Banner>
   )
 }
 
 /** InstalledList is every installed model (all kinds, voice included) with delete and force. */
 export default function InstalledList() {
-  const { data, isLoading, isError, error } = useInstalled()
+  const { data, isLoading, isError, error, refetch } = useInstalled()
   const del = useDeleteModel()
   const [pending, setPending] = useState<PendingDelete | null>(null)
 
@@ -94,51 +99,65 @@ export default function InstalledList() {
   }
 
   return (
-    <Section
+    <ModelCard
       title="Installed"
       icon={HardDrive}
       description={data ? `${formatBytes(data.disk_bytes)} in ${data.dir}` : undefined}
     >
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not list installed models')}</p>}
+      {isLoading && <SkeletonList rows={3} label="Loading installed models" />}
+      {isError && (
+        <ErrorState
+          className="py-6"
+          title="Couldn't list the installed models"
+          message={errorMessage(error, 'The server did not answer.')}
+          onRetry={() => refetch()}
+        />
+      )}
       {data && data.models.length === 0 && (
-        <p className="text-sm text-[var(--color-text-muted)]">No models installed yet. Pick one from the catalog.</p>
+        <EmptyState
+          className="py-6"
+          icon={<HardDrive size={20} />}
+          title="No models installed yet"
+          description="Install one from the catalog: the recommended ones fit this computer."
+        />
       )}
       {data && data.models.length > 0 && (
-        <ul className="divide-y divide-[var(--color-border)]">
+        <ul className="divide-y divide-border">
           {data.models.map((m) => (
-            <li key={m.id} className="py-2" data-testid={`installed-${m.id}`}>
+            <li key={m.id} className="py-3 first:pt-0 last:pb-0" data-testid={`installed-${m.id}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm text-[var(--color-text)]">{m.id}</span>
-                    <Pill>{m.kind}</Pill>
-                    {m.state !== 'ready' && <Pill tone={stateTone(m.state)}>{m.state}</Pill>}
-                    {m.external && <Pill title={m.path}>registered</Pill>}
+                    <span className="font-mono text-subheading break-all text-text">{m.id}</span>
+                    <Badge>{m.kind}</Badge>
+                    {m.state !== 'ready' && <Badge tone={stateBadge(m.state)}>{m.state}</Badge>}
+                    {m.external && <Badge title={m.path}>registered</Badge>}
                     {m.labels.map((l) => (
-                      <Pill key={l} tone="info">
+                      <Badge key={l} tone="primary">
                         {l}
-                      </Pill>
+                      </Badge>
                     ))}
                   </div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-small text-text-muted">
                     {m.display !== m.id ? `${m.display} · ` : ''}
                     {formatBytes(m.size)}
                     {m.prompt_provider ? ` · prompt ${m.prompt_provider}` : ''}
                     {m.mmproj_id ? ` · projector ${m.mmproj_id}` : ''}
                   </p>
-                  {m.error && <p className="text-xs text-red-500">{m.error}</p>}
+                  {m.error && <p className="text-small text-danger">{m.error}</p>}
                 </div>
-                <button
-                  type="button"
-                  className={buttonClass.icon}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="px-2"
                   title={`Delete ${m.id}`}
                   aria-label={`Delete ${m.id}`}
+                  icon={<Trash2 size={14} aria-hidden />}
                   onClick={() => ask(m)}
                   disabled={del.isPending}
                 >
-                  <Trash2 size={14} />
-                </button>
+                  Delete
+                </Button>
               </div>
               {pending?.model.id === m.id && (
                 <ConfirmDelete pending={pending} busy={del.isPending} onConfirm={confirm} onCancel={() => setPending(null)} />
@@ -147,6 +166,6 @@ export default function InstalledList() {
           ))}
         </ul>
       )}
-    </Section>
+    </ModelCard>
   )
 }

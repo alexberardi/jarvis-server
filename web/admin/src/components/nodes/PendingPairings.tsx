@@ -1,14 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Check, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { Badge, Button, Card, CardHeader, Input, Select } from '@/components/ui'
 import { useApprovePairing, useDenyPairing, usePairings } from '@/hooks/useNodes'
 import { useSystemInfo } from '@/hooks/useSystem'
 import { errorMessage } from '@/lib/errors'
 import { configURLFor } from './configUrl'
 import type { PairingHousehold } from '@/api/nodes'
-
-const inputClass =
-  'rounded-md border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1 text-sm text-[var(--color-text)]'
 
 function ApproveForm({ households }: { households: PairingHousehold[] }) {
   const [code, setCode] = useState('')
@@ -43,61 +41,42 @@ function ApproveForm({ households }: { households: PairingHousehold[] }) {
     })
 
   return (
-    <form
-      onSubmit={onApprove}
-      className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
-    >
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs text-[var(--color-text-muted)]">
-          Code shown on the computer
-          <input
-            className={`${inputClass} w-36 font-mono text-base uppercase tracking-widest`}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="ABCD-EFGH"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={busy}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-[var(--color-text-muted)]">
-          Household
-          <select
-            className={inputClass}
-            value={household}
-            onChange={(e) => setHousehold(e.target.value)}
-            disabled={busy}
-          >
-            {households.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-[var(--color-text-muted)]">
-          Room
-          <input className={inputClass} value={room} onChange={(e) => setRoom(e.target.value)} disabled={busy} />
-        </label>
-        <div className="ml-auto flex gap-2">
-          <button
-            type="button"
-            onClick={onDeny}
-            disabled={busy || !typed}
-            className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50"
-          >
-            <X size={14} /> Deny
-          </button>
-          <button
+    <form onSubmit={onApprove} className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(9rem,11rem)_1fr_1fr] lg:grid-cols-[minmax(9rem,11rem)_1fr_1fr_auto] lg:items-end">
+        <Input
+          label="Code shown on the computer"
+          className="font-mono tracking-widest uppercase"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="ABCD-EFGH"
+          autoComplete="off"
+          spellCheck={false}
+          disabled={busy}
+        />
+        <Select
+          label="Household"
+          value={household}
+          onValueChange={setHousehold}
+          disabled={busy}
+          options={households.map((h) => ({ value: h.id, label: h.name }))}
+        />
+        <Input label="Room" value={room} onChange={(e) => setRoom(e.target.value)} disabled={busy} />
+        <div className="flex gap-2 sm:col-span-3 sm:justify-end lg:col-span-1">
+          <Button icon={<X size={16} aria-hidden />} onClick={onDeny} disabled={busy || !typed} loading={deny.isPending}>
+            Deny
+          </Button>
+          <Button
             type="submit"
+            variant="primary"
+            icon={<Check size={16} aria-hidden />}
             disabled={busy || !typed || !household}
-            className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-on-primary hover:opacity-90 disabled:opacity-50"
+            loading={approve.isPending}
           >
-            <Check size={14} /> Approve
-          </button>
+            Approve
+          </Button>
         </div>
       </div>
-      <p className="text-xs text-[var(--color-text-muted)]">
+      <p className="text-small text-text-muted">
         Type the code from the computer's own screen. The computer then shows the household and asks before it joins.
       </p>
     </form>
@@ -126,25 +105,29 @@ export default function PendingPairings({ systemInfo = true }: { systemInfo?: bo
   const households = data?.households ?? []
   if (households.length === 0) return null
   return (
-    <section className="space-y-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-        Pending pairings
-      </h2>
-      {waiting === 0 ? (
-        <p className="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
-          No computers waiting. On the computer, open Jarvis Automation Agent or run{' '}
-          <code className="rounded bg-[var(--color-surface-alt)] px-1 font-mono text-[var(--color-text)]">
-            jarvis-agent enroll --server {configURL ?? "<this server's address>"}
-          </code>
-          , then type the code it shows below.
-        </p>
-      ) : (
-        <p className="text-sm text-[var(--color-text)]" data-testid="pairings-waiting">
-          {waiting === 1 ? '1 computer is' : `${waiting} computers are`} waiting for approval. Type the code shown on
-          the computer.
-        </p>
-      )}
+    <Card as="section" aria-labelledby="pending-pairings-title">
+      <CardHeader
+        id="pending-pairings-title"
+        title="Pending pairings"
+        actions={waiting > 0 && <Badge tone="warning" dot>{waiting} waiting</Badge>}
+        description={
+          waiting === 0 ? (
+            <>
+              No computers waiting. On the computer, open Jarvis Automation Agent or run{' '}
+              <code className="rounded-control bg-surface-alt px-1 font-mono break-all text-text">
+                jarvis-agent enroll --server {configURL ?? "<this server's address>"}
+              </code>
+              , then type the code it shows below.
+            </>
+          ) : (
+            <span data-testid="pairings-waiting" className="text-text">
+              {waiting === 1 ? '1 computer is' : `${waiting} computers are`} waiting for approval. Type the code shown on
+              the computer.
+            </span>
+          )
+        }
+      />
       <ApproveForm households={households} />
-    </section>
+    </Card>
   )
 }

@@ -17,8 +17,8 @@ import AssignPicker from './AssignPicker'
 import FitBadge, { ResidentsNote } from './FitBadge'
 import { currentModels, defaultAssign, fitSummary, recommendedFor, recommendedInstalls } from './logic'
 import { useInstallAction } from './useInstallAction'
-import { buttonClass } from './styles'
-import { Pill, Section } from './ui'
+import { Badge, Button, ErrorState, SkeletonList } from '@/components/ui'
+import ModelCard from './ModelCard'
 
 const KIND_GROUPS: { kind: string; title: string }[] = [
   { kind: 'llm', title: 'Language models' },
@@ -63,57 +63,57 @@ function CatalogRow({
   }
 
   return (
-    <li className="rounded-lg border border-[var(--color-border)] p-3" data-testid={`catalog-${entry.id}`}>
+    <li className="py-3 first:pt-0 last:pb-0" data-testid={`catalog-${entry.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-[var(--color-text)]">{entry.display}</span>
+            <span className="text-subheading text-text">{entry.display}</span>
             {recFor.length > 0 && (
-              <Pill tone="info" title={`Recommended for ${recFor.map((l) => LABEL_TITLE[l]).join(', ')}`}>
-                <Star size={10} /> Recommended
-              </Pill>
+              <Badge tone="primary" title={`Recommended for ${recFor.map((l) => LABEL_TITLE[l]).join(', ')}`}>
+                <Star size={12} aria-hidden /> Recommended
+              </Badge>
             )}
             <FitBadge fit={entry.fit} />
-            {entry.mmproj && <Pill>vision</Pill>}
-            {entry.thinking && <Pill>thinking</Pill>}
-            {entry.directory && <Pill title="A Hugging Face model folder run by mlx-lm, text-only">MLX</Pill>}
+            {entry.mmproj && <Badge>vision</Badge>}
+            {entry.thinking && <Badge>thinking</Badge>}
+            {entry.directory && <Badge title="A Hugging Face model folder run by mlx-lm, text-only">MLX</Badge>}
           </div>
-          <p className="text-xs text-[var(--color-text-muted)]">
+          <p className="text-small text-text-muted">
             {formatBytes(entry.size)}
             {entry.context_default ? ` · ${entry.context_default.toLocaleString()} context` : ''}
             {entry.prompt_provider ? ` · prompt ${entry.prompt_provider}` : ''} · {fitSummary(entry.fit)}
           </p>
-          {entry.notes && <p className="text-xs text-[var(--color-text-muted)]">{entry.notes}</p>}
-          {entry.unavailable && <p className="text-xs text-amber-500">{entry.unavailable}</p>}
+          {entry.notes && <p className="text-small text-text-muted">{entry.notes}</p>}
+          {entry.unavailable && <p className="text-small text-warning">{entry.unavailable}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {entry.installed ? (
-            <Pill tone="ok">
-              <CheckCircle2 size={10} /> Installed{usedBy.length > 0 ? ` · ${usedBy.join(', ')}` : ''}
-            </Pill>
+            <Badge tone="success">
+              <CheckCircle2 size={12} aria-hidden /> Installed{usedBy.length > 0 ? ` · ${usedBy.join(', ')}` : ''}
+            </Badge>
           ) : installing ? (
-            <Pill tone="warn">Installing…</Pill>
+            <Badge tone="warning">Installing…</Badge>
           ) : entry.unavailable ? null : (
-            <button type="button" className={buttonClass.secondary} onClick={toggle} aria-expanded={open}>
+            <Button size="sm" onClick={toggle} aria-expanded={open}>
               {open ? 'Close' : 'Install'}
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       {open && !entry.installed && (
-        <div className="mt-3 space-y-2 border-t border-[var(--color-border)] pt-3">
+        <div className="mt-3 space-y-3 rounded-control bg-surface-alt p-3">
           <AssignPicker kind={entry.kind} value={assign} onChange={setAssign} idPrefix={entry.id} />
           {entry.mmproj && (
-            <label className="flex items-center gap-1.5 text-xs text-[var(--color-text)]">
+            <label className="flex items-center gap-2 text-small text-text">
               <input type="checkbox" checked={withMMProj} onChange={(e) => setWithMMProj(e.target.checked)} />
               Include the vision projector (lets this model see images)
             </label>
           )}
           <div className="flex justify-end">
-            <button type="button" className={buttonClass.primary} disabled={isPending} onClick={start}>
-              {isPending ? 'Starting…' : `Install ${entry.display}`}
-            </button>
+            <Button variant="primary" size="sm" loading={isPending} onClick={start}>
+              {`Install ${entry.display}`}
+            </Button>
           </div>
         </div>
       )}
@@ -134,7 +134,7 @@ export default function CatalogList({
   onNeedsToken?: (reason: string) => void
   showInstallRecommended?: boolean
 }) {
-  const { data, isLoading, isError, error } = useCatalog()
+  const { data, isLoading, isError, error, refetch } = useCatalog()
   const { data: labels } = useLabels()
   const { data: installs } = useInstalls()
   const { installAll, isPending } = useInstallAction(onNeedsToken)
@@ -145,12 +145,23 @@ export default function CatalogList({
     [installs],
   )
 
-  if (isLoading) return <Section title="Catalog" icon={BookOpen}><p className="text-sm text-[var(--color-text-muted)]">Loading…</p></Section>
+  if (isLoading) {
+    return (
+      <ModelCard title="Catalog" icon={BookOpen}>
+        <SkeletonList rows={4} label="Loading the catalog" />
+      </ModelCard>
+    )
+  }
   if (isError || !data) {
     return (
-      <Section title="Catalog" icon={BookOpen}>
-        <p className="text-sm text-red-500">{errorMessage(error, 'Could not load the catalog')}</p>
-      </Section>
+      <ModelCard title="Catalog" icon={BookOpen}>
+        <ErrorState
+          className="py-6"
+          title="Couldn't load the catalog"
+          message={errorMessage(error, 'The server did not answer.')}
+          onRetry={() => refetch()}
+        />
+      </ModelCard>
     )
   }
 
@@ -172,40 +183,41 @@ export default function CatalogList({
   }
 
   return (
-    <Section
+    <ModelCard
       title="Catalog"
       icon={BookOpen}
       description="Tested models with pinned downloads. The verdict accounts for what already runs on your GPU."
       actions={
         showInstallRecommended && pending.length > 0 ? (
-          <button
-            type="button"
-            className={buttonClass.primary}
-            disabled={isPending}
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Sparkles size={14} aria-hidden />}
+            loading={isPending}
             onClick={installRecommended}
             title={pending.map((r) => `${r.catalog_id} → ${(r.assign ?? []).join(', ')}`).join('\n')}
           >
-            <Sparkles size={12} /> Install recommended ({pending.length})
-          </button>
+            Install recommended ({pending.length})
+          </Button>
         ) : undefined
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-6">
         <ResidentsNote residents={data.residents} />
         {groups.map((g) => {
           const entries = data.models.filter((m) => m.kind === g.kind)
           if (entries.length === 0) return null
           return (
-            <div key={g.kind} className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div key={g.kind} className="space-y-3">
+              <h3 className="border-b border-border pb-2 text-subheading text-text">
                 {g.title}
                 {labelsForKind(g.kind).length > 0 && (
-                  <span className="ml-2 font-normal normal-case tracking-normal">
+                  <span className="ml-2 text-small font-normal text-text-muted">
                     ({labelsForKind(g.kind).map((l) => LABEL_TITLE[l]).join(', ')})
                   </span>
                 )}
               </h3>
-              <ul className="space-y-2">
+              <ul className="divide-y divide-border">
                 {entries.map((e) => (
                   <CatalogRow
                     key={e.id}
@@ -221,6 +233,6 @@ export default function CatalogList({
           )
         })}
       </div>
-    </Section>
+    </ModelCard>
   )
 }

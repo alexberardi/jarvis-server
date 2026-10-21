@@ -55,11 +55,15 @@ const (
 	// ComputerRecordDesktop starts a recording of the desktop instead (`jarvis-agent computer
 	// record start --desktop`; macOS); ComputerRecordStop stops it.
 	ComputerRecordDesktop = "computer-record-desktop"
+	// Permissions answers the macOS grants the agent holds itself, as "name=status" pairs
+	// ("accessibility=granted microphone=not_asked"): the setup page says "restart Jarvis to
+	// apply" for one granted since the agent started.
+	Permissions = "permissions"
 )
 
 // Commands is every command the agent accepts.
 var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff,
-	ComputerRecordStart, ComputerRecordStop, ComputerRecordDesktop}
+	ComputerRecordStart, ComputerRecordStop, ComputerRecordDesktop, Permissions}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second

@@ -22,7 +22,7 @@ test('a node pairs with a code approved on the Nodes page and comes online', asy
 
   // The agent says yes, registers and connects: its card shows up, online, in the room chosen.
   // The node list doesn't refetch after an approval, so reload until it is there.
-  const card = page.locator('div.rounded-lg', { has: page.getByText(name, { exact: true }) }).last()
+  const card = page.locator('[data-testid^="node-"]', { has: page.getByText(name, { exact: true }) }).last()
   await expect(async () => {
     await page.reload()
     await expect(card.getByText('Online')).toBeVisible({ timeout: 2_000 })

@@ -17,11 +17,11 @@ export default function AssignPicker({
   return (
     <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <legend className="sr-only">Use for</legend>
-      <span className="text-xs text-[var(--color-text-muted)]">Use for:</span>
+      <span className="text-small text-text-muted">Use for:</span>
       {options.map((l) => {
         const id = `${idPrefix}-assign-${l}`
         return (
-          <label key={l} htmlFor={id} className="flex items-center gap-1.5 text-xs text-[var(--color-text)]">
+          <label key={l} htmlFor={id} className="flex items-center gap-1.5 text-small text-text">
             <input
               id={id}
               type="checkbox"
@@ -33,7 +33,7 @@ export default function AssignPicker({
         )
       })}
       {value.length === 0 && (
-        <span className="text-xs text-[var(--color-text-muted)]">(install only; assign later)</span>
+        <span className="text-small text-text-muted">(install only; assign later)</span>
       )}
     </fieldset>
   )

@@ -17,8 +17,10 @@ import { useHardware, useInstalled, useLabels, usePutLabels } from '@/hooks/useM
 import { errorMessage } from '@/lib/errors'
 import { labelDraftDiff } from './logic'
 import GpuFaultBanner from './GpuFaultBanner'
-import { buttonClass, inputClass, stateTone } from './styles'
-import { Pill, Section } from './ui'
+import { Badge, Banner, Button, ErrorState, SkeletonList } from '@/components/ui'
+import { fieldControl } from '@/components/ui/fieldStyles'
+import ModelCard from './ModelCard'
+import { stateBadge } from './tone'
 
 /** Engine modes each label may take (06 §3). */
 const MODES: Record<EngineLabel, string[]> = {
@@ -51,17 +53,19 @@ const BUILD_KIND: Record<EngineLabel, string> = {
 
 function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="space-y-1">
-      <label htmlFor={htmlFor} className="block text-xs font-medium text-[var(--color-text-muted)]">
+    <div className="min-w-0 space-y-1.5">
+      <label htmlFor={htmlFor} className="block text-small font-medium text-text">
         {label}
       </label>
       {children}
-      {hint && <p className="text-[11px] text-[var(--color-text-muted)]">{hint}</p>}
+      {hint && <p className="text-small text-text-muted">{hint}</p>}
     </div>
   )
 }
 
-const selectClass = inputClass
+// Native selects and fields with the shared field look (fieldStyles), for the dense label forms.
+const selectClass = fieldControl
+const inputClass = fieldControl
 
 /** Engines that run a Hugging Face model folder (text-only). */
 const PY_ENGINES = ['mlx-lm', 'vllm', 'transformers']
@@ -108,7 +112,7 @@ function DevicePicker({ id, value, devices, onChange }: { id: string; value: str
       {devices.map((d) => {
         const key = String(d.index)
         return (
-          <label key={key} className="flex items-center gap-1.5 text-xs text-[var(--color-text)]">
+          <label key={key} className="flex min-h-10 items-center gap-2 text-small text-text">
             <input
               type="checkbox"
               checked={chosen.has(key)}
@@ -123,7 +127,7 @@ function DevicePicker({ id, value, devices, onChange }: { id: string; value: str
           </label>
         )
       })}
-      <span className="text-[11px] text-[var(--color-text-muted)]">{chosen.size === 0 ? '(auto)' : ''}</span>
+      <span className="self-center text-small text-text-muted">{chosen.size === 0 ? '(auto)' : ''}</span>
     </div>
   )
 }
@@ -152,7 +156,7 @@ export function ImageInputToggle({
   return (
     <div className="space-y-1" data-testid={`image-input-${label}`}>
       {simple ? (
-        <label htmlFor={id} className="flex items-center gap-2 text-xs text-[var(--color-text)]">
+        <label htmlFor={id} className="flex min-h-10 items-center gap-2 text-small font-medium text-text">
           <input
             id={id}
             type="checkbox"
@@ -163,11 +167,11 @@ export function ImageInputToggle({
           Image input
         </label>
       ) : (
-        <p className="text-xs text-[var(--color-text)]">
+        <p className="text-small text-text">
           Image input: projector <code>{mmproj}</code> (change it under Advanced)
         </p>
       )}
-      <p className="text-[11px] text-[var(--color-text-muted)]">
+      <p className="text-small text-text-muted">
         {runningText}.{' '}
         {simple && "On uses the model's own vision projector when it has one; off frees its memory."}
         {label === 'live' && ' Chat image upload in the app needs this on.'}
@@ -243,27 +247,27 @@ function EngineLabelCard({
   )
 
   return (
-    <div className="space-y-3 rounded-lg border border-[var(--color-border)] p-3" data-testid={`label-${label}`}>
+    <div className="space-y-4 py-5 first:pt-0 last:pb-0" data-testid={`label-${label}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-[var(--color-text)]">{LABEL_TITLE[label]}</span>
-          <code className="text-xs text-[var(--color-text-muted)]">{label}</code>
-          <Pill tone={stateTone(status.state)} title={status.reason || undefined}>
+          <h3 className="text-subheading text-text">{LABEL_TITLE[label]}</h3>
+          <code className="font-mono text-small text-text-muted">{label}</code>
+          <Badge tone={stateBadge(status.state)} title={status.reason || undefined}>
             {STATE_TEXT[status.state] ?? status.state}
-          </Pill>
-          {status.endpoint?.vision && <Pill>vision</Pill>}
-          {status.endpoint?.engine && <Pill title="Engine instance (shared labels name the same one)">{status.endpoint.engine}</Pill>}
+          </Badge>
+          {status.endpoint?.vision && <Badge>vision</Badge>}
+          {status.endpoint?.engine && <Badge title="Engine instance (shared labels name the same one)">{status.endpoint.engine}</Badge>}
         </div>
         {status.endpoint && status.endpoint.context_length > 0 && (
-          <span className="text-xs text-[var(--color-text-muted)]">
+          <span className="text-small text-text-muted">
             {status.endpoint.context_length.toLocaleString()} ctx × {status.endpoint.parallel}
           </span>
         )}
       </div>
       {(status.reason || cfg.problem) && (
-        <p className="text-xs text-amber-500">{cfg.problem || status.reason}</p>
+        <p className="text-small text-warning">{cfg.problem || status.reason}</p>
       )}
-      {cfg.note && <p className="text-xs text-[var(--color-text-muted)]">{cfg.note}</p>}
+      {cfg.note && <p className="text-small text-text-muted">{cfg.note}</p>}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Runs" htmlFor={id('engine')}>
@@ -284,12 +288,11 @@ function EngineLabelCard({
       </div>
 
       {mode === 'remote' && (
-        <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-          <p className="flex items-start gap-2 text-xs text-[var(--color-text)]">
-            <Globe size={14} className="mt-0.5 shrink-0 text-amber-500" />
+        <div className="space-y-3">
+          <Banner tone="warning" icon={<Globe size={16} />}>
             Requests for this label leave this machine: prompts, conversation text
             {isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.
-          </p>
+          </Banner>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Base URL" htmlFor={id('remote_url')}>
               <input
@@ -337,7 +340,7 @@ function EngineLabelCard({
               />
             </Field>
             {isLLM && (
-              <label className="flex items-center gap-2 self-end text-xs text-[var(--color-text)]">
+              <label className="flex min-h-10 items-center gap-2 self-end text-small text-text">
                 <input type="checkbox" checked={v('remote_vision')} onChange={(e) => set({ remote_vision: e.target.checked })} />
                 The remote model accepts images
               </label>
@@ -403,14 +406,16 @@ function EngineLabelCard({
             </Field>
           </div>
 
-          <button
-            type="button"
-            className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-3"
+            icon={<SlidersHorizontal size={14} aria-hidden />}
             onClick={() => setAdvanced(!advanced)}
             aria-expanded={advanced}
           >
-            <SlidersHorizontal size={12} /> {advanced ? 'Hide advanced' : 'Advanced'}
-          </button>
+            {advanced ? 'Hide advanced' : 'Advanced'}
+          </Button>
 
           {advanced && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -533,12 +538,12 @@ function EngineLabelCard({
 
       {dirty && (
         <div className="flex justify-end gap-2">
-          <button type="button" className={buttonClass.secondary} onClick={() => setDraft({})} disabled={put.isPending}>
+          <Button onClick={() => setDraft({})} disabled={put.isPending}>
             Reset
-          </button>
-          <button type="button" className={buttonClass.primary} onClick={save} disabled={put.isPending}>
-            {put.isPending ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
+          <Button variant="primary" onClick={save} loading={put.isPending}>
+            Save
+          </Button>
         </div>
       )}
     </div>
@@ -566,24 +571,24 @@ function VoiceLabelCard({ voice, models }: { voice: VoiceModel; models: Installe
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-[var(--color-border)] p-3" data-testid={`label-${label}`}>
+    <div className="space-y-3 py-5 first:pt-0 last:pb-0" data-testid={`label-${label}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-[var(--color-text)]">{LABEL_TITLE[label]}</span>
-        <code className="text-xs text-[var(--color-text-muted)]">{label}</code>
-        <Pill tone={voice.problem ? 'warn' : 'ok'}>{voice.problem ?? 'ready'}</Pill>
-        <span className="text-xs text-[var(--color-text-muted)]">runs inside jarvisd (CPU)</span>
+        <h3 className="text-subheading text-text">{LABEL_TITLE[label]}</h3>
+        <code className="font-mono text-small text-text-muted">{label}</code>
+        <Badge tone={voice.problem ? 'warning' : 'success'}>{voice.problem ?? 'ready'}</Badge>
+        <span className="text-small text-text-muted">runs inside jarvisd (CPU)</span>
       </div>
-      <div className="flex gap-2">
-        <div className="flex-1">
+      <div className="flex flex-wrap gap-2">
+        <div className="min-w-0 flex-1 basis-60">
           <label htmlFor={`label-${label}-model`} className="sr-only">
             {LABEL_TITLE[label]} model
           </label>
           <ModelSelect id={`label-${label}-model`} value={value} models={kindModels} onChange={setDraft} />
         </div>
         {draft !== null && draft !== (voice.id ?? '') && (
-          <button type="button" className={buttonClass.primary} onClick={save} disabled={put.isPending}>
-            {put.isPending ? 'Saving…' : 'Save'}
-          </button>
+          <Button variant="primary" onClick={save} loading={put.isPending}>
+            Save
+          </Button>
         )}
       </div>
     </div>
@@ -596,29 +601,36 @@ function VoiceLabelCard({ voice, models }: { voice: VoiceModel; models: Installe
  * wizard's Models step can show just live/background/stt).
  */
 export default function LabelsEditor({ labels: only }: { labels?: Label[] }) {
-  const { data, isLoading, isError, error } = useLabels()
+  const { data, isLoading, isError, error, refetch } = useLabels()
   const { data: installed } = useInstalled()
   const { data: hw } = useHardware()
   const models = installed?.models ?? []
   const devices = hw?.hardware.devices ?? []
 
   return (
-    <Section
+    <ModelCard
       title="Labels"
       icon={SlidersHorizontal}
       description="What each job runs on. Changes apply without restarting jarvisd; only the affected engine restarts."
     >
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not load the labels')}</p>}
+      {isLoading && <SkeletonList rows={3} label="Loading the labels" />}
+      {isError && (
+        <ErrorState
+          className="py-6"
+          title="Couldn't load the labels"
+          message={errorMessage(error, 'The server did not answer.')}
+          onRetry={() => refetch()}
+        />
+      )}
       {data && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <GpuFaultBanner fault={data.gpu_fault} />
           {(data.warnings ?? []).map((w) => (
-            <p key={w} className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <Banner key={w} tone="warning" icon={<AlertTriangle size={16} />}>
               {w}
-            </p>
+            </Banner>
           ))}
+          <div className="divide-y divide-border">
           {data.labels
             .filter((l) => !only || only.includes(l.label as Label))
             .map((l) => (
@@ -635,8 +647,9 @@ export default function LabelsEditor({ labels: only }: { labels?: Label[] }) {
             .map((v) => (
               <VoiceLabelCard key={v.label} voice={v} models={models} />
             ))}
+          </div>
         </div>
       )}
-    </Section>
+    </ModelCard>
   )
 }

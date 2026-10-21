@@ -151,3 +151,5 @@ button.primary { padding: 10px 28px; font-weight: 600; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } #mic-bar { transition: none; } }
 [hidden] { display: none !important; }
+
+.running .inline { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 0; }

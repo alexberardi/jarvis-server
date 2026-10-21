@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -184,13 +185,14 @@ func setupDeps(log *slog.Logger, o setupOptions) firstrun.Deps {
 		},
 		Remove:     removeAgent,
 		RemoveNote: removeNote(),
+		Running:    func() bool { return control.Send(controlDial, control.Ping) == nil },
 	}
 	if voice.Supported {
 		d.Voice = &firstrun.Voice{On: voiceSetting, Set: setVoice}
 		d.Mic = func() (device.Capture, error) { return device.OpenCapture(micName(), 16000, 1) }
 	}
 	if runtime.GOOS == "darwin" && macax.Supported() {
-		d.Permissions = macPermissions()
+		d.Permissions = macPermissions(freshStatus, func() map[string]string { return agentPermissions(controlDial) })
 	} else {
 		d.Permissions = linuxPermissions(runtime.GOOS, (&dictate.LinuxWindows{X: dictate.OSExec{}}).Compositor(), inputAccess)
 	}
@@ -221,7 +223,9 @@ func afterJoin(ctx context.Context, log *slog.Logger, noStart bool) error {
 	if err != nil {
 		return err
 	}
-	return newStarter(e, s).start(ctx, false)
+	st := newStarter(e, s)
+	st.window = nil // the page asking is already open
+	return st.start(ctx, false)
 }
 
 // setVoice saves the wake-word choice and tells the running agent (the status icon's toggle).
@@ -291,27 +295,34 @@ const (
 )
 
 // macPermissions are the five grants the agent uses, each with a live status and what asks
-// for it. macOS only.
-func macPermissions() []firstrun.Permission {
+// for it. macOS only. fresh answers a grant from a new process (freshStatus) and agent is the
+// running agent's own view (agentPermissions; nil when none answers): macOS gives a process
+// Accessibility, Screen Recording and Input Monitoring (and the microphone) as they were when
+// it started, so this page's own answer, and the running agent's, can be out of date.
+func macPermissions(fresh func(name string) string, agent func() map[string]string) []firstrun.Permission {
 	open := func(pane string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		_ = exec.CommandContext(ctx, "open", pane).Run()
 	}
-	boolStatus := func(ok bool) string {
-		if ok {
-			return firstrun.Granted
+	// The running agent has a grant only once it restarts: say so until it does.
+	restart := func(id string) func() bool {
+		return func() bool {
+			a := agent()
+			return a != nil && a[id] != firstrun.Granted
 		}
-		return firstrun.NotAsked // macOS doesn't say whether it was refused: ask, then the pane
 	}
+	status := func(id string) func() string { return func() string { return fresh(id) } }
 	return []firstrun.Permission{
 		{ID: "accessibility", Label: "Accessibility", Pane: paneAccessibility,
-			Why:    "So Jarvis can type what you dictate, and focus, minimise or close windows.",
-			Status: func() string { return boolStatus(macax.Trusted()) },
-			Ask:    func() { macax.Prompt(); open(paneAccessibility) }},
+			Why:          "So Jarvis can type what you dictate, and focus, minimise or close windows.",
+			Status:       status("accessibility"),
+			NeedsRestart: restart("accessibility"),
+			Ask:          func() { macax.Prompt(); open(paneAccessibility) }},
 		{ID: "microphone", Label: "Microphone", Pane: paneMicrophone,
-			Why:    `So Jarvis can hear "Hey Jarvis" and what you say next.`,
-			Status: macax.MicStatus,
+			Why:          `So Jarvis can hear "Hey Jarvis" and what you say next.`,
+			Status:       status("microphone"),
+			NeedsRestart: restart("microphone"),
 			Ask: func() {
 				// Opening the microphone is what makes macOS ask.
 				if c, err := device.OpenCapture("default", 16000, 1); err == nil {
@@ -330,15 +341,15 @@ func macPermissions() []firstrun.Permission {
 				_ = exec.CommandContext(ctx, "osascript", "-e", `tell application id "`+systemEventsID+`" to count processes`).Run()
 			}},
 		{ID: "screen", Label: "Screen Recording", Pane: paneScreen,
-			Why: "So Jarvis can read what's on your screen when you ask it to.",
-			// A process sees a new Screen Recording grant only after it restarts: ask a fresh one.
-			Status: func() string { return boolStatus(freshStatus("screen")) },
-			Ask:    func() { macax.ScreenPrompt(); open(paneScreen) }},
+			Why:          "So Jarvis can read what's on your screen when you ask it to.",
+			Status:       status("screen"),
+			NeedsRestart: restart("screen"),
+			Ask:          func() { macax.ScreenPrompt(); open(paneScreen) }},
 		{ID: "input-monitoring", Label: "Input Monitoring", Pane: paneInput,
-			Why: "So Jarvis can watch what you do in an app when you ask it to learn a task (never what you type into a password field).",
-			// Like Screen Recording, the grant applies to a fresh process.
-			Status: func() string { return boolStatus(freshStatus("input-monitoring")) },
-			Ask:    func() { macax.ListenPrompt(); open(paneInput) }},
+			Why:          "So Jarvis can watch what you do in an app when you ask it to learn a task (never what you type into a password field).",
+			Status:       status("input-monitoring"),
+			NeedsRestart: restart("input-monitoring"),
+			Ask:          func() { macax.ListenPrompt(); open(paneInput) }},
 	}
 }
 
@@ -381,14 +392,31 @@ func inputMonitoring() bool {
 	return macax.ListenTrusted()
 }
 
-// freshChecks are the grants macOS shows a process only after it restarts, which
+// boolStatus is a yes/no grant as a status: macOS doesn't say whether it was refused, so no is
+// "ask, then the pane".
+func boolStatus(check func() bool) func() string {
+	return func() string {
+		if check() {
+			return firstrun.Granted
+		}
+		return firstrun.NotAsked
+	}
+}
+
+// freshChecks are the grants macOS shows a process as they were at its start, which
 // `jarvis-agent permission <name>` checks in a fresh one (on Linux input-monitoring is the
-// input group, which a login applies).
-var freshChecks = map[string]func() bool{"screen": macax.ScreenTrusted, "input-monitoring": inputMonitoring}
+// input group, which a login applies). The running agent answers the same checks for itself
+// (control.Permissions).
+var freshChecks = map[string]func() string{
+	"accessibility":    boolStatus(macax.Trusted),
+	"microphone":       macax.MicStatus,
+	"screen":           boolStatus(macax.ScreenTrusted),
+	"input-monitoring": boolStatus(inputMonitoring),
+}
 
 // freshStatus asks a new process of this binary (`jarvis-agent permission <name>`), which
 // macOS answers with the current grant; this process's own answer is fixed at its start.
-func freshStatus(name string) bool {
+func freshStatus(name string) string {
 	exe, err := agentExe()
 	if err != nil {
 		return freshChecks[name]()
@@ -396,27 +424,68 @@ func freshStatus(name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, exe, "permission", name).Output()
-	return err == nil && strings.TrimSpace(string(out)) == firstrun.Granted
+	if err != nil {
+		return firstrun.Unknown
+	}
+	return parseStatus(string(out))
 }
 
-// permissionCmd is `jarvis-agent permission screen|input-monitoring`: the setup page's fresh
-// Screen Recording or Input Monitoring check (prints granted or not_asked; on Linux,
+// parseStatus is the first line of `jarvis-agent permission`'s answer, a status.
+func parseStatus(out string) string {
+	line, _, _ := strings.Cut(out, "\n")
+	switch st := strings.TrimSpace(line); st {
+	case firstrun.Granted, firstrun.Denied, firstrun.NotAsked:
+		return st
+	}
+	return firstrun.Unknown
+}
+
+// ownPermissions is the running agent's answer to control.Permissions: what it holds itself,
+// as "name=status" pairs.
+func ownPermissions(checks map[string]func() string) string {
+	names := make([]string, 0, len(checks))
+	for n := range checks {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	pairs := make([]string, len(names))
+	for i, n := range names {
+		pairs[i] = n + "=" + checks[n]()
+	}
+	return strings.Join(pairs, " ")
+}
+
+// agentPermissions asks the running agent what it holds itself (ownPermissions); nil when no
+// agent answers, or one too old to say.
+func agentPermissions(dial control.Dialer) map[string]string {
+	r, err := control.Ask(dial, control.Permissions)
+	if err != nil {
+		return nil
+	}
+	m := map[string]string{}
+	for _, f := range strings.Fields(r.Answer) {
+		if n, st, ok := strings.Cut(f, "="); ok {
+			m[n] = st
+		}
+	}
+	return m
+}
+
+// permissionCmd is `jarvis-agent permission accessibility|microphone|screen|input-monitoring`:
+// the setup page's fresh check (prints granted, denied or not_asked; on Linux,
 // input-monitoring is whether the input group lets it read the keyboard, and not_asked also
 // prints the command that adds it). Hidden: not in the usage.
 func permissionCmd(args []string, w io.Writer) error {
-	var check func() bool
+	var check func() string
 	if len(args) == 1 {
 		check = freshChecks[args[0]]
 	}
 	if check == nil {
-		return errors.New("usage: jarvis-agent permission screen|input-monitoring")
+		return errors.New("usage: jarvis-agent permission accessibility|microphone|screen|input-monitoring")
 	}
-	if check() {
-		fmt.Fprintln(w, firstrun.Granted)
-		return nil
-	}
-	fmt.Fprintln(w, firstrun.NotAsked)
-	if runtime.GOOS == "linux" && args[0] == "input-monitoring" {
+	st := check()
+	fmt.Fprintln(w, st)
+	if st != firstrun.Granted && runtime.GOOS == "linux" && args[0] == "input-monitoring" {
 		fmt.Fprintf(w, "Recording the desktop needs to read the keyboard and mouse: run `%s`, then log out and back in.\n", inputGroupCmd)
 	}
 	return nil

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppWindow, Check, Copy, Globe, KeyRound, Link2, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -15,51 +15,73 @@ import {
   type ConnectionsResponse,
   type HealthStatus,
 } from '@/api/connections'
-import { buttonClass, dialogClass, inputClass } from '@/components/models/styles'
-import { Pill, Section } from '@/components/models/ui'
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Input,
+  PageHeader,
+  SkeletonList,
+} from '@/components/ui'
 import { errorMessage } from '@/lib/errors'
-import { cn } from '@/lib/utils'
 
 const KEYS = {
   quick: ['connections', 'no-health'] as const,
   probed: ['connections', 'health'] as const,
 }
 
-function HealthPill({ health, probing }: { health: HealthStatus | null | undefined; probing: boolean }) {
-  if (!health) return <Pill tone="muted">{probing ? 'checking…' : 'unknown'}</Pill>
+function HealthBadge({ health, probing }: { health: HealthStatus | null | undefined; probing: boolean }) {
+  if (!health) return <Badge>{probing ? 'checking…' : 'unknown'}</Badge>
   if (health.healthy) {
-    return <Pill tone="ok">healthy{health.latency_ms !== undefined ? ` · ${Math.round(health.latency_ms)} ms` : ''}</Pill>
+    return (
+      <Badge tone="success" dot>
+        healthy{health.latency_ms !== undefined ? ` · ${Math.round(health.latency_ms)} ms` : ''}
+      </Badge>
+    )
   }
   return (
-    <Pill tone="bad" title={health.error}>
+    <Badge tone="danger" title={health.error}>
       unreachable
-    </Pill>
+    </Badge>
   )
 }
 
 /**
  * KeyModal shows an app key exactly once (I5). Closing it drops the key from memory; there is
- * no way to see it again, only to rotate.
+ * no way to see it again, only to rotate. Only "I've stored it" closes it, so a stray tap on
+ * the backdrop can't lose the key.
  */
 export function KeyModal({ appKey, onClose }: { appKey: AppKey; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className={dialogClass.backdrop} role="dialog" aria-modal="true" aria-labelledby="key-title">
-      <div className={cn(dialogClass.panel, 'space-y-4')}>
-        <h2 id="key-title" className="flex items-center gap-2 break-all text-lg font-semibold text-[var(--color-text)]">
-          <KeyRound size={18} /> Key for {appKey.app_id}
-        </h2>
-        <p className="text-sm text-[var(--color-text-muted)]">
-          Copy it now. This is the only time it is shown; if it is lost, rotate the key to get a new one. The app sends it
-          as <code>X-Jarvis-App-Id</code> + <code>X-Jarvis-App-Key</code>.
-        </p>
-        <div className="flex items-center gap-2">
-          <code data-testid="app-key" className="min-w-0 flex-1 break-all rounded bg-[var(--color-surface-alt)] px-2 py-1.5 font-mono text-xs text-[var(--color-text)]">
+    <Dialog
+      open
+      onClose={onClose}
+      dismissible={false}
+      title={<span className="break-all">Key for {appKey.app_id}</span>}
+      description="Copy it now. This is the only time it is shown; if it is lost, rotate the key to get a new one."
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          I've stored it
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="flex items-start gap-2">
+          <code
+            data-testid="app-key"
+            className="min-w-0 flex-1 rounded-control bg-surface-alt px-3 py-2 font-mono text-small break-all text-text"
+          >
             {appKey.app_key}
           </code>
-          <button
-            type="button"
-            className={buttonClass.secondary}
+          <Button
+            size="sm"
+            className="mt-1"
+            icon={copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
             onClick={() => {
               void navigator.clipboard?.writeText(appKey.app_key).then(
                 () => setCopied(true),
@@ -67,16 +89,15 @@ export function KeyModal({ appKey, onClose }: { appKey: AppKey; onClose: () => v
               )
             }}
           >
-            {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
-          </button>
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
         </div>
-        <div className="flex justify-end">
-          <button type="button" className={buttonClass.primary} onClick={onClose}>
-            I've stored it
-          </button>
-        </div>
+        <p className="text-small text-text-muted">
+          The app sends it as <code className="font-mono">X-Jarvis-App-Id</code> +{' '}
+          <code className="font-mono">X-Jarvis-App-Key</code>.
+        </p>
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -104,55 +125,72 @@ export function PublicURLField({ name, value }: { name: string; value: string | 
   })
   if (!editing) {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
-        <Globe size={12} aria-hidden />
-        {value ? <span data-testid={`public-url-${name}`}>{value}</span> : <span>no public URL</span>}
-        <button
-          type="button"
-          className={buttonClass.icon}
+      <div className="flex min-w-0 items-center gap-1.5 text-small text-text-muted">
+        <Globe size={14} aria-hidden className="shrink-0" />
+        {value ? (
+          <span data-testid={`public-url-${name}`} className="min-w-0 break-all text-text">
+            {value}
+          </span>
+        ) : (
+          <span>no public URL</span>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-my-1 px-2"
           title={`Edit the public URL of ${name}`}
           aria-label={`Edit the public URL of ${name}`}
+          icon={<Pencil size={14} aria-hidden />}
           onClick={() => {
             setDraft(value ?? '')
             setEditing(true)
           }}
         >
-          <Pencil size={12} />
-        </button>
+          Edit
+        </Button>
       </div>
     )
   }
   return (
     <form
-      className="mt-1 w-full space-y-1"
+      className="mt-2 w-full"
       onSubmit={(e) => {
         e.preventDefault()
         if (!problem) save.mutate(draft.trim() || null)
       }}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <input
+      <div className="flex flex-wrap items-start gap-2">
+        <Input
           aria-label={`Public URL for ${name}`}
-          aria-invalid={problem ? true : undefined}
-          className={cn(inputClass, 'min-w-0 flex-1')}
+          wrapperClassName="min-w-0 flex-1 basis-60"
           placeholder="https://jarvis.example.com"
           value={draft}
+          error={problem ? <span role="alert">{problem}</span> : undefined}
+          hint={PUBLIC_URL_HINT}
           onChange={(e) => setDraft(e.target.value)}
         />
-        <button type="button" className={buttonClass.secondary} onClick={() => setEditing(false)}>
-          Cancel
-        </button>
-        <button type="submit" className={buttonClass.primary} disabled={!!problem || save.isPending}>
-          {draft.trim() ? 'Save' : 'Clear'}
-        </button>
+        <div className="flex gap-2">
+          <Button onClick={() => setEditing(false)}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={!!problem} loading={save.isPending}>
+            {draft.trim() ? 'Save' : 'Clear'}
+          </Button>
+        </div>
       </div>
-      {problem ? (
-        <p className="text-xs text-red-500" role="alert">
-          {problem}
-        </p>
-      ) : (
-        <p className="text-xs text-[var(--color-text-muted)]">{PUBLIC_URL_HINT}</p>
-      )}
+    </form>
+  )
+}
+
+/** InlineForm is a form that opens inside a card (add a service, create an app): a tinted panel, not a box in a box. */
+function InlineForm({ onSubmit, children }: { onSubmit: () => void; children: ReactNode }) {
+  return (
+    <form
+      className="mb-4 grid gap-3 rounded-control bg-surface-alt p-3 sm:grid-cols-2 md:p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        onSubmit()
+      }}
+    >
+      {children}
     </form>
   )
 }
@@ -182,39 +220,27 @@ function AddServiceForm({ onDone }: { onDone: () => void }) {
     onError: (err) => toast.error(errorMessage(err, 'Could not add the service')),
   })
   return (
-    <form
-      className="grid gap-2 rounded-lg border border-[var(--color-border)] p-3 sm:grid-cols-2"
-      onSubmit={(e) => {
-        e.preventDefault()
-        add.mutate()
-      }}
-    >
-      <input aria-label="Service name" className={inputClass} placeholder="Name, e.g. jarvis-recipes" value={name} onChange={(e) => setName(e.target.value)} />
-      <input aria-label="Base URL" className={inputClass} placeholder="http://host:port" value={url} onChange={(e) => setUrl(e.target.value)} />
-      <input aria-label="Health path" className={inputClass} placeholder="/health" value={healthPath} onChange={(e) => setHealthPath(e.target.value)} />
-      <input aria-label="Description" className={inputClass} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
-      <input
-        aria-label="Public URL"
-        aria-invalid={publicProblem ? true : undefined}
-        className={cn(inputClass, 'sm:col-span-2')}
-        placeholder="Public URL (optional, for a tunnel), e.g. https://recipes.example.io"
+    <InlineForm onSubmit={() => add.mutate()}>
+      <Input label="Service name" placeholder="jarvis-recipes" value={name} onChange={(e) => setName(e.target.value)} />
+      <Input label="Base URL" placeholder="http://host:port" value={url} onChange={(e) => setUrl(e.target.value)} />
+      <Input label="Health path" placeholder="/health" value={healthPath} onChange={(e) => setHealthPath(e.target.value)} />
+      <Input label="Description" hint="Optional." value={description} onChange={(e) => setDescription(e.target.value)} />
+      <Input
+        label="Public URL"
+        wrapperClassName="sm:col-span-2"
+        placeholder="https://recipes.example.io"
+        hint="Optional, for access through a tunnel or reverse proxy."
+        error={publicProblem ? <span role="alert">{publicProblem}</span> : undefined}
         value={publicURL}
         onChange={(e) => setPublicURLDraft(e.target.value)}
       />
-      {publicProblem && (
-        <p className="text-xs text-red-500 sm:col-span-2" role="alert">
-          {publicProblem}
-        </p>
-      )}
       <div className="flex justify-end gap-2 sm:col-span-2">
-        <button type="button" className={buttonClass.secondary} onClick={onDone}>
-          Cancel
-        </button>
-        <button type="submit" className={buttonClass.primary} disabled={!name.trim() || !url.trim() || !!publicProblem || add.isPending}>
+        <Button onClick={onDone}>Cancel</Button>
+        <Button type="submit" variant="primary" disabled={!name.trim() || !url.trim() || !!publicProblem} loading={add.isPending}>
           Add
-        </button>
+        </Button>
       </div>
-    </form>
+    </InlineForm>
   )
 }
 
@@ -231,26 +257,84 @@ function CreateAppForm({ onCreated, onCancel }: { onCreated: (k: AppKey) => void
     onError: (err) => toast.error(errorMessage(err, 'Could not create the app client')),
   })
   return (
-    <form
-      className="grid gap-2 rounded-lg border border-[var(--color-border)] p-3 sm:grid-cols-2"
-      onSubmit={(e) => {
-        e.preventDefault()
-        create.mutate()
-      }}
-    >
-      <input aria-label="App ID" className={inputClass} placeholder="App ID, e.g. jarvis-recipes" value={appId} onChange={(e) => setAppId(e.target.value)} />
-      <input aria-label="App name" className={inputClass} placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} />
+    <InlineForm onSubmit={() => create.mutate()}>
+      <Input label="App ID" placeholder="jarvis-recipes" value={appId} onChange={(e) => setAppId(e.target.value)} />
+      <Input label="App name" placeholder="Recipes" value={name} onChange={(e) => setName(e.target.value)} />
       <div className="flex justify-end gap-2 sm:col-span-2">
-        <button type="button" className={buttonClass.secondary} onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className={buttonClass.primary} disabled={!appId.trim() || !name.trim() || create.isPending}>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button type="submit" variant="primary" disabled={!appId.trim() || !name.trim()} loading={create.isPending}>
           Create
-        </button>
+        </Button>
       </div>
-    </form>
+    </InlineForm>
   )
 }
+
+/** ConnectionCard is one of the page's three sections: a card with an icon heading. */
+function ConnectionCard({
+  id,
+  title,
+  icon,
+  description,
+  actions,
+  children,
+}: {
+  id: string
+  title: string
+  icon: ReactNode
+  description: ReactNode
+  actions?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <Card as="section" aria-labelledby={id}>
+      <CardHeader
+        id={id}
+        title={title}
+        icon={icon}
+        description={description}
+        actions={actions}
+      />
+      {children}
+    </Card>
+  )
+}
+
+/**
+ * Row is one connection: its name, badges and health on the first line, the lines under it, and
+ * its actions at the right (under it on a phone).
+ */
+function Row({
+  testId,
+  title,
+  status,
+  meta,
+  children,
+  actions,
+}: {
+  testId: string
+  title: ReactNode
+  status?: ReactNode
+  meta?: ReactNode
+  children?: ReactNode
+  actions?: ReactNode
+}) {
+  return (
+    <li className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0" data-testid={testId}>
+      <div className="min-w-0 flex-1 basis-64 space-y-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {title}
+          {status && <span className="ml-auto">{status}</span>}
+        </div>
+        {meta && <p className="text-small break-all text-text-muted">{meta}</p>}
+        {children}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </li>
+  )
+}
+
+const rowName = 'font-mono text-body font-medium break-all text-text'
 
 /**
  * ConnectionsPage (AD7): what talks to jarvisd. The list renders at once without health
@@ -294,163 +378,221 @@ export default function ConnectionsPage() {
     onError: (err) => toast.error(errorMessage(err, 'Could not revoke it')),
   })
 
-  if (quick.isLoading && !data) return <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>
-  if (!data) return <p className="text-sm text-red-500">{errorMessage(quick.error, 'Could not load the connections')}</p>
+  const header = (
+    <PageHeader
+      title="Connections"
+      description="jarvisd's ports, the services it knows about, and the apps allowed to call it."
+      actions={
+        <Button size="sm" icon={<RefreshCw size={16} aria-hidden />} loading={probing} onClick={refresh}>
+          Check again
+        </Button>
+      }
+    />
+  )
+
+  if (quick.isLoading && !data) {
+    return (
+      <div className="mx-auto max-w-5xl">
+        {header}
+        <Card flush>
+          <SkeletonList rows={6} label="Loading connections" />
+        </Card>
+      </div>
+    )
+  }
+  if (!data) {
+    return (
+      <div className="mx-auto max-w-5xl">
+        {header}
+        <Card>
+          <ErrorState
+            title="Couldn't load the connections"
+            message={errorMessage(quick.error, 'The server did not answer. Check that Jarvis Automation is running.')}
+            onRetry={() => quick.refetch()}
+          />
+        </Card>
+      </div>
+    )
+  }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold text-[var(--color-text)]">Connections</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">jarvisd's ports, the services it knows about, and the apps allowed to call it.</p>
-        </div>
-        <button type="button" className={buttonClass.icon} title="Check again" aria-label="Check again" onClick={refresh}>
-          <RefreshCw size={14} className={cn(probing && 'animate-spin')} />
-        </button>
-      </div>
-
-      <Section
-        title="jarvisd listeners"
-        icon={Server}
-        description="Managed by jarvisd; change ports with JARVIS_PORT_* in jarvisd.env. Behind a tunnel (e.g. Cloudflare), set each public hostname as that listener's public URL."
-      >
-        <ul className="divide-y divide-[var(--color-border)]">
-          {data.listeners.map((l) => (
-            <li key={l.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`listener-${l.name}`}>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <code className="break-all text-[var(--color-text)]">{l.name}</code>
-                  <span className="break-all text-xs text-[var(--color-text-muted)]">{l.url}</span>
-                  {l.managed === 'broker' && <Pill>MQTT</Pill>}
-                </div>
+    <div className="mx-auto max-w-5xl">
+      {header}
+      <div className="space-y-4">
+        <ConnectionCard
+          id="conn-listeners"
+          title="jarvisd listeners"
+          icon={<Server size={18} />}
+          description="Managed by jarvisd; change ports with JARVIS_PORT_* in jarvisd.env. Behind a tunnel (e.g. Cloudflare), set each public hostname as that listener's public URL."
+        >
+          <ul className="divide-y divide-border">
+            {data.listeners.map((l) => (
+              <Row
+                key={l.name}
+                testId={`listener-${l.name}`}
+                title={
+                  <>
+                    <code className={rowName}>{l.name}</code>
+                    {l.managed === 'broker' && <Badge>MQTT</Badge>}
+                  </>
+                }
+                meta={l.url}
+                status={<HealthBadge health={l.health} probing={probing} />}
+              >
                 <PublicURLField name={l.name} value={l.public_url} />
-              </div>
-              <HealthPill health={l.health} probing={probing} />
-            </li>
-          ))}
-        </ul>
-      </Section>
+              </Row>
+            ))}
+          </ul>
+        </ConnectionCard>
 
-      <Section
-        title="External services"
-        icon={Link2}
-        description="Add-ons and other machines registered with jarvisd's service registry, so nodes and apps can find them."
-        actions={
-          !adding && (
-            <button type="button" className={buttonClass.secondary} onClick={() => setAdding(true)}>
-              <Plus size={12} /> Add
-            </button>
-          )
-        }
-      >
-        {adding && <AddServiceForm onDone={() => setAdding(false)} />}
-        {data.external.length === 0 ? (
-          <p className="text-xs text-[var(--color-text-muted)]">None.</p>
-        ) : (
-          <ul className="divide-y divide-[var(--color-border)]">
-            {data.external.map((x) => (
-              <li key={x.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`external-${x.name}`}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <code className="break-all text-[var(--color-text)]">{x.name}</code>
-                    {x.managed === 'setting' && <Pill title="Follows a jarvisd setting; change it under Settings">from settings</Pill>}
-                  </div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    <span className="break-all">{x.url}</span>
-                    {x.description ? ` · ${x.description}` : ''}
-                  </p>
+        <ConnectionCard
+          id="conn-external"
+          title="External services"
+          icon={<Link2 size={18} />}
+          description="Add-ons and other machines registered with jarvisd's service registry, so nodes and apps can find them."
+          actions={
+            !adding && (
+              <Button size="sm" icon={<Plus size={16} aria-hidden />} onClick={() => setAdding(true)}>
+                Add
+              </Button>
+            )
+          }
+        >
+          {adding && <AddServiceForm onDone={() => setAdding(false)} />}
+          {data.external.length === 0 ? (
+            !adding && (
+              <EmptyState
+                className="py-6"
+                title="No external services"
+                description="Add one when an add-on or another machine should be found by nodes and apps."
+              />
+            )
+          ) : (
+            <ul className="divide-y divide-border">
+              {data.external.map((x) => (
+                <Row
+                  key={x.name}
+                  testId={`external-${x.name}`}
+                  title={
+                    <>
+                      <code className={rowName}>{x.name}</code>
+                      {x.managed === 'setting' && <Badge title="Follows a jarvisd setting; change it under Settings">from settings</Badge>}
+                    </>
+                  }
+                  meta={
+                    <>
+                      {x.url}
+                      {x.description ? ` · ${x.description}` : ''}
+                    </>
+                  }
+                  status={<HealthBadge health={x.health} probing={probing} />}
+                  actions={
+                    x.removable && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="px-2"
+                          title={`Remove ${x.name}`}
+                          aria-label={`Remove ${x.name}`}
+                          icon={<Trash2 size={14} aria-hidden />}
+                          disabled={remove.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Remove ${x.name} from the registry?`)) remove.mutate(x.name)
+                          }}
+                        >
+                          Remove
+                        </Button>
+                    )
+                  }
+                >
                   <PublicURLField name={x.name} value={x.public_url} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <HealthPill health={x.health} probing={probing} />
-                  {x.removable && (
-                    <button
-                      type="button"
-                      className={buttonClass.icon}
-                      title={`Remove ${x.name}`}
-                      aria-label={`Remove ${x.name}`}
-                      disabled={remove.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Remove ${x.name} from the registry?`)) remove.mutate(x.name)
-                      }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+                </Row>
+              ))}
+            </ul>
+          )}
+        </ConnectionCard>
 
-      <Section
-        title="App clients"
-        icon={AppWindow}
-        description="Credentials for other programs that call jarvisd (add-ons, a remote GPU box). Phones and nodes don't need one."
-        actions={
-          !creating && (
-            <button type="button" className={buttonClass.secondary} onClick={() => setCreating(true)}>
-              <Plus size={12} /> New app
-            </button>
-          )
-        }
-      >
-        {creating && (
-          <CreateAppForm
-            onCancel={() => setCreating(false)}
-            onCreated={(k) => {
-              setCreating(false)
-              setShownKey(k)
-            }}
-          />
-        )}
-        {data.apps.length === 0 ? (
-          <p className="text-xs text-[var(--color-text-muted)]">None.</p>
-        ) : (
-          <ul className="divide-y divide-[var(--color-border)]">
-            {data.apps.map((a) => (
-              <li key={a.app_id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid={`app-${a.app_id}`}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <code className="break-all text-[var(--color-text)]">{a.app_id}</code>
-                    <span className="text-[var(--color-text-muted)]">{a.name}</span>
-                    {a.is_active ? <Pill tone="ok">active</Pill> : <Pill tone="bad">revoked</Pill>}
-                  </div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    created {new Date(a.created_at).toLocaleDateString()}
-                    {a.last_rotated_at ? ` · key rotated ${new Date(a.last_rotated_at).toLocaleDateString()}` : ''}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className={buttonClass.secondary}
-                    disabled={rotate.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Issue a new key for ${a.app_id}? The old key stops working.`)) rotate.mutate(a.app_id)
-                    }}
-                  >
-                    <KeyRound size={12} /> {a.is_active ? 'Rotate key' : 'Reissue key'}
-                  </button>
-                  {a.is_active && (
-                    <button
-                      type="button"
-                      className={buttonClass.danger}
-                      disabled={revoke.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Revoke ${a.app_id}? Its key stops working at once.`)) revoke.mutate(a.app_id)
-                      }}
-                    >
-                      Revoke
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+        <ConnectionCard
+          id="conn-apps"
+          title="App clients"
+          icon={<AppWindow size={18} />}
+          description="Credentials for other programs that call jarvisd (add-ons, a remote GPU box). Phones and nodes don't need one."
+          actions={
+            !creating && (
+              <Button size="sm" icon={<Plus size={16} aria-hidden />} onClick={() => setCreating(true)}>
+                New app
+              </Button>
+            )
+          }
+        >
+          {creating && (
+            <CreateAppForm
+              onCancel={() => setCreating(false)}
+              onCreated={(k) => {
+                setCreating(false)
+                setShownKey(k)
+              }}
+            />
+          )}
+          {data.apps.length === 0 ? (
+            !creating && (
+              <EmptyState
+                className="py-6"
+                title="No app clients"
+                description="Create one for a program that calls jarvisd from another machine. It gets a key, shown once."
+              />
+            )
+          ) : (
+            <ul className="divide-y divide-border">
+              {data.apps.map((a) => (
+                <Row
+                  key={a.app_id}
+                  testId={`app-${a.app_id}`}
+                  title={
+                    <>
+                      <code className={rowName}>{a.app_id}</code>
+                      <span className="text-body text-text-muted">{a.name}</span>
+                      {a.is_active ? <Badge tone="success">active</Badge> : <Badge tone="danger">revoked</Badge>}
+                    </>
+                  }
+                  meta={
+                    <>
+                      Created {new Date(a.created_at).toLocaleDateString()}
+                      {a.last_rotated_at ? ` · key rotated ${new Date(a.last_rotated_at).toLocaleDateString()}` : ''}
+                    </>
+                  }
+                  actions={
+                    <>
+                      <Button
+                        size="sm"
+                        icon={<KeyRound size={14} aria-hidden />}
+                        disabled={rotate.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Issue a new key for ${a.app_id}? The old key stops working.`)) rotate.mutate(a.app_id)
+                        }}
+                      >
+                        {a.is_active ? 'Rotate key' : 'Reissue key'}
+                      </Button>
+                      {a.is_active && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={revoke.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Revoke ${a.app_id}? Its key stops working at once.`)) revoke.mutate(a.app_id)
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </>
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </ConnectionCard>
+      </div>
 
       {shownKey && <KeyModal appKey={shownKey} onClose={() => setShownKey(null)} />}
     </div>

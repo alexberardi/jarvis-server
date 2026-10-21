@@ -913,3 +913,39 @@ func TestMDNSNamesAndURLs(t *testing.T) {
 		t.Fatal("no port")
 	}
 }
+
+// A grant given while the page is open shows on the next poll, and says so when the running
+// agent sees it only after a restart.
+func TestPermissionGrantedWhileOpenTurnsGranted(t *testing.T) {
+	status, restart := NotAsked, true
+	s := testServer(t, Deps{Permissions: []Permission{{ID: "accessibility", Label: "Accessibility",
+		Status: func() string { return status }, NeedsRestart: func() bool { return restart }}}})
+	st := decode[stateView](t, send(s, req(s, "GET", "api/state", nil)))
+	if p := st.Permissions[0]; p.Status != NotAsked || p.Restart {
+		t.Fatalf("before: %+v", p)
+	}
+	status = Granted
+	st = decode[stateView](t, send(s, req(s, "GET", "api/state", nil)))
+	if p := st.Permissions[0]; p.Status != Granted || !p.Restart {
+		t.Fatalf("granted, agent not restarted: %+v", p)
+	}
+	restart = false
+	st = decode[stateView](t, send(s, req(s, "GET", "api/state", nil)))
+	if p := st.Permissions[0]; p.Status != Granted || p.Restart {
+		t.Fatalf("granted, agent restarted: %+v", p)
+	}
+}
+
+// Opened again once set up (the app reopened while the agent runs): the page says Jarvis is
+// running.
+func TestStateSaysTheAgentIsRunning(t *testing.T) {
+	running := false
+	s := testServer(t, Deps{Running: func() bool { return running }})
+	if st := decode[stateView](t, send(s, req(s, "GET", "api/state", nil))); st.Running {
+		t.Fatal("running before it is")
+	}
+	running = true
+	if st := decode[stateView](t, send(s, req(s, "GET", "api/state", nil))); !st.Running {
+		t.Fatal("not running")
+	}
+}

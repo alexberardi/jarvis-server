@@ -112,4 +112,52 @@ describe('NodesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide signed-out nodes' }))
     expect(screen.queryByText('Old-PC')).not.toBeInTheDocument()
   })
+
+  it('shows a placeholder list while loading, then the nodes', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NodesPage />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByRole('status', { name: 'Loading nodes' })).toBeInTheDocument()
+    expect(await screen.findByText('Office-PC')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading nodes' })).toBeNull()
+  })
+
+  it('says what failed and loads again on Try again', async () => {
+    let fail = true
+    const base = get.getMockImplementation()!
+    get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/nodes' && fail) throw new Error('connection refused')
+      return base(url)
+    })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NodesPage />
+      </QueryClientProvider>,
+    )
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent("Couldn't load the nodes")
+    fail = false
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Office-PC')).toBeInTheDocument()
+  })
+
+  it('says how to add a node when there are none', async () => {
+    const base = get.getMockImplementation()!
+    get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/households' || url === '/api/admin/nodes') return { data: [] }
+      return base(url)
+    })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NodesPage />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('No nodes yet')).toBeInTheDocument()
+    expect(screen.getByText(/Jarvis Automation phone app/)).toBeInTheDocument()
+  })
 })

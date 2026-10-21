@@ -103,6 +103,8 @@ type permissionView struct {
 	Why    string `json:"why"`
 	How    string `json:"how,omitempty"`
 	Status string `json:"status"`
+	// Restart: granted, but the running agent has it only once it restarts.
+	Restart bool `json:"restart,omitempty"`
 }
 
 type portalView struct {
@@ -120,6 +122,7 @@ type stateView struct {
 	Computer    string           `json:"computer"`
 	OS          string           `json:"os"`
 	Joined      bool             `json:"joined"`
+	Running     bool             `json:"running"`
 	Server      *Found           `json:"server,omitempty"`
 	Join        joinState        `json:"join"`
 	Voice       *voiceView       `json:"voice,omitempty"`
@@ -155,6 +158,9 @@ func (a *app) state(ctx context.Context) stateView {
 	if v.Joined && v.Join.State == JoinIdle {
 		v.Join.State = JoinJoined
 	}
+	if a.d.Running != nil {
+		v.Running = a.d.Running()
+	}
 	if a.d.Voice != nil {
 		v.Voice = &voiceView{On: a.d.Voice.On()}
 	}
@@ -163,7 +169,8 @@ func (a *app) state(ctx context.Context) stateView {
 		if p.Status != nil {
 			st = p.Status()
 		}
-		v.Permissions = append(v.Permissions, permissionView{ID: p.ID, Label: p.Label, Why: p.Why, How: p.How, Status: st})
+		restart := st == Granted && p.NeedsRestart != nil && p.NeedsRestart()
+		v.Permissions = append(v.Permissions, permissionView{ID: p.ID, Label: p.Label, Why: p.Why, How: p.How, Status: st, Restart: restart})
 	}
 	if a.d.Portal != nil {
 		allowed, available, why := a.d.Portal.Status(ctx)
