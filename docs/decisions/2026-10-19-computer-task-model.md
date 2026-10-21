@@ -11,3 +11,6 @@ the largest vision model, and no third model slot is added (VRAM).
 This is a first decision, not a final one: it is **re-decided from the computer-task suite's
 numbers** (piece 16 of plan P3), which scores the required cases per label and may move the
 `computer.model` default.
+
+Re-decided on 2026-10-20 from the suite's numbers, with the same outcome (`auto` stays):
+[2026-10-20-computer-task-default-model.md](2026-10-20-computer-task-default-model.md).
