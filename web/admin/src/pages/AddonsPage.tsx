@@ -10,7 +10,7 @@ import PendingPairings from '@/components/nodes/PendingPairings'
 import {
   Badge,
   Button,
-  buttonClasses,
+  buttonStyles,
   Card,
   CardHeader,
   EmptyState,
@@ -56,7 +56,7 @@ function AddonCard({ id, title, icon, description, children }: { id: string; tit
 
 function External({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={buttonClasses({ size: 'sm' })}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={buttonStyles({ size: 'sm' })}>
       {children}
       <ExternalLink size={14} aria-hidden="true" />
     </a>
@@ -123,7 +123,7 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
           {!n.online && (
             <a
               href={AGENT_START_URL}
-              className={buttonClasses({ size: 'sm' })}
+              className={buttonStyles({ size: 'sm' })}
               title="Works on the computer where the agent is installed"
             >
               <Play size={14} aria-hidden="true" />
@@ -238,7 +238,7 @@ export default function AddonsPage() {
           )}
           {here && !here.online && (
             <div className="mt-3">
-              <a href={AGENT_START_URL} className={buttonClasses({ variant: 'primary', size: 'sm' })}>
+              <a href={AGENT_START_URL} className={buttonStyles({ variant: 'primary', size: 'sm' })}>
                 <Play size={14} aria-hidden="true" />
                 Start the agent
               </a>
