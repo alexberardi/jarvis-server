@@ -196,8 +196,44 @@ func (s *Store) LookupModel(ctx context.Context, id string) (engine.ModelInfo, e
 			return engine.ModelInfo{}, err
 		}
 		info.FoldSystemMessages = e.FoldSystemMessages
+	} else if m.Kind == engine.ModelLLM {
+		info.FoldSystemMessages = dirFold(m.Path)
+	}
+	if mlxRepo(m.Repo) && m.Kind == engine.ModelLLM {
+		info.Engine = engine.KindMLX
 	}
 	return info, nil
+}
+
+// dirFold is a model directory's fold flag from its config.json (InferDir); false for a file.
+func dirFold(p string) bool {
+	if st, err := os.Stat(p); err != nil || !st.IsDir() {
+		return false
+	}
+	return InferDir(p).FoldSystemMessages
+}
+
+// ByPath returns the ready model installed at path p.
+func (s *Store) ByPath(ctx context.Context, p string) (Model, error) {
+	m, err := scanModel(s.DB.Read.QueryRowContext(ctx, `SELECT `+modelCols+` FROM llm_models WHERE path = ? AND state = ? ORDER BY id LIMIT 1`, p, StateReady))
+	if errors.Is(err, sql.ErrNoRows) {
+		return m, ErrNotFound
+	}
+	return m, err
+}
+
+// LookupPath implements engine.PathLookup: a label's model set to an absolute path gets the
+// traits of the ready model installed there, else (a folder) those its config.json implies.
+func (s *Store) LookupPath(ctx context.Context, p string) (engine.ModelInfo, bool) {
+	if mod, err := s.ByPath(ctx, p); err == nil {
+		if info, err := s.LookupModel(ctx, mod.ID); err == nil {
+			return info, true
+		}
+	}
+	if dirFold(p) {
+		return engine.ModelInfo{ID: p, Kind: engine.ModelLLM, Path: p, FoldSystemMessages: true}, true
+	}
+	return engine.ModelInfo{}, false
 }
 
 const installCols = `id, model_id, COALESCE(mmproj_id,''), COALESCE(engine_kind,''), COALESCE(engine_flavour,''), assign, state,

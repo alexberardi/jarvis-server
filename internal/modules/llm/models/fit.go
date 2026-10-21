@@ -174,7 +174,29 @@ func entryFitAlongside(hw engine.Hardware, e Entry, residents []Resident) Fit {
 			w += p.Size
 		}
 	}
-	return fitAlongside(hw, e.Kind, w, e.HostBytes, e.KVBytesPerTok, e.ContextDefault, residents)
+	return minMemory(hw, e, fitAlongside(hw, e.Kind, w, e.HostBytes, e.KVBytesPerTok, e.ContextDefault, residents))
+}
+
+// hostMemoryMB is the machine's memory as an entry's MinMemoryMB means it: physical RAM, or on
+// Apple Silicon the unified memory behind the Metal device's usable share (0 = unknown).
+func hostMemoryMB(hw engine.Hardware) int64 {
+	if hw.RAMMB > 0 {
+		return hw.RAMMB
+	}
+	for _, d := range hw.Devices {
+		if d.Backend == engine.FlavourMetal {
+			return d.TotalMB * 10 / 7
+		}
+	}
+	return 0
+}
+
+// minMemory makes f too_big for an entry the machine has less memory than it asks for.
+func minMemory(hw engine.Hardware, e Entry, f Fit) Fit {
+	if mem := hostMemoryMB(hw); e.MinMemoryMB > 0 && mem > 0 && mem < e.MinMemoryMB {
+		f.Verdict = "too_big"
+	}
+	return f
 }
 
 // Overcommitted warns, per card, when the assigned engines together need more than it has

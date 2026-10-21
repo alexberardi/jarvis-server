@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -134,7 +135,17 @@ func (m *Module) LiveModelTraits(ctx context.Context) ModelTraits {
 	}
 	mod, err := m.stack.Manager.Store.Get(ctx, id)
 	if err != nil {
-		return ModelTraits{}
+		// A model set by path: the installed model there, else the file or folder itself.
+		if !filepath.IsAbs(id) {
+			return ModelTraits{}
+		}
+		if mod, err = m.stack.Manager.Store.ByPath(ctx, id); err != nil {
+			mod = models.Model{ID: id, Kind: engine.ModelLLM, Path: id}
+		}
+	}
+	if mod.PromptProvider == "" && mod.Kind == engine.ModelLLM {
+		// A model directory names its provider in its config.json (catalog GGUFs in their entry).
+		mod.PromptProvider = models.InferDir(mod.Path).PromptProvider
 	}
 	e, inCatalog := models.CatalogEntry(mod.CatalogID)
 	key := mod.ID + "\x00" + mod.Path

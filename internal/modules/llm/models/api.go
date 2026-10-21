@@ -139,6 +139,8 @@ type catalogItem struct {
 	Fit       Fit    `json:"fit"`
 	Installed bool   `json:"installed"`
 	State     string `json:"state,omitempty"` // installed row state, if any
+	// Unavailable says why this machine can't run the entry (an MLX build off Apple Silicon).
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +160,13 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 	for _, e := range Catalog() {
 		// Judged for the labels of its kind: next to the other engines, not to itself or to
 		// the model it would replace.
-		items = append(items, catalogItem{Entry: e, Fit: a.Manager.entryFit(ctx, hw, e, residents), Installed: state[e.ID] == StateReady, State: state[e.ID]})
+		it := catalogItem{Entry: e, Fit: a.Manager.entryFit(ctx, hw, e, residents), Installed: state[e.ID] == StateReady, State: state[e.ID]}
+		if e.Directory {
+			if err := a.Manager.checkDirEngine(e.Repo); err != nil {
+				it.Unavailable = err.Error()
+			}
+		}
+		items = append(items, it)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": items, "recommended": a.Manager.Recommend(ctx, hw), "hardware": hw, "residents": residents})
 }
@@ -166,6 +174,10 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
 type hfChoice struct {
 	Choice
 	Fit Fit `json:"fit"`
+	// Engine runs a directory choice here (mlx-lm, vllm, transformers); Unavailable says why
+	// none can.
+	Engine      string `json:"engine,omitempty"`
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +202,11 @@ func (a *API) hfRepo(w http.ResponseWriter, r *http.Request) {
 	residents := a.Manager.Residents(ctx)
 	choices := []hfChoice{}
 	for _, c := range Choices(repo) {
-		choices = append(choices, hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, 0, ctxLen, residents)})
+		hc := hfChoice{Choice: c, Fit: a.Manager.fitFor(ctx, hw, c.Kind, c.Size, 0, 0, ctxLen, residents)}
+		if c.Directory {
+			hc.Engine, hc.Unavailable = a.Manager.dirEngineFor(repo.ID)
+		}
+		choices = append(choices, hc)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"repo": repo.ID, "revision": repo.Revision, "gated": repo.Gated, "files": choices})
 }
