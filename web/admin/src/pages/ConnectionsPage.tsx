@@ -423,7 +423,7 @@ export default function ConnectionsPage() {
           id="conn-listeners"
           title="jarvisd listeners"
           icon={<Server size={18} />}
-          description="Managed by jarvisd; change ports with JARVIS_PORT_* in jarvisd.env. Behind a tunnel (e.g. Cloudflare), set each public hostname as that listener's public URL."
+          description="Managed by jarvisd. Services share the API port under their own path; turn on server.legacy_ports in Settings for clients that need the old ports. Behind a tunnel (e.g. Cloudflare), set each public hostname as that listener's public URL."
         >
           <ul className="divide-y divide-border">
             {data.listeners.map((l) => (

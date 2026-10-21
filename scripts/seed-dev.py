@@ -55,7 +55,8 @@ USAGE
     scripts/seed-dev.py --home DIR --base-url http://127.0.0.1 --auth-port 27701 --cc-port 27703
 
 Ports default to JARVIS_PORT_AUTH / JARVIS_PORT_COMMAND_CENTER / JARVIS_PORT_ADMIN when set,
-else jarvisd's legacy ports (7701, 7703, 7710).
+else jarvisd's legacy ports (7701, 7703, 7710). --auth-url and --cc-url give a service's whole
+base URL instead (a single-port jarvisd: http://127.0.0.1:7700/auth) and win over the ports.
 
 Node keys are stored only as hashes on the server, so the seeder keeps the plaintext keys it
 minted in <home>/seed-dev-state.json (0600) and reuses them on later runs: the printed node
@@ -804,6 +805,8 @@ def main() -> int:
     p.add_argument("--base-url", default="http://localhost", help="scheme and host of jarvisd (default %(default)s)")
     p.add_argument("--auth-port", type=int, default=env_port("JARVIS_PORT_AUTH", 7701))
     p.add_argument("--cc-port", type=int, default=env_port("JARVIS_PORT_COMMAND_CENTER", 7703))
+    p.add_argument("--auth-url", default="", help="auth's base URL; wins over --base-url/--auth-port")
+    p.add_argument("--cc-url", default="", help="command center's base URL; wins over --base-url/--cc-port")
     p.add_argument("--admin-port", type=int, default=env_port("JARVIS_PORT_ADMIN", 7710),
                    help="only printed in the summary")
     p.add_argument("--setup-token", default="",
@@ -827,8 +830,8 @@ def main() -> int:
         return rc
     db_path = os.path.join(home, "jarvis.db")
     base = args.base_url.rstrip("/")
-    auth_url = f"{base}:{args.auth_port}"
-    cc_url = f"{base}:{args.cc_port}"
+    auth_url = args.auth_url.rstrip("/") or f"{base}:{args.auth_port}"
+    cc_url = args.cc_url.rstrip("/") or f"{base}:{args.cc_port}"
 
     try:
         if args.reset:

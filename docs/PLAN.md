@@ -73,18 +73,20 @@ Python libraries:
 
 ## 3. Architecture
 
-### 3.1 One process, legacy ports
+### 3.1 One process, one API port; legacy ports behind `server.legacy_ports`
 
 `jarvisd` runs one in-process **module** per former service.
 
-For compatibility it **listens on every legacy port**: 7700, 7701, 7702, 7703, 7704, 7706, 7707, 7712, 7030 and 7031. Each listener mounts only that module's routes. The services' paths collide if merged onto one port:
+Each module keeps its own listener and mux: the services' paths collide if merged onto one mux:
 
 - `/health`, `/ping`, `/info`
 - `/settings/*`
 - `/api/v0/me/data`, served by both command-center and notifications
 - `/api/v0/admin/*`
 
-Multi-listen gives zero client changes. `/services` returns the same host for every name, on different ports. A unified single port is a later, optional step.
+**One API port.** The config port (7700) also serves every other module under its own prefix (`/auth`, `/logs`, `/cc`, `/llm`, `/stt`, `/tts`, `/notifications`, `/recipes`, `/ocr`), prefix stripped, so no route moves. A fresh install listens only on 7700, the admin's 7710 and MQTT's 1884, and `/services` hands out path URLs (`http://host:7700/cc`).
+
+**Legacy ports behind `server.legacy_ports`.** With the setting on (or `JARVIS_LEGACY_PORTS=1`), jarvisd also listens on every legacy port (7701, 7702, 7703, 7704, 7706, 7707, 7712, 7030, 7031) and the MQTT WebSocket 9883, and `/services` answers the old per-port URLs. An upgraded install starts with it on, a fresh one with it off ([decision](decisions/2026-10-20-single-api-port.md)).
 
 Inside the process:
 

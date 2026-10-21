@@ -39,6 +39,10 @@ type Runner struct {
 	// Mounts maps listeners to the prefix they are also served under on config.ListenerConfig's
 	// port. Nil: no mounts (each listener only on its own port, as before).
 	Mounts map[string]string
+	// Legacy, when set, runs after migrations and before Register: true binds the mounted
+	// listeners' own ports too; false binds only the unmounted ones and sets
+	// Deps.Config.SinglePort. Nil with Mounts set = true.
+	Legacy func(ctx context.Context) (bool, error)
 
 	mu    sync.Mutex
 	addrs map[string]string         // listener -> bound address, filled once listening
@@ -135,6 +139,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.Migrate(ctx); err != nil {
 		return err
 	}
+	legacy := true
+	if r.Mounts != nil && r.Legacy != nil {
+		var err error
+		if legacy, err = r.Legacy(ctx); err != nil {
+			return err
+		}
+	}
 
 	muxes := map[string]*http.ServeMux{}
 	for _, m := range r.Modules {
@@ -145,6 +156,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.mu.Lock()
 	r.muxes = muxes
 	r.mu.Unlock()
+	// Without legacy ports the mounted listeners are reached only through the config port.
+	singlePort := !legacy && muxes[config.ListenerConfig] != nil
+	if singlePort {
+		r.Deps.Config.SinglePort = true
+	}
 	deps := r.Deps
 	deps.Handler = r.Handler
 	for _, m := range r.Modules {
@@ -156,6 +172,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		names = append(names, n)
 	}
 	slices.Sort(names)
+	// bound is the listeners that get a port of their own.
+	bound := names
+	if singlePort {
+		bound = slices.DeleteFunc(slices.Clone(names), func(n string) bool { return n != config.ListenerConfig && r.Mounts[n] != "" })
+		r.Deps.Log.Info("single port", "port", r.Deps.Config.Ports[config.ListenerConfig])
+	}
 
 	// The config listener also serves every mounted listener under its prefix.
 	handlers := map[string]http.Handler{}
@@ -183,7 +205,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.mu.Lock()
 	r.addrs = map[string]string{}
 	r.mu.Unlock()
-	for _, n := range names {
+	for _, n := range bound {
 		addr, err := r.Deps.Config.Addr(n)
 		if err != nil {
 			closeAll()
@@ -206,7 +228,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	errc := make(chan error, len(listeners)+len(r.Modules))
 	var servers []*http.Server
 	var wg sync.WaitGroup
-	for _, n := range names {
+	for _, n := range bound {
 		srv := &http.Server{
 			Handler:           handlers[n],
 			ReadHeaderTimeout: 10 * time.Second,

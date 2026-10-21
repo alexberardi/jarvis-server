@@ -554,7 +554,32 @@ func serve(ctx context.Context, browser, allowDowngrade bool) error {
 		defer timer.Stop()
 	}
 	var runner *module.Runner
-	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, Mounts: config.Paths, OnReady: func() {
+	// The legacy-ports decision (server.legacy_ports) runs after migrations, before Register:
+	// the MQTT WebSocket and the doctor's exposure follow it.
+	legacyPorts := func(ctx context.Context) (bool, error) {
+		on, err := configmod.LegacyPorts(ctx, deps.DB, deps.Log, cfg.Env.LegacyPorts)
+		if err != nil {
+			return false, err
+		}
+		env := cfg.Env
+		env.MQTTWSAddr = mqttWSAddr(cfg.Env, on)
+		var served []string
+		var admin *adminmod.Module
+		for _, m := range mods {
+			served = append(served, m.Listener())
+			switch x := m.(type) {
+			case *ccmod.Module:
+				x.MQTT.WSAddr = env.MQTTWSAddr
+			case *adminmod.Module:
+				admin = x
+			}
+		}
+		if admin != nil {
+			admin.Exposure = exposure(boundListeners(served, on), env)
+		}
+		return on, nil
+	}
+	runner = &module.Runner{Deps: deps, Modules: mods, AllowDowngrade: allowDowngrade, Mounts: config.Paths, Legacy: legacyPorts, OnReady: func() {
 		if err := service.Ready(ctx); err != nil {
 			log.Warn("could not notify the service manager", "err", err)
 		}

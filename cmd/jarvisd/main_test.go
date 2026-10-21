@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	ocrmod "github.com/alexberardi/jarvis-server/internal/modules/ocr"
 	ttsmod "github.com/alexberardi/jarvis-server/internal/modules/tts"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 )
 
@@ -45,17 +48,86 @@ func TestRunCommands(t *testing.T) {
 func TestDoctorPortsIncludeAdmin(t *testing.T) {
 	t.Setenv("JARVIS_HOME", t.TempDir())
 	t.Setenv("JARVIS_PORT_ADMIN", "")
+	ports := func(t *testing.T) map[string]int {
+		t.Helper()
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int{}
+		for _, p := range doctorPorts(cfg) {
+			if p.Proto == "tcp" {
+				out[p.Name] = p.Port
+			}
+		}
+		return out
+	}
+	// No database yet (or no decision stored): single port.
+	got := ports(t)
+	if got[config.ListenerAdmin] != 7710 || got[config.ListenerConfig] != 7700 || got["mqtt"] != 1884 {
+		t.Fatalf("single port: %v", got)
+	}
+	if _, ok := got[config.ListenerCC]; ok {
+		t.Errorf("single port lists cc: %v", got)
+	}
+	if _, ok := got["mqtt-ws"]; ok {
+		t.Errorf("single port lists mqtt-ws: %v", got)
+	}
+	if len(got) != 3 {
+		t.Errorf("single port: %v, want config, admin and mqtt", got)
+	}
+
+	// Legacy ports on: every listener and the MQTT WebSocket.
+	t.Setenv("JARVIS_LEGACY_PORTS", "1")
+	got = ports(t)
+	for l, p := range config.DefaultPorts {
+		if got[l] != p {
+			t.Errorf("legacy: %s = %d, want %d", l, got[l], p)
+		}
+	}
+	if got["mqtt-ws"] != 9883 {
+		t.Errorf("legacy: mqtt-ws = %d, want 9883", got["mqtt-ws"])
+	}
+}
+
+// The doctor reads the stored decision without migrating anything.
+func TestReadLegacyPortsFromDB(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("JARVIS_HOME", home)
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ports := doctorPorts(cfg)
-	for _, p := range ports {
-		if p.Name == config.ListenerAdmin && p.Port == 7710 && p.Proto == "tcp" {
-			return
-		}
+	if readLegacyPorts(cfg) {
+		t.Fatal("no database reads as on")
 	}
-	t.Fatalf("admin listener 7710 missing from %v", ports)
+	ctx := context.Background()
+	d, err := db.Open(ctx, cfg.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if readLegacyPorts(cfg) {
+		t.Fatal("no settings table reads as on")
+	}
+	if err := db.Migrate(ctx, d, "config", configmod.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`INSERT INTO config_services (name, host, port, scheme, health_path, description)
+		VALUES ('jarvis-auth', 'localhost', 7701, 'http', '/health', 'served by jarvisd')`); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := configmod.LegacyPorts(ctx, d, slog.New(slog.NewTextHandler(io.Discard, nil)), ""); err != nil || !on {
+		t.Fatalf("upgrade decision = %v, %v", on, err)
+	}
+	if !readLegacyPorts(cfg) {
+		t.Fatal("stored true reads as off")
+	}
+	t.Setenv("JARVIS_LEGACY_PORTS", "0")
+	cfg, _ = config.Load()
+	if readLegacyPorts(cfg) {
+		t.Fatal("JARVIS_LEGACY_PORTS=0 reads as on")
+	}
 }
 
 // The admin BFF reaches every module it reads in process (A3, A4).
@@ -97,14 +169,21 @@ func testModules(t *testing.T) []module.Module {
 
 func TestMQTTAddrsFollowPortOffset(t *testing.T) {
 	t.Setenv("JARVIS_PORT_OFFSET", "10000")
-	if mqtt := testModules(t)[8].(*ccmod.Module).MQTT; mqtt.TCPAddr != ":11884" || mqtt.WSAddr != ":19883" {
+	// The WebSocket stays off until serve's legacy-ports decision turns it on.
+	if mqtt := testModules(t)[8].(*ccmod.Module).MQTT; mqtt.TCPAddr != ":11884" || mqtt.WSAddr != "" {
 		t.Fatalf("offset: %+v", mqtt)
+	}
+	if a := mqttWSAddr(config.LoadEnv(), true); a != ":19883" {
+		t.Fatalf("legacy ports on: ws %q, want :19883", a)
 	}
 	// An explicit address wins over the offset, and "" still disables the listener.
 	t.Setenv("JARVIS_MQTT_ADDR", "127.0.0.1:2000")
 	t.Setenv("JARVIS_MQTT_WS_ADDR", "")
 	if mqtt := testModules(t)[8].(*ccmod.Module).MQTT; mqtt.TCPAddr != "127.0.0.1:2000" || mqtt.WSAddr != "" {
 		t.Fatalf("explicit: %+v", mqtt)
+	}
+	if a := mqttWSAddr(config.LoadEnv(), true); a != "" {
+		t.Fatalf("legacy ports on, JARVIS_MQTT_WS_ADDR=\"\": ws %q", a)
 	}
 }
 

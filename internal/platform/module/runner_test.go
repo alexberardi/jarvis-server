@@ -566,3 +566,99 @@ func TestShutdownGivesUpOnModuleWaitAtDrainTimeout(t *testing.T) {
 		t.Errorf("Run returned after %v; want about DrainTimeout (%v)", el, DrainTimeout)
 	}
 }
+
+// singlePortSpy records Deps.Config.SinglePort as Register saw it.
+type singlePortSpy struct {
+	fakeModule
+	singlePort atomic.Bool
+}
+
+func (s *singlePortSpy) Register(mux *http.ServeMux, deps Deps) {
+	s.singlePort.Store(deps.Config.SinglePort)
+	s.fakeModule.Register(mux, deps)
+}
+
+// runLegacy runs config + cc + admin fakes with cc mounted at /cc and legacy as the Legacy
+// hook's answer, until OnReady.
+func runLegacy(t *testing.T, legacy bool) (*Runner, *singlePortSpy) {
+	t.Helper()
+	cfg := &singlePortSpy{fakeModule: fakeModule{name: "config", listener: config.ListenerConfig, routes: map[string]string{"GET /info": "config"}}}
+	cc := &fakeModule{name: "cc", listener: config.ListenerCC, routes: map[string]string{"GET /health": "cc"}}
+	admin := &fakeModule{name: "admin", listener: config.ListenerAdmin, routes: map[string]string{"GET /health": "admin"}}
+	ready := make(chan struct{})
+	r := &Runner{Deps: deps(t), Modules: []Module{cfg, cc, admin}, Mounts: map[string]string{config.ListenerCC: "/cc"},
+		Legacy:  func(context.Context) (bool, error) { return legacy, nil },
+		OnReady: func() { close(ready) }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(30 * time.Second): // hang guard
+			t.Error("Run did not return after cancel")
+		}
+	})
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("Run returned early: %v", err)
+	case <-time.After(30 * time.Second): // hang guard
+		t.Fatal("OnReady never called")
+	}
+	if !cc.started.Load() {
+		t.Error("cc not started")
+	}
+	return r, cfg
+}
+
+func TestRunnerLegacyOffBindsOnlyUnmounted(t *testing.T) {
+	r, cfg := runLegacy(t, false)
+	if a := r.Addr(config.ListenerCC); a != "" {
+		t.Errorf("cc bound %s with legacy ports off", a)
+	}
+	if r.Addr(config.ListenerAdmin) == "" {
+		t.Error("admin (not mounted) did not bind")
+	}
+	if code, b := get(t, r.Addr(config.ListenerConfig), "/cc/health"); code != 200 || b != "cc" {
+		t.Errorf("/cc/health on config = %d %q", code, b)
+	}
+	if !cfg.singlePort.Load() {
+		t.Error("Deps.Config.SinglePort was false in Register")
+	}
+}
+
+func TestRunnerLegacyOnBindsAll(t *testing.T) {
+	r, cfg := runLegacy(t, true)
+	for _, l := range []string{config.ListenerConfig, config.ListenerCC, config.ListenerAdmin} {
+		if r.Addr(l) == "" {
+			t.Errorf("%s did not bind", l)
+		}
+	}
+	if code, b := get(t, r.Addr(config.ListenerCC), "/health"); code != 200 || b != "cc" {
+		t.Errorf("cc's own port /health = %d %q", code, b)
+	}
+	if code, b := get(t, r.Addr(config.ListenerConfig), "/cc/health"); code != 200 || b != "cc" {
+		t.Errorf("/cc/health on config = %d %q", code, b)
+	}
+	if cfg.singlePort.Load() {
+		t.Error("Deps.Config.SinglePort was true with legacy ports on")
+	}
+}
+
+func TestRunnerLegacyError(t *testing.T) {
+	boom := errors.New("boom")
+	cfg := &fakeModule{name: "config", listener: config.ListenerConfig}
+	r := &Runner{Deps: deps(t), Modules: []Module{cfg}, Mounts: map[string]string{config.ListenerCC: "/cc"},
+		Legacy: func(context.Context) (bool, error) { return false, boom }}
+	if err := r.Run(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("Run = %v, want %v", err, boom)
+	}
+	if r.Addr(config.ListenerConfig) != "" {
+		t.Error("bound a listener after Legacy failed")
+	}
+}

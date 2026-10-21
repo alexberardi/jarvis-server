@@ -134,11 +134,12 @@ func TestLoadEnvDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (Env{MDNS: true, MQTTAddr: ":1884", MQTTWSAddr: ":9883"}); c.Env != want {
+	// The WebSocket has no default here: main gives it 9883 when legacy ports are on.
+	if want := (Env{MDNS: true, MQTTAddr: ":1884"}); c.Env != want {
 		t.Fatalf("Env = %+v, want %+v", c.Env, want)
 	}
 	c, _ = load(env(map[string]string{"JARVIS_HOME": "/d", "JARVIS_PORT_OFFSET": "10000"}))
-	if c.Env.MQTTAddr != ":11884" || c.Env.MQTTWSAddr != ":19883" {
+	if c.Env.MQTTAddr != ":11884" || c.Env.MQTTWSAddr != "" {
 		t.Fatalf("offset: %+v", c.Env)
 	}
 }
@@ -160,7 +161,8 @@ func TestLoadEnv(t *testing.T) {
 		"JARVIS_OSX_API_URL": "http://mac", "JARVIS_OSX_API_KEY": "mk",
 		"TWILIO_ACCOUNT_SID": "sid", "TWILIO_AUTH_TOKEN": "tt", "TWILIO_FROM_NUMBER": "+1",
 		"JARVIS_PHONE_PUBLIC_URL": "https://p", "JARVIS_PHONE_PUBLIC_WSS_URL": "wss://p",
-		"JARVIS_CONTAINER": " Unraid\n",
+		"JARVIS_CONTAINER":    " Unraid\n",
+		"JARVIS_LEGACY_PORTS": "0",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +173,7 @@ func TestLoadEnv(t *testing.T) {
 		MQTTAddr: "127.0.0.1:2000", MQTTWSAddr: "", MQTTAllowAnonymous: true, MQTTWSAllowedOrigins: "a.example, b.example", AuthAdminToken: "at",
 		AuthSecretKey: "hs", AdminUIDir: "/ui", AppID: "id", AppKey: "key", OSXAPIURL: "http://mac", OSXAPIKey: "mk",
 		TwilioAccountSID: "sid", TwilioAuthToken: "tt", TwilioFromNumber: "+1",
-		PhonePublicURL: "https://p", PhonePublicWSSURL: "wss://p", Container: "unraid"}
+		PhonePublicURL: "https://p", PhonePublicWSSURL: "wss://p", Container: "unraid", LegacyPorts: "0"}
 	if c.Env != want {
 		t.Fatalf("Env = %+v, want %+v", c.Env, want)
 	}
@@ -180,5 +182,23 @@ func TestLoadEnv(t *testing.T) {
 		"JARVIS_DEV_SPEAKER_HINTS": "true", "JARVIS_MQTT_ALLOW_ANONYMOUS": "yes"}))
 	if !c.Env.MDNS || c.Env.DevSpeakerHints || c.Env.MQTTAllowAnonymous {
 		t.Fatalf("switches: %+v", c.Env)
+	}
+}
+
+func TestParseLegacyPorts(t *testing.T) {
+	for _, c := range []struct {
+		in      string
+		set, on bool
+		wantErr bool
+	}{
+		{"", false, false, false},
+		{"1", true, true, false}, {"true", true, true, false}, {"TRUE", true, true, false},
+		{"0", true, false, false}, {"false", true, false, false},
+		{"maybe", false, false, true}, {"yes", false, false, true},
+	} {
+		set, on, err := ParseLegacyPorts(c.in)
+		if set != c.set || on != c.on || (err != nil) != c.wantErr {
+			t.Errorf("ParseLegacyPorts(%q) = %v, %v, %v", c.in, set, on, err)
+		}
 	}
 }
