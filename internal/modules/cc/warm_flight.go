@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -16,6 +18,9 @@ import (
 // to send one cold warm-up each for the same prefix; on an engine that serves one request at a
 // time (mlx_lm.server) a voice turn then waited behind all of them.
 type warmFlight struct {
+	// path, when set, is where the recent warm-ups are kept across restarts (0600; they hold
+	// the household's system prompt and tools, no conversation).
+	path     string
 	mu       sync.Mutex
 	inFlight map[string]*warmCall
 	recent   []llm.ChatRequest // newest last, distinct prefixes
@@ -68,10 +73,51 @@ func (w *warmFlight) do(ctx context.Context, req llm.ChatRequest, fn func(contex
 		if len(w.recent) > maxRecentWarm {
 			w.recent = w.recent[len(w.recent)-maxRecentWarm:]
 		}
+		w.saveLocked()
 	}
 	w.mu.Unlock()
 	close(c.done)
 	return c.err
+}
+
+// load reads the saved warm-ups; a missing or unreadable file is none.
+func (w *warmFlight) load() {
+	if w.path == "" {
+		return
+	}
+	b, err := os.ReadFile(w.path)
+	if err != nil {
+		return
+	}
+	var reqs []llm.ChatRequest
+	if json.Unmarshal(b, &reqs) != nil {
+		return
+	}
+	if len(reqs) > maxRecentWarm {
+		reqs = reqs[len(reqs)-maxRecentWarm:]
+	}
+	w.mu.Lock()
+	w.recent = reqs
+	w.mu.Unlock()
+}
+
+// saveLocked writes the recent warm-ups (w.mu held); failures only cost a cold first turn.
+func (w *warmFlight) saveLocked() {
+	if w.path == "" {
+		return
+	}
+	b, err := json.Marshal(w.recent)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(w.path), 0o700); err != nil {
+		return
+	}
+	tmp := w.path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, w.path)
 }
 
 // recentWarm returns the remembered warm-ups, newest first.
