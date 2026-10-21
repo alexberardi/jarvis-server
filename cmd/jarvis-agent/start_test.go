@@ -50,6 +50,7 @@ func (f *fakeStart) starter(e install.Env) starter {
 		enrolled: func() bool { return f.setUp },
 		install:  func() error { f.log = append(f.log, "install"); f.installed = true; return nil },
 		firstRun: func(context.Context) error { f.log = append(f.log, "first-run"); return nil },
+		window:   func() { f.log = append(f.log, "window") },
 	}
 }
 
@@ -61,12 +62,14 @@ func linuxEnv(t *testing.T, exe string) install.Env {
 	return install.Env{GOOS: "linux", Home: home, Exe: exe, Getenv: func(string) string { return "" }}
 }
 
-func TestStartWhenRunningOnlyFlashesThePill(t *testing.T) {
+// Opening Jarvis while it runs flashes the pill and opens the setup page, which says it is
+// running: the pill alone was easy to miss (and absent without the island).
+func TestStartWhenRunningShowsThePillAndTheSetupPage(t *testing.T) {
 	f := &fakeStart{running: true, setUp: true}
 	if err := f.starter(linuxEnv(t, "")).start(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(f.log, []string{"send show-running"}) {
+	if !slices.Equal(f.log, []string{"send show-running", "window"}) {
 		t.Fatalf("did %q", f.log)
 	}
 	// At login: a ping, no pill.

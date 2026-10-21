@@ -54,6 +54,9 @@ type Deps struct {
 	// Permissions are the macOS privacy grants, in the order shown; on Hyprland and sway the
 	// input group (desktop recording); empty elsewhere.
 	Permissions []Permission
+	// Running reports whether this computer's agent is running (the page opened again from
+	// the app says so). Optional.
+	Running func() bool
 	// Portal is the GNOME/KDE "allow typing" step; nil where it doesn't apply.
 	Portal *Portal
 	// OpenURL opens a link outside the browser (System Settings panes).
@@ -88,6 +91,9 @@ type Permission struct {
 	Pane string
 	// How is a command the user runs themselves instead (Linux's input group), shown as is.
 	How string
+	// NeedsRestart reports whether the running agent sees a granted permission only after it
+	// restarts (macOS gives a running process some grants only at its start). Optional.
+	NeedsRestart func() bool
 }
 
 // Permission statuses.

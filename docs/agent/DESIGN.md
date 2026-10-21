@@ -1003,9 +1003,11 @@ or "isn't your checkout's commit". Release builds carry no checkout and skip it;
 agent (the menu entry, the shortcuts, opening the macOS app with no command, the login autostart
 entry and `jarvis-agent://start`) runs `jarvis-agent start`:
 
-1. **Already running:** it tells the running agent `show-running` over its control socket and
+1. **Already running:** it tells the running agent `show-running` over its control socket,
+   opens the setup page (which then says "Jarvis is running", with links to its sections) and
    exits; the agent flashes the island's "Jarvis is running" pill (2.5 s, `island.RunningNote`,
-   golden `running.png`). At login (`--login`) it only pings: no pill.
+   golden `running.png`). Reopening the macOS app while the agent runs (an Apple event, not a
+   `start`) does the same. At login (`--login`) it only pings: no pill, no page.
 2. **A packaged copy's first launch** (the `.deb`'s `/usr/lib/jarvis-agent`, the macOS app): if
    this user isn't installed yet, it runs `install` first (Q5).
 3. **Not set up** (no enrollment): the setup page ("The setup page" below), served by this
@@ -1101,10 +1103,12 @@ step 3, as a page in the user's own browser (open question 1). Code: `internal/a
   browsers". Links only (installers plan Q2: no detection). Neither listing is public yet, so
   both open the docs (`firstrun.DefaultStores`: flip `Published` when they are).
 - **4. Permissions.** macOS: Accessibility (`AXIsProcessTrusted`), Microphone
-  (`AVCaptureDevice authorizationStatusForMediaType:`), Automation of System Events
-  (`AEDeterminePermissionToAutomateTarget`, never asking; unknown while System Events isn't
-  running) and Screen Recording (`CGPreflightScreenCaptureAccess` in a fresh `jarvis-agent
-  permission screen` process, since a process keeps its first answer). Each ticks live; Allow
+  (`AVCaptureDevice authorizationStatusForMediaType:`), Screen Recording
+  (`CGPreflightScreenCaptureAccess`) and Input Monitoring, each read in a fresh `jarvis-agent
+  permission <name>` process on every poll, since a process keeps its first answer; and
+  Automation of System Events (`AEDeterminePermissionToAutomateTarget`, never asking; unknown
+  while System Events isn't running). A grant the running agent doesn't hold yet (its own
+  answer, control's `permissions`) shows "Granted — restart Jarvis to apply". Each ticks live; Allow
   shows macOS's own prompt (or opens the mic, or sends System Events the window tools' Apple
   event) and opens the pane; once refused, the button opens the pane. GNOME/KDE on Wayland:
   "Allow typing" is `dictation allow` (the portal dialog), with its status.
