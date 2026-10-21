@@ -1,11 +1,11 @@
-# The jarvisd container image, built from a release archive (docs/install/container.md).
-#   docker build --build-arg ARCHIVE=jarvisd-<v>-linux-amd64.tar.gz --build-arg VERSION=<v> \
+# The jarvisd container image, built from a linux release archive (docs/install/container.md).
+#   docker build --build-arg ARCHIVE=jarvisd-<v>-linux-<arch>.tar.gz --build-arg VERSION=<v> \
 #     -f scripts/packaging/container/Dockerfile <dir with the archive and entrypoint.sh>
-# scripts/container-check.sh builds and checks it.
+# scripts/container-build.sh builds it; scripts/container-check.sh builds and checks it.
 
 FROM ubuntu:24.04 AS unpack
 ARG ARCHIVE
-# ADD extracts a local tar.gz: /unpack/jarvisd-<v>-linux-amd64/{jarvisd,LICENSE[,NOTICE]}.
+# ADD extracts a local tar.gz: /unpack/jarvisd-<v>-linux-<arch>/{jarvisd,LICENSE[,NOTICE]}.
 ADD ${ARCHIVE} /unpack/
 RUN set -eu; \
     src=$(echo /unpack/jarvisd-*/); \
