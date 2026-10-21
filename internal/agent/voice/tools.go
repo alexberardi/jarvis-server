@@ -71,7 +71,7 @@ func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls
 	for _, c := range calls {
 		args := node.DecodeArgs(c.Function.Arguments)
 		start := p.Now()
-		out := p.callTool(ctx, c.Function.Name, args, node.Request{ToolCallID: c.ID, UserID: s.userID, VoiceCommand: ex.Transcript})
+		out := p.callTool(ctx, c.Function.Name, args, node.Request{ToolCallID: c.ID, UserID: s.userID, VoiceCommand: StripNonSpeech(ex.Transcript)})
 		sig := node.TakeSignals(out)
 		r.signals.WaitForInput = r.signals.WaitForInput || sig.WaitForInput
 		r.signals.ClearHistory = r.signals.ClearHistory || sig.ClearHistory

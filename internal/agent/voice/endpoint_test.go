@@ -202,6 +202,35 @@ func TestIsNonSpeechMatchesPython(t *testing.T) {
 	}
 }
 
+// Whisper writes the wake chime heard at the start of a take as "(beep)" (#358): leading
+// annotations go when words follow; a transcript of annotations only stays for IsNonSpeech.
+func TestStripNonSpeech(t *testing.T) {
+	want := map[string]string{
+		"(beep)  Open Google Chrome.":    "Open Google Chrome.",
+		"[BLANK_AUDIO] what time is it":  "what time is it",
+		"*click* (beep) turn off lights": "turn off lights",
+		"(beep). Turn on the lamp":       "Turn on the lamp",
+		"(beep)":                         "(beep)",
+		"[BLANK_AUDIO]":                  "[BLANK_AUDIO]",
+		"(beep) [BLANK_AUDIO].":          "(beep) [BLANK_AUDIO].",
+		"open (the) door":                "open (the) door",
+		"What time is it?":               "What time is it?",
+		"  okay ":                        "okay",
+		"":                               "",
+		"(beep) ...":                     "(beep) ...",
+	}
+	for in, w := range want {
+		if got := StripNonSpeech(in); got != w {
+			t.Errorf("StripNonSpeech(%q) = %q, want %q", in, got, w)
+		}
+	}
+	for _, in := range []string{"(beep)", "[BLANK_AUDIO]", "(beep) [BLANK_AUDIO]."} {
+		if !IsNonSpeech(StripNonSpeech(in)) {
+			t.Errorf("IsNonSpeech(StripNonSpeech(%q)) = false, want the silence path", in)
+		}
+	}
+}
+
 func TestEnsureModelsFetchesVerifiesAndCaches(t *testing.T) {
 	body := map[string]string{"a.onnx": "model a", "b.onnx": "model b"}
 	sum := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }

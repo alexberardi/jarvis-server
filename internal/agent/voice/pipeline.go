@@ -282,6 +282,10 @@ func flush(chunks <-chan []int16) {
 	}
 }
 
+// chimeTailChunks is how far into the recording the wake chime can still reach: the
+// microphone's own buffering delivers its last frames after the speaker has drained.
+const chimeTailChunks = 2
+
 // takePreRoll empties the queue, keeping its last n chunks (the most recent audio) in order.
 func takePreRoll(chunks <-chan []int16, n int) []int16 {
 	var kept [][]int16
@@ -475,6 +479,9 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	if len(pcm) > 0 {
 		pcm = slices.Concat(pre, pcm)
 		t.PreRollSecs = float64(len(pre)) / CaptureRate
+		if p.Cfg.Chimes { // the chime the mic heard, in the pre-roll or the first chunks after it (#358)
+			muteChime(pcm[:min(len(pcm), len(pre)+chimeTailChunks*ChunkSamples)])
+		}
 	}
 	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
 	if err != nil {
@@ -511,6 +518,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	}
 	// Row 10. The Python node still opens the follow-up window after a wake that heard
 	// nothing (the user may just have paused after "hey Jarvis").
+	tr.Text = StripNonSpeech(tr.Text)
 	if IsNonSpeech(tr.Text) {
 		ex.Outcome = OutcomeNonSpeech
 		return "", true

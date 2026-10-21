@@ -158,8 +158,8 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			s.log.Warn("follow-up: transcription failed", "err", err)
 			return
 		}
-		text := strings.TrimSpace(tr.Text)
-		ex.Transcript = text
+		ex.Transcript = strings.TrimSpace(tr.Text)
+		text := StripNonSpeech(tr.Text)
 		if IsNonSpeech(text) {
 			ex.Outcome = OutcomeNonSpeech
 			t.FollowUps, t.FollowUpEnd = append(t.FollowUps, ex), EndNonSpeech
@@ -195,8 +195,8 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		// A follow_up turn of the same conversation, on the blocking route as the Python node
 		// sends it (continue_conversation → POST /voice/command).
 		iter := it
-		activity := p.computerTurn(s, tr.Text, true) // "I'm done" stops a recording at once (#288)
-		c, err := p.Server.VoiceCommand(ctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
+		activity := p.computerTurn(s, text, true) // "I'm done" stops a recording at once (#288)
+		c, err := p.Server.VoiceCommand(ctx, StreamRequest{VoiceCommand: text, ConversationID: s.id,
 			TurnSource: "follow_up", FollowUpIteration: &iter, LevelVsWake: level, Computer: activity})
 		if err == nil && c.StopReason == "not_for_me" && c.KeepListening {
 			ignored++
