@@ -3,11 +3,12 @@
 export type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'muted'
 
 export const toneClass: Record<Tone, string> = {
-  ok: 'bg-green-500/10 text-green-500',
-  warn: 'bg-amber-500/10 text-amber-500',
-  bad: 'bg-red-500/10 text-red-500',
-  info: 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]',
-  muted: 'bg-[var(--color-surface-alt)] text-[var(--color-text-muted)]',
+  // The status tokens on their soft fills: the pairs tokens.test.ts checks for AA (audit 2026-10 #1).
+  ok: 'bg-success-soft text-success',
+  warn: 'bg-warning-soft text-warning',
+  bad: 'bg-danger-soft text-danger',
+  info: 'bg-primary-soft text-primary',
+  muted: 'bg-surface-alt text-text-muted',
 }
 
 /** stateTone colours an engine/label/install state. */

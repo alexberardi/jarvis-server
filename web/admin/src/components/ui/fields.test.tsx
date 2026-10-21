@@ -61,6 +61,26 @@ describe('Select', () => {
   })
 })
 
+describe('Select groups', () => {
+  it('puts grouped options under their optgroup', () => {
+    render(
+      <Select
+        label="Voice"
+        value="b"
+        onChange={() => {}}
+        groups={[
+          { label: 'English', options: [{ value: 'a', label: 'Amy' }] },
+          { label: 'French', options: [{ value: 'b', label: 'Bea' }] },
+        ]}
+      />,
+    )
+    const select = screen.getByLabelText('Voice')
+    expect(select).toHaveValue('b')
+    expect(select.querySelectorAll('optgroup')).toHaveLength(2)
+    expect(screen.getByRole('option', { name: 'Bea' }).parentElement).toHaveAttribute('label', 'French')
+  })
+})
+
 describe('Switch', () => {
   function Controlled({ onChange }: { onChange?: (v: boolean) => void }) {
     const [on, setOn] = useState(false)

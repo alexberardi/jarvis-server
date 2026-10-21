@@ -155,7 +155,7 @@ export default function HfBrowser() {
           </button>
         </form>
 
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
         {tokenReason && <HfTokenPrompt reason="This repo is gated or private." onSaved={() => void browse()} />}
 
         {result && (

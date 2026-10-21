@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Cpu } from 'lucide-react'
 import { toast } from 'sonner'
 import { DetectedHardware } from '@/components/models/HardwarePanel'
-import { buttonClass } from '@/components/models/styles'
+import { Button, ErrorState, Select } from '@/components/ui'
 import { useLabels, usePutLabels } from '@/hooks/useModelManager'
 import { useSetupState } from '@/hooks/useSetup'
 import { errorMessage } from '@/lib/errors'
@@ -18,6 +18,7 @@ import {
   sttGpuAvailable,
   type HardwareChoices,
 } from './hardware'
+import { StepActions, StepHeader, StepLoading } from './StepFrame'
 
 const FLAVOUR_TITLE: Record<string, string> = {
   cpu: 'CPU only',
@@ -26,9 +27,6 @@ const FLAVOUR_TITLE: Record<string, string> = {
   vulkan: 'Vulkan',
   metal: 'Apple Metal',
 }
-
-const selectClass =
-  'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1 text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]'
 
 function DeviceSelect({
   id,
@@ -44,21 +42,31 @@ function DeviceSelect({
   summary: SetupHardware
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor={id} className="w-48 text-sm text-[var(--color-text)]">
-        {label}
-      </label>
-      <select id={id} className={selectClass} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Automatic</option>
-        {gpus(summary).map((d) => (
-          <option key={d.index} value={String(d.index)}>
-            GPU {d.index}: {d.name} ({formatMB(d.total_mb)})
-          </option>
-        ))}
-      </select>
-    </div>
+    <Select
+      id={id}
+      label={label}
+      wrapperClassName="max-w-md"
+      value={value}
+      onValueChange={onChange}
+      options={[
+        { value: '', label: 'Automatic' },
+        ...gpus(summary).map((d) => ({ value: String(d.index), label: `GPU ${d.index}: ${d.name} (${formatMB(d.total_mb)})` })),
+      ]}
+    />
   )
 }
+
+/** A radio drawn as a choice chip: the selected one on the primary's soft fill. */
+function choiceClass(selected: boolean, disabled?: boolean) {
+  return cn(
+    'flex min-h-10 items-center gap-2 rounded-control border px-3 text-body',
+    disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+    selected ? 'border-primary bg-primary-soft text-text' : 'border-border-strong text-text hover:bg-surface-alt',
+  )
+}
+
+const legendClass = 'text-subheading text-text'
+const noteClass = 'text-small text-text-muted'
 
 /**
  * HardwareChoicesForm is the editable part, rendered once detection and the label settings are
@@ -92,40 +100,33 @@ function HardwareChoicesForm({ summary, onDone }: { summary: SetupHardware; onDo
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium text-[var(--color-text)]">Language-model engine</legend>
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <legend className={legendClass}>Language-model engine</legend>
+        <p className={noteClass}>
           Which llama.cpp build runs the language models. Only builds that exist for this platform are listed.
         </p>
         <div className="flex flex-wrap gap-2">
           {offered.map((f) => (
-            <label
-              key={f}
-              className={cn(
-                'flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm',
-                choices.flavour === f
-                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-text)]'
-                  : 'border-[var(--color-border)] text-[var(--color-text-muted)]',
-              )}
-            >
+            <label key={f} className={choiceClass(choices.flavour === f)}>
               <input
                 type="radio"
                 name="engine-flavour"
                 value={f}
                 checked={choices.flavour === f}
                 onChange={() => set({ flavour: f })}
+                className="accent-primary"
               />
               {FLAVOUR_TITLE[f] ?? f}
-              {f === detected && <span className="text-[10px] text-[var(--color-text-muted)]">(detected)</span>}
+              {f === detected && <span className="text-caption text-text-muted">(detected)</span>}
             </label>
           ))}
         </div>
       </fieldset>
 
       {multiGpu && choices.flavour !== 'cpu' && (
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium text-[var(--color-text)]">Which GPU runs what</legend>
+        <fieldset className="space-y-3">
+          <legend className={cn(legendClass, 'mb-2')}>Which GPU runs what</legend>
           <DeviceSelect
             id="device-live"
             label="Live model (voice replies)"
@@ -144,9 +145,9 @@ function HardwareChoicesForm({ summary, onDone }: { summary: SetupHardware; onDo
       )}
 
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium text-[var(--color-text)]">Speech to text</legend>
-        <div className="flex flex-wrap gap-4 text-sm text-[var(--color-text)]">
-          <label className="flex items-center gap-1.5">
+        <legend className={legendClass}>Speech to text</legend>
+        <div className="flex flex-wrap gap-2">
+          <label className={choiceClass(choices.stt === 'gpu', !sttGpu)}>
             <input
               type="radio"
               name="stt-target"
@@ -154,22 +155,24 @@ function HardwareChoicesForm({ summary, onDone }: { summary: SetupHardware; onDo
               checked={choices.stt === 'gpu'}
               disabled={!sttGpu}
               onChange={() => set({ stt: 'gpu' })}
+              className="accent-primary"
             />
             On the GPU (fast)
           </label>
-          <label className="flex items-center gap-1.5">
+          <label className={choiceClass(choices.stt === 'cpu')}>
             <input
               type="radio"
               name="stt-target"
               value="cpu"
               checked={choices.stt === 'cpu'}
               onChange={() => set({ stt: 'cpu' })}
+              className="accent-primary"
             />
             On the CPU
           </label>
         </div>
         {!sttGpu && (
-          <p className="text-xs text-[var(--color-text-muted)]">No GPU build of the speech engine fits this machine, so it runs on the CPU.</p>
+          <p className={noteClass}>No GPU build of the speech engine fits this machine, so it runs on the CPU.</p>
         )}
         {multiGpu && choices.stt === 'gpu' && (
           <DeviceSelect
@@ -180,16 +183,16 @@ function HardwareChoicesForm({ summary, onDone }: { summary: SetupHardware; onDo
             summary={summary}
           />
         )}
-        <p className="text-xs text-[var(--color-text-muted)]">
+        <p className={noteClass}>
           Text to speech and speaker recognition always run on the CPU; they are small and fast there.
         </p>
       </fieldset>
 
-      <div className="flex justify-end">
-        <button type="button" className={buttonClass.primary} disabled={put.isPending} onClick={save}>
-          {put.isPending ? 'Saving…' : changed ? 'Save and continue' : 'Looks good'}
-        </button>
-      </div>
+      <StepActions>
+        <Button variant="primary" loading={put.isPending} onClick={save}>
+          {changed ? 'Save and continue' : 'Looks good'}
+        </Button>
+      </StepActions>
     </div>
   )
 }
@@ -205,35 +208,36 @@ export default function HardwareStep({ onDone }: { onDone: () => void }) {
   const summary = state.data?.hardware
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
-          <Cpu size={20} /> Hardware
-        </h2>
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          This is what jarvisd found. The choices below are already set to what suits it.
-        </p>
-      </div>
+    <div className="space-y-5">
+      <StepHeader icon={<Cpu size={22} />} title="Hardware">
+        This is what jarvisd found. The choices below are already set to what suits it.
+      </StepHeader>
 
-      {(state.isLoading || labels.isLoading) && <p className="text-sm text-[var(--color-text-muted)]">Detecting…</p>}
-      {state.isError && <p className="text-sm text-red-500">{errorMessage(state.error, 'Could not read the hardware')}</p>}
+      {(state.isLoading || labels.isLoading) && <StepLoading>Detecting the hardware</StepLoading>}
+      {state.isError && (
+        <ErrorState
+          title="Couldn't read the hardware"
+          message={errorMessage(state.error, 'The server did not answer.')}
+          onRetry={() => state.refetch()}
+        />
+      )}
 
       {state.data && !summary && (
         <>
-          <p className="text-sm text-[var(--color-text-muted)]">
+          <p className="text-body text-text-muted">
             This jarvisd runs without its local model engines, so there is nothing to place here.
           </p>
-          <div className="flex justify-end">
-            <button type="button" className={buttonClass.primary} onClick={onDone}>
+          <StepActions>
+            <Button variant="primary" onClick={onDone}>
               Continue
-            </button>
-          </div>
+            </Button>
+          </StepActions>
         </>
       )}
 
       {summary && !labels.isLoading && (
         <>
-          <div className="rounded-lg border border-[var(--color-border)] p-3">
+          <div className="rounded-card bg-surface-alt p-4">
             <DetectedHardware data={summary} />
           </div>
           <HardwareChoicesForm summary={summary} onDone={onDone} />

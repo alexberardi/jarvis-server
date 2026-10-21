@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { Globe, HardDrive, Info, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateSetting } from '@/api/settings'
-import { buttonClass } from '@/components/models/styles'
+import { Button, ErrorState, Switch } from '@/components/ui'
 import { useAllSettings } from '@/hooks/useSettings'
 import { errorMessage } from '@/lib/errors'
-import { cn } from '@/lib/utils'
 import type { ServiceSettingsResult } from '@/types/settings'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -17,33 +16,12 @@ import {
   relayChange,
   type PrivacyValues,
 } from './privacy'
+import { StepActions, StepHeader, StepLoading } from './StepFrame'
+
+const sectionTitle = 'flex items-center gap-2 text-subheading text-text'
 
 function settingValue(services: ServiceSettingsResult[] | undefined, service: string, key: string): unknown {
   return services?.find((s) => s.service_name === service)?.settings.find((s) => s.key === key)?.value
-}
-
-function Toggle({
-  id,
-  checked,
-  disabled,
-  onChange,
-}: {
-  id: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (v: boolean) => void
-}) {
-  return (
-    <input
-      id={id}
-      type="checkbox"
-      role="switch"
-      checked={checked}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.checked)}
-      className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-primary)]"
-    />
-  )
 }
 
 function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; onDone: () => void }) {
@@ -79,26 +57,22 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
   const pantry = settingValue(services, 'cc', 'pantry.base_url')
   const hf = settingValue(services, 'llm', 'llm.hf_endpoint')
 
+  const unavailable = ' (Not available in this jarvisd version.)'
   const group = (offBox: boolean) => (
-    <ul className="space-y-3">
+    <ul className="space-y-4">
       {PRIVACY_TOGGLES.filter((t) => t.offBox === offBox).map((t) => {
         const id = privacyId(t)
         const known = id in chosen
         return (
-          <li key={id} className="flex items-start gap-3">
-            <Toggle
+          <li key={id}>
+            <Switch
               id={`privacy-${id}`}
+              label={t.title}
+              description={known ? t.what : t.what + unavailable}
               checked={known && chosen[id]}
               disabled={!known}
-              onChange={(v) => setChosen((c) => ({ ...c, [id]: v }))}
+              onCheckedChange={(v) => setChosen((c) => ({ ...c, [id]: v }))}
             />
-            <label htmlFor={`privacy-${id}`} className={cn('min-w-0', !known && 'opacity-60')}>
-              <span className="block text-sm font-medium text-[var(--color-text)]">{t.title}</span>
-              <span className="block text-xs text-[var(--color-text-muted)]">
-                {t.what}
-                {!known && ' (Not available in this jarvisd version.)'}
-              </span>
-            </label>
           </li>
         )
       })}
@@ -106,41 +80,48 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
   )
 
   return (
-    <div className="space-y-5">
-      <section className="space-y-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
-          <Globe size={14} /> Sends data off this machine
-        </h3>
-        <p className="text-xs text-[var(--color-text-muted)]">Off unless you turn them on.</p>
+    <div className="space-y-6">
+      <section className="space-y-3" aria-labelledby="privacy-off-box">
+        <div>
+          <h3 id="privacy-off-box" className={sectionTitle}>
+            <Globe size={16} aria-hidden className="text-text-muted" /> Sends data off this machine
+          </h3>
+          <p className="text-small text-text-muted">Off unless you turn them on.</p>
+        </div>
         {group(true)}
-        <div className="flex items-start gap-3">
-          <Toggle id="privacy-push" checked={relayKnown && push} disabled={!relayKnown} onChange={setPush} />
-          <label htmlFor="privacy-push" className={cn('min-w-0', !relayKnown && 'opacity-60')}>
-            <span className="block text-sm font-medium text-[var(--color-text)]">Phone push notifications</span>
-            <span className="block text-xs text-[var(--color-text-muted)]">
+        <Switch
+          id="privacy-push"
+          label="Phone push notifications"
+          description={
+            <>
               Each notification's title and text go through a push relay (
               <code className="break-all">{relay || DEFAULT_RELAY_URL}</code>) to Apple or Google so phones get them.
               Off: notifications stay in the app's inbox.
-              {!relayKnown && ' (Not available in this jarvisd version.)'}
-            </span>
-          </label>
-        </div>
+              {!relayKnown && unavailable}
+            </>
+          }
+          checked={relayKnown && push}
+          disabled={!relayKnown}
+          onCheckedChange={setPush}
+        />
       </section>
 
-      <section className="space-y-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
-          <HardDrive size={14} /> Keeps personal data on this machine
-        </h3>
-        <p className="text-xs text-[var(--color-text-muted)]">All of this stays on this machine.</p>
+      <section className="space-y-3" aria-labelledby="privacy-on-box">
+        <div>
+          <h3 id="privacy-on-box" className={sectionTitle}>
+            <HardDrive size={16} aria-hidden className="text-text-muted" /> Keeps personal data on this machine
+          </h3>
+          <p className="text-small text-text-muted">All of this stays on this machine.</p>
+        </div>
         {group(false)}
       </section>
 
-      <section className="space-y-1 rounded-lg border border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
-          <Info size={14} /> Also good to know
+      <section className="space-y-2 border-t border-border pt-5 text-small text-text-muted" aria-labelledby="privacy-more">
+        <h3 id="privacy-more" className={sectionTitle}>
+          <Info size={16} aria-hidden className="text-text-muted" /> Also good to know
         </h3>
         <p>
-          <strong className="text-[var(--color-text)]">Command packages</strong> are browsed and installed from the Pantry
+          <strong className="font-medium text-text">Command packages</strong> are browsed and installed from the Pantry
           {typeof pantry === 'string' && pantry ? (
             <>
               {' '}at <code className="break-all">{pantry}</code>
@@ -149,46 +130,46 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
           , which sees which packages you look at. Change it under Settings.
         </p>
         <p>
-          <strong className="text-[var(--color-text)]">Model downloads</strong> come from{' '}
+          <strong className="font-medium text-text">Model downloads</strong> come from{' '}
           {typeof hf === 'string' && hf ? <code className="break-all">{hf}</code> : 'Hugging Face'}, only when you install
           a model.
         </p>
         <p>
-          <strong className="text-[var(--color-text)]">Remote model endpoints</strong> are off. A job sends your requests
+          <strong className="font-medium text-text">Remote model endpoints</strong> are off. A job sends your requests
           to another server only if you point it at one on the Models page.
+        </p>
+        <p>
+          These are the defaults for the whole install. Each household can change its own from the mobile app, and a
+          household that already has its own value keeps it. Settings shows every household's value.
         </p>
       </section>
 
-      <p className="text-xs text-[var(--color-text-muted)]">
-        These are the defaults for the whole install. Each household can change its own from the mobile app,
-        and a household that already has its own value keeps it. Settings shows every household's value.
-      </p>
-
-      <div className="flex justify-end">
-        <button type="button" className={buttonClass.primary} disabled={saving} onClick={() => void save()}>
-          {saving ? 'Saving…' : changes.length > 0 ? 'Save and continue' : 'Continue'}
-        </button>
-      </div>
+      <StepActions>
+        <Button variant="primary" loading={saving} onClick={() => void save()}>
+          {changes.length > 0 ? 'Save and continue' : 'Continue'}
+        </Button>
+      </StepActions>
     </div>
   )
 }
 
 /** PrivacyStep (AD3a, ID8): what leaves the box and what is kept, each in one line. */
 export default function PrivacyStep({ onDone }: { onDone: () => void }) {
-  const { data, isLoading, isError, error } = useAllSettings()
+  const { data, isLoading, isError, error, refetch } = useAllSettings()
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="flex items-center gap-2 text-xl font-bold text-[var(--color-text)]">
-          <ShieldCheck size={20} /> Privacy
-        </h2>
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Jarvis runs on this machine. These are the features that reach the internet or keep personal data, so you
-          decide.
-        </p>
-      </div>
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the settings')}</p>}
+    <div className="space-y-5">
+      <StepHeader icon={<ShieldCheck size={22} />} title="Privacy">
+        Jarvis runs on this machine. These are the features that reach the internet or keep personal data, so you
+        decide.
+      </StepHeader>
+      {isLoading && <StepLoading>Loading the settings</StepLoading>}
+      {isError && (
+        <ErrorState
+          title="Couldn't read the settings"
+          message={errorMessage(error, 'The server did not answer.')}
+          onRetry={() => refetch()}
+        />
+      )}
       {data && <PrivacyForm services={data.services} onDone={onDone} />}
     </div>
   )

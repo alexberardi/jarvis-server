@@ -111,7 +111,7 @@ export default function AgentDownload({ onSaved, size = 'xs' }: { onSaved?: () =
         )}
         {status.kind === 'saved' && (
           <div className="space-y-1">
-            <p className="flex items-center gap-1.5 text-green-500" role="status">
+            <p className="flex items-center gap-1.5 text-success" role="status">
               <CheckCircle2 size={14} aria-hidden="true" /> Saved {status.filename}
             </p>
             <p className="flex items-start gap-1.5 text-[var(--color-text-muted)]">
@@ -123,7 +123,7 @@ export default function AgentDownload({ onSaved, size = 'xs' }: { onSaved?: () =
           </div>
         )}
         {status.kind === 'failed' && (
-          <p className="text-red-500" role="alert">
+          <p className="text-danger" role="alert">
             {status.message}{' '}
             <a
               href={status.releaseUrl}

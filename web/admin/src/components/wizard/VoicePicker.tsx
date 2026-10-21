@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Play } from 'lucide-react'
+import { Play } from 'lucide-react'
 import { getVoices, sampleVoice } from '@/api/tts'
-import { buttonClass, inputClass } from '@/components/models/styles'
+import { Alert, Button, Select } from '@/components/ui'
 import { groupVoices, voiceInfo } from '@/components/setup/jobs'
 import { errorMessage, errorStatus } from '@/lib/errors'
 
@@ -57,56 +57,53 @@ export default function VoicePicker({
     }
   }
 
-  if (voices.isError) return <p className="text-sm text-red-500">{errorMessage(voices.error, 'Could not list the voices')}</p>
+  if (voices.isError)
+    return (
+      <Alert tone="danger" title="Couldn't list the voices">
+        {errorMessage(voices.error, 'The server did not answer')}. Jarvis keeps its default voice; you can change it
+        later on the Models page.
+      </Alert>
+    )
   const groups = groupVoices(voices.data?.voices ?? [])
 
   return (
-    <div className="space-y-2 rounded-lg border border-[var(--color-border)] p-3">
-      <label htmlFor="voice-select" className="block text-sm font-medium text-[var(--color-text)]">
-        Voice
-      </label>
-      <div className="flex flex-wrap items-center gap-2">
-        <select
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <Select
           id="voice-select"
-          className={`${inputClass} max-w-xs`}
+          label="Voice"
+          wrapperClassName="w-full max-w-xs"
           value={value}
           disabled={!voices.data}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {groups.map((g) => (
-            <optgroup key={g.language} label={g.language}>
-              {g.voices.map((v) => {
-                const info = voiceInfo(v)
-                return (
-                  <option key={v} value={v}>
-                    {info.name}
-                    {info.gender ? ` (${info.gender})` : ''}
-                    {v === voices.data?.default ? ' · default' : ''}
-                  </option>
-                )
-              })}
-            </optgroup>
-          ))}
-        </select>
-        <button
-          type="button"
-          className={buttonClass.secondary}
+          onValueChange={onChange}
+          groups={groups.map((g) => ({
+            label: g.language,
+            options: g.voices.map((v) => {
+              const info = voiceInfo(v)
+              return {
+                value: v,
+                label: `${info.name}${info.gender ? ` (${info.gender})` : ''}${v === voices.data?.default ? ' · default' : ''}`,
+              }
+            }),
+          }))}
+        />
+        <Button
           onClick={play}
-          disabled={!canSample || !value || playing}
+          disabled={!canSample || !value}
+          loading={playing}
+          icon={<Play size={16} aria-hidden />}
           title={canSample ? undefined : 'Available once the voice model is installed'}
         >
-          {playing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Play sample
-        </button>
+          Play sample
+        </Button>
       </div>
-      {!canSample && (
-        <p className="text-xs text-[var(--color-text-muted)]">The sample plays once the voice model has downloaded.</p>
-      )}
+      {!canSample && <p className="text-small text-text-muted">The sample plays once the voice model has downloaded.</p>}
       {error && (
-        <p role="alert" className="text-xs text-red-500">
+        <p role="alert" className="text-small text-danger">
           {error}
         </p>
       )}
-      <p className="text-xs text-[var(--color-text-muted)]">
+      <p className="text-small text-text-muted">
         The American and British English voices are the tested ones; the others may mispronounce words.
       </p>
     </div>

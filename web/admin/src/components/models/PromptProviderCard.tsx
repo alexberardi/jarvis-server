@@ -109,7 +109,7 @@ export default function PromptProviderCard() {
       description="The default prompt for households without their own, and how the live model calls tools and thinks."
     >
       {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the prompt provider')}</p>}
+      {isError && <p className="text-sm text-danger">{errorMessage(error, 'Could not read the prompt provider')}</p>}
       {data && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -127,7 +127,7 @@ export default function PromptProviderCard() {
           )}
 
           {warn && (
-            <p role="alert" className="flex items-start gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">
+            <p role="alert" className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               {data.effective
                 ? `"${data.effective}" is not a known prompt provider, so voice turns will fail. Pick one below.`
