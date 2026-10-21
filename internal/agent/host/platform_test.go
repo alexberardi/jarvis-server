@@ -82,21 +82,18 @@ func TestLinuxWmctrlTitlesKeepSpacing(t *testing.T) {
 }
 
 func TestDarwinWithoutAccessibilityHasNoWindowControl(t *testing.T) {
-	s := macFull()
-	inner := s.handler
-	s.handler = func(name string, args []string) (string, error) {
-		if strings.Contains(args[len(args)-1], "System Events") {
-			return "", &RunError{Name: "osascript", Msg: "execution error: System Events got an error: osascript is not allowed assistive access. (-25211)"}
-		}
-		return inner(name, args)
-	}
-	caps, _ := New(NewDarwin(s)).Capabilities(ctx)
+	d, _, a := macDesktop()
+	a.trusted = false
+	caps, _ := New(d).Capabilities(ctx)
 	if strings.Join(caps, ",") != "open,volume.get,volume.set" {
 		t.Fatalf("caps = %v", caps)
 	}
 	// And a direct call maps the TCC denial to NotSupported, not a generic failure.
-	if _, err := NewDarwin(s).ListWindows(ctx); !errors.Is(err, ErrNotSupported) {
+	if _, err := d.ListWindows(ctx); !errors.Is(err, ErrNotSupported) {
 		t.Fatalf("err = %v", err)
+	}
+	if err := d.FocusWindow(ctx, macWinID); !errors.Is(err, ErrNotSupported) {
+		t.Fatalf("focus err = %v", err)
 	}
 }
 

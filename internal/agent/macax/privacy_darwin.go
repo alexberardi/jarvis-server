@@ -105,7 +105,7 @@ const (
 )
 
 // AutomationStatus is whether this process may send Apple events to the app with bundleID
-// (the agent's window tools drive "System Events"). It never prompts. "unknown" when that app
+// (dictation asks "System Events" for the frontmost app). It never prompts. "unknown" when that app
 // isn't running: macOS can only answer for a running target.
 func AutomationStatus(bundleID string) string {
 	if loadAE() != nil || bundleID == "" {
