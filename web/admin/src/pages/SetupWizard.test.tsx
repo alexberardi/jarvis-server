@@ -606,3 +606,89 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
     expect(await screen.findByText('home page')).toBeInTheDocument()
   })
 })
+
+// #354: on Apple Silicon the Language model step offers the MLX builds next to the GGUFs, sized
+// by the Mac's memory (the server's fit and recommendation); elsewhere it lists none of them.
+describe('setup wizard: MLX models on a Mac', () => {
+  const tooBig = { verdict: 'too_big', needed_mb: 17000, context: 32768, kv_estimated: false }
+  const mlx = (id: string, display: string, over: Partial<CatalogEntry> = {}) =>
+    entry(id, 'llm', display, { directory: true, prompt_provider: 'qwen3.5', ...over })
+  function macCatalog(gb: 16 | 32): CatalogResponse {
+    const big = gb >= 32 ? {} : { fit: tooBig }
+    return {
+      ...catalog,
+      models: [
+        ...catalog.models,
+        mlx('qwen3.5-9b-mlx', 'Qwen 3.5 9B (MLX)'),
+        mlx('qwen3.5-27b-mlx', 'Qwen 3.5 27B (MLX)', big),
+        mlx('qwen3.5-35b-a3b-mlx', 'Qwen 3.5 35B-A3B (MLX)', big),
+      ],
+      // What Recommend sends on main: the 9B GGUF at 16 GB (the MLX 9B is
+      // no_recommend, #371), the 27B MLX from 32 GB.
+      recommended: gb >= 32
+        ? { ...catalog.recommended, live: 'qwen3.5-27b-mlx', background: 'qwen3.5-27b-mlx' }
+        : { ...catalog.recommended, live: 'qwen3.5-9b', background: 'qwen3.5-9b' },
+      hardware: { os: 'darwin', arch: 'arm64', devices: [], sources: [], flavour: 'metal', detected_at: '' },
+    }
+  }
+
+  function atLlmStep(cat: CatalogResponse) {
+    signIn()
+    sessionStorage.setItem(STEP_STORAGE_KEY, 'llm')
+    auth.getSetupState.mockResolvedValue(superState)
+    api.getCatalog.mockResolvedValue(cat)
+    renderWizard()
+  }
+
+  const names = () => screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label'))
+
+  it('16 GB: offers the 9B MLX build first with an MLX badge, recommends the GGUF, and installs the MLX pick with no more questions', async () => {
+    atLlmStep(macCatalog(16))
+    const gguf = await screen.findByRole('radio', { name: 'Qwen 3.5 9B' })
+    await waitFor(() => expect(gguf).toBeChecked())
+    const ggufRow = gguf.closest('label')!
+    expect(within(ggufRow).getByText('Recommended')).toBeInTheDocument()
+    expect(within(ggufRow).queryByText('MLX')).toBeNull()
+    const mlxRow = screen.getByRole('radio', { name: 'Qwen 3.5 9B (MLX)' }).closest('label')!
+    expect(within(mlxRow).getByText('MLX')).toBeInTheDocument()
+    expect(within(mlxRow).queryByText('Recommended')).toBeNull()
+    // The 27B and 35B need 32 GB: not offered here.
+    expect(names()).toEqual(['Qwen 3.5 9B (MLX)', 'Qwen 3 4B', 'Qwen 3.5 9B'])
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Qwen 3.5 9B (MLX)' }))
+    expect(screen.getByRole('radio', { name: 'Qwen 3.5 9B (MLX)' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Install and continue' }))
+    await waitFor(() =>
+      expect(api.startInstall).toHaveBeenCalledWith({ catalog_id: 'qwen3.5-9b-mlx', assign: ['live', 'background'] }),
+    )
+    expect(await screen.findByRole('heading', { name: /Speech-to-text/ })).toBeInTheDocument()
+  })
+
+  it('32 GB: also offers the 27B and 35B MLX builds, the 27B recommended', async () => {
+    atLlmStep(macCatalog(32))
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Qwen 3.5 27B (MLX)' })).toBeChecked())
+    expect(within(screen.getByRole('radio', { name: 'Qwen 3.5 27B (MLX)' }).closest('label')!).getByText('Recommended')).toBeInTheDocument()
+    expect(names()).toEqual([
+      'Qwen 3.5 9B (MLX)',
+      'Qwen 3.5 27B (MLX)',
+      'Qwen 3.5 35B-A3B (MLX)',
+      'Qwen 3 4B',
+      'Qwen 3.5 9B',
+    ])
+  })
+
+  it('off Apple Silicon: lists no MLX entries and pre-selects a GGUF', async () => {
+    const why = 'mlx-community/Qwen3.5-9B-4bit is an MLX build, which runs only on Apple Silicon'
+    atLlmStep({
+      ...catalog,
+      models: [
+        mlx('qwen3.5-9b-mlx', 'Qwen 3.5 9B (MLX)', { unavailable: why }),
+        ...catalog.models,
+        mlx('qwen3.5-27b-mlx', 'Qwen 3.5 27B (MLX)', { unavailable: why }),
+      ],
+    })
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Qwen 3.5 9B' })).toBeChecked())
+    expect(names()).toEqual(['Qwen 3 4B', 'Qwen 3.5 9B'])
+    expect(screen.queryByText('MLX')).toBeNull()
+  })
+})

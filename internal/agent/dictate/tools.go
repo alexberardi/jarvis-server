@@ -73,26 +73,15 @@ const (
 )
 
 var appParam = node.Param{Name: "app", Type: "string",
-	Description: "The app or window to switch to first, exactly as the user said it: \"claude\", \"slack\", \"the terminal\", " +
-		"\"quillpad\", or words from its title. Always pass it when the user names one (\"into X\", \"in X\", \"to X\"), " +
-		"even a name you don't recognise. Leave it out only when they name none, to use whatever window is in front."}
+	Description: "The app the user named ('in slack', 'into X'); always set when named"}
 
 func typeSpec() node.Spec {
 	return node.Spec{Name: ToolType,
-		Description: "Type text on the user's computer, as if typed on the keyboard: into the window in front, or into the app " +
-			"the user names (it is brought to the front first). When the user names an app or window (\"into X\", \"in X\", " +
-			"\"to X\"), always set app to that name exactly as they said it, even one you don't recognise: never drop it, and " +
-			"never leave it in text. Use it for dictation: \"type hello world\" → {text: \"hello world\"}; " +
-			"\"tell claude to run the tests\" → {app: \"claude\", text: \"run the tests\", submit: true}; \"write thanks in slack\" → " +
-			"{app: \"slack\", text: \"thanks\"}; \"type into quillpad that the build is green\" → {app: \"quillpad\", text: " +
-			"\"the build is green\"}. Put only the words to type in text, never the instruction around them, and " +
-			"keep the user's wording; if speech ran \"type\" into the first word (\"typehello there\"), leave \"type\" out. After opening an app with desktop_open, pass the same name in app. submit presses Enter afterwards: true when the user says \"tell X to …\", \"send …\", \"ask X …\" " +
-			"or \"… and press enter\"; false for \"type …\", \"write …\", \"put … in\". For a field on a web page use " +
-			"browser_fill instead. If the result says awaiting_confirmation, nothing was typed yet: ask the user the question.",
+		Description: "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill.",
 		Params: []node.Param{
-			{Name: "text", Type: "string", Required: true, Description: "Exactly the words to type"},
+			{Name: "text", Type: "string", Required: true, Description: "Only the words to type"},
 			appParam,
-			{Name: "submit", Type: "bool", Description: "Press Enter after typing, to send it (default false)"},
+			{Name: "submit", Type: "bool", Description: "Press Enter after ('tell X to', 'send', 'and press enter')"},
 		},
 		Keywords: []string{"type", "dictate", "write", "tell", "send", "enter", "keyboard", "claude", "terminal", "message"},
 		Examples: []node.Example{
@@ -112,13 +101,9 @@ func pressSpec() node.Spec {
 		keys[i] = string(k)
 	}
 	return node.Spec{Name: ToolPress,
-		Description: "Press one key on the user's computer, in the window in front or in the app the user names. Use it to answer a " +
-			"dialog box on the computer: \"click OK\", \"press enter\", \"say yes to that\", \"accept it\" → enter (the default " +
-			"button); \"cancel\", \"hit cancel\", \"close that dialog\", \"press escape\", \"no\" → escape; \"next button\" → tab; " +
-			"\"previous button\" → shift+tab; space presses the highlighted button or ticks a box; arrows move between choices. " +
-			"For a button on a web page use browser_click instead.",
+		Description: "Press a key on the computer ('press enter', 'hit cancel', 'press escape'): enter = OK, escape = cancel. Web page buttons: browser_click.",
 		Params: []node.Param{
-			{Name: "key", Type: "string", Required: true, Enum: keys, Description: "The key to press"},
+			{Name: "key", Type: "string", Required: true, Enum: keys, Description: ""},
 			appParam,
 		},
 		Keywords: []string{"press", "key", "enter", "escape", "cancel", "ok", "dialog", "button", "tab", "click", "accept"},
@@ -365,13 +350,7 @@ func (t *Tools) awaitWindow(ctx context.Context, asked string, l launches.Launch
 			}
 		}
 		if l.Before != nil {
-			var fresh []Window
-			for _, w := range ws {
-				if !l.Before[w.ID] {
-					fresh = append(fresh, w)
-				}
-			}
-			if len(fresh) == 1 {
+			if fresh := t.freshSince(ctx, ws, l); len(fresh) == 1 {
 				t.log().Info("dictation: the launched app's new window", "app", l.Name, "polls", i)
 				tg := t.targetOf(fresh[0], asked, false)
 				tg.name, tg.app = l.Name, l.Name
@@ -387,6 +366,34 @@ func (t *Tools) awaitWindow(ctx context.Context, asked string, l launches.Launch
 	}
 	return nil, &appError{code: CodeNotReady, app: l.Name,
 		msg: fmt.Sprintf("%s was opened, but its window hasn't appeared yet", l.Name)}
+}
+
+// freshSince is the listed windows that weren't there at launch l. A snapshot from a faster
+// source than the window list (macOS's window server) names the apps with a new window
+// instead; each one's front window in ws is taken as the new one.
+func (t *Tools) freshSince(ctx context.Context, ws []Window, l launches.Launch) []Window {
+	var fresh []Window
+	if !l.ByOwner {
+		for _, w := range ws {
+			if !l.Before[w.ID] {
+				fresh = append(fresh, w)
+			}
+		}
+		return fresh
+	}
+	owners, err := t.Launched.NewOwners(ctx, l)
+	if err != nil {
+		return nil
+	}
+	for _, o := range owners {
+		for _, w := range ws {
+			if t.Win.Same(w.ID, o) {
+				fresh = append(fresh, w)
+				break
+			}
+		}
+	}
+	return fresh
 }
 
 // notOpen turns "no window matches" into "that app is installed but not open" when the

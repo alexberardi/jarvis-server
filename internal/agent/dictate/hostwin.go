@@ -100,8 +100,8 @@ type X11ActiveWM interface {
 	Active(ctx context.Context) (uint32, error)
 }
 
-// MacFrontPid is the frontmost app's pid via System Events (the Automation grant window control
-// already needs).
+// MacFrontPid is the frontmost app's pid via System Events (the Automation grant setup asks for;
+// window control itself goes through Accessibility).
 func MacFrontPid(x Exec) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		return x.Run(ctx, Cmd{Name: "osascript", Args: []string{"-e",

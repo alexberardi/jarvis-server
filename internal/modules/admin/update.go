@@ -123,8 +123,22 @@ func (m *Module) updatesEnabled(ctx context.Context) bool {
 	return m.settings != nil && m.settings.Bool(ctx, SettingUpdatesEnabled, settings.Scope{})
 }
 
+// ContainerHint is how a jarvisd in a container (UpgradeConfig.Container) is updated: by its
+// container host, never in place (the next image pull would undo it).
+func ContainerHint(kind string) string {
+	if kind == "unraid" {
+		return "This jarvisd runs in a container. Update it from Unraid's Docker tab: Check for Updates, " +
+			"then apply update. Your data in appdata is kept."
+	}
+	return "This jarvisd runs in a container. Pull the new image and recreate the container; the /data volume is kept."
+}
+
 // baseStatus is the answer before any check: nothing claimed.
 func (m *Module) baseStatus(enabled bool) *updateStatus {
+	if m.Upgrade.Container != "" {
+		return &updateStatus{UpdatesEnabled: enabled, CurrentVersion: m.version(), Platform: platform(),
+			InstallHint: ContainerHint(m.Upgrade.Container)}
+	}
 	return &updateStatus{
 		UpdatesEnabled: enabled, CurrentVersion: m.version(), Platform: platform(),
 		InstallHint: "Install updates from here (jarvisd checks the release signature, keeps the previous " +
@@ -214,6 +228,8 @@ func (m *Module) checkReleases(ctx context.Context) *updateStatus {
 		}
 	}
 	switch {
+	case m.Upgrade.Container != "":
+		st.InstallCommand, st.InstallHint = nil, ContainerHint(m.Upgrade.Container)
 	case st.Asset == nil:
 		st.InstallHint = "This release has no download for " + platform() + "."
 	case st.InstallCommand != nil:

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 )
@@ -98,5 +99,37 @@ func TestBindings(t *testing.T) {
 	}
 	if got := goString(cfstr("AXRole")); got != "AXRole" {
 		t.Errorf("CFString round trip = %q", got)
+	}
+}
+
+// TestLiveWindowList lists every regular app's windows on this Mac, as desktop_list_windows does
+// (sequentially here, so the time is an upper bound):
+//
+//	JARVIS_AX_LIVE=1 go test -run LiveWindowList -v ./internal/agent/ax/
+func TestLiveWindowList(t *testing.T) {
+	if os.Getenv("JARVIS_AX_LIVE") != "1" {
+		t.Skip("set JARVIS_AX_LIVE=1 to list this Mac's windows")
+	}
+	if !trusted() {
+		t.Skip("this process is not trusted for Accessibility (System Settings → Privacy & Security → Accessibility)")
+	}
+	apps, err := Windows{}.Apps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) == 0 {
+		t.Fatal("no regular apps running (Finder always is)")
+	}
+	for _, a := range apps {
+		start := time.Now()
+		ws, err := Windows{}.AppWindows(a.PID)
+		took := time.Since(start)
+		t.Logf("%s (%d): %d windows in %v, err %v", a.Name, a.PID, len(ws), took.Round(time.Millisecond), err)
+		if took > time.Second {
+			t.Errorf("%s took %v: its messaging timeout didn't hold", a.Name, took)
+		}
+		for i, w := range ws {
+			t.Logf("  %d/%d %q minimized=%v", a.PID, i+1, w.Title, w.Minimized)
+		}
 	}
 }

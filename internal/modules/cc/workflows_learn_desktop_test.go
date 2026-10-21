@@ -226,7 +226,7 @@ func TestLearnFromDesktopRecording(t *testing.T) {
 			if strings.Contains(user, "hunter2") {
 				t.Fatalf("a masked value reached the model:\n%s", user)
 			}
-			if raw := mustJSON(t, le.notify.items); !bytes.Contains([]byte(raw), []byte(learnCardCategory)) {
+			if raw := mustJSON(t, le.cards()); !bytes.Contains([]byte(raw), []byte(learnCardCategory)) {
 				t.Fatalf("no learnt card: %s", raw)
 			}
 		})

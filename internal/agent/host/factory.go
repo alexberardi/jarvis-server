@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 	"github.com/alexberardi/jarvis-server/internal/agent/x11"
 )
 
@@ -23,11 +24,15 @@ func ForOS(goos string, sys Sys, api Win32) (Backend, error) {
 }
 
 // Native is the backend for the OS this binary runs on. On Linux it gets the built-in X11
-// window control (EWMH); ForOS leaves it out so tests never reach a real X server.
+// window control (EWMH), on macOS the Accessibility one; ForOS leaves them out so tests never
+// reach a real X server or the user's apps.
 func Native() (Backend, error) {
 	b, err := ForOS(runtime.GOOS, OSSys{}, NewWin32())
-	if l, ok := b.(*Linux); ok {
-		l.X = &x11.Display{}
+	switch b := b.(type) {
+	case *Linux:
+		b.X = &x11.Display{}
+	case *Darwin:
+		b.AX = ax.Windows{}
 	}
 	return b, err
 }

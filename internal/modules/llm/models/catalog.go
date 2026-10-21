@@ -72,7 +72,10 @@ type Entry struct {
 	Directory bool `json:"directory,omitempty"`
 	// MinMemoryMB is the least GPU or unified memory the entry needs to be worth installing
 	// (a 27B on a 16 GB Mac would leave too little for anything else); 0 = judged by its fit.
-	MinMemoryMB int64    `json:"min_memory_mb,omitempty"`
+	MinMemoryMB int64 `json:"min_memory_mb,omitempty"`
+	// NoRecommend keeps the entry out of the hardware recommendation (Recommend) while it stays
+	// installable: a build measured worse than its alternative (the notes say why).
+	NoRecommend bool     `json:"no_recommend,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Notes       string   `json:"notes,omitempty"`
 }

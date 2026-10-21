@@ -2,23 +2,43 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 )
 
-// Darwin shells out to osascript (volume, windows via System Events) and open(1).
+// Darwin shells out to osascript (volume) and open(1); windows go through the Accessibility API
+// (AX, an ax.Windows on macOS).
 //
-// Window control needs an Accessibility (TCC) grant for the binary hosting the agent, plus an
-// Automation grant to drive System Events. TCC grants are per binary, which is one reason this
-// is a single Go binary rather than a Python script: the grant goes to jarvis-agent, not to a
-// Homebrew Python that a patch upgrade silently replaces.
+// Window control needs an Accessibility (TCC) grant for the binary hosting the agent. TCC grants
+// are per binary, which is one reason this is a single Go binary rather than a Python script:
+// the grant goes to jarvis-agent, not to a Homebrew Python that a patch upgrade silently
+// replaces.
 //
 // Not named *_darwin.go: it compiles everywhere so the contract suite can run it everywhere.
 type Darwin struct {
 	Sys Sys
+	// AX is the Accessibility window control; nil: no window control. Native sets it; tests
+	// leave it nil or pass a fake.
+	AX MacAX
+
+	log    *slog.Logger // nil: slog.Default()
+	silent sync.Map     // pids already logged as not answering
+}
+
+// MacAX is the Accessibility window control (ax.Windows).
+type MacAX interface {
+	Trusted() bool
+	Apps() ([]ax.App, error)
+	AppWindows(pid int) ([]ax.AppWindow, error)
+	Act(pid, index int, action string) error
 }
 
 // NewDarwin builds the macOS backend. It touches nothing.
@@ -26,29 +46,18 @@ func NewDarwin(s Sys) *Darwin { return &Darwin{Sys: s} }
 
 func (*Darwin) Platform() string { return "darwin" }
 
-func (d *Darwin) Capabilities(ctx context.Context) []string {
+func (d *Darwin) Capabilities(context.Context) []string {
 	var caps []string
 	if d.Sys.LookPath("open") {
 		caps = append(caps, CapOpen)
 	}
 	if d.Sys.LookPath("osascript") {
 		caps = append(caps, CapVolumeGet, CapVolumeSet)
-		if d.accessibilityGranted(ctx) {
-			caps = append(caps, AllWindowCaps...)
-		}
+	}
+	if d.AX != nil && d.AX.Trusted() {
+		caps = append(caps, AllWindowCaps...)
 	}
 	return caps
-}
-
-// accessProbe really touches windows. The earlier Python probe ("count processes") succeeds
-// without assistive access on current macOS, so window control was advertised and then failed.
-const accessProbe = `tell application "System Events" to get name of every window of (first process whose frontmost is true)`
-
-func (d *Darwin) accessibilityGranted(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := d.osascript(ctx, accessProbe)
-	return err == nil
 }
 
 func (d *Darwin) osascript(ctx context.Context, script string) (string, error) {
@@ -85,84 +94,122 @@ func (d *Darwin) ApplyVolume(ctx context.Context, level int) error {
 	return err
 }
 
-// Window ids are "<pid>/<index>": the owning process and the window's position in its window
-// list. Opaque to callers, and only as stable as the window list, which is what the contract
-// promises (valid until the window set changes). System Events windows have no usable id.
+// Window ids are "<pid>/<index>": the owning process and the window's 1-based position in its
+// AXWindows (the order System Events' "window N" used, the frontmost first). Opaque to callers,
+// and only as stable as the window list, which is what the contract promises (valid until the
+// window set changes). AX windows have no usable id.
 var reMacID = regexp.MustCompile(`^(\d{1,10})/(\d{1,4})$`)
 
-const listScript = `tell application "System Events"
-	set out to ""
-	repeat with proc in (every process whose background only is false)
-		set procID to (unix id of proc) as string
-		set procName to name of proc
-		set i to 0
-		repeat with w in (every window of proc)
-			set i to i + 1
-			try
-				set m to false
-				try
-					set m to value of attribute "AXMinimized" of w
-				end try
-				set out to out & procID & "/" & (i as string) & tab & procName & tab & (name of w as string) & tab & (m as string) & linefeed
-			end try
-		end repeat
-	end repeat
-	return out
-end tell`
+// listBudget bounds a window list: an app whose windows aren't in by then is left out. Its own
+// messaging timeout (ax.AppTimeout) normally fails it sooner; this also covers a call that
+// ignores it.
+const listBudget = 300 * time.Millisecond
 
 func (d *Darwin) ListWindows(ctx context.Context) ([]Window, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	raw, err := d.osascript(ctx, listScript)
+	if d.AX == nil {
+		return nil, Errorf(ErrNotSupported, "window control needs the Accessibility API")
+	}
+	apps, err := d.AX.Apps()
 	if err != nil {
-		return nil, err
+		return nil, macAXError(err, "the window list")
+	}
+	// Every app at once (a desktop has tens): one that doesn't answer costs the list its
+	// timeout once, not once per app in turn.
+	type result struct {
+		i   int
+		ws  []ax.AppWindow
+		err error
+	}
+	done := make(chan result, len(apps))
+	for i, a := range apps {
+		go func() {
+			ws, err := d.AX.AppWindows(a.PID)
+			done <- result{i, ws, err}
+		}()
+	}
+	got := make([]*result, len(apps))
+	timer := time.NewTimer(listBudget)
+	defer timer.Stop()
+collect:
+	for range apps {
+		select {
+		case r := <-done:
+			got[r.i] = &r
+		case <-timer.C:
+			break collect
+		case <-ctx.Done():
+			return nil, Errorf(ErrOperationFailed, "window list: %v", ctx.Err())
+		}
 	}
 	out := []Window{}
-	for _, line := range strings.Split(raw, "\n") {
-		p := strings.Split(line, "\t")
-		if len(p) != 4 || !reMacID.MatchString(p[0]) {
+	for i, a := range apps {
+		r := got[i]
+		switch {
+		case r == nil:
+			d.skipped(a, "did not answer within "+listBudget.String())
+			continue
+		case errors.Is(r.err, ax.ErrNotTrusted):
+			return nil, macAXError(r.err, "the window list")
+		case errors.Is(r.err, ax.ErrNoWindow):
+			continue // it quit
+		case r.err != nil:
+			d.skipped(a, r.err.Error())
 			continue
 		}
-		out = append(out, Window{ID: p[0], App: p[1], Title: p[2], Minimized: strings.EqualFold(p[3], "true")})
+		d.silent.Delete(a.PID)
+		for j, w := range r.ws {
+			out = append(out, Window{ID: fmt.Sprintf("%d/%d", a.PID, j+1), App: a.Name, Title: w.Title, Minimized: w.Minimized})
+		}
 	}
 	return out, nil
 }
 
-// The id is validated against reMacID before it is spliced into AppleScript: only digits reach
-// the script, so a window id from an LLM cannot inject code.
-const actionScript = `tell application "System Events"
-	set procs to (every process whose unix id is %s)
-	if (count of procs) is 0 then return "missing"
-	set proc to item 1 of procs
-	if (count of windows of proc) < %s then return "missing"
-	set w to window %s of proc
-	%s
-	return "ok"
-end tell`
-
-var macActions = map[WindowAction]string{
-	ActionMinimize: `set value of attribute "AXMinimized" of w to true`,
-	ActionFocus:    "perform action \"AXRaise\" of w\n\tset frontmost of proc to true",
-	// The window's own close button: the same graceful request a click makes, so the app can
-	// prompt to save. Never quit or kill the process.
-	ActionClose: `click (first button of w whose subrole is "AXCloseButton")`,
+// skipped logs an app left out of the window list, once until it answers again.
+func (d *Darwin) skipped(a ax.App, why string) {
+	if _, seen := d.silent.LoadOrStore(a.PID, true); seen {
+		return
+	}
+	l := d.log
+	if l == nil {
+		l = slog.Default()
+	}
+	l.Warn("window list: an app did not answer Accessibility; its windows are left out", "app", a.Name, "pid", a.PID, "why", why)
 }
 
-func (d *Darwin) act(ctx context.Context, action WindowAction, id string) error {
+// macAXError maps an ax error to the host's.
+func macAXError(err error, what string) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ax.ErrNoWindow):
+		return Errorf(ErrWindowNotFound, "%s no longer exists", what)
+	case errors.Is(err, ax.ErrNotTrusted):
+		return Errorf(ErrNotSupported, "Accessibility permission required: %v", err)
+	case errors.Is(err, ax.ErrUnsupported):
+		return Errorf(ErrNotSupported, "%v", err)
+	}
+	return Errorf(ErrOperationFailed, "%s: %v", what, err)
+}
+
+var macActions = map[WindowAction]string{
+	ActionMinimize: ax.ActMinimize,
+	ActionFocus:    ax.ActFocus,
+	// The window's own close button: the same graceful request a click makes, so the app can
+	// prompt to save. Never quit or kill the process.
+	ActionClose: ax.ActClose,
+}
+
+func (d *Darwin) act(_ context.Context, action WindowAction, id string) error {
+	if d.AX == nil {
+		return Errorf(ErrNotSupported, "window control needs the Accessibility API")
+	}
 	m := reMacID.FindStringSubmatch(id)
 	if m == nil {
 		return Errorf(ErrWindowNotFound, "not a window id: %q", id)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	out, err := d.osascript(ctx, fmt.Sprintf(actionScript, m[1], m[2], m[2], macActions[action]))
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(out) == "missing" {
-		return Errorf(ErrWindowNotFound, "window %s no longer exists", id)
-	}
-	return nil
+	pid, _ := strconv.Atoi(m[1])
+	idx, _ := strconv.Atoi(m[2])
+	return macAXError(d.AX.Act(pid, idx, macActions[action]), "window "+id)
 }
 
 func (d *Darwin) MinimizeWindow(ctx context.Context, id string) error {

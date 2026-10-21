@@ -12,7 +12,7 @@ import (
 // Agent context (docs/cc/04 §3.3 C): household rows the node's background agents inject
 // (weather, calendar, news, reminders) that match the utterance are appended to the user
 // message, after the turn hints, so recency keeps them top of mind. Gated per household by
-// model.advanced_context (default off) and memory.agent_context_enabled.
+// model.advanced_context (default on, #408) and memory.agent_context_enabled.
 
 // agentContextEmbedTimeout keeps the per-turn embedding off the latency budget; on timeout
 // the search falls back to keywords (04 §11 "Hot path"). A var for tests, which need the

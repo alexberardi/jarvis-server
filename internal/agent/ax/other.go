@@ -13,3 +13,11 @@ func recordedAt(float64, float64) (*Recorded, error) { return nil, ErrUnsupporte
 func focusedElement() (*Recorded, error) { return nil, ErrUnsupported }
 
 func forgetApps() {}
+
+func trusted() bool { return false }
+
+func runningApps() ([]App, error) { return nil, ErrUnsupported }
+
+func appWindows(int) ([]AppWindow, error) { return nil, ErrUnsupported }
+
+func windowAct(int, int, string) error { return ErrUnsupported }

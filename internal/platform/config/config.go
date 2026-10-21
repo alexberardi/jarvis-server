@@ -42,6 +42,20 @@ var DefaultPorts = map[string]int{
 	ListenerAdmin:         7710,
 }
 
+// Paths is the prefix each listener is also served under on the config port; admin is not
+// mounted.
+var Paths = map[string]string{
+	ListenerAuth:          "/auth",
+	ListenerLogs:          "/logs",
+	ListenerCC:            "/cc",
+	ListenerLLM:           "/llm",
+	ListenerSTT:           "/stt",
+	ListenerTTS:           "/tts",
+	ListenerNotifications: "/notifications",
+	ListenerRecipes:       "/recipes",
+	ListenerOCR:           "/ocr",
+}
+
 type Config struct {
 	// Home is the data directory (~/.jarvisd by default): database, blobs, extracted libs, engines.
 	Home string
@@ -54,6 +68,9 @@ type Config struct {
 	MDNSInterfaces []string
 	// Env is what cmd/jarvisd wires into the modules from the environment.
 	Env Env
+	// SinglePort: the mounted listeners have no port of their own (legacy ports off); the
+	// registry and node URLs use the config port + Paths. Set by the runner before Register.
+	SinglePort bool
 }
 
 // Env holds the modules' bootstrap values from the environment: secrets, dev switches and the
@@ -64,9 +81,11 @@ type Env struct {
 	AdminAPIKey       string // ADMIN_API_KEY (notifications and cc)
 	RelayHouseholdJWT string // RELAY_HOUSEHOLD_JWT
 	DevSpeakerHints   bool   // JARVIS_DEV_SPEAKER_HINTS=1
-	// MQTTAddr and MQTTWSAddr are JARVIS_MQTT_ADDR / JARVIS_MQTT_WS_ADDR when set (even to "",
-	// which disables that listener), else the broker's defaults moved by JARVIS_PORT_OFFSET.
-	MQTTAddr           string
+	// MQTTAddr is JARVIS_MQTT_ADDR when set (even to "", which disables the listener), else the
+	// broker's default moved by JARVIS_PORT_OFFSET.
+	MQTTAddr string
+	// MQTTWSAddr is JARVIS_MQTT_WS_ADDR as set, else "": the WebSocket's 9883 default comes from
+	// main, and only when legacy ports are on (server.legacy_ports).
 	MQTTWSAddr         string
 	MQTTAllowAnonymous bool // JARVIS_MQTT_ALLOW_ANONYMOUS=1
 	// MQTTWSAllowedOrigins is JARVIS_MQTT_WS_ALLOWED_ORIGINS as set: comma-separated hosts (or
@@ -83,6 +102,13 @@ type Env struct {
 	// phone.EnvTwilio* names), JARVIS_PHONE_PUBLIC_URL and JARVIS_PHONE_PUBLIC_WSS_URL.
 	TwilioAccountSID, TwilioAuthToken, TwilioFromNumber string
 	PhonePublicURL, PhonePublicWSSURL                   string
+	// Container is JARVIS_CONTAINER, trimmed and lower-cased: "" (not a container), "docker"
+	// (the image's default) or "unraid" (its template). Updates and Stop then go through the
+	// container host.
+	Container string
+	// LegacyPorts is JARVIS_LEGACY_PORTS as set: "1"/"true" on, "0"/"false" off, "" leaves it to
+	// the server.legacy_ports setting (ParseLegacyPorts).
+	LegacyPorts string
 }
 
 // DBPath is the single SQLite database file.
@@ -106,6 +132,8 @@ func (c Config) Addr(listener string) (string, error) {
 //	JARVIS_PORT_<LISTENER>   per-listener port override, e.g. JARVIS_PORT_COMMAND_CENTER=17703;
 //	                         taken as is, without the offset
 //	JARVIS_MDNS_INTERFACES   comma-separated LAN interface names, e.g. "en0" or "eth0,wlan0"
+//	JARVIS_LEGACY_PORTS      "1"/"true" or "0"/"false": also bind every listener's own port (and the
+//	                         MQTT WebSocket), overriding the server.legacy_ports setting
 //
 // and the modules' bootstrap values (Env).
 func Load() (Config, error) {
@@ -170,7 +198,7 @@ func loadEnv(lookup func(string) (string, bool), getenv func(string) string, off
 		RelayHouseholdJWT:    getenv("RELAY_HOUSEHOLD_JWT"),
 		DevSpeakerHints:      getenv("JARVIS_DEV_SPEAKER_HINTS") == "1",
 		MQTTAddr:             envOr("JARVIS_MQTT_ADDR", ShiftAddr(DefaultMQTTAddr, offset)),
-		MQTTWSAddr:           envOr("JARVIS_MQTT_WS_ADDR", ShiftAddr(DefaultMQTTWSAddr, offset)),
+		MQTTWSAddr:           envOr("JARVIS_MQTT_WS_ADDR", ""),
 		MQTTAllowAnonymous:   getenv("JARVIS_MQTT_ALLOW_ANONYMOUS") == "1",
 		MQTTWSAllowedOrigins: getenv("JARVIS_MQTT_WS_ALLOWED_ORIGINS"),
 		AuthAdminToken:       getenv("JARVIS_AUTH_ADMIN_TOKEN"),
@@ -185,7 +213,23 @@ func loadEnv(lookup func(string) (string, bool), getenv func(string) string, off
 		TwilioFromNumber:     getenv("TWILIO_FROM_NUMBER"),
 		PhonePublicURL:       getenv("JARVIS_PHONE_PUBLIC_URL"),
 		PhonePublicWSSURL:    getenv("JARVIS_PHONE_PUBLIC_WSS_URL"),
+		Container:            strings.ToLower(strings.TrimSpace(getenv("JARVIS_CONTAINER"))),
+		LegacyPorts:          getenv("JARVIS_LEGACY_PORTS"),
 	}
+}
+
+// ParseLegacyPorts reads a JARVIS_LEGACY_PORTS value: set is false for "" (the setting
+// decides), and anything but 1/true/0/false is an error.
+func ParseLegacyPorts(v string) (set, on bool, err error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return false, false, nil
+	case "1", "true":
+		return true, true, nil
+	case "0", "false":
+		return true, false, nil
+	}
+	return false, false, fmt.Errorf("config: JARVIS_LEGACY_PORTS=%q: want 1, true, 0 or false", v)
 }
 
 // The MQTT broker's default listen addresses. They equal mqtt.DefaultTCPAddr and

@@ -248,3 +248,25 @@ func TestSetupLinkURLAndQR(t *testing.T) {
 		t.Fatalf("style for a buffer: %v", s)
 	}
 }
+
+// In a container stderr is the container log, which only the host's admin reads: the token is
+// printed even without a terminal, with the WebUI's port instead of the unreachable bridge IP.
+func TestAnnounceSetupInAContainer(t *testing.T) {
+	var out, logged bytes.Buffer
+	cfg := config.Config{Host: "172.17.0.2", Ports: map[string]int{config.ListenerAdmin: 7710},
+		Env: config.Env{Container: "unraid"}}
+	announceSetup(&out, false, slog.New(slog.NewTextHandler(&logged, nil)), cfg, "abc123", "/data/setup-token", true)
+	s := out.String()
+	for _, want := range []string{"Open the WebUI (port 7710 on your server) and paste this setup token:",
+		"Setup token: abc123", "(also in setup-token in the data folder"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in %q", want, s)
+		}
+	}
+	if strings.Contains(s+logged.String(), "172.17") || strings.Contains(s+logged.String(), "http://") {
+		t.Errorf("names the bridge address: %q / %q", s, logged.String())
+	}
+	if strings.Contains(logged.String(), "abc123") {
+		t.Errorf("log carries the setup token: %q", logged.String())
+	}
+}

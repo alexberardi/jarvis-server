@@ -4,19 +4,83 @@
 <meta charset="utf-8">
 <title>Jarvis Browser Control</title>
 <style>
-  :root { color-scheme: light dark; --fg: #1a1a1a; --muted: #5c5c5c; --bg: #ffffff; --accent: #2563eb; --ok: #16a34a; --warn: #d97706; }
-  @media (prefers-color-scheme: dark) { :root { --fg: #ececec; --muted: #a3a3a3; --bg: #1f1f1f; --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; } }
-  body { margin: 0; width: 300px; padding: 14px 16px; font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
-  h1 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
-  .ok .dot { background: var(--ok); }
-  p { margin: 0 0 10px; color: var(--muted); }
-  a.button { display: inline-block; padding: 7px 12px; border-radius: 8px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
-  a.button:focus-visible, button.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-  button.button { padding: 7px 12px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-  #access { margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--muted) 35%, transparent); }
-  #access-line { color: var(--fg); }
-  .off #access-state { color: var(--warn); font-weight: 600; }
+  /*
+   * Direction B's tokens (docs/decisions/2026-10-20-web-ui-direction.md), the same values as
+   * web/admin/src/index.css and the desktop agent's setup page; internal/agent/firstrun's
+   * tokens_test.go keeps them equal and fails on a colour anywhere else in this style.
+   */
+  :root {
+    color-scheme: light dark;
+    --color-background: #f6f6f8;
+    --color-surface: #ffffff;
+    --color-surface-alt: #f0f0f3;
+    --color-border: #e2e2e8;
+    --color-border-strong: #84848f;
+    --color-text: #16161b;
+    --color-text-muted: #5b5b68;
+    --color-primary: #8A00C4;
+    --color-on-primary: #ffffff;
+    --color-primary-soft: #f2e6fa;
+    --color-success: #1d7339;
+    --color-success-soft: #e3f3e8;
+    --color-warning: #8a5300;
+    --color-warning-soft: #fbefd9;
+    --color-danger: #bf2530;
+    --color-danger-soft: #fbe5e6;
+    --color-focus: #8A00C4;
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --radius-control: 0.5rem;
+    --radius-card: 0.75rem;
+    --radius-pill: 9999px;
+    --duration-press: 100ms;
+    --duration-hover: 120ms;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-background: #111115;
+      --color-surface: #1a1a20;
+      --color-surface-alt: #23232b;
+      --color-border: #2e2e38;
+      --color-border-strong: #787889;
+      --color-text: #f2f2f5;
+      --color-text-muted: #a6a6b4;
+      --color-primary: #c084fc;
+      --color-on-primary: #1d0b2b;
+      --color-primary-soft: #2e1f3d;
+      --color-success: #72d697;
+      --color-success-soft: #173022;
+      --color-warning: #f0b44c;
+      --color-warning-soft: #352a16;
+      --color-danger: #ff8f8f;
+      --color-danger-soft: #3a1d20;
+      --color-focus: #c084fc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 320px; padding: 16px; font: 0.9375rem/1.55 var(--font-sans); color: var(--color-text); background: var(--color-surface); -webkit-font-smoothing: antialiased; }
+  h1 { margin: 0 0 8px; font-size: 0.9375rem; font-weight: 600; line-height: 1.4; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--color-warning); flex: none; }
+  .ok .dot { background: var(--color-success); }
+  p { margin: 0 0 12px; color: var(--color-text-muted); }
+  .button {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 16px;
+    border: 0; border-radius: var(--radius-control); background: var(--color-primary); color: var(--color-on-primary);
+    font: inherit; font-weight: 500; text-decoration: none; cursor: pointer;
+    transition: background-color var(--duration-hover) ease, transform var(--duration-press) var(--ease-out);
+  }
+  .button:hover { background: color-mix(in srgb, var(--color-primary) 90%, transparent); }
+  .button:active { transform: scale(0.98); }
+  :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  #access { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--color-border); }
+  #access p { margin: 0; }
+  #access-line { color: var(--color-text); display: flex; align-items: center; gap: 8px; }
+  #access-state { font-weight: 600; color: var(--color-success); }
+  /* Off: a warning callout, the reason and the button that turns it on. */
+  #access.off { border-top: 0; padding: 12px; border-radius: var(--radius-card); background: var(--color-warning-soft); }
+  .off #access-state { color: var(--color-warning); }
+  .off #access-hint { margin: 4px 0 12px; color: var(--color-text); font-size: 0.8125rem; line-height: 1.45; }
+  @media (prefers-reduced-motion: reduce) { .button:active { transform: none; } }
   [hidden] { display: none !important; }
 </style>
 </head>

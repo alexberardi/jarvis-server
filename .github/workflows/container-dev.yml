@@ -1,0 +1,156 @@
+name: container-dev
+
+# Publishes ghcr.io/alexberardi/jarvisd:dev (multi-arch: linux amd64 and arm64) from every push
+# to main, plus its single-arch images :dev-amd64 and :dev-arm64. Pushes that only change docs
+# (docs/**, **/*.md) are skipped, and a newer push cancels an older run, so :dev stays at the
+# newest commit. The image's jarvisd version is `git describe --tags --match 'v*'` (e.g.
+# v0.1.0-rc18-5-gabc1234), so the admin shows which commit it is.
+#
+# It doesn't wait for ci.yml: ci's macOS and Windows jobs would hold :dev back, and a dev tag
+# doesn't need them. Its own health check (scripts/container-check.sh) runs on each arch's
+# native runner before anything is pushed. A pull request that touches the container machinery
+# runs the same build and checks (v0.0.0-pr<N>) and never pushes.
+#
+# The build job is modelled on release.yml's: the same Go and admin UI steps and the same
+# jarvisd build command, for the two linux targets only. The images are made and pushed by the
+# same scripts as release.yml's container jobs: container-build.sh, container-check.sh and
+# container-publish.sh.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**/*.md']
+  pull_request:
+    paths:
+      - .github/workflows/container-dev.yml
+      - scripts/container-*.sh
+      - scripts/packaging/container/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      # The full history and tags, for git describe.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - id: v
+        name: Version
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            v="v0.0.0-pr${{ github.event.pull_request.number }}"
+          else
+            v=$(git describe --tags --match 'v*' 2>/dev/null || echo "v0.0.0-dev.$(git rev-parse --short HEAD)")
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Fetch native libs (linux)
+        run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/admin/.nvmrc
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - name: Build the admin UI
+        run: |
+          npm --prefix web/admin ci
+          npm --prefix web/admin run build
+      - name: Check the admin UI is embedded (not the placeholder)
+        run: go test ./web/admin -run TestEmbeddedUI -tags release_ui -count=1 -v
+      - name: Build
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            name="jarvisd-${VERSION}-linux-${arch}"
+            mkdir -p "stage/$name"
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" -o "stage/$name/jarvisd" ./cmd/jarvisd
+            cp LICENSE "stage/$name/"
+            if [ -f NOTICE ]; then cp NOTICE "stage/$name/"; fi
+            # A tar keeps the executable bit (artifacts don't).
+            tar -C stage -czf "dist/$name.tar.gz" "$name"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-archives
+          path: dist/
+          retention-days: 1
+          if-no-files-found: error
+
+  # One image per arch, built and checked on its own native runner.
+  container:
+    name: container (${{ matrix.arch }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, arch: amd64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dev-archives
+          path: dist
+      - name: shellcheck
+        run: shellcheck scripts/container-*.sh scripts/ghcr-public-check.sh scripts/packaging/container/entrypoint.sh
+      - name: Test container-publish.sh
+        run: scripts/container-publish-test.sh
+      - name: Build and check the image
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          scripts/container-build.sh dist "$VERSION" "$ARCH" "jarvisd:release-$ARCH"
+          scripts/container-check.sh dist "$VERSION" "$ARCH"
+          docker save "jarvisd:release-$ARCH" | gzip > "jarvisd-image-$ARCH.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: container-dev-${{ matrix.arch }}
+          path: jarvisd-image-${{ matrix.arch }}.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  # Only a push to main publishes; a pull request stops after the checks.
+  push:
+    needs: container
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: container-dev-*
+          merge-multiple: true
+          path: image
+      # container-publish.sh joins the arch images with docker buildx imagetools.
+      - uses: docker/setup-buildx-action@v3
+      - name: Publish :dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          scripts/container-publish.sh image dev dev

@@ -42,7 +42,7 @@ func smartHomeDefinitions() []settings.Definition {
 		{Key: settingOAuthRelayURL, Category: "oauth", Type: settings.String, Default: "",
 			Description: "Relay URL for OAuth bounce (external providers like Google)", EnvFallback: "JARVIS_RELAY_URL"},
 		{Key: settingOAuthExternalURL, Category: "oauth", Type: settings.String, Default: "",
-			Description: "Public base URL for this service (used as OAuth redirect URI base)", EnvFallback: "JARVIS_EXTERNAL_URL"},
+			Description: "Public base URL for this service (used as OAuth redirect URI base); include /cc when jarvisd serves a single port", EnvFallback: "JARVIS_EXTERNAL_URL"},
 	}
 }
 

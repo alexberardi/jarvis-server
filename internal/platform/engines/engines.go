@@ -131,6 +131,10 @@ type Spec struct {
 	// line since the start that matches (its first group, if it has one) is added to the
 	// exit's error, e.g. the root cause of a Python traceback the last lines no longer show.
 	ErrorLine *regexp.Regexp
+	// OnHealthy, if set, runs (in its own goroutine) each time a start first passes its health
+	// check: after the first start and after every restart. The llm layer warms the engine
+	// there (decision 2026-10-20-prompt-diet).
+	OnHealthy func()
 }
 
 func (s Spec) withDefaults() Spec {
@@ -536,6 +540,9 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 				healthy = true
 				startup.Stop()
 				s.log.Info("engine healthy", "pid", p.cmd.Process.Pid)
+				if s.spec.OnHealthy != nil {
+					go s.spec.OnHealthy()
+				}
 			}
 			s.set(Healthy, "")
 		case !healthy:

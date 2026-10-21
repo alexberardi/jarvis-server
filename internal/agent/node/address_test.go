@@ -25,6 +25,7 @@ func TestNormalizeAddressTakesWhateverIsPasted(t *testing.T) {
 		"192.0.2.7:7710/settings#voice":      "http://192.0.2.7:7710",
 		"http://jarvis.local/admin/nodes":    "http://jarvis.local:7700",
 		"HTTP://Jarvis.Local:7710/":          "http://Jarvis.Local:7710",
+		"http://h:7700/cc":                   "http://h:7700", // a mounted module's URL
 	}
 	for in, want := range ok {
 		if got, err := NormalizeAddress(in); err != nil || got != want {

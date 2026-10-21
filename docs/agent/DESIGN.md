@@ -19,7 +19,7 @@ appears in the household's node list, and offers the host-agent capabilities as 
 | `desktop_list_apps` | `open` | XDG .desktop entries | .app bundles | Start Menu .lnk |
 | `desktop_get_volume` | `volume.get` | pactl / wpctl / amixer | osascript | WASAPI (COM) |
 | `desktop_set_volume` | `volume.set` | same | same | same |
-| `desktop_list_windows` | `windows.list` | EWMH `_NET_CLIENT_LIST` (X11 only; wmctrl fallback) | System Events (AX grant) | EnumWindows |
+| `desktop_list_windows` | `windows.list` | EWMH `_NET_CLIENT_LIST` (X11 only; wmctrl fallback) | Accessibility API (AXWindows per regular app, 250 ms per app) | EnumWindows |
 | `desktop_minimize_window` | `windows.minimize` | ICCCM `WM_CHANGE_STATE` (xdotool fallback) | AXMinimized | ShowWindow |
 | `desktop_focus_window` | `windows.focus` | EWMH `_NET_ACTIVE_WINDOW` (wmctrl -a fallback) | AXRaise | SetForegroundWindow |
 | `desktop_close_window` | `windows.close` | EWMH `_NET_CLOSE_WINDOW` (wmctrl -c fallback) | AXCloseButton | WM_CLOSE |
@@ -65,9 +65,12 @@ to exactly one. A tool is offered only while its capability is available, comput
   processes" succeeds without assistive access and made the Python agent advertise window
   control that then failed. Verified on the MBP (macOS 26.1): absent over SSH *and* from a GUI
   LaunchAgent until granted.
-- **macOS window ids are `pid/index` and validated before reaching AppleScript.** The Python
+- **macOS window ids are `pid/index` and validated before any Accessibility call.** The Python
   agent spliced ids into AppleScript verbatim (an injection path), and used `id of w`, which
-  System Events windows don't reliably have.
+  System Events windows don't reliably have. Windows go through the Accessibility API, not
+  System Events (#359): System Events waited out each unresponsive app's AX timeout, so one such
+  app made every window operation take ~10 s. Each app element gets a 250 ms messaging timeout,
+  apps are queried at once, and one that hasn't answered within 300 ms is left out (logged once).
 - **macOS close clicks the AXCloseButton**, not `button 1` (which isn't always close).
 - **Linux:** wpctl is supported (PipeWire without pactl). X11 window control is built in
   (EWMH over a pure-Go X11 connection, `internal/agent/x11`, 2026-10-13) whenever an EWMH window
@@ -1044,8 +1047,11 @@ nothing to do. Started by a login item it waits for setup instead (below).
   `node.json`) keeps later logins quiet. The menu entry, the app and `jarvis-agent://start` still
   open the page.
 - **Then the agent.** The waiting `run` checks every second for the credentials the page saves,
-  and once they're there it becomes the agent in place (`exec` of the same binary and arguments,
-  so the PID and its supervisor stay; Windows spawns a new `run`). The page's own start finds
+  and once they're there it becomes the agent: on Linux in place (`exec` of the same binary and
+  arguments, so the PID and its supervisor stay); on macOS it asks launchd for a fresh process
+  (`launchctl kickstart -k gui/<uid>/net.jarvisautomation.agent`, or a detached `run` outside
+  launchd), because an AppKit process that execs itself shows no menu-bar icon (#407); Windows
+  spawns a new `run`. The page's own start finds
   the unit already active, and waits for that agent's control socket. Quit in the waiting menu
   exits 0, which no supervisor restarts. Code: `cmd/jarvis-agent/setupwait.go`. The island
 now runs whenever `--no-overlay` isn't given, voice or not, so the pill can show; voice states

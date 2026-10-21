@@ -103,7 +103,7 @@ func TestVoiceStreamTraceSpans(t *testing.T) {
 	}
 
 	names, by = ve.traceSpans(ve.traceIDs("voice_command_stream", 1)[0])
-	want := "auth_complete,process_voice_command_with_tools,cache_lookups,speaker_resolve,tool_execution_loop," +
+	want := "auth_complete,process_voice_command_with_tools,cache_lookups,speaker_resolve,agent_context,tool_execution_loop," +
 		"llm_call_iter_1,audio_stream,tts_first_chunk,tts_stream_total,first_audio_byte"
 	if got := strings.Join(names, ","); got != want {
 		t.Fatalf("stream spans\n got %s\nwant %s", got, want)
@@ -172,7 +172,7 @@ func TestVoiceBlockingTraceServerTool(t *testing.T) {
 	}
 
 	names, by = ve.traceSpans(ve.traceIDs("voice_command", 1)[0])
-	want := "auth_complete,cache_get_tools,process_voice_command_with_tools,cache_lookups,speaker_resolve," +
+	want := "auth_complete,cache_get_tools,process_voice_command_with_tools,cache_lookups,speaker_resolve,agent_context," +
 		"tool_execution_loop,llm_call_iter_1,tool_exec_iter_1,server_tool_identify_speaker,llm_call_iter_2,build_response"
 	if got := strings.Join(names, ","); got != want {
 		t.Fatalf("blocking spans\n got %s\nwant %s", got, want)

@@ -25,6 +25,8 @@ var serviceShape = Obj{
 	"external_port": NullOr(Int),
 	"created_at":    TimestampNaive,
 	"updated_at":    TimestampNaive,
+	// jarvisd only: a mounted listener's prefix on the config port in single-port mode.
+	"path": Optional(NullOr(String)),
 }
 
 // TestConfigInfo: the mobile app's LAN probe (configDiscoveryService.ts probeHost) accepts a

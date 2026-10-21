@@ -30,7 +30,7 @@ var subjects = []subject{
 		func() (Backend, recorder) { s, x := linuxEWMH(); return &Linux{Sys: s, X: x}, s },
 		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }},
 	{"darwin", "darwin", macWinID,
-		func() (Backend, recorder) { s := macFull(); return NewDarwin(s), s },
+		func() (Backend, recorder) { d, s, _ := macDesktop(); return d, s },
 		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }},
 	{"windows", "windows", winWinID,
 		func() (Backend, recorder) { w := winFull(); return NewWindows(w), w },
@@ -214,7 +214,7 @@ func TestCloseIsGraceful(t *testing.T) {
 			}
 		}
 		graceful := map[string]string{"linux": "wmctrl -i -c " + s.winID, "linux-ewmh": "x11 close 0x03a00007",
-			"darwin": "AXCloseButton", "windows": "postclose 1311"}[s.name]
+			"darwin": "ax close 4242/1", "windows": "postclose 1311"}[s.name]
 		if !strings.Contains(rec.allCommands(), graceful) {
 			t.Fatalf("close did not issue %q:\n%s", graceful, rec.allCommands())
 		}

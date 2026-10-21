@@ -228,17 +228,29 @@ kill_emulator() {
 }
 
 # --- the app on the emulator, logged in to a sandbox -------------------------------------------
+# url_port is the port of a URL like http://127.0.0.1:17700/cc (host:port before any path).
+url_port() {
+  local hp=${1#*://}
+  hp=${hp%%/*}
+  echo "${hp##*:}"
+}
+
 # reverse_pairs prints the tunnels from the emulator to the sourced sandbox.env, one LOCAL=REMOTE
-# per line: every sandbox listener at the same port inside the emulator (config-service hands out
-# absolute 127.0.0.1:<port> URLs), plus the baked localhost:7700 → the sandbox's config port.
+# per line: every sandbox listener's port, once, at the same port inside the emulator
+# (config-service hands out absolute 127.0.0.1:<port> URLs; a --single-port sandbox's are all on
+# the config port), plus the baked localhost:7700 → the sandbox's config port. MQTT's 9883 is
+# reversed either way: a tunnel to a closed port is harmless.
 reverse_pairs() {
   local v p
+  local -A seen=()
   for v in SBX_CONFIG SBX_AUTH SBX_LOGS SBX_CC SBX_LLM SBX_WHISPER SBX_TTS SBX_NOTIFICATIONS SBX_RECIPES SBX_OCR SBX_ADMIN; do
-    p=${!v##*:}
+    p=$(url_port "${!v}")
+    [ -n "${seen[$p]:-}" ] && continue
+    seen[$p]=1
     echo "tcp:$p=tcp:$p"
   done
   for p in 1884 9883; do echo "tcp:$((p + JARVIS_PORT_OFFSET))=tcp:$((p + JARVIS_PORT_OFFSET))"; done
-  echo "tcp:${BAKED_CONFIG##*:}=tcp:${SBX_CONFIG##*:}"
+  echo "tcp:$(url_port "$BAKED_CONFIG")=tcp:$(url_port "$SBX_CONFIG")"
 }
 
 # reverse_args sets REVERSE_ARGS: the tunnels and the port to probe, as e2emobile's --reverse and

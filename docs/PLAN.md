@@ -73,18 +73,20 @@ Python libraries:
 
 ## 3. Architecture
 
-### 3.1 One process, legacy ports
+### 3.1 One process, one API port; legacy ports behind `server.legacy_ports`
 
 `jarvisd` runs one in-process **module** per former service.
 
-For compatibility it **listens on every legacy port**: 7700, 7701, 7702, 7703, 7704, 7706, 7707, 7712, 7030 and 7031. Each listener mounts only that module's routes. The services' paths collide if merged onto one port:
+Each module keeps its own listener and mux: the services' paths collide if merged onto one mux:
 
 - `/health`, `/ping`, `/info`
 - `/settings/*`
 - `/api/v0/me/data`, served by both command-center and notifications
 - `/api/v0/admin/*`
 
-Multi-listen gives zero client changes. `/services` returns the same host for every name, on different ports. A unified single port is a later, optional step.
+**One API port.** The config port (7700) also serves every other module under its own prefix (`/auth`, `/logs`, `/cc`, `/llm`, `/stt`, `/tts`, `/notifications`, `/recipes`, `/ocr`), prefix stripped, so no route moves. A fresh install listens only on 7700, the admin's 7710 and MQTT's 1884, and `/services` hands out path URLs (`http://host:7700/cc`).
+
+**Legacy ports behind `server.legacy_ports`.** With the setting on (or `JARVIS_LEGACY_PORTS=1`), jarvisd also listens on every legacy port (7701, 7702, 7703, 7704, 7706, 7707, 7712, 7030, 7031) and the MQTT WebSocket 9883, and `/services` answers the old per-port URLs. An upgraded install starts with it on, a fresh one with it off ([decision](decisions/2026-10-20-single-api-port.md)).
 
 Inside the process:
 
@@ -153,7 +155,7 @@ Platforms: linux/amd64, linux/arm64, darwin/arm64 and **windows/amd64**, all nat
   - one code path everywhere
 - **One-time cost:** mirror the sherpa C-API config structs in Go, exactly matching their layout. This is guarded by a test that round-trips every config struct, and it is **Phase 0 task #1**.
 - **Fallback if purego proves fragile on a platform:** static cgo on linux/darwin (already proven: a 41 MB binary) and DLLs-beside-exe on Windows.
-- **Release outputs** (as built): one archive per target, `jarvisd-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows), plus `SHA256SUMS`, its minisign signature, and the install scripts `install.sh` (systemd/launchd) and `install.ps1` (a Windows service). No container image is published.
+- **Release outputs** (as built): one archive per target, `jarvisd-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows), plus `SHA256SUMS`, its minisign signature, and the install scripts `install.sh` (systemd/launchd) and `install.ps1` (a Windows service). The container image `ghcr.io/alexberardi/jarvisd:<version>` is built for linux/amd64 and linux/arm64 and published with each release (`:<version>` and `:latest`); every push to main publishes `:dev` (docs/install/container.md). After publishing, `release.yml` sends a `repository_dispatch` (event type `jarvisd-release`, payload `{tag}`) to `alexberardi/jarvis-installer` so the landing page rebuilds with the new tag (secret `INSTALLER_DISPATCH_TOKEN`, a fine-grained PAT for that repo with Contents: read and write; the step warns and skips when the secret is unset or the dispatch fails).
 - **Windows notes:**
   - extracted DLLs may need code-signing to avoid antivirus friction; plan an Authenticode step in Phase 6
   - GPU engines (`llama-server`, whisper) have official Windows CUDA and Vulkan builds

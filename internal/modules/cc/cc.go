@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -177,7 +178,9 @@ type Module struct {
 	// lastInputs is each node's latest warmup prompt inputs (household_prompt.go).
 	lastInputs lastInputs
 
-	convs   *convCache
+	convs *convCache
+	// warms shares identical warm-ups and remembers recent ones for re-warming (warm_flight.go).
+	warms   warmFlight
 	signals *convSignals
 	// wakeSem and voiceSem bound the wake verifications and follow-up voice checks running
 	// beside node transcriptions (whisper and the speaker model are shared): one more is
@@ -271,6 +274,11 @@ const (
 
 func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.deps = deps
+	// Recent warm-ups survive a restart, so the live engine is warm before the first wake.
+	if deps.Config.Home != "" {
+		m.warms.path = filepath.Join(deps.Config.Home, "cc", "recent-warmups.json")
+		m.warms.load()
+	}
 	if m.now == nil {
 		m.now = time.Now
 	}

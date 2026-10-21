@@ -56,10 +56,12 @@ func memoryDefinitions() []settings.Definition {
 			Description: "Maximum number of recall results returned"},
 		{Key: settingTranscriptTTLDays, Category: "memory", Type: settings.Int, Default: int64(7),
 			Description: "Days to retain conversation transcripts before cleanup"},
-		{Key: settingAdvancedContext, Category: "model", Type: settings.Bool, Default: false,
-			Description: "Enable proactive context injection — the background agents' weather, calendar, news, and " +
-				"reminder memories are injected into the prompt so the assistant can answer 'how's today looking?' " +
-				"proactively. Agent memories are always stored (D40 04.Q10); this gates only the per-turn injection."},
+		{Key: settingAdvancedContext, Category: "model", Type: settings.Bool, Default: true,
+			Description: "Enable proactive context injection, on by default (#408) — the background agents' weather, " +
+				"calendar, news, and reminder memories (and custom agents' get_context_data() facts, injected by the " +
+				"node) are retrieved per turn by relevance and injected into the prompt so the assistant can answer " +
+				"'how's today looking?' proactively. Agent memories are always stored (D40 04.Q10); this gates only the " +
+				"per-turn injection. A household that explicitly stored false keeps it."},
 		{Key: settingAgentContextEnabled, Category: "memory", Type: settings.Bool, Default: true,
 			Description: "Enable agent-injected context retrieval during voice commands"},
 		{Key: settingAgentContextMaxResults, Category: "memory", Type: settings.Int, Default: int64(5),
