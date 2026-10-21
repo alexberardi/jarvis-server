@@ -1,0 +1,45 @@
+# jarvisd in server mode only, on a Docker bridge network with published ports. Use this when macvlan is not possible (Docker Desktop,
+# a host with no spare LAN address). mDNS discovery does not cross a bridge, so nodes and phones need the config URL entered by hand.
+# Run it with: docker compose -f docker-compose.bridge.yml up -d --build. Settings are in .env. See README.md.
+name: jarvisd
+
+services:
+  jarvisd:
+    build:
+      context: ../build
+      # Multi-arch: build for both with `docker buildx` (see README.md). A plain `docker compose build` builds for this machine.
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      args:
+        JARVISD_VERSION: ${JARVISD_VERSION:?set JARVISD_VERSION in .env}
+        JARVISD_SHA256_AMD64: ${JARVISD_SHA256_AMD64:?set JARVISD_SHA256_AMD64 in .env}
+        JARVISD_SHA256_ARM64: ${JARVISD_SHA256_ARM64:?set JARVISD_SHA256_ARM64 in .env}
+    image: jarvisd:${JARVISD_VERSION}
+    container_name: jarvisd
+    restart: unless-stopped
+    environment:
+      JARVIS_HOME: /data
+      JARVIS_NO_BROWSER: "1"
+      TZ: ${TZ:-UTC}
+    ports:
+      - "${JARVIS_API_PORT:-7700}:7700"
+      - "${JARVIS_ADMIN_PORT:-7710}:7710"
+      - "${JARVIS_MQTT_PORT:-1884}:1884"
+    volumes:
+      - ${JARVIS_DATA:-./data}:/data
+    # NVIDIA GPU for the speech-to-text engine (and any local language model). Needs the NVIDIA Container Toolkit on the host.
+    # No GPU? Delete this deploy block and pick a CPU engine in the setup wizard; see "GPU or CPU" in README.md.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7700/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
