@@ -73,14 +73,11 @@ const (
 const maxOffset = 366
 
 var spec = node.Spec{
-	Name: ToolName,
-	Description: "Current time, date, day of the week, month or year, locally or in a city/state/country; " +
-		"also tomorrow's/yesterday's day and date, whether it's the weekend, and how many days until a date. " +
-		"Use for 'what time is it?', 'what day is it?', 'what's the date tomorrow?', 'is it the weekend?', " +
-		"'how many days until Christmas?', 'what time is it in Tokyo?'. Not for weather — use get_weather.",
+	Name:        ToolName,
+	Description: "Time and date somewhere else ('what time is it in Tokyo'). Local time and date are in the calendar above.",
 	Params: []node.Param{
 		{Name: "location", Type: "string",
-			Description: "Omit for local time. Otherwise an IANA time zone (e.g. 'Asia/Tokyo', 'Europe/London') or a city/country name."},
+			Description: "City, country or IANA time zone"},
 		{Name: "query", Type: "string", Enum: []string{QueryTime, QueryDate, QueryWeekday, QueryYear, QueryMonth, QueryWeekend},
 			Description: "What is asked: time (default), date, weekday, year, month or weekend."},
 		{Name: "days_offset", Type: "int",

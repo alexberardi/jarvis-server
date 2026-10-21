@@ -206,7 +206,7 @@ func joinLast(xs []string, last string) string {
 }
 
 func computerProp() *pyjson.Object {
-	return strProp("Which computer, by its name, only when the user named one (e.g. 'the MacBook'); leave it empty for the computer they're at or their only one")
+	return strProp("Only if the user named one")
 }
 
 // setComputerControl turns target's switch on or off through its agent and says what it did.
@@ -235,9 +235,7 @@ func (*enableComputerControlTool) Name() string { return toolEnableComputerContr
 
 func (*enableComputerControlTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolEnableComputerControl,
-		"ONLY when the user says the words 'computer control' ('enable computer control', 'turn on computer control'): "+
-			"turns on the 'Computer control' switch that lets Jarvis use their computer's mouse, keyboard and browser. "+
-			"Never for 'turn on the computer' (powering a computer on, which Jarvis can't do), dark mode or any other setting.",
+		"Turn computer control on, only when the user says 'computer control'.",
 		servertools.Obj("computer", computerProp()))
 }
 
@@ -263,8 +261,7 @@ func (*disableComputerControlTool) Name() string { return toolDisableComputerCon
 
 func (*disableComputerControlTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolDisableComputerControl,
-		"Turn off computer control on a computer: Jarvis stops using it, and a task running there stops. Use when "+
-			"the user says 'disable computer control', 'turn off computer control'. Works from any device.",
+		"Turn computer control off.",
 		servertools.Obj("computer", computerProp()))
 }
 
@@ -300,7 +297,7 @@ func (*computerControlStatusTool) Name() string { return toolComputerControlStat
 
 func (*computerControlStatusTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolComputerControlStatus,
-		"Say whether computer control is on: 'is computer control on?', 'can you use my computer?'.",
+		"Whether computer control is on.",
 		servertools.Obj("computer", computerProp()))
 }
 

@@ -59,16 +59,14 @@ func PersonalityBlock(persona string) string {
 	return "<personality>\n" + PersonaFrame + "\n" + persona + "\n</personality>"
 }
 
-// dtKeysLine is the Qwen DT_KEYS section (identical in the three Qwen providers).
+// dtKeysLine is the DT_KEYS date vocabulary and the one rule for it (decision
+// 2026-10-20-prompt-diet: the rule was four sentences).
 func dtKeysLine(keys []string) string {
 	if len(keys) == 0 {
 		return ""
 	}
 	return "\nDT_KEYS: " + strings.Join(keys, "|") + "\n" +
-		"CRITICAL — resolved_datetimes: You MUST use the symbolic key strings from DT_KEYS " +
-		"(e.g., \"today\", \"tomorrow\", \"this_weekend\", \"last_weekend\"). " +
-		"NEVER resolve dates to ISO timestamps like \"2026-03-07T05:00:00Z\" — the server handles resolution. " +
-		"If the user omits a date, pass [\"today\"].\n"
+		"resolved_datetimes takes these keys as is (e.g. \"tomorrow\"), never ISO dates; with no date, [\"today\"].\n"
 }
 
 // toolGuidanceSection is context_builders.build_tool_guidance_section: each tool's stripped
@@ -94,34 +92,34 @@ func toolGuidanceSection(tools []Tool) string {
 	return "\nTool Guidance:\n" + strings.Join(hints, "\n") + "\n"
 }
 
-// directAnswerSection is context_builders.build_direct_answer_section.
-func directAnswerSection(flags []CommandFlag) string {
-	var must, direct []string
+// directAnswerSection keeps replies brief and names the commands that must always call their
+// tool: the node commands without allow_direct_answer, and the offered tools marked must_call
+// (decision 2026-10-20-prompt-diet: without the list, models answered maths and reminders
+// themselves; the allowed-direct list and the padding rules went).
+func directAnswerSection(flags []CommandFlag, tools []Tool) string {
+	var must []string
 	for _, f := range flags {
-		if f.CommandName == "" {
-			continue
-		}
-		if f.AllowDirectAnswer {
-			direct = append(direct, f.CommandName)
-		} else {
+		if f.CommandName != "" && !f.AllowDirectAnswer {
 			must = append(must, f.CommandName)
 		}
 	}
-	if len(must) == 0 && len(direct) == 0 {
+	for _, t := range tools {
+		if !truthy(get(t, "must_call")) {
+			continue
+		}
+		if fn, ok := get(t, "function").(*pyjson.Object); ok {
+			if name := pyStr(get(fn, "name")); name != "" {
+				must = append(must, name)
+			}
+		}
+	}
+	if len(flags) == 0 && len(must) == 0 {
 		return ""
 	}
-	s := "\nDirect Answer Policy:\n"
+	s := "\nYour reply is read aloud: one short sentence, just what was asked.\n"
 	if len(must) > 0 {
-		s += "- MUST call tools for: " + strings.Join(sortedSet(must), ", ") + "\n"
+		s += "Always call the tool, never answer yourself, for: " + strings.Join(sortedSet(must), ", ") + ".\n"
 	}
-	if len(direct) > 0 {
-		s += "- Direct answers allowed for: " + strings.Join(sortedSet(direct), ", ") + "\n"
-	}
-	s += "- BE BRIEF. Your reply is read aloud. Answer in ONE short sentence and STOP. " +
-		"Give exactly what was asked — do NOT add tips, extra facts, safety advice, or " +
-		"\"let me know if…\" offers unless the user explicitly asks for more. Warm tone " +
-		"is fine; padding is not. E.g. \"what's the weather?\" -> \"72 and cloudy.\" — " +
-		"not a paragraph.\n"
 	return s
 }
 

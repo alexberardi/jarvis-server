@@ -256,6 +256,19 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			msgs = append(msgs, sysMsg(stopRecordingRetry))
 			continue
 		}
+		// A native not_for_me call is the sentinel (decision 2026-10-20-prompt-diet): alone it ends
+		// the turn silently, with the plain sentinel kept in the history (no call without a
+		// result); next to real calls it is dropped and they run.
+		if native {
+			rest, only := splitNotForMe(calls)
+			if only {
+				raw, message, calls, finish = parse.NotForMeLiteral, parse.NotForMeLiteral, nil, parse.FinishStop
+				msgs[len(msgs)-1] = chatMsg{Role: "assistant", Content: raw}
+			} else if len(rest) != len(calls) {
+				calls = rest
+				msgs[len(msgs)-1].ToolCalls = rest
+			}
+		}
 		// h. The sentinel outranks every guard.
 		if parse.SentinelNotForMe(raw, message) {
 			if havePopped {

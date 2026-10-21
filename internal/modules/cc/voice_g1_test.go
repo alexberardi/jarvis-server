@@ -111,8 +111,12 @@ func TestG1ThroughWarmup(t *testing.T) {
 			warm := ve.eng.requests()[0]
 			gotTools := warm["tools"].([]any)
 			wantTools := og2(fx, "native_tools").([]any)
-			if len(gotTools) != len(wantTools) {
-				t.Fatalf("warmup tools %d, want %d", len(gotTools), len(wantTools))
+			// Plus the native not_for_me tool, last (decision 2026-10-20-prompt-diet).
+			if len(gotTools) != len(wantTools)+1 {
+				t.Fatalf("warmup tools %d, want %d + not_for_me", len(gotTools), len(wantTools))
+			}
+			if toolByName(gotTools[len(gotTools)-1:], notForMeTool) == nil {
+				t.Fatalf("last warmup tool isn't not_for_me: %s", jsonOf(gotTools[len(gotTools)-1]))
 			}
 			conv := ve.m.convs.get("g1")
 			for i, nt := range prompts.NativeTools(conv.tools) {

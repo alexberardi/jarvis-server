@@ -19,6 +19,7 @@ var jarvisExtensionKeys = map[string]bool{
 	"command_name":        true,
 	"keywords":            true,
 	"examples":            true,
+	"must_call":           true,
 	"_refinable":          true,
 }
 

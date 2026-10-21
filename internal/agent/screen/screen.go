@@ -129,18 +129,12 @@ type Tools struct {
 
 func spec() node.Spec {
 	return node.Spec{Name: ToolRead,
-		Description: "Look at the user's computer screen: takes a screenshot of a window (or the whole screen) and shows it " +
-			"to you with this result. Call it whenever the user refers to something on their screen and you need to see it: " +
-			"\"what does this error say\", \"summarise this window\", \"read the firefox window\", \"what's in my terminal\", " +
-			"\"what's on my screen\". When the user names an app or window (\"the firefox window\", \"the terminal\", \"slack\"), " +
-			"put that name in window: it may not be the focused one. Without a name you get the focused window. Answer from " +
-			"what you see; quote short text exactly. If it fails, tell the user what the error says. Only when asked: never " +
-			"call it unprompted. The screenshot is not kept after this turn.",
+		Description: "Screenshot and read a window ('what does this error say', 'read the firefox window') or the whole screen ('what's on my screen').",
 		Params: []node.Param{
 			{Name: "scope", Type: "string", Enum: []string{ScopeWindow, ScopeScreen},
-				Description: "window (default): one window. screen: the whole screen, only when the user says screen or names no window and one window isn't enough"},
+				Description: "window (default); screen only when they say screen"},
 			{Name: "window", Type: "string",
-				Description: "the app or window the user named, in their words: \"firefox\", \"terminal\", \"slack\", or words from its title. Leave it out when they mean whatever is in front (\"this error\", \"this window\")"},
+				Description: "The app or window the user named, if any"},
 		},
 		Keywords: []string{"screen", "screenshot", "window", "error", "read", "see", "look", "summarise", "computer"},
 		Examples: []node.Example{

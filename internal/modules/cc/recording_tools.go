@@ -89,11 +89,8 @@ func (*startRecordingTool) Name() string { return toolStartRecording }
 
 func (*startRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStartRecording,
-		"Call this (never just reply) when the user says 'record this macro', 'record a macro called ...', 'watch me', "+
-			"'watch me do this', 'learn how I do this', 'let me show you how to ...': it starts recording a macro, watching what "+
-			"they do in the browser on their computer so Jarvis can learn to do it. Saying you're watching without it records "+
-			"nothing. Not for reminders, notes or audio. Stop with stop_recording when they say they're done.",
-		servertools.Obj("task", strProp("The macro's name or what the user is about to show, in their words (e.g. 'pay the water bill' from 'record a macro called pay the water bill'); empty when they only said 'record this macro', 'watch me (do this)' or 'learn how I do this'"),
+		"Start recording a macro ('record a macro called X', 'watch me do this'). Call it; don't just reply. Stop with stop_recording.",
+		servertools.Obj("task", strProp("The macro's name, if given"),
 			"computer", computerProp()))
 }
 
@@ -129,10 +126,8 @@ func (*stopRecordingTool) Name() string { return toolStopRecording }
 
 func (*stopRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStopRecording,
-		"Stop recording the macro (after start_recording) and keep what the user showed, to learn from it. "+
-			"Use when the user says 'I'm done', 'that's it', 'stop recording', 'stop watching'. If it answers need_name, "+
-			"ask what to call the macro and call it again with the name.",
-		servertools.Obj("name", strProp("The macro's name, when the user gave one (e.g. 'pay the water bill')"),
+		"Stop recording the macro ('I'm done', 'stop recording'). If it asks for a name, call it again with the user's answer.",
+		servertools.Obj("name", strProp("The macro's name, if given"),
 			"computer", computerProp()))
 }
 
