@@ -414,13 +414,32 @@ func openStreamAt(t *testing.T, ctx context.Context, r *Runner, listener, path s
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
 	<-ready
-	resp, err := http.Get("http://" + r.Addr(listener) + path)
+	// A stream that never flushes sends no headers and no event: cancel the request after
+	// 10s so that fails here instead of at go test's timeout.
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	t.Cleanup(cancelReq)
+	timer := time.AfterFunc(10*time.Second, cancelReq)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "http://"+r.Addr(listener)+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
 	t.Cleanup(func() { resp.Body.Close() })
-	if _, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: status %d, want 200", path, resp.StatusCode)
+	}
+	line, err := bufio.NewReader(resp.Body).ReadString('\n')
+	if !timer.Stop() {
+		t.Fatalf("GET %s: no event within 10s (not flushed?)", path)
+	}
+	if err != nil {
 		t.Fatal(err)
+	}
+	if line != "data: hi\n" {
+		t.Fatalf("GET %s: first line %q, want %q", path, line, "data: hi\n")
 	}
 	return done
 }
