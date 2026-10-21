@@ -127,7 +127,7 @@ def corpus_cases(path):
         entries = yaml.safe_load(open(path))
     out = []
     for i, e in enumerate(entries):
-        c = {"id": f"corpus:{i:03d}:{e['utterance']}", "node": "voice", "say": e["utterance"],
+        c = {"id": f"corpus:{i:03d}:{e['utterance']}", "node": e.get("node", "voice"), "say": e["utterance"],
              "matchers": e.get("args") or {}}
         if e.get("any_tool"):
             if None in e["any_tool"]:
