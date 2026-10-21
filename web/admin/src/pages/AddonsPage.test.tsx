@@ -208,4 +208,14 @@ describe('AddonsPage', () => {
     const list = await screen.findByRole('list', { name: 'Your devices' })
     await waitFor(() => expect(within(list).getAllByRole('button', { name: 'Sign out' })).toHaveLength(2))
   })
+
+  it("says when your devices couldn't load, and loads them again on Try again", async () => {
+    api.getNodeLiveness.mockRejectedValueOnce(new Error('connection refused'))
+    renderPage()
+    const section = (await screen.findByRole('heading', { name: 'Your devices' })).closest('section')!
+    expect(await within(section).findByRole('alert')).toHaveTextContent("Couldn't load your devices")
+    fireEvent.click(within(section).getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('list', { name: 'Your devices' })).toBeInTheDocument()
+  })
 })
+

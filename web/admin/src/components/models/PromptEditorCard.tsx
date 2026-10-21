@@ -19,8 +19,10 @@ import {
 } from '@/hooks/usePrompt'
 import { errorMessage } from '@/lib/errors'
 import { promptTheme, promptVariables } from './promptEditor'
-import { buttonClass, inputClass } from './styles'
-import { Pill, Section } from './ui'
+import { Badge, Banner, Button, ErrorState, Skeleton } from '@/components/ui'
+import { fieldControl } from '@/components/ui/fieldStyles'
+import { cn } from '@/lib/utils'
+import ModelCard from './ModelCard'
 
 const SOURCE_TEXT: Record<HouseholdPrompt['source'], string> = {
   builtin: 'built-in',
@@ -116,14 +118,14 @@ function ModeSelect({
   const fromModel = mode.source === 'prompt' ? mode.detected || fallback : mode.effective
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor={`prompt-${id}`} className="w-32 text-sm text-[var(--color-text-muted)]">
+      <label htmlFor={`prompt-${id}`} className="w-32 text-small font-medium text-text">
         {label}
       </label>
       <select
         id={`prompt-${id}`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`${inputClass} w-auto max-w-xs`}
+        className={cn(fieldControl, 'w-auto max-w-full sm:max-w-xs')}
       >
         <option value="">from the model ({fromModel})</option>
         {options.map((o) => (
@@ -132,10 +134,10 @@ function ModeSelect({
           </option>
         ))}
       </select>
-      <code className="text-sm text-[var(--color-text)]">{mode.effective}</code>
-      <Pill tone={mode.source === 'setting' || mode.source === 'prompt' ? 'info' : 'muted'}>{MODE_SOURCE_TEXT[mode.source]}</Pill>
+      <code className="font-mono text-small text-text">{mode.effective}</code>
+      <Badge tone={mode.source === 'setting' || mode.source === 'prompt' ? 'primary' : 'neutral'}>{MODE_SOURCE_TEXT[mode.source]}</Badge>
       {mode.source === 'setting' && value !== '' && (
-        <span className="text-xs text-[var(--color-text-muted)]">the superuser's value wins over this prompt's</span>
+        <span className="text-small text-text-muted">the superuser's value wins over this prompt's</span>
       )}
     </div>
   )
@@ -148,7 +150,7 @@ function ModeSelect({
  */
 export default function PromptEditorCard() {
   const { activeHouseholdId } = useAuth()
-  const { data, isLoading, isError, error } = useHouseholdPrompt()
+  const { data, isLoading, isError, error, refetch } = useHouseholdPrompt()
   const save = useSavePrompt()
   const reset = useResetPrompt()
   const setBase = useSetPromptBase()
@@ -223,31 +225,42 @@ export default function PromptEditorCard() {
   }
 
   return (
-    <Section
+    <ModelCard
       title="Voice prompt"
       icon={FileText}
       description="The system prompt this household's voice turns use. Type {{ for the variables."
     >
-      {isLoading && <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">{errorMessage(error, 'Could not read the prompt')}</p>}
+      {isLoading && (
+        <div role="status" aria-label="Loading the prompt" className="space-y-2">
+          <Skeleton className="w-1/4" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      )}
+      {isError && (
+        <ErrorState
+          className="py-6"
+          title="Couldn't read the prompt"
+          message={errorMessage(error, 'The server did not answer.')}
+          onRetry={() => refetch()}
+        />
+      )}
       {data && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <code className="text-sm text-[var(--color-text)]">{data.name || '(none)'}</code>
-            <Pill tone={data.source === 'default' ? 'muted' : 'info'}>{SOURCE_TEXT[data.source]}</Pill>
-            {data.edited && <Pill tone="warn">edited</Pill>}
+            <code className="font-mono text-body text-text">{data.name || '(none)'}</code>
+            <Badge tone={data.source === 'default' ? 'neutral' : 'primary'}>{SOURCE_TEXT[data.source]}</Badge>
+            {data.edited && <Badge tone="warning">edited</Badge>}
           </div>
 
           {data.fallback && (
-            <p role="alert" className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <Banner role="alert" tone="warning" icon={<AlertTriangle size={16} />}>
               {data.fallback}
-            </p>
+            </Banner>
           )}
 
           <CodeEditor value={draft} onChange={edit} variables={data.variables} />
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <ModeSelect
               id="tool_calling"
               label="Tool calling"
@@ -269,23 +282,23 @@ export default function PromptEditorCard() {
           </div>
 
           {save.error && (
-            <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">
+            <Banner role="alert" tone="danger" icon={<AlertTriangle size={16} />}>
               {errorMessage(save.error, 'Could not save the prompt')}
-            </p>
+            </Banner>
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={buttonClass.primary} disabled={!changed || busy} onClick={onSave}>
+            <Button variant="primary" disabled={!changed || busy} onClick={onSave}>
               Save
-            </button>
+            </Button>
             {data.edited && (
-              <button type="button" className={buttonClass.secondary} disabled={busy} onClick={onReset}>
+              <Button disabled={busy} onClick={onReset}>
                 Reset to original
-              </button>
+              </Button>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-3">
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
             <label htmlFor="prompt-builtin" className="sr-only">
               Built-in prompt
             </label>
@@ -293,7 +306,7 @@ export default function PromptEditorCard() {
               id="prompt-builtin"
               value={builtin}
               onChange={(e) => setBuiltin(e.target.value)}
-              className={`${inputClass} w-auto max-w-xs`}
+              className={cn(fieldControl, 'w-auto max-w-full sm:max-w-xs')}
             >
               <option value="" disabled>
                 Built-in prompt…
@@ -304,12 +317,12 @@ export default function PromptEditorCard() {
                 </option>
               ))}
             </select>
-            <button type="button" className={buttonClass.secondary} disabled={!builtin || busy} onClick={onUseBuiltin}>
+            <Button disabled={!builtin || busy} onClick={onUseBuiltin}>
               Use
-            </button>
-            <button type="button" className={buttonClass.secondary} disabled={busy} onClick={() => fileInput.current?.click()}>
+            </Button>
+            <Button disabled={busy} onClick={() => fileInput.current?.click()}>
               Import file
-            </button>
+            </Button>
             <input
               ref={fileInput}
               type="file"
@@ -320,16 +333,16 @@ export default function PromptEditorCard() {
             />
           </div>
 
-          <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+          <div className="space-y-3 border-t border-border pt-4">
             <div className="flex flex-wrap items-center gap-2">
-              <label htmlFor="prompt-preview-node" className="text-sm text-[var(--color-text-muted)]">
+              <label htmlFor="prompt-preview-node" className="text-small font-medium text-text">
                 Preview node
               </label>
               <select
                 id="prompt-preview-node"
                 value={previewNode}
                 onChange={(e) => setNodeId(e.target.value)}
-                className={`${inputClass} w-auto max-w-xs`}
+                className={cn(fieldControl, 'w-auto max-w-full sm:max-w-xs')}
                 disabled={nodeList.length === 0}
               >
                 {nodeList.length === 0 && <option value="">No nodes</option>}
@@ -339,40 +352,39 @@ export default function PromptEditorCard() {
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                className={buttonClass.secondary}
-                disabled={!previewNode || preview.isPending}
+              <Button
+                disabled={!previewNode}
+                loading={preview.isPending}
                 onClick={() => preview.mutate({ text: draft, nodeId: previewNode })}
               >
                 Preview
-              </button>
+              </Button>
             </div>
             {preview.error && (
-              <p role="alert" className="text-xs text-red-500">
+              <p role="alert" className="text-small text-danger">
                 {errorMessage(preview.error, 'Could not preview the prompt')}
               </p>
             )}
             {preview.data && (
               <div className="space-y-2">
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-small text-text-muted">
                   <span>
-                    Tool calling: <code className="text-[var(--color-text)]">{preview.data.tool_calling}</code>
+                    Tool calling: <code className="font-mono text-text">{preview.data.tool_calling}</code>
                   </span>
                   <span>
-                    Tools sent via the API: <code className="text-[var(--color-text)]">{preview.data.tools_via_api}</code>
+                    Tools sent via the API: <code className="font-mono text-text">{preview.data.tools_via_api}</code>
                   </span>
                   <span>
                     User suffix:{' '}
-                    <code className="text-[var(--color-text)]">{preview.data.user_suffix ? preview.data.user_suffix : '(none)'}</code>
+                    <code className="font-mono text-text">{preview.data.user_suffix ? preview.data.user_suffix : '(none)'}</code>
                   </span>
                 </div>
                 {preview.data.partial && (
-                  <p className="text-xs text-amber-500">
+                  <p className="text-small text-warning">
                     No warmup from this node yet: rendered without its tools, devices or command flags.
                   </p>
                 )}
-                <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--color-surface-alt)] p-3 text-xs text-[var(--color-text)]">
+                <pre className="max-h-96 overflow-auto rounded-control bg-surface-alt p-3 font-mono text-small break-words whitespace-pre-wrap text-text">
                   {preview.data.system_prompt}
                 </pre>
               </div>
@@ -380,6 +392,6 @@ export default function PromptEditorCard() {
           </div>
         </div>
       )}
-    </Section>
+    </ModelCard>
   )
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Download, ExternalLink, Loader2, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, Download, ExternalLink, ShieldCheck } from 'lucide-react'
 import { AgentDownloadError, fetchAgent, saveFile } from '@/api/addons'
 import { AGENT_TARGETS, agentTarget, detectAgentTarget, type AgentTarget } from '@/lib/agentDownload'
 import { LINKS } from '@/lib/addons'
-import { buttonClass } from '@/components/models/styles'
+import { Button, Select } from '@/components/ui'
 
 type NavigatorUAData = { getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }> }
 
@@ -75,35 +75,29 @@ export default function AgentDownload({ onSaved, size = 'xs' }: { onSaved?: () =
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-end gap-2">
-        <button
-          type="button"
-          className={size === 'sm' ? buttonClass.primary.replace('text-xs', 'text-sm') : buttonClass.primary}
-          disabled={!target || busy}
+        <Button
+          variant="primary"
+          size={size === 'sm' ? 'md' : 'sm'}
+          icon={<Download size={16} aria-hidden="true" />}
+          loading={busy}
+          disabled={!target}
           onClick={() => void download()}
         >
-          {busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
           {target ? `Download for ${target.short}` : 'Download'}
-        </button>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--color-text-muted)]">
-          {target ? 'Another computer?' : 'Choose your computer'}
-          <select
-            className="max-w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1 text-sm text-[var(--color-text)]"
-            value={target?.id ?? ''}
-            disabled={busy}
-            onChange={(e) => setPicked(e.target.value || null)}
-          >
-            {!target && <option value="">Choose…</option>}
-            {AGENT_TARGETS.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        </Button>
+        <Select
+          label={target ? 'Another computer?' : 'Choose your computer'}
+          wrapperClassName="min-w-0 max-w-full"
+          value={target?.id ?? ''}
+          disabled={busy}
+          placeholder={target ? undefined : 'Choose…'}
+          onValueChange={(v) => setPicked(v || null)}
+          options={AGENT_TARGETS.map((t) => ({ value: t.id, label: t.label }))}
+        />
       </div>
-      <div aria-live="polite" className="text-xs">
+      <div aria-live="polite" className="text-small">
         {busy && (
-          <p className="text-[var(--color-text-muted)]" role="status">
+          <p className="text-text-muted" role="status">
             {status.done > 0
               ? `Downloading… ${mb(status.done)}${status.total ? ` of ${mb(status.total)}` : ''}`
               : 'Getting a verified copy from the release. The first download takes a moment.'}
@@ -112,10 +106,10 @@ export default function AgentDownload({ onSaved, size = 'xs' }: { onSaved?: () =
         {status.kind === 'saved' && (
           <div className="space-y-1">
             <p className="flex items-center gap-1.5 text-success" role="status">
-              <CheckCircle2 size={14} aria-hidden="true" /> Saved {status.filename}
+              <CheckCircle2 size={16} aria-hidden="true" /> Saved {status.filename}
             </p>
-            <p className="flex items-start gap-1.5 text-[var(--color-text-muted)]">
-              <ShieldCheck size={14} className="mt-px shrink-0" aria-hidden="true" />
+            <p className="flex items-start gap-1.5 text-text-muted">
+              <ShieldCheck size={16} className="mt-px shrink-0" aria-hidden="true" />
               <span>
                 Checked against the signed release{status.release ? ` ${status.release}` : ''} before it was sent. {target?.hint}
               </span>
@@ -129,7 +123,7 @@ export default function AgentDownload({ onSaved, size = 'xs' }: { onSaved?: () =
               href={status.releaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-0.5 underline"
+              className="inline-flex items-center gap-0.5 underline underline-offset-2"
             >
               Release page <ExternalLink size={12} aria-hidden="true" />
             </a>

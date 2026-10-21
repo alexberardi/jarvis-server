@@ -1,16 +1,25 @@
-import { useMemo, useState } from 'react'
-import { RefreshCw, Cpu, Laptop, Zap, ZapOff, Wifi, WifiOff } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Cpu, Laptop, RefreshCw } from 'lucide-react'
 import PendingPairings from '@/components/nodes/PendingPairings'
+import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonList } from '@/components/ui'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
 import { formatVersion } from '@/lib/format'
 import { timeAgo } from '@/lib/time'
-import { cn } from '@/lib/utils'
 import type { AdminNode } from '@/api/admin'
 import { computerControlState, extensionState, websiteAccessState } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
 
 const extensionText = { connected: 'connected', disconnected: 'not connected', disabled: 'off' } as const
+
+/** Detail is one "Label: value" line of a node card. */
+function Detail({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
+  return (
+    <p title={title} className="min-w-0 break-words">
+      <span className="text-text-muted">{label}:</span> {children}
+    </p>
+  )
+}
 
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const desktop = live?.node_kind === 'desktop'
@@ -20,89 +29,81 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const computerControl = computerControlState(live)
   const Icon = desktop ? Laptop : Cpu
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid={`node-${node.node_id}`}>
+    <Card as="article" data-testid={`node-${node.node_id}`}>
       {/* The badges drop below the name when both don't fit, rather than squeezing the name. */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Icon size={16} className="shrink-0 text-[var(--color-text-muted)]" aria-label={desktop ? 'Computer' : 'Node'} />
-          <span className="min-w-0 break-words font-medium text-[var(--color-text)]">{node.name}</span>
+          <Icon size={18} className="shrink-0 text-text-muted" aria-label={desktop ? 'Computer' : 'Node'} />
+          <h3 className="min-w-0 text-subheading break-words text-text">{node.name}</h3>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           {live && (
-            <span
-              className={cn(
-                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
-                live.online ? 'bg-green-500/10 text-green-500' : 'bg-amber-500/10 text-amber-500',
-              )}
-            >
-              {live.online ? <Wifi size={10} /> : <WifiOff size={10} />}
+            <Badge tone={live.online ? 'success' : 'neutral'} dot={live.online}>
               {live.online ? 'Online' : 'Offline'}
-            </span>
+            </Badge>
           )}
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
-              node.is_active ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500',
-            )}
-          >
-            {node.is_active ? <Zap size={10} /> : <ZapOff size={10} />}
-            {node.is_active ? 'Active' : 'Inactive'}
-          </span>
+          <Badge tone={node.is_active ? 'neutral' : 'warning'}>{node.is_active ? 'Active' : 'Inactive'}</Badge>
         </div>
       </div>
 
-      <div className="mt-3 space-y-1 text-xs text-[var(--color-text-muted)]">
-        <p>
-          <span className="font-medium">ID:</span> <code>{node.node_id}</code>
-        </p>
-        {live?.room && (
-          <p>
-            <span className="font-medium">Room:</span> {live.room}
-          </p>
-        )}
+      <div className="mt-3 space-y-1 text-small text-text">
+        {live?.room && <Detail label="Room">{live.room}</Detail>}
         {live && (
-          <p>
-            <span className="font-medium">Last seen:</span> {timeAgo(live.last_seen)}
+          <Detail label="Last seen">
+            {timeAgo(live.last_seen)}
             {live.last_seen_version && <> &middot; {formatVersion(live.last_seen_version)}</>}
-          </p>
+          </Detail>
         )}
         {ext && (
-          <p>
-            <span className="font-medium">Browser extension:</span> {extensionText[ext]}
+          <Detail label="Browser extension">
+            {extensionText[ext]}
             {accessOff && (
-              <span title='Turn it on with "Turn on" in the Jarvis Browser Control toolbar button on that computer'>
+              <span className="text-warning" title='Turn it on with "Turn on" in the Jarvis Browser Control toolbar button on that computer'>
                 , website access off
               </span>
             )}
-          </p>
+          </Detail>
         )}
         {computerControl && (
-          <p title='Turned on and off with "Computer control" in the Jarvis Automation menu on this computer'>
-            <span className="font-medium">Computer control:</span> {computerControl}
-          </p>
+          <Detail
+            label="Computer control"
+            title='Turned on and off with "Computer control" in the Jarvis Automation menu on this computer'
+          >
+            {computerControl}
+          </Detail>
         )}
-        {node.services.length > 0 && (
-          <p>
-            <span className="font-medium">Services:</span> {node.services.join(', ')}
-          </p>
-        )}
+        {node.services.length > 0 && <Detail label="Services">{node.services.join(', ')}</Detail>}
+        <Detail label="ID">
+          <code className="font-mono break-all text-text-muted">{node.node_id}</code>
+        </Detail>
       </div>
-    </div>
+    </Card>
   )
 }
 
 function NodeGrid({ nodes, liveness }: { nodes: AdminNode[]; liveness: Map<string, NodeLiveness> }) {
   if (nodes.length === 0) {
     return (
-      <p className="py-4 text-center text-sm text-[var(--color-text-muted)]">No nodes in this household</p>
+      <Card>
+        <p className="text-small text-text-muted">No nodes in this household yet.</p>
+      </Card>
     )
   }
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {nodes.map((node) => (
         <NodeCard key={node.node_id} node={node} live={liveness.get(node.node_id)} />
       ))}
     </div>
+  )
+}
+
+function NodeGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3" aria-label={title}>
+      <h2 className="text-heading text-text">{title}</h2>
+      {children}
+    </section>
   )
 }
 
@@ -136,25 +137,40 @@ export default function NodesPage() {
   }, [data, showInactive])
   const inactiveCount = useMemo(() => (data?.nodes ?? []).filter((n) => !n.is_active).length, [data])
 
+  const header = (
+    <PageHeader
+      title="Nodes"
+      description="Voice nodes and computers on this install, by household."
+      actions={
+        <Button size="sm" icon={<RefreshCw size={16} aria-hidden />} loading={isFetching} onClick={() => refetch()}>
+          Refresh
+        </Button>
+      }
+    />
+  )
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw className="animate-spin text-[var(--color-primary)]" size={24} />
+      <div className="mx-auto max-w-5xl">
+        {header}
+        <Card flush>
+          <SkeletonList rows={3} label="Loading nodes" />
+        </Card>
       </div>
     )
   }
 
   if (isError) {
     return (
-      <div className="py-20 text-center">
-        <p className="mb-2 text-red-500">Failed to load nodes</p>
-        <p className="mb-4 text-sm text-[var(--color-text-muted)]">{errorMessage(error, 'Unknown error')}</p>
-        <button
-          onClick={() => refetch()}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white hover:opacity-90"
-        >
-          Retry
-        </button>
+      <div className="mx-auto max-w-5xl">
+        {header}
+        <Card>
+          <ErrorState
+            title="Couldn't load the nodes"
+            message={errorMessage(error, 'The server did not answer. Check that Jarvis Automation is running.')}
+            onRetry={() => refetch()}
+          />
+        </Card>
       </div>
     )
   }
@@ -162,55 +178,41 @@ export default function NodesPage() {
   const households = data?.households ?? []
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Nodes</h1>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className={cn('rounded-lg p-1.5 hover:bg-[var(--color-surface-alt)]', isFetching && 'animate-spin')}
-          title="Refresh"
-        >
-          <RefreshCw size={14} className="text-[var(--color-text-muted)]" />
-        </button>
+    <div className="mx-auto max-w-5xl">
+      {header}
+      <div className="space-y-8">
+        <PendingPairings />
+
+        {households.length === 0 && grouped.orphans.length === 0 && (
+          <Card>
+            <EmptyState
+              icon={<Cpu size={20} />}
+              title="No nodes yet"
+              description="Add a voice node with the Jarvis Automation phone app (scan its QR code), or pair a computer: its code shows up under Pending pairings."
+            />
+          </Card>
+        )}
+
+        {households.map((h) => (
+          <NodeGroup key={h.id} title={h.name}>
+            <NodeGrid nodes={grouped.byHousehold.get(h.id) ?? []} liveness={liveMap} />
+          </NodeGroup>
+        ))}
+
+        {grouped.orphans.length > 0 && (
+          <NodeGroup title="No household">
+            <NodeGrid nodes={grouped.orphans} liveness={liveMap} />
+          </NodeGroup>
+        )}
+
+        {inactiveCount > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => setShowInactive((v) => !v)}>
+            {showInactive
+              ? 'Hide signed-out nodes'
+              : `Show ${inactiveCount} signed-out node${inactiveCount === 1 ? '' : 's'}`}
+          </Button>
+        )}
       </div>
-
-      <PendingPairings />
-
-      {inactiveCount > 0 && (
-        <button
-          onClick={() => setShowInactive((v) => !v)}
-          className="text-xs text-[var(--color-text-muted)] underline hover:text-[var(--color-text)]"
-        >
-          {showInactive
-            ? 'Hide signed-out nodes'
-            : `Show ${inactiveCount} signed-out node${inactiveCount === 1 ? '' : 's'}`}
-        </button>
-      )}
-
-      {households.length === 0 && grouped.orphans.length === 0 && (
-        <div className="py-12 text-center">
-          <p className="text-sm text-[var(--color-text-muted)]">
-            No households or nodes yet. Add a node by QR provisioning in the mobile app, or pair a computer: its code shows up here.
-          </p>
-        </div>
-      )}
-
-      {households.map((h) => (
-        <div key={h.id} className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">{h.name}</h2>
-          <NodeGrid nodes={grouped.byHousehold.get(h.id) ?? []} liveness={liveMap} />
-        </div>
-      ))}
-
-      {grouped.orphans.length > 0 && (
-        <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            No household
-          </h2>
-          <NodeGrid nodes={grouped.orphans} liveness={liveMap} />
-        </div>
-      )}
     </div>
   )
 }

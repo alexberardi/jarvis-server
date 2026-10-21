@@ -85,14 +85,14 @@ describe('HardwarePanel builds', () => {
     })
     renderPanel()
     await screen.findByText(why)
-    expect(screen.getByRole('button', { name: 'cuda ↓' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Download the cuda build' })).toBeTruthy()
 
     api.getHardware.mockResolvedValue({
       ...hardware(engine),
       builds: { 'mlx-lm': { build: '0.32.2', flavours: ['metal'] } },
     })
     renderPanel()
-    expect(await screen.findByRole('button', { name: 'metal ↓' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Download the metal build' })).toBeTruthy()
   })
 
   it('says what vLLM downloads before it is fetched', async () => {
@@ -102,7 +102,7 @@ describe('HardwarePanel builds', () => {
     })
     renderPanel()
     expect(await screen.findByText('3.7 GB download, needs 15.8 GB free while installing')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'cuda ↓' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Download the cuda build' })).toBeTruthy()
   })
 
   it('says why vLLM cannot run without an NVIDIA GPU, with no download offered', async () => {

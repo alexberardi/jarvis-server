@@ -61,18 +61,18 @@ export default function JobChecklist({
         const pct = jobPercent(job)
         const flagged = def.required && !underWay(job.state)
         return (
-          <li key={def.id} className="space-y-1.5 py-2.5" data-testid={`job-${def.id}`}>
+          <li key={def.id} className="space-y-1.5 py-3 first:pt-0 last:pb-0" data-testid={`job-${def.id}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                 <Icon job={job} />
-                <span className="text-subheading text-text">{def.title}</span>
+                <span className="text-body font-medium text-text">{def.title}</span>
                 {def.required ? (
-                  <span className="text-caption text-text-muted">required for voice</span>
+                  <span className="text-caption font-normal text-text-muted">required for voice</span>
                 ) : (
-                  <span className="text-caption text-text-muted">optional</span>
+                  <span className="text-caption font-normal text-text-muted">optional</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ml-auto flex items-center gap-2">
                 <Badge tone={tone(job)}>{jobStateText(job, wizard)}</Badge>
                 {action?.(def, job)}
               </div>

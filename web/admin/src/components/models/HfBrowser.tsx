@@ -8,8 +8,8 @@ import FitBadge from './FitBadge'
 import HfTokenPrompt from './HfTokenPrompt'
 import { fitSummary, isGatedError, normalizeRepo } from './logic'
 import { useInstallAction } from './useInstallAction'
-import { buttonClass, inputClass } from './styles'
-import { Pill, Section } from './ui'
+import { Badge, Button, Input, Select } from '@/components/ui'
+import ModelCard from './ModelCard'
 
 function FileRow({
   repo,
@@ -41,50 +41,45 @@ function FileRow({
   }
 
   return (
-    <li className="rounded-lg border border-[var(--color-border)] p-3" data-testid={`hf-${choice.file}`}>
+    <li className="py-3 first:pt-0 last:pb-0" data-testid={`hf-${choice.file}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="break-all font-mono text-xs text-[var(--color-text)]">{choice.file}</span>
-            <Pill>{choice.kind}</Pill>
-            {choice.quant && <Pill>{choice.quant}</Pill>}
-            {choice.shards.length > 1 && <Pill>{choice.shards.length} parts</Pill>}
+            <span className="font-mono text-small break-all text-text">{choice.file}</span>
+            <Badge>{choice.kind}</Badge>
+            {choice.quant && <Badge>{choice.quant}</Badge>}
+            {choice.shards.length > 1 && <Badge>{choice.shards.length} parts</Badge>}
             <FitBadge fit={choice.fit} />
           </div>
-          <p className="text-xs text-[var(--color-text-muted)]">
+          <p className="text-small text-text-muted">
             {formatBytes(choice.size)} · {fitSummary(choice.fit)}
           </p>
         </div>
         {installable && (
-          <button type="button" className={buttonClass.secondary} onClick={() => setOpen(!open)} aria-expanded={open}>
+          <Button size="sm" onClick={() => setOpen(!open)} aria-expanded={open}>
             {open ? 'Close' : 'Install'}
-          </button>
+          </Button>
         )}
       </div>
       {open && (
-        <div className="mt-3 space-y-2 border-t border-[var(--color-border)] pt-3">
+        <div className="mt-3 space-y-3 rounded-control bg-surface-alt p-3">
           <AssignPicker kind={choice.kind} value={assign} onChange={setAssign} idPrefix={`hf-${choice.file}`} />
           {choice.kind === 'llm' && mmprojFiles.length > 0 && (
-            <label className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-text)]">
-              Vision projector:
-              <select
-                value={mmproj}
-                onChange={(e) => setMMProj(e.target.value)}
-                className="rounded border border-[var(--color-border)] bg-[var(--color-surface-alt)] px-2 py-1 text-xs"
-              >
-                <option value="">none</option>
-                {mmprojFiles.map((m) => (
-                  <option key={m.file} value={m.file}>
-                    {m.file} ({formatBytes(m.size)})
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Select
+              label="Vision projector"
+              wrapperClassName="max-w-md"
+              value={mmproj}
+              onValueChange={setMMProj}
+              options={[
+                { value: '', label: 'none' },
+                ...mmprojFiles.map((m) => ({ value: m.file, label: `${m.file} (${formatBytes(m.size)})` })),
+              ]}
+            />
           )}
           <div className="flex justify-end">
-            <button type="button" className={buttonClass.primary} disabled={isPending} onClick={start}>
-              {isPending ? 'Starting…' : 'Start install'}
-            </button>
+            <Button variant="primary" size="sm" loading={isPending} onClick={start}>
+              Start install
+            </Button>
           </div>
         </div>
       )}
@@ -127,47 +122,49 @@ export default function HfBrowser() {
   const mmprojFiles = result?.files.filter((f) => f.kind === 'mmproj') ?? []
 
   return (
-    <Section
+    <ModelCard
       title="Hugging Face"
       icon={Search}
       description="Paste a repo to install a model that isn't in the catalog. Only GGUF and whisper files are listed."
     >
       <div className="space-y-3">
         <form
-          className="flex gap-2"
+          className="flex flex-wrap gap-2"
           onSubmit={(e) => {
             e.preventDefault()
             void browse()
           }}
         >
-          <label htmlFor="hf-repo" className="sr-only">
-            Hugging Face repo
-          </label>
-          <input
+          <Input
             id="hf-repo"
+            aria-label="Hugging Face repo"
+            wrapperClassName="min-w-0 flex-1 basis-60"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="owner/name or https://huggingface.co/owner/name"
-            className={inputClass}
           />
-          <button type="submit" className={buttonClass.primary} disabled={loading || !input.trim()}>
-            {loading ? 'Reading…' : 'Browse'}
-          </button>
+          <Button type="submit" variant="primary" disabled={!input.trim()} loading={loading}>
+            Browse
+          </Button>
         </form>
 
-        {error && <p className="text-sm text-danger">{error}</p>}
+        {error && (
+          <p role="alert" className="text-small text-danger">
+            {error}
+          </p>
+        )}
         {tokenReason && <HfTokenPrompt reason="This repo is gated or private." onSaved={() => void browse()} />}
 
         {result && (
           <div className="space-y-2">
-            <p className="text-xs text-[var(--color-text-muted)]">
+            <p className="text-small text-text-muted">
               <span className="font-mono">{result.repo}</span> at <span className="font-mono">{result.revision.slice(0, 12)}</span>
               {result.gated && ' · gated'} · {result.files.length} installable file{result.files.length === 1 ? '' : 's'}
             </p>
             {result.files.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">No GGUF or whisper files in this repo.</p>
+              <p className="text-small text-text-muted">No GGUF or whisper files in this repo. Try its -GGUF variant.</p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="divide-y divide-border">
                 {result.files.map((f) => (
                   <FileRow
                     key={f.file}
@@ -183,14 +180,16 @@ export default function HfBrowser() {
         )}
 
         {!tokenReason && (
-          <details className="text-xs text-[var(--color-text-muted)]">
-            <summary className="cursor-pointer">Hugging Face token for gated repos</summary>
+          <details className="text-small text-text-muted">
+            <summary className="min-h-10 cursor-pointer content-center rounded-control hover:text-text">
+              Hugging Face token for gated repos
+            </summary>
             <div className="mt-2">
               <HfTokenPrompt compact />
             </div>
           </details>
         )}
       </div>
-    </Section>
+    </ModelCard>
   )
 }

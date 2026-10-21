@@ -3,7 +3,7 @@ import { KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useHfTokenSet, useSetHfToken } from '@/hooks/useModelManager'
 import { errorMessage } from '@/lib/errors'
-import { buttonClass, inputClass } from './styles'
+import { Banner, Button, Input } from '@/components/ui'
 
 /**
  * HfTokenPrompt stores `llm.hf_token` (a write-only secret) for gated repos. The Models page
@@ -35,47 +35,41 @@ export default function HfTokenPrompt({
     })
   }
 
-  return (
-    <div className={compact ? 'space-y-2' : 'space-y-2 rounded-lg bg-warning-soft p-3'}>
-      <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
-        <KeyRound size={14} className="text-warning" />
-        Hugging Face token
-        <span className="text-xs font-normal text-[var(--color-text-muted)]">
-          {isSet ? '(set; enter a new one to replace it)' : '(not set)'}
-        </span>
-      </div>
-      {reason && <p className="text-xs text-[var(--color-text-muted)]">{reason}</p>}
-      <p className="text-xs text-[var(--color-text-muted)]">
+  const state = (
+    <span className="text-small font-normal text-text-muted">
+      {isSet ? '(set; enter a new one to replace it)' : '(not set)'}
+    </span>
+  )
+  const body = (
+    <div className="space-y-2">
+      {reason && <p className="text-small text-text">{reason}</p>}
+      <p className="text-small text-text-muted">
         Only needed for gated or private repos. Create a read token at huggingface.co → Settings → Access
         Tokens, and accept the model's licence on its page first. It is stored on this server and never
         shown again.
       </p>
       <form
-        className="flex gap-2"
+        className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault()
           submit()
         }}
       >
-        <label htmlFor="hf-token" className="sr-only">
-          Hugging Face token
-        </label>
-        <input
+        <Input
           id="hf-token"
+          aria-label="Hugging Face token"
+          wrapperClassName="min-w-0 flex-1 basis-48"
           type="password"
           autoComplete="off"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="hf_…"
-          className={inputClass}
         />
-        <button type="submit" disabled={!token.trim() || save.isPending} className={buttonClass.primary}>
-          {save.isPending ? 'Saving…' : 'Save'}
-        </button>
+        <Button type="submit" variant="primary" disabled={!token.trim()} loading={save.isPending}>
+          Save
+        </Button>
         {isSet && (
-          <button
-            type="button"
-            className={buttonClass.secondary}
+          <Button
             disabled={save.isPending}
             onClick={() =>
               save.mutate(null, {
@@ -85,9 +79,27 @@ export default function HfTokenPrompt({
             }
           >
             Remove
-          </button>
+          </Button>
         )}
       </form>
+    </div>
+  )
+
+  if (!compact) {
+    return (
+      <Banner tone="warning" icon={<KeyRound size={16} />} title={<>Hugging Face token {state}</>}>
+        {body}
+      </Banner>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-subheading text-text">
+        <KeyRound size={16} aria-hidden className="text-warning" />
+        Hugging Face token
+        {state}
+      </div>
+      {body}
     </div>
   )
 }

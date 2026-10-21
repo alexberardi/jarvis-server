@@ -98,9 +98,11 @@ describe('Models page job checklist (AD3b)', () => {
   })
 
   it('"Set up" narrows the catalog to that job, and "Show all" widens it again', async () => {
-    renderPage()
+    renderPage('/models?tab=catalog')
     expect(await screen.findByTestId('catalog-qwen3-4b')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Set up Speech-to-text' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Jobs' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up Speech-to-text' }))
+    expect(screen.getByRole('tab', { name: 'Catalog' })).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByText(/Showing models for/)).toHaveTextContent('Showing models for Speech-to-text')
     expect(screen.getByTestId('catalog-whisper-base.en')).toBeInTheDocument()
     expect(screen.queryByTestId('catalog-qwen3-4b')).toBeNull()
@@ -114,5 +116,29 @@ describe('Models page job checklist (AD3b)', () => {
     renderPage('/models?job=speaker')
     expect(await screen.findByTestId('catalog-eres2net')).toBeInTheDocument()
     expect(screen.queryByTestId('catalog-whisper-base.en')).toBeNull()
+    // "Show all" widens the catalog and stays on it.
+    fireEvent.click(screen.getByRole('button', { name: /Show all/ }))
+    expect(await screen.findByTestId('catalog-whisper-base.en')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Catalog' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('opens the Jobs tab while a job filter is on', async () => {
+    renderPage('/models?job=speaker')
+    expect(await screen.findByTestId('catalog-eres2net')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Jobs' }))
+    expect(await screen.findByRole('list', { name: 'Model jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Jobs' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('splits the page into tabs: Jobs first, the others one tap away, and ?tab= opens one', async () => {
+    renderPage()
+    expect(await screen.findByRole('list', { name: 'Model jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Jobs' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByTestId('catalog-qwen3-4b')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Catalog' }))
+    expect(await screen.findByTestId('catalog-qwen3-4b')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Model jobs' })).toBeNull()
+    for (const t of ['Installed', 'Prompts', 'Hardware']) expect(screen.getByRole('tab', { name: t })).toBeInTheDocument()
   })
 })
+

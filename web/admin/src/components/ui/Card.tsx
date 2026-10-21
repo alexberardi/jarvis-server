@@ -20,6 +20,8 @@ export default function Card({ as: Tag = 'div', flush, className, ...rest }: Car
 
 interface CardHeaderProps {
   title: ReactNode
+  /** A lucide icon before the title, drawn muted (18px). */
+  icon?: ReactNode
   description?: ReactNode
   /** Buttons at the right of the heading. */
   actions?: ReactNode
@@ -29,11 +31,16 @@ interface CardHeaderProps {
 }
 
 /** CardHeader is a card's heading row: an h2, an optional line under it, and actions. */
-export function CardHeader({ title, description, actions, id, className }: CardHeaderProps) {
+export function CardHeader({ title, icon, description, actions, id, className }: CardHeaderProps) {
   return (
     <div className={cn('mb-4 flex flex-wrap items-start justify-between gap-3', className)}>
       <div className="min-w-0">
-        <h2 id={id} className="text-heading text-text">
+        <h2 id={id} className={cn('text-heading text-text', icon && 'flex items-center gap-2')}>
+          {icon && (
+            <span aria-hidden className="flex shrink-0 text-text-muted">
+              {icon}
+            </span>
+          )}
           {title}
         </h2>
         {description && <p className="mt-0.5 text-small text-text-muted">{description}</p>}
