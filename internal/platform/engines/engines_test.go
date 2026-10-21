@@ -605,3 +605,42 @@ func TestDrainCalledOffWhenEngineRecovers(t *testing.T) {
 		t.Fatalf("state %s after %d starts; the recovery should have called the restart off", st, f.startCount())
 	}
 }
+
+// OnHealthy runs once each time a start becomes healthy (decision 2026-10-20-prompt-diet: the
+// llm layer warms the engine then), not while it is still loading, and again after a restart.
+func TestOnHealthyEachStart(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false) // loading
+	calls := make(chan struct{}, 4)
+	spec := f.spec(nil)
+	spec.OnHealthy = func() { calls <- struct{}{} }
+	s := start(t, spec)
+	f.health.awaitChecks(t, 2)
+	select {
+	case <-calls:
+		t.Fatal("OnHealthy while loading")
+	default:
+	}
+	f.health.set(true)
+	waitHealthy(t, s)
+	awaitCall := func(n int) {
+		select {
+		case <-calls:
+		case <-time.After(hangGuard):
+			t.Fatalf("OnHealthy call %d never came", n)
+		}
+	}
+	awaitCall(1)
+	f.awaitStarts(t, 1)
+	if err := s.Restart(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitHealthy(t, s)
+	awaitCall(2)
+	select {
+	case <-calls:
+		t.Fatal("OnHealthy ran more than once per start")
+	default:
+	}
+}

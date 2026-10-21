@@ -57,12 +57,13 @@ This is the whole list. Any other name is invalid (§7).
 | `room` | inline | the node's room (`unknown` when unset) |
 | `voice_mode` | inline | the node's voice style (`brief` when unset) |
 | `persona` | section | the household persona inside `<personality>` with the persona frame; empty when the persona is empty |
-| `persona_reminder` | section | the end-of-prompt "YOUR VOICE" restatement of the persona; empty when the persona is empty |
+| `persona_reminder` | section | a one-line end-of-prompt reminder to keep the persona's voice; empty when the persona is empty |
 | `tools` | section | text tool calling only: the `<tools>` block with full schemas and the `<tool_call>` format the server parses. Empty with native tool calling (tools go through the API) |
 | `tools_compact` | section | as `tools`, with parameter descriptions dropped |
 | `date_keys` | section | the `DT_KEYS` vocabulary and the rule to use its symbolic keys |
 | `tool_guidance` | section | the tools' own prompt hints, de-duplicated |
-| `direct_answers` | section | which commands must call a tool and which may be answered directly |
+| `direct_answers` | section | keep replies brief, and which commands must always call their tool |
+| `not_for_me` | inline | how to stay silent: "call not_for_me and nothing else." (native tool calling) or "reply with <not_for_me/> alone." (text) |
 | `agents` | section | the node's smart-home devices by room (or a per-domain summary over 20 devices, with floors and the room hierarchy) |
 | `rooms` | section | the household's room hierarchy (parent → sub-rooms) |
 | `trim` | directive | removes the whitespace before it |
@@ -85,9 +86,7 @@ Talk like a warm, easygoing friend — folksy, down-to-earth, glad to help. …
 **`persona_reminder`**:
 
 ```text
-YOUR VOICE — this is how you sound in every spoken reply (acknowledgments, answers, even one-liners, even when told to be brief):
-Talk like a warm, easygoing friend — folksy, down-to-earth, glad to help. …
-Talk this way every time. It shapes only your wording and tone — never which function you call, … Don't announce or describe the voice; just speak in it.
+Keep that voice in every reply; it never changes which tool you call.
 ```
 
 **`tools`** (text tool calling; one compact JSON object per line):
@@ -112,10 +111,10 @@ With native tool calling: empty.
 
 ```text
 DT_KEYS: today|tomorrow|yesterday|this_weekend|last_weekend|…
-CRITICAL — resolved_datetimes: You MUST use the symbolic key strings from DT_KEYS (e.g., "today", "tomorrow", "this_weekend", "last_weekend"). NEVER resolve dates to ISO timestamps like "2026-03-07T05:00:00Z" — the server handles resolution. If the user omits a date, pass ["today"].
+resolved_datetimes takes these keys as is (e.g. "tomorrow"), never ISO dates; with no date, ["today"].
 ```
 
-**`tool_guidance`**:
+**`tool_guidance`** (not used by the built-in prompts since 2026-10-20; each tool's hint belongs in its description):
 
 ```text
 Tool Guidance:
@@ -126,11 +125,13 @@ Tool Guidance:
 **`direct_answers`**:
 
 ```text
-Direct Answer Policy:
-- MUST call tools for: control_device, get_weather, set_timer
-- Direct answers allowed for: answer_question
-- BE BRIEF. Your reply is read aloud. Answer in ONE short sentence and STOP. …
+Your reply is read aloud: one short sentence, just what was asked.
+Always call the tool, never answer yourself, for: control_device, get_weather, remember, set_timer.
 ```
+
+The list is the node commands without `allow_direct_answer` plus any offered tool marked `"must_call": true` (a Jarvis extension key, stripped before the model sees the tools; the memory tools set it).
+
+**`not_for_me`**: `call not_for_me and nothing else.` with native tool calling, where the payload adds a `not_for_me` tool with no parameters; `reply with <not_for_me/> alone.` with text tool calling. The built-in prompts use it as `…noise), {{not_for_me}} Any command or question…`.
 
 **`agents`**:
 

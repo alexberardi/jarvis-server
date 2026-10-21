@@ -529,3 +529,33 @@ func TestRemoteAPI(t *testing.T) {
 		}
 	}
 }
+
+// OnReady reports a healthy engine with every label it serves (decision 2026-10-20-prompt-diet:
+// the llm layer warms it then).
+func TestOnReadyReportsLabels(t *testing.T) {
+	g := newRig(t)
+	got := make(chan []string, 4)
+	g.r.OnReady = func(labels []string) { got <- labels }
+	m := g.model("qwen.gguf")
+	live := g.llm(LabelLive, m)
+	g.src.set(live)
+	bg := live
+	bg.Label = LabelBackground
+	g.src.set(bg)
+	g.ready(LabelLive)
+	g.ready(LabelBackground)
+	// Each label is reported once it has a healthy engine: together when both were bound before
+	// the engine came up, or the later one on its own when it joined a running engine.
+	seen := map[string]bool{}
+	deadline := time.After(10 * time.Second)
+	for !seen[LabelLive] || !seen[LabelBackground] {
+		select {
+		case labels := <-got:
+			for _, l := range labels {
+				seen[l] = true
+			}
+		case <-deadline:
+			t.Fatalf("reported %v, want live and background", seen)
+		}
+	}
+}

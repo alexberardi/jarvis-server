@@ -177,6 +177,9 @@ func modules(env config.Env) []module.Module {
 	cc.Version = version
 	// The voice pipeline calls the other modules in process (5b).
 	cc.LLM = ccmod.WaitingLLM(llm.Service(), ccmod.ReadyWait)
+	// A local engine that (re)starts gets cc's recent prompt warm-ups again (decision
+	// 2026-10-20-prompt-diet), after the llm module loaded it with a one-token call.
+	llm.OnEngineReady = cc.EngineReady
 	cc.STT = sttm
 	cc.TTS = ccmod.TTSFrom(ttsm)
 	cc.Notify = notif
