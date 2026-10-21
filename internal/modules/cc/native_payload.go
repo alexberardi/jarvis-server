@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -19,7 +20,44 @@ const failureMessageParam = "failure_message"
 // turn, and with native tool calling the model sees a failed result and speaks for it on the
 // next turn anyway. takeFailureMessage still strips one a model sends.
 func nativePayload(tools []prompts.Tool) []llm.Tool {
-	return llmTools(prompts.NativeTools(tools))
+	native := prompts.NativeTools(tools)
+	for _, t := range native {
+		if toolName(t) == notForMeTool {
+			return llmTools(native)
+		}
+	}
+	return llmTools(append(native, notForMeToolDef()))
+}
+
+// notForMeTool is the native form of the <not_for_me/> sentinel (decision
+// 2026-10-20-prompt-diet): the model calls it, without arguments, when the speech wasn't meant
+// for it. The engine takes the sentinel's silent path; it never reaches a node.
+const notForMeTool = "not_for_me"
+
+const notForMeToolJSON = `{"type": "function", "function": {"name": "not_for_me", ` +
+	`"description": "Only for speech clearly meant for someone else, or background noise: say nothing. Never for a command or question.", ` +
+	`"parameters": {"type": "object", "properties": {}}}}`
+
+func notForMeToolDef() prompts.Tool {
+	v, err := pyjson.Loads(notForMeToolJSON)
+	if err != nil {
+		panic("notForMeToolJSON: " + err.Error())
+	}
+	return v.(*pyjson.Object)
+}
+
+// splitNotForMe separates native not_for_me calls from the rest. only is true when every call
+// was not_for_me (and there was at least one): the turn is the sentinel's.
+func splitNotForMe(calls []parse.ToolCall) (rest []parse.ToolCall, only bool) {
+	n := 0
+	for _, c := range calls {
+		if c.Function.Name == notForMeTool {
+			n++
+			continue
+		}
+		rest = append(rest, c)
+	}
+	return rest, n > 0 && len(rest) == 0
 }
 
 // takeFailureMessage removes a string failure_message from a native call's arguments. It

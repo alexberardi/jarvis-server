@@ -41,15 +41,15 @@ func toolByName(tools []any, name string) map[string]any {
 	return nil
 }
 
-// The native payload is prompts.NativeTools as is: no failure_message property is added to the
-// tools (decision 2026-10-20-prompt-diet), the cached tools don't change, and the warmup sends the
-// engine's bytes so the prefix cache holds.
+// The native payload is prompts.NativeTools plus the not_for_me tool: no failure_message property
+// is added to the tools (decision 2026-10-20-prompt-diet), the cached tools don't change, and the
+// warmup sends the engine's bytes so the prefix cache holds.
 func TestNativePayloadSendsNativeTools(t *testing.T) {
 	tools := toolsFrom(t, searchTools)
 	before := prompts.CompactASCII(tools[0])
 
 	out := nativePayload(tools)
-	want := llmTools(prompts.NativeTools(tools))
+	want := llmTools(append(prompts.NativeTools(tools), notForMeToolDef()))
 	if len(out) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(out), len(want))
 	}

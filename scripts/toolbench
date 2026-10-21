@@ -83,9 +83,11 @@ def cases():
     for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
         fn = t.get("function", t)
         for ex in t.get("examples") or fn.get("examples") or []:
-            out.append({"id": f"ex:{fn['name']}:{ex['voice_command']}", "node": "desktop",
-                        "say": ex["voice_command"], "tool": fn["name"],
-                        "args": ex.get("expected_parameters") or {}})
+            c = {"id": f"ex:{fn['name']}:{ex['voice_command']}", "node": "desktop",
+                 "say": ex["voice_command"], "tool": fn["name"], "args": ex.get("expected_parameters") or {}}
+            if fn["name"] == "get_current_time" and not (ex.get("expected_parameters") or {}).get("location"):
+                c["direct_ok"] = True  # the prompt's <calendar> block answers local date/time directly
+            out.append(c)
     for path in sorted(glob.glob(os.path.join(ROOT, "tools/pipeline/scenarios/*.json"))):
         for sc in json.load(open(path)):
             if sc.get("skip") or sc.get("settings") or sc.get("results") or sc.get("voice") \
@@ -115,6 +117,45 @@ def cases():
     return out
 
 
+def corpus_cases(path):
+    """The legacy GPU benchmark's corpus (install-e2e/gpu/bench_corpus.cc.yaml): {utterance,
+    tool|null, args: {name: {equals|contains|in|any_of: ...}}}, played on the voice node."""
+    if path.endswith(".json"):
+        entries = json.load(open(path))
+    else:
+        import yaml  # the corpus is YAML; only this needs PyYAML (pass a .json copy where it's missing)
+        entries = yaml.safe_load(open(path))
+    out = []
+    for i, e in enumerate(entries):
+        c = {"id": f"corpus:{i:03d}:{e['utterance']}", "node": "voice", "say": e["utterance"],
+             "matchers": e.get("args") or {}}
+        if e.get("any_tool"):
+            if None in e["any_tool"]:
+                c["any_or_none"] = [t for t in e["any_tool"] if t]
+            else:
+                c["any_tool"] = e["any_tool"]
+        elif e.get("tool"):
+            c["tool"] = e["tool"]
+            if e["tool"] == "get_current_time" and not any(k in (e.get("args") or {}) for k in ("location", "timezone")):
+                c["direct_ok"] = True
+        elif "any_or_none" not in c:
+            c["no_tool"] = True
+        out.append(c)
+    return out
+
+
+def matcher_ok(m, got):
+    if "equals" in m:
+        return same(m["equals"], got)
+    if "contains" in m:
+        return str(m["contains"]).lower() in str(got).lower()
+    if "in" in m:
+        return any(same(v, got) for v in m["in"])
+    if "any_of" in m:
+        return any(matcher_ok(x, got) for x in m["any_of"])
+    return True
+
+
 def endpoint(args):
     if args.url:
         return args.url.rstrip("/") + "/v1/chat/completions", args.model or "live", {}
@@ -140,11 +181,15 @@ def same(want, got):
     return str(want).strip().lower() == str(got).strip().lower()
 
 
-def score(case, call):
+def score(case, call, reply=""):
     name = call["name"] if call else None
     args = call["args"] if call else {}
     if case.get("no_tool"):
         return name is None, True
+    if "any_or_none" in case:
+        return name is None or name in case["any_or_none"], True
+    if name is None and case.get("direct_ok") and reply.strip() and "not_for_me" not in reply:
+        return True, True
     if name in (case.get("not_tool") or []):
         return False, False
     if "any_tool" in case:
@@ -155,6 +200,7 @@ def score(case, call):
         return False, False
     a_ok = all(k in args and same(v, args[k]) for k, v in (case.get("args") or {}).items())
     a_ok = a_ok and all(k in args and re.search(rx, str(args[k])) for k, rx in (case.get("args_match") or {}).items())
+    a_ok = a_ok and all(k in args and matcher_ok(m, args[k]) for k, m in (case.get("matchers") or {}).items())
     return True, a_ok
 
 
@@ -165,7 +211,28 @@ def run(args):
         p = os.path.join(args.base, f"base-{kind}.json")
         if os.path.exists(p):
             bases[kind] = json.load(open(p))
-    cs = [c for c in cases() if c["node"] in bases and (not args.only or re.search(args.only, c["id"]))]
+    if args.patch:
+        # {tool: {"description": str, "params": {name: str | null (drop the description)}, "drop_params": [...]}}
+        patch = json.load(open(args.patch))
+        for base in bases.values():
+            for t in base.get("tools") or []:
+                fn = t["function"]
+                p = patch.get(fn["name"])
+                if not p:
+                    continue
+                if "description" in p:
+                    fn["description"] = p["description"]
+                props = (fn.get("parameters") or {}).get("properties") or {}
+                for name, d in (p.get("params") or {}).items():
+                    if name in props:
+                        if d is None:
+                            props[name].pop("description", None)
+                        else:
+                            props[name]["description"] = d
+                for name in p.get("drop_params") or []:
+                    props.pop(name, None)
+    allc = corpus_cases(args.corpus) if args.corpus else cases()
+    cs = [c for c in allc if c["node"] in bases and (not args.only or re.search(args.only, c["id"]))]
     print(f"{len(cs)} cases x {args.repeat} against {url} (model {model})", file=sys.stderr)
     results = []
     for c in cs:
@@ -208,7 +275,7 @@ def run(args):
                 except json.JSONDecodeError:
                     a = {}
                 call = {"name": tc["function"]["name"], "args": a}
-            tool_ok, args_ok = (False, False) if err else score(c, call)
+            tool_ok, args_ok = (False, False) if err else score(c, call, msg.get("content") or "")
             usage = resp.get("usage") or {}
             results.append({"id": c["id"], "run": i, "tool_ok": tool_ok, "args_ok": tool_ok and args_ok,
                             "got": call, "reply": (msg.get("content") or "")[:120], "error": err,
@@ -249,6 +316,8 @@ def main():
     r.add_argument("--model")
     r.add_argument("--env")
     r.add_argument("--timeout", type=int, default=180)
+    r.add_argument("--patch", help="JSON of tool description overrides to try without a rebuild")
+    r.add_argument("--corpus", help="a legacy corpus YAML (install-e2e/gpu/bench_corpus.cc.yaml) instead of the scenarios")
     r.add_argument("--fold", action="store_true", help="fold later system messages into the user turn (strict chat templates, direct engines)")
     a = ap.parse_args()
     {"capture": capture, "run": run}[a.cmd](a)
