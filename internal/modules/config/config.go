@@ -149,8 +149,9 @@ func (m *Module) Start(ctx context.Context) error {
 }
 
 // syncSelf upserts a row per served listener: host "localhost" (the URL-style rewrite turns it
-// into host.docker.internal or the caller's remote_host) and the listener's port. ids and
-// created_at survive restarts; external_* are left for the operator.
+// into host.docker.internal or the caller's remote_host) and the listener's port, or in
+// single-port mode the config port and the listener's prefix (path). ids and created_at
+// survive restarts; external_* are left for the operator.
 func (m *Module) syncSelf(ctx context.Context) error {
 	for _, l := range m.Served {
 		name, ok := ServiceNames[l]
@@ -158,6 +159,10 @@ func (m *Module) syncSelf(ctx context.Context) error {
 			continue
 		}
 		port := m.deps.Config.Ports[l]
+		var path any
+		if prefix := pconfig.Paths[l]; m.deps.Config.SinglePort && prefix != "" {
+			port, path = m.deps.Config.Ports[pconfig.ListenerConfig], prefix
+		}
 		if port == 0 {
 			continue // ephemeral (tests); nothing stable to advertise
 		}
@@ -172,14 +177,14 @@ func (m *Module) syncSelf(ctx context.Context) error {
 				"name", name, "was", fmt.Sprintf("%s:%d", oldHost, oldPort), "now", fmt.Sprintf("localhost:%d", port))
 		}
 		_, err = m.deps.DB.Write.ExecContext(ctx, `
-			INSERT INTO config_services (name, host, port, scheme, health_path, description)
-			VALUES (?, 'localhost', ?, 'http', '/health', 'served by jarvisd')
+			INSERT INTO config_services (name, host, port, scheme, health_path, description, path)
+			VALUES (?, 'localhost', ?, 'http', '/health', 'served by jarvisd', ?)
 			ON CONFLICT (name) DO UPDATE SET host = 'localhost', port = excluded.port, scheme = 'http',
-				health_path = '/health', description = 'served by jarvisd',
+				health_path = '/health', description = 'served by jarvisd', path = excluded.path,
 				updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 			WHERE config_services.host != 'localhost' OR config_services.port != excluded.port
-				OR config_services.scheme != 'http'`,
-			name, port)
+				OR config_services.scheme != 'http' OR config_services.path IS NOT excluded.path`,
+			name, port, path)
 		if err != nil {
 			return fmt.Errorf("config: register %s: %w", name, err)
 		}
@@ -279,14 +284,17 @@ type service struct {
 	// ExternalScheme set (with ExternalHost) makes external_* the row's public base URL
 	// (public.go). NULL keeps the legacy external_host/external_port meaning.
 	ExternalScheme sql.NullString
+	// Path is the prefix a mounted listener is served under on the config port (single-port
+	// mode), appended to the LAN URL. NULL for everything else.
+	Path sql.NullString
 }
 
-const serviceCols = `id, name, host, port, scheme, health_path, description, external_host, external_port, created_at, updated_at, external_scheme`
+const serviceCols = `id, name, host, port, scheme, health_path, description, external_host, external_port, created_at, updated_at, external_scheme, path`
 
 func scanService(sc interface{ Scan(...any) error }) (service, error) {
 	var s service
 	err := sc.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.Scheme, &s.HealthPath, &s.Description,
-		&s.ExternalHost, &s.ExternalPort, &s.CreatedAt, &s.UpdatedAt, &s.ExternalScheme)
+		&s.ExternalHost, &s.ExternalPort, &s.CreatedAt, &s.UpdatedAt, &s.ExternalScheme, &s.Path)
 	return s, err
 }
 
@@ -324,7 +332,7 @@ func (s service) url(st urlStyle) string {
 	case st.dockerized && isLocal(host):
 		host = "host.docker.internal"
 	}
-	return fmt.Sprintf("%s://%s:%d", s.Scheme, host, port)
+	return fmt.Sprintf("%s://%s:%d", s.Scheme, host, port) + s.Path.String
 }
 
 func (s service) healthURL() string {
@@ -371,6 +379,7 @@ func (s service) response(st urlStyle) map[string]any {
 		"description":   nullable(s.Description.String, s.Description.Valid),
 		"external_host": nullable(s.ExternalHost.String, s.ExternalHost.Valid),
 		"external_port": nullable(s.ExternalPort.Int64, s.ExternalPort.Valid),
+		"path":          nullable(s.Path.String, s.Path.Valid),
 		"url":           s.url(st),
 		"created_at":    pyTime(s.CreatedAt),
 		"updated_at":    pyTime(s.UpdatedAt),

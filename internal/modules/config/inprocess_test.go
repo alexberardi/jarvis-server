@@ -95,3 +95,30 @@ func TestServicesAddRemoveProbe(t *testing.T) {
 		t.Fatalf("remove twice: %v", err)
 	}
 }
+
+// In single-port mode the admin's entries carry the mounted listeners' prefix; an operator's
+// entry has none.
+func TestServicesSinglePort(t *testing.T) {
+	m, _ := setupSinglePort(t, pconfig.ListenerConfig, pconfig.ListenerCC)
+	ctx := context.Background()
+	if _, err := m.AddService(ctx, NewService{Name: "jarvis-web", URL: "http://web:7722"}); err != nil {
+		t.Fatal(err)
+	}
+	es, err := m.Services(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]ServiceEntry{}
+	for _, e := range es {
+		byName[e.Name] = e
+	}
+	for name, want := range map[string][2]string{
+		"jarvis-command-center": {"http://localhost:7700/cc", "/cc"},
+		"jarvis-config-service": {"http://localhost:7700", ""},
+		"jarvis-web":            {"http://web:7722", ""},
+	} {
+		if e := byName[name]; e.URL != want[0] || e.Path != want[1] {
+			t.Errorf("%s: url %q path %q, want %q %q", name, e.URL, e.Path, want[0], want[1])
+		}
+	}
+}

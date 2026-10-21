@@ -15,6 +15,7 @@ import (
 	authmod "github.com/alexberardi/jarvis-server/internal/modules/auth"
 	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
 	llmmod "github.com/alexberardi/jarvis-server/internal/modules/llm"
+	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -479,6 +480,10 @@ type listenerInfo struct {
 	Name   string `json:"name"`
 	Port   int    `json:"port"`
 	Served bool   `json:"served"`
+	// Path is the prefix the listener is served under on the config port ("" for config and
+	// admin); OwnPort is false when single-port mode leaves it only there.
+	Path    string `json:"path"`
+	OwnPort bool   `json:"own_port"`
 }
 
 // handleSystemInfo is GET /api/system/info: the Fastify shape (hostname, platform, release,
@@ -489,7 +494,9 @@ func (m *Module) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	var listeners []listenerInfo
 	for name, port := range cfg.Ports {
 		served := m.deps.Handler != nil && m.deps.Handler(name) != nil
-		listeners = append(listeners, listenerInfo{Name: name, Port: port, Served: served})
+		path := pconfig.Paths[name]
+		listeners = append(listeners, listenerInfo{Name: name, Port: port, Served: served,
+			Path: path, OwnPort: !cfg.SinglePort || path == ""})
 	}
 	slices.SortFunc(listeners, func(a, b listenerInfo) int {
 		if a.Port != b.Port {

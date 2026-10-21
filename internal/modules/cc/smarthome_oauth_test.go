@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
+	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
 // fakeTokenServer is a provider token endpoint recording each exchange form.
@@ -363,5 +364,54 @@ func TestOAuthHelpers(t *testing.T) {
 	}
 	if _, err := base64.URLEncoding.DecodeString(enc); err != nil {
 		t.Fatal("not padded base64url", enc)
+	}
+}
+
+// Through the config port's /cc mount (single port), the redirect_uri and the callback's
+// exchange carry the prefix, so the provider sends the browser back under it.
+func TestOAuthUnderMountPrefix(t *testing.T) {
+	ha := newTokenServer(t, false)
+	e := oauthEnv(t, nil)
+	mounted := httptest.NewServer(httpx.Mount("/cc", e.srv.Config.Handler))
+	defer mounted.Close()
+	do := func(method, path string, body any, h hdr) *http.Response {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(method, mounted.URL+path, strings.NewReader(string(raw)))
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+		c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	tok := e.auth.addUser(1, "hh1", authn.RoleMember)
+	e.createNode("n1", "hh1")
+	body := map[string]any{"provider": "home_assistant", "node_id": "n1", "provider_base_url": ha.URL + "/",
+		"auth_config": map[string]any{"provider": "home_assistant", "client_id": "ignored", "keys": []string{"HA_TOKEN"},
+			"authorize_path": "/auth/authorize", "exchange_path": "/auth/token"}}
+	h := bearer(tok)
+	h["X-Forwarded-Host"] = "jarvis.lan:7700"
+	res := do("POST", "/cc/api/v0/oauth/sessions", body, h)
+	defer res.Body.Close()
+	var r map[string]any
+	json.NewDecoder(res.Body).Decode(&r)
+	if res.StatusCode != 201 {
+		t.Fatal(res.StatusCode, r)
+	}
+	_, q := query(t, r["authorize_url"].(string))
+	if q.Get("redirect_uri") != "http://jarvis.lan:7700/cc/api/v0/oauth/callback" || q.Get("client_id") != "http://jarvis.lan:7700/cc" {
+		t.Fatal(r["authorize_url"])
+	}
+	cb := do("GET", "/cc/api/v0/oauth/callback?code=abc&state="+url.QueryEscape(q.Get("state")), nil, hdr{"X-Forwarded-Host": "jarvis.lan:7700"})
+	cb.Body.Close()
+	if cb.StatusCode != 302 {
+		t.Fatal(cb.StatusCode)
+	}
+	if f := ha.last(); f.Get("redirect_uri") != "http://jarvis.lan:7700/cc/api/v0/oauth/callback" {
+		t.Fatal(f)
 	}
 }

@@ -6,14 +6,18 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
+	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
 func TestNodeURLs(t *testing.T) {
 	cfg := config.Config{Ports: map[string]int{config.ListenerCC: 17703, config.ListenerConfig: 17700}}
 	lan := func() string { return "10.0.0.20" }
 	none := func() string { return "" }
+	singlePort := cfg
+	singlePort.SinglePort = true
 	cases := []struct {
 		name, host, remote, proto string
+		prefix                    string // the mount prefix on the config port
 		tls                       bool
 		lan                       func() string
 		cfg                       config.Config
@@ -52,11 +56,20 @@ func TestNodeURLs(t *testing.T) {
 		{name: "tls", host: "jarvis.example.io:7703", tls: true, lan: lan,
 			wantCC: "https://jarvis.example.io:7703", wantConfig: "https://jarvis.example.io:7700"},
 		{name: "empty host", host: "", lan: lan},
+		// Through the config port's mount (single port): the CC URL keeps the prefix.
+		{name: "mounted lan ip", host: "192.168.1.5:7700", prefix: "/cc", lan: lan,
+			wantCC: "http://192.168.1.5:7700/cc", wantConfig: "http://192.168.1.5:7700"},
+		// Loopback on a single-port server: the LAN address, the config port and /cc.
+		{name: "loopback single port", host: "localhost:7700", prefix: "/cc", lan: lan, cfg: singlePort,
+			wantCC: "http://10.0.0.20:17700/cc", wantConfig: "http://10.0.0.20:17700"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := httptest.NewRequest("POST", "/api/v0/provisioning/token", nil)
 			r.Host = c.host
+			if c.prefix != "" {
+				r = httpx.WithMountPrefix(r, c.prefix)
+			}
 			if c.remote != "" {
 				r.RemoteAddr = c.remote
 			}

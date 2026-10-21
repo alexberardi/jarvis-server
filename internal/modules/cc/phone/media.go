@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
+	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
 // The provider's Media Streams WebSocket (gateway main.py /media/{token} and
@@ -58,11 +59,7 @@ func (s *Service) handleMediaWS(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	reqURL := strings.TrimRight(s.Options.PublicURL, "/") + r.URL.Path
-	if s.Options.PublicURL == "" {
-		reqURL = "https://" + r.Host + r.URL.Path
-	}
-	if !live.ValidateWSSignature(key, reqURL, r.Header.Get("X-Twilio-Signature")) {
+	if !live.ValidateWSSignature(key, s.signatureURL(r), r.Header.Get("X-Twilio-Signature")) {
 		s.log().Warn("phone: rejected media stream: bad signature", "session", pending.SessionID)
 		detail(w, http.StatusForbidden, "Forbidden")
 		return
@@ -238,4 +235,14 @@ func (m *mediaSession) awaitPlayback() {
 			return
 		}
 	}
+}
+
+// signatureURL is the URL Twilio requested and signed: the public base the stream URL was
+// built from (on a single-port server it ends in /cc), else this host plus the mount prefix
+// the request came in under.
+func (s *Service) signatureURL(r *http.Request) string {
+	if s.Options.PublicURL != "" {
+		return strings.TrimRight(s.Options.PublicURL, "/") + r.URL.Path
+	}
+	return "https://" + r.Host + httpx.MountPrefix(r) + r.URL.Path
 }
