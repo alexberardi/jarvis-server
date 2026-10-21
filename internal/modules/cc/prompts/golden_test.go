@@ -166,6 +166,12 @@ func TestG1PromptsGolden(t *testing.T) {
 			// The fixture is the legacy ToolBuilder.build output; what the server sends
 			// (NativeTools) is that payload with the Jarvis extensions stripped (D8, 02.Q7).
 			want := toTools(og(fx, "native_tools"))
+			built := buildTools(tools, nativeBuild)
+			parts := make([]string, len(built))
+			for i, bt := range built {
+				parts[i] = pyjson.Dumps(bt, false)
+			}
+			goldenDump(t, map[string]string{"file": file, "native_tools": "[" + strings.Join(parts, ", ") + "]"})
 			for _, c := range []struct {
 				what      string
 				got, want []Tool

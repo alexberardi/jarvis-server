@@ -89,17 +89,17 @@
    "type": "function",
    "function": {
     "name": "set_timer",
-    "description": "Start a countdown timer & announce it when done (e.g. <5 min> tea).",
+    "description": "Countdown timer for a length of time ('5 minutes', 'an hour'). Not for a clock time, date or alarm: use reminder.",
     "parameters": {
      "type": "object",
      "properties": {
       "duration_seconds": {
        "type": "integer",
-       "description": "Length in seconds"
+       "description": "Total seconds"
       },
       "label": {
        "type": "string",
-       "description": "Optional name — e.g. “pasta” or 'café'"
+       "description": "What it's for, e.g. 'pasta'"
       }
      },
      "required": [

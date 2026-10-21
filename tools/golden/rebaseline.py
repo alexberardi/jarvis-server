@@ -4,7 +4,7 @@
     JARVIS_GOLDEN_DUMP=/tmp/g.jsonl go test -run 'TestG1PromptsGolden|TestPerTurnBlocksGolden' ./internal/modules/cc/prompts/
     tools/golden/rebaseline.py /tmp/g.jsonl
 
-Rewrites only each fixture's "system_prompt" and _blocks.json's blocks, keeping the files'
+Rewrites only each fixture's "system_prompt" (and "native_tools" for native-mode fixtures) and _blocks.json's blocks, keeping the files'
 format (json.dump indent=1, non-ASCII as is). Review the diff before committing.
 """
 import json
@@ -18,13 +18,15 @@ for r in rows:
     if r["file"] == "_blocks.json":
         blocks[r["block"]] = r["value"]
     else:
-        files[r["file"]] = r["system_prompt"]
+        files.setdefault(r["file"], {}).update(
+            {k: (json.loads(v) if k == "native_tools" else v) for k, v in r.items() if k != "file"})
 changed = 0
-for name, prompt in files.items():
+for name, fields in files.items():
     path = os.path.join(DIR, name)
     d = json.load(open(path))
-    if d["system_prompt"] != prompt:
-        d["system_prompt"] = prompt
+    new = {k: v for k, v in fields.items() if d.get(k) != v}
+    if new:
+        d.update(new)
         with open(path, "w") as f:
             json.dump(d, f, indent=1, ensure_ascii=False)
             f.write("\n")
