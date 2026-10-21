@@ -42,10 +42,15 @@ name: release
 # in SHA256SUMS: it runs as root on the Pi, so someone who trusts the key can check the script
 # before running it. The install-pi job runs the stamped copy against this run's own files.
 #
+# The container image (plan P4: Unraid, Docker) is built in the container job from this run's
+# linux-amd64 jarvisd archive with scripts/packaging/container/Dockerfile, checked with
+# scripts/container-check.sh, and saved as an artifact; publish pushes it to
+# ghcr.io/alexberardi/jarvisd:<version> (and :latest when the version has no '-').
+#
 # Jobs: build (all 8 binaries and the two launchers) → sign-macos (Developer ID + notarization
 # of the darwin jarvisd, the two apps and the two dmgs) and windows-installers (Inno Setup) →
 # package (archives, .debs, install-pi.sh, SHA256SUMS, minisign) → verify (each OS) and
-# install-agent, install-pi → publish. Signing
+# install-agent, install-pi, container → publish. Signing
 # happens before packaging so SHA256SUMS and its signature cover the notarized files.
 
 on:
@@ -62,6 +67,8 @@ on:
       - scripts/install-pi-check.sh
       - scripts/packaging/pi/**
       - scripts/testdata/install-pi.golden
+      - scripts/packaging/container/**
+      - scripts/container-check.sh
       - scripts/build-debs.sh
       - scripts/packaging/deb/**
       - scripts/build-windows-installers.sh
@@ -815,12 +822,54 @@ jobs:
             scripts/install-pi-check.sh dist "$VERSION" valid
           fi
 
+  # The container image from this run's linux-amd64 archive. container-check.sh builds its own
+  # jarvisd:check and removes that tag on exit, so the image is built first as jarvisd:release
+  # with the same command (the check's build reuses its layers), and that tag is what is saved.
+  container:
+    needs: [build, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvisd-${{ needs.build.outputs.version }}
+          path: dist
+      - name: shellcheck
+        run: shellcheck scripts/container-check.sh scripts/packaging/container/entrypoint.sh
+      - name: Build the image
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          archive="jarvisd-$VERSION-linux-amd64.tar.gz"
+          ctx=$(mktemp -d)
+          cp "dist/$archive" scripts/packaging/container/entrypoint.sh "$ctx/"
+          docker build -t jarvisd:release -f scripts/packaging/container/Dockerfile \
+            --build-arg ARCHIVE="$archive" --build-arg VERSION="$VERSION" "$ctx"
+          rm -rf "$ctx"
+          docker inspect -f '{{.Id}}' jarvisd:release > image-id
+      - name: Check the image
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          scripts/container-check.sh dist "$VERSION"
+          [ "$(docker inspect -f '{{.Id}}' jarvisd:release)" = "$(cat image-id)" ]
+      - name: Save the image
+        run: docker save jarvisd:release | gzip > jarvisd-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: container-${{ needs.build.outputs.version }}
+          path: jarvisd-image.tar.gz
+          if-no-files-found: error
+
   publish:
-    needs: [build, verify, install-agent, install-pi]
+    needs: [build, verify, install-agent, install-pi, container]
     if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -834,5 +883,24 @@ jobs:
           set -euo pipefail
           pre=""; case "$VERSION" in *-*) pre="--prerelease";; esac
           gh release create "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --title "jarvisd $VERSION" \
-            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. macOS: open \`Jarvis-Automation-Server-<version>.dmg\` (the server) or \`Jarvis-Automation-Agent-<version>.dmg\` (the desktop agent), drag the app to Applications and open it (both are notarized). Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Windows: \`Jarvis-Automation-Server-Setup-<version>.exe\` installs the server, \`Jarvis-Automation-Agent-Setup-<version>.exe\` the desktop agent (for you only, no administrator needed). Windows may say *Windows protected your PC*: Jarvis Automation is safe and open source, and Windows shows this for any installer that isn't signed with a paid code-signing certificate, which we don't buy. Click **More info**, then **Run anyway**. To check the file first, compare its SHA-256 with SHA256SUMS. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`. Raspberry Pi voice node (64-bit Raspberry Pi OS, ReSpeaker 2-mics HAT): \`curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-pi.sh && sudo sh install-pi.sh\` (install-pi.sh is listed in SHA256SUMS, so it can be checked first)." \
+            --notes "Single-binary Jarvis Automation server (jarvisd) and desktop agent (jarvis-agent). Download the archive for your platform, verify it against SHA256SUMS (signed: SHA256SUMS.minisig, minisign key RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L), and run \`jarvisd serve\`. The macOS jarvisd binary is signed with a Developer ID and notarized. macOS: open \`Jarvis-Automation-Server-<version>.dmg\` (the server) or \`Jarvis-Automation-Agent-<version>.dmg\` (the desktop agent), drag the app to Applications and open it (both are notarized). Existing installs: \`jarvisd upgrade\`. Run \`jarvisd doctor\` to check that nodes and phones can reach it. Debian/Ubuntu: open \`jarvis-automation-server_<version>_<arch>.deb\` (the server) or \`jarvis-automation-agent_<version>_<arch>.deb\` (the desktop agent) to install it with App Center or Software. Windows: \`Jarvis-Automation-Server-Setup-<version>.exe\` installs the server, \`Jarvis-Automation-Agent-Setup-<version>.exe\` the desktop agent (for you only, no administrator needed). Windows may say *Windows protected your PC*: Jarvis Automation is safe and open source, and Windows shows this for any installer that isn't signed with a paid code-signing certificate, which we don't buy. Click **More info**, then **Run anyway**. To check the file first, compare its SHA-256 with SHA256SUMS. Other Linux desktop agents: \`curl -fsSLo install-agent.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-agent.sh && sh install-agent.sh\`. Raspberry Pi voice node (64-bit Raspberry Pi OS, ReSpeaker 2-mics HAT): \`curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/${VERSION}/install-pi.sh && sudo sh install-pi.sh\` (install-pi.sh is listed in SHA256SUMS, so it can be checked first). Container (Unraid, Docker): \`ghcr.io/alexberardi/jarvisd:${VERSION}\`." \
             $pre
+      - uses: actions/download-artifact@v4
+        with:
+          name: container-${{ needs.build.outputs.version }}
+          path: image
+      - name: Push the image to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          gunzip -c image/jarvisd-image.tar.gz | docker load
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          img=ghcr.io/alexberardi/jarvisd
+          docker tag jarvisd:release "$img:$VERSION"
+          docker push "$img:$VERSION"
+          case "$VERSION" in
+            *-*) ;;
+            *) docker tag jarvisd:release "$img:latest"; docker push "$img:latest" ;;
+          esac
