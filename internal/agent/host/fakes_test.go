@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 	"github.com/alexberardi/jarvis-server/internal/agent/x11"
 )
 
@@ -197,7 +198,7 @@ func (f *fakeX) Iconify(_ context.Context, id uint32) error     { return f.op("i
 
 func linuxEmpty() *fakeSys { return &fakeSys{bins: map[string]bool{}, env: map[string]string{}} }
 
-// macFull is a Mac with Accessibility granted and one window open.
+// macFull is a Mac with osascript and open(1): volume and open. Windows come from macAX.
 func macFull() *fakeSys {
 	vol := 40
 	return &fakeSys{
@@ -211,19 +212,74 @@ func macFull() *fakeSys {
 			case strings.HasPrefix(script, "set volume output volume"):
 				_, _ = fmt.Sscanf(script, "set volume output volume %d", &vol)
 				return "", nil
-			case script == accessProbe:
-				return "Terminal", nil
-			case strings.Contains(script, "AXMinimized\" of w\n") || strings.Contains(script, "set out to"):
-				return macWinID + "\tSafari\tApple\tfalse\n", nil
-			case strings.Contains(script, "unix id is 4242"):
-				if strings.Contains(script, "< 1 then") {
-					return "ok", nil
-				}
-				return "missing", nil
 			}
-			return "missing", nil
+			return "", nil
 		},
 	}
+}
+
+// macAX is Accessibility granted with one window open (macWinID, Safari's).
+func macAX(s *fakeSys) *fakeAX {
+	return &fakeAX{sys: s, trusted: true, apps: []ax.App{{PID: 4242, Name: "Safari"}},
+		windows: map[int][]ax.AppWindow{4242: {{Title: "Apple"}}}}
+}
+
+// macDesktop is a Darwin backend on macFull and macAX.
+func macDesktop() (*Darwin, *fakeSys, *fakeAX) {
+	s := macFull()
+	a := macAX(s)
+	return &Darwin{Sys: s, AX: a}, s, a
+}
+
+// fakeAX is the Accessibility window control, recording "ax <op> ..." among the fakeSys's
+// commands. An app in hang blocks AppWindows until its channel is closed: one that never
+// answers.
+type fakeAX struct {
+	sys     *fakeSys
+	trusted bool
+	apps    []ax.App
+	windows map[int][]ax.AppWindow
+	errs    map[int]error // AppWindows' error per pid
+	hang    map[int]chan struct{}
+}
+
+func (f *fakeAX) rec(line string) {
+	f.sys.record("ax", line)
+	f.sys.mu.Lock()
+	f.sys.runs = append(f.sys.runs, "ax "+line)
+	f.sys.mu.Unlock()
+}
+
+func (f *fakeAX) Trusted() bool { f.rec("trusted"); return f.trusted }
+
+func (f *fakeAX) Apps() ([]ax.App, error) {
+	f.rec("apps")
+	if !f.trusted {
+		return nil, ax.ErrNotTrusted
+	}
+	return f.apps, nil
+}
+
+func (f *fakeAX) AppWindows(pid int) ([]ax.AppWindow, error) {
+	f.rec(fmt.Sprintf("windows %d", pid))
+	if ch, ok := f.hang[pid]; ok {
+		<-ch
+	}
+	if err := f.errs[pid]; err != nil {
+		return nil, err
+	}
+	return f.windows[pid], nil
+}
+
+func (f *fakeAX) Act(pid, index int, action string) error {
+	f.rec(fmt.Sprintf("%s %d/%d", action, pid, index))
+	if !f.trusted {
+		return ax.ErrNotTrusted
+	}
+	if index < 1 || index > len(f.windows[pid]) {
+		return ax.ErrNoWindow
+	}
+	return nil
 }
 
 func macEmpty() *fakeSys { return &fakeSys{bins: map[string]bool{}, env: map[string]string{}} }

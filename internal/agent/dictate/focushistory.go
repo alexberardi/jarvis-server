@@ -102,7 +102,7 @@ for (var i = 0; i < l.count; i++) {
 out.join(' ');`
 
 // MacFrontToBack is macOS's focus history: apps in front-to-back order of their windows, and
-// within an app System Events' own order (window 1 is its frontmost). A window id is pid/index.
+// within an app its AXWindows order (window 1 is its frontmost). A window id is pid/index.
 func MacFrontToBack(x Exec) func(context.Context, []Window) bool {
 	return func(ctx context.Context, ws []Window) bool {
 		out, err := x.Run(ctx, Cmd{Name: "osascript", Args: []string{"-l", "JavaScript", "-e", macFrontToBack}})

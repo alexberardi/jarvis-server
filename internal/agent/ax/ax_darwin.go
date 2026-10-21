@@ -406,6 +406,7 @@ func recorded(e elem) *Recorded {
 var (
 	appKitOnce sync.Once
 	runningApp objc.ID // NSRunningApplication; 0 when AppKit didn't load
+	workspace  objc.ID // NSWorkspace
 	poolPush   func() uintptr
 	poolPop    func(uintptr)
 	bundleIDs  sync.Map
@@ -413,11 +414,8 @@ var (
 
 func forgetApps() { bundleIDs.Clear() }
 
-// bundleID is the bundle id of the app with this pid ("" when it has none), remembered per pid.
-func bundleID(pid int32) string {
-	if v, ok := bundleIDs.Load(pid); ok {
-		return v.(string)
-	}
+// appKit loads AppKit and the autorelease pool calls once; false when they didn't load.
+func appKit() bool {
 	appKitOnce.Do(func() {
 		lobjc, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
 		if err != nil {
@@ -427,9 +425,18 @@ func bundleID(pid int32) string {
 			purego.RegisterLibFunc(&poolPush, lobjc, "objc_autoreleasePoolPush")
 			purego.RegisterLibFunc(&poolPop, lobjc, "objc_autoreleasePoolPop")
 			runningApp = objc.ID(objc.GetClass("NSRunningApplication"))
+			workspace = objc.ID(objc.GetClass("NSWorkspace"))
 		}
 	})
-	if runningApp == 0 {
+	return runningApp != 0 && workspace != 0
+}
+
+// bundleID is the bundle id of the app with this pid ("" when it has none), remembered per pid.
+func bundleID(pid int32) string {
+	if v, ok := bundleIDs.Load(pid); ok {
+		return v.(string)
+	}
+	if !appKit() {
 		return ""
 	}
 	// runningApplicationWithProcessIdentifier: returns an autoreleased object, and a Go thread
