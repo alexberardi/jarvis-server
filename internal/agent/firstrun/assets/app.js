@@ -171,7 +171,8 @@ function renderPermissions(perms, os) {
       action.append(b);
     } else {
       action.className = "muted";
-      action.textContent = "Allowed";
+      // macOS gives the running agent this grant only when it starts again.
+      action.textContent = p.restart ? "Granted — restart Jarvis to apply" : "Allowed";
     }
     const why = document.createElement("span");
     why.className = "why";
@@ -202,6 +203,16 @@ function renderVoice(s) {
   show("mic-block", s.mic);
 }
 
+// Opened again once set up (the app reopened while Jarvis runs): say it is running, with links
+// to its settings on this page.
+function renderRunning(s, joined) {
+  const running = joined && s.running;
+  $("title").textContent = running ? "Jarvis Automation" : "Set up Jarvis Automation";
+  show("running", running);
+  show("running-perms", !$("perm-step").hidden);
+  show("running-voice", !$("voice-step").hidden);
+}
+
 function numberSteps() {
   let n = 0;
   for (const sec of document.querySelectorAll("#steps > section.card")) {
@@ -221,6 +232,7 @@ function render(s) {
   renderPermissions(s.permissions, s.os);
   renderPortal(s.portal);
   renderVoice(s);
+  renderRunning(s, joined);
   show("done-row", joined);
   show("remove-open", s.can_remove && $("remove-confirm").hidden);
   numberSteps();

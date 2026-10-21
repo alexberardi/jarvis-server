@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,13 +40,114 @@ func TestNeedsTypingPortal(t *testing.T) {
 
 func TestPermissionCmdUsage(t *testing.T) {
 	var b bytes.Buffer
-	if err := permissionCmd([]string{"microphone"}, &b); err == nil {
+	if err := permissionCmd([]string{"automation"}, &b); err == nil {
 		t.Fatal("accepted another permission")
 	}
-	for _, name := range []string{"screen", "input-monitoring"} {
+	for _, name := range []string{"accessibility", "microphone", "screen", "input-monitoring"} {
 		b.Reset()
 		if err := permissionCmd([]string{name}, &b); err != nil || strings.TrimSpace(b.String()) == "" {
 			t.Fatalf("%s: %q %v", name, b.String(), err)
+		}
+	}
+}
+
+func TestParseStatus(t *testing.T) {
+	for out, want := range map[string]string{
+		"granted\n": firstrun.Granted,
+		"denied\n":  firstrun.Denied,
+		"not_asked\nRecording the desktop needs…\n": firstrun.NotAsked,
+		"":      firstrun.Unknown,
+		"yes\n": firstrun.Unknown,
+	} {
+		if got := parseStatus(out); got != want {
+			t.Errorf("%q: %q, want %q", out, got, want)
+		}
+	}
+}
+
+// The setup page reads every grant from a fresh process on each poll (a process keeps what it
+// had at its start), so one granted while the page is open turns Granted on the next poll; it
+// says "restart to apply" until the running agent holds it itself.
+func TestMacPermissionsFollowAGrantWhileOpen(t *testing.T) {
+	fresh := map[string]string{"accessibility": firstrun.NotAsked, "microphone": firstrun.NotAsked,
+		"screen": firstrun.NotAsked, "input-monitoring": firstrun.NotAsked}
+	var asked []string
+	agent := map[string]string{"accessibility": firstrun.NotAsked, "microphone": firstrun.NotAsked}
+	running := true
+	perms := macPermissions(func(name string) string { asked = append(asked, name); return fresh[name] },
+		func() map[string]string {
+			if !running {
+				return nil
+			}
+			return agent
+		})
+	byID := map[string]firstrun.Permission{}
+	for _, p := range perms {
+		byID[p.ID] = p
+	}
+	for _, id := range []string{"accessibility", "microphone", "screen", "input-monitoring"} {
+		p := byID[id]
+		if p.Status == nil || p.NeedsRestart == nil {
+			t.Fatalf("%s: no fresh status or restart check", id)
+		}
+		if st := p.Status(); st != firstrun.NotAsked {
+			t.Fatalf("%s before: %q", id, st)
+		}
+	}
+	if !slices.Equal(asked, []string{"accessibility", "microphone", "screen", "input-monitoring"}) {
+		t.Fatalf("asked a fresh process for %q", asked)
+	}
+
+	// Granted in System Settings between two polls.
+	fresh["accessibility"], fresh["microphone"] = firstrun.Granted, firstrun.Denied
+	if st := byID["accessibility"].Status(); st != firstrun.Granted {
+		t.Fatalf("accessibility after the grant: %q", st)
+	}
+	if st := byID["microphone"].Status(); st != firstrun.Denied {
+		t.Fatalf("microphone after refusing: %q", st)
+	}
+	if !byID["accessibility"].NeedsRestart() {
+		t.Fatal("the running agent doesn't hold it yet: no restart asked")
+	}
+	agent["accessibility"] = firstrun.Granted // restarted
+	if byID["accessibility"].NeedsRestart() {
+		t.Fatal("restart asked of an agent that holds it")
+	}
+	running = false // or one too old to say
+	if byID["screen"].NeedsRestart() {
+		t.Fatal("restart asked with no agent answering")
+	}
+}
+
+// The running agent answers what it holds itself, which the setup page compares with a fresh
+// process's answer.
+func TestControlSocketAnswersTheAgentsPermissions(t *testing.T) {
+	checks := map[string]func() string{"screen": func() string { return firstrun.NotAsked },
+		"accessibility": func() string { return firstrun.Granted }}
+	if got := ownPermissions(checks); got != "accessibility=granted screen=not_asked" {
+		t.Fatalf("%q", got)
+	}
+	dir, err := os.MkdirTemp("", "jvp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "c.sock")
+	dial := func() (net.Conn, error) { return browser.Dial(path) }
+	if m := agentPermissions(dial); m != nil {
+		t.Fatalf("no agent: %v", m)
+	}
+	ln, err := browser.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return nil }, func() error { return nil }, nil, nil, nil)
+	defer func() { cancel(); wait() }()
+	m := agentPermissions(dial)
+	for name := range freshChecks {
+		if m[name] == "" {
+			t.Fatalf("%s missing from %v", name, m)
 		}
 	}
 }

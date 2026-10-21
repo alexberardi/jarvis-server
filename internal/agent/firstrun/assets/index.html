@@ -15,10 +15,20 @@
   <header class="top">
     <img src="icon.png" alt="" width="40" height="40">
     <div>
-      <h1>Set up Jarvis Automation</h1>
+      <h1 id="title">Set up Jarvis Automation</h1>
       <p class="sub" id="computer">on this computer</p>
     </div>
   </header>
+
+  <nav class="card running" id="running" hidden aria-label="Jarvis is running">
+    <p class="ok-line"><span class="tick" aria-hidden="true">✓</span> Jarvis is running on this computer. Its settings are below.</p>
+    <p class="inline">
+      <a href="#perm-step" id="running-perms">Permissions</a>
+      <a href="#browser-step">Browser</a>
+      <a href="#voice-step" id="running-voice">Voice and microphone</a>
+      <a href="#server-step">Server and sign-in</a>
+    </p>
+  </nav>
 
   <noscript><p class="card">This page needs JavaScript turned on.</p></noscript>
 

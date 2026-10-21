@@ -51,9 +51,14 @@ func TestAppEventsShowThePill(t *testing.T) {
 	var p runningPill
 	p.Attach(func() { got <- struct{}{} })
 	activity := &computer.Activity{}
-	ev := appEvents(&p, activity, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	windows := 0
+	ev := appEvents(&p, func() { windows++ }, activity, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ev.Reopen()
 	<-got
+	// Reopening the app (Dock, Finder, Spotlight) also shows a window: the setup page.
+	if windows != 1 {
+		t.Fatalf("reopen opened %d windows", windows)
+	}
 	for _, u := range []string{"jarvis-agent://start", "jarvis-agent:start", "jarvis-agent://start/"} {
 		ev.OpenURL(u)
 		select {
@@ -61,6 +66,9 @@ func TestAppEventsShowThePill(t *testing.T) {
 		default:
 			t.Fatalf("%s: no pill", u)
 		}
+	}
+	if windows != 1 {
+		t.Fatalf("a start link opened a window (%d)", windows)
 	}
 	for _, u := range []string{"jarvis-agent://start?x=1", "jarvis-agent://quit", "https://example.com"} {
 		ev.OpenURL(u)
@@ -80,6 +88,10 @@ func TestAppEventsShowThePill(t *testing.T) {
 	if k, _ := activity.Status(); k != computer.Idle {
 		t.Fatalf("after the stop hotkey the activity is %q", k)
 	}
+
+	// No setup page to open (not a computer): only the pill, no panic.
+	appEvents(&p, nil, activity, slog.New(slog.DiscardHandler)).Reopen()
+	<-got
 }
 
 // Signed out: only node.json goes; agent.json and apps.json stay; the setup page opens; and the
