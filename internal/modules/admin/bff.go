@@ -116,6 +116,10 @@ func (m *Module) mountBFF(mux *http.ServeMux, _ module.Deps) {
 	// AD3b: the wizard's Voice step.
 	su("GET /api/tts/voices", m.handleVoices)
 	su("POST /api/tts/sample", m.handleVoiceSample)
+	// The Phone page (docs/cc/phone-sip.md §6): SIP status, self-tests, the SIP trace.
+	su("GET /api/phone/sip", m.handleSIPStatus)
+	su("POST /api/phone/sip/{port}/tests/{test}", m.handleSIPTest)
+	su("GET /api/phone/sip/trace", m.handleSIPTrace)
 	// Add-ons and the wizard's agent step (install plan 3.1): the desktop agent for this
 	// server's version, verified against the signed SHA256SUMS before a byte is sent. Any
 	// signed-in user: the file is a public release asset; what the tier guards is that only

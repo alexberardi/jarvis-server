@@ -157,6 +157,31 @@ type Status struct {
 	Hint         string // what the user can do about it (plain words)
 	AuthFailures int    // consecutive, since the last success
 	Attempts     int    // REGISTER attempts (each may be two requests: challenge and answer)
+
+	// LastRegister is when the last REGISTER attempt ended and RegisterRTT how long it took
+	// (the challenge and the answer); LastOptions and OptionsRTT the same for the last
+	// keepalive OPTIONS that was answered.
+	LastRegister time.Time
+	RegisterRTT  time.Duration
+	LastOptions  time.Time
+	OptionsRTT   time.Duration
+	// ActiveCalls is the calls under way (ringing or answered).
+	ActiveCalls int
+	// LastInbound is the last inbound INVITE the PBX sent (refused until inbound calls are
+	// built); its At is zero when none came.
+	LastInbound InboundInvite
+}
+
+// InboundInvite is what an inbound INVITE said: who calls and where the PBX would send audio
+// from. The inbound watch self-test shows it.
+type InboundInvite struct {
+	At         time.Time
+	Caller     string   // the number: P-Asserted-Identity's user, else From's
+	CallerName string   // the display name, if any
+	To         string   // the dialed user (our extension, or the DID the PBX passes on)
+	Media      string   // the SDP's audio address (ip:port), "" without SDP
+	Codecs     []string // the audio codecs offered, in order
+	Response   int      // what we answered
 }
 
 // HintBlocked is what a stopped registration says: the PBX refused our password, or its

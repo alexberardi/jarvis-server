@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -48,7 +49,7 @@ const sipReconcileEvery = time.Minute
 
 func sipDefinitions() []settings.Definition {
 	port := func(v any) error {
-		n, ok := v.(int64)
+		n, ok := wholeNumber(v)
 		if !ok || n < 1 || n > 65535 {
 			return fmt.Errorf("a port is 1-65535")
 		}
@@ -77,6 +78,22 @@ func sipDefinitions() []settings.Definition {
 		{Key: SettingSIPDialPrefix, Category: "phone_calls", Type: settings.String, Default: "", Validate: validDialPrefix,
 			Description: "SIP: digits dialed before every number, for PBXs whose outbound route needs one (e.g. 9)."},
 	}
+}
+
+// wholeNumber reads an integer setting value as Go code sets it (int64, int) and as the admin's
+// settings API hands it over (a JSON number, float64).
+func wholeNumber(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		if n == math.Trunc(n) && math.Abs(n) < 1<<53 {
+			return int64(n), true
+		}
+	}
+	return 0, false
 }
 
 func oneOf(opts ...string) func(any) error {
@@ -253,6 +270,10 @@ func (s *Service) readSIPAccount(ctx context.Context, sc settings.Scope) (SIPAcc
 type sipUA interface {
 	Ready() error
 	Dial(ctx context.Context, number string) (sipCall, error)
+	// DialFeature calls a self-test feature code (*43, *65): never reachable from Dial.
+	DialFeature(ctx context.Context, code string) (sipCall, error)
+	// Check re-registers now and pings the registrar (the connection self-test).
+	Check(ctx context.Context) sip.CheckResult
 	Status() sip.Status
 	Close(ctx context.Context)
 }
@@ -283,6 +304,14 @@ func (u realUA) Dial(ctx context.Context, number string) (sipCall, error) {
 	return c, nil
 }
 
+func (u realUA) DialFeature(ctx context.Context, code string) (sipCall, error) {
+	c, err := u.UA.DialFeature(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 func startRealUA(ctx context.Context, a SIPAccount, log func(sip.Config) sip.Config) (sipUA, error) {
 	cfg := a.config()
 	if log != nil {
@@ -303,9 +332,10 @@ type sipLines struct {
 }
 
 type sipLine struct {
-	acct SIPAccount
-	ua   sipUA // nil when it could not start
-	err  error // why it could not start, or why the account was not used (port clash)
+	acct  SIPAccount
+	owner string // the household whose account it is; "" for the system's
+	ua    sipUA  // nil when it could not start
+	err   error  // why it could not start, or why the account was not used (port clash)
 }
 
 // sipProvider is Provider over one SIP account's UA.
@@ -397,22 +427,25 @@ func (s *Service) SIPStatuses() []SIPStatus {
 // wantedSIP is every SIP account the settings call for: the system's when the install's
 // provider is sip, and each household's whose provider is sip. Two accounts on one local port:
 // the first (system, then by household id) gets it.
-func (s *Service) wantedSIP(ctx context.Context) map[int]SIPAccount {
-	out := map[int]SIPAccount{}
+func (s *Service) wantedSIP(ctx context.Context) (map[int]SIPAccount, map[int]string) {
+	out, owners := map[int]SIPAccount{}, map[int]string{}
 	if s.Settings == nil {
-		return out
+		return out, owners
 	}
-	add := func(a SIPAccount) {
+	add := func(a SIPAccount, owner string) {
 		if cur, ok := out[a.LocalPort]; ok && cur != a {
 			s.log().Error("phone: two SIP accounts share a local port; only the first runs",
 				"port", a.LocalPort, "running", cur.String(), "skipped", a.String())
 			return
 		}
+		if _, ok := out[a.LocalPort]; !ok {
+			owners[a.LocalPort] = owner
+		}
 		out[a.LocalPort] = a
 	}
 	if kind, err := s.providerKind(ctx, ""); err == nil && kind == ProviderSIP {
 		if a, _, err := s.sipAccount(ctx, ""); err == nil {
-			add(a)
+			add(a, "")
 		}
 	}
 	households := map[string]bool{}
@@ -434,11 +467,15 @@ func (s *Service) wantedSIP(ctx context.Context) map[int]SIPAccount {
 		if kind, err := s.providerKind(ctx, hh); err != nil || kind != ProviderSIP {
 			continue
 		}
-		if a, _, err := s.sipAccount(ctx, hh); err == nil {
-			add(a)
+		if a, source, err := s.sipAccount(ctx, hh); err == nil {
+			owner := hh
+			if source == SourceSystem {
+				owner = ""
+			}
+			add(a, owner)
 		}
 	}
-	return out
+	return out, owners
 }
 
 // reconcileSIP starts a UA for each wanted account that has none, and closes those no longer
@@ -448,7 +485,7 @@ func (s *Service) reconcileSIP(ctx context.Context) {
 	s.init()
 	s.sip.reconcile.Lock()
 	defer s.sip.reconcile.Unlock()
-	want := s.wantedSIP(ctx)
+	want, owners := s.wantedSIP(ctx)
 	s.sip.mu.Lock()
 	var stale []sipUA
 	for port, l := range s.sip.lines {
@@ -486,7 +523,7 @@ func (s *Service) reconcileSIP(ctx context.Context) {
 			s.log().Info("phone: SIP account started", "account", a.String())
 		}
 		s.sip.mu.Lock()
-		s.sip.lines[port] = &sipLine{acct: a, ua: ua, err: err}
+		s.sip.lines[port] = &sipLine{acct: a, owner: owners[port], ua: ua, err: err}
 		s.sip.mu.Unlock()
 	}
 }

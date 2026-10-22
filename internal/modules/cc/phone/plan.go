@@ -69,6 +69,9 @@ type PlanRequest struct {
 	ErrandID     string
 	ErrandStep   *int64
 	PriorContext string
+	// Number, when set, is the number to call (the SIP "call my phone" self-test): no
+	// phonebook or web search. The confirm card, caps and the call itself are as always.
+	Number string
 }
 
 // CreatePlan drafts a call plan and posts its confirm card, returning the session id. It
@@ -106,7 +109,11 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 		return "", nil
 	}
 
-	contact, score := s.resolveContact(ctx, hh, req.Business)
+	var contact *Contact
+	score := 0.0
+	if req.Number == "" {
+		contact, score = s.resolveContact(ctx, hh, req.Business)
+	}
 	resolved, lineType := "", "unknown"
 	if contact != nil {
 		if contact.DoNotCall {
@@ -129,7 +136,14 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 		numberSource = "phonebook"
 	}
 	var searchAddress, searchURL, locationWarning, resolutionNote string
-	if contact == nil {
+	if req.Number != "" {
+		n, err := NormalizeUS(req.Number)
+		if err != nil {
+			return "", err
+		}
+		resolved, numberSource = n, "you"
+	}
+	if contact == nil && req.Number == "" {
 		res := s.findBusinessNumber(ctx, req.Business, hh)
 		if res.Number != "" {
 			resolved, numberSource = res.Number, "web"
@@ -146,6 +160,9 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 	}
 	if numberSource == "phonebook" {
 		resolutionNote = "This number is from your phonebook."
+	}
+	if numberSource == "you" {
+		resolutionNote = "This is the number you entered."
 	}
 	if contact != nil && score < 95 {
 		// D40 11.Q5: make a fuzzy substitution visible; the confirm tap is the real guard.

@@ -23,8 +23,12 @@ type fakeUA struct {
 	dialed chan string
 	calls  chan *fakeCall
 
-	mu     sync.Mutex
-	closed bool
+	mu      sync.Mutex
+	closed  bool
+	status  *sip.Status
+	check   sip.CheckResult
+	checks  int
+	feature func(code string) (sipCall, error)
 }
 
 func (u *fakeUA) Ready() error { return u.ready }
@@ -36,7 +40,31 @@ func (u *fakeUA) Dial(_ context.Context, number string) (sipCall, error) {
 	return c, nil
 }
 
-func (u *fakeUA) Status() sip.Status { return sip.Status{State: sip.StateRegistered} }
+func (u *fakeUA) DialFeature(_ context.Context, code string) (sipCall, error) {
+	u.mu.Lock()
+	f := u.feature
+	u.mu.Unlock()
+	if f == nil {
+		return nil, errors.New("no feature calls in this test")
+	}
+	return f(code)
+}
+
+func (u *fakeUA) Check(context.Context) sip.CheckResult {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.checks++
+	return u.check
+}
+
+func (u *fakeUA) Status() sip.Status {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.status != nil {
+		return *u.status
+	}
+	return sip.Status{State: sip.StateRegistered}
+}
 
 func (u *fakeUA) Close(context.Context) {
 	u.mu.Lock()
@@ -420,3 +448,21 @@ func TestSIPAccountsFollowTheSettingsAndUnregisterOnShutdown(t *testing.T) {
 }
 
 func fmtV(a SIPAccount) string { return strings.TrimSpace(strings.Join([]string{a.GoString()}, "")) }
+
+// The admin's settings API hands a validator the JSON number (float64): a port set from the
+// Settings page must pass the same check as one set in Go.
+func TestSIPPortSettingsAcceptJSONNumbers(t *testing.T) {
+	e := newEnv(t)
+	for _, key := range []string{SettingSIPPort, SettingSIPLocalPort} {
+		for _, ok := range []any{int64(5060), float64(5062), 5070} {
+			if err := e.s.Settings.Validate(key, ok); err != nil {
+				t.Errorf("%s=%v (%T) refused: %v", key, ok, ok, err)
+			}
+		}
+		for _, bad := range []any{float64(5060.5), float64(70000), float64(0), "5060", true} {
+			if err := e.s.Settings.Validate(key, bad); !errors.Is(err, settings.ErrInvalidValue) {
+				t.Errorf("%s=%v (%T) accepted: %v", key, bad, bad, err)
+			}
+		}
+	}
+}
