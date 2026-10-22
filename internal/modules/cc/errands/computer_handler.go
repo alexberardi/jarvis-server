@@ -170,7 +170,13 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		t.ApprovedReason = "within your " + dollars(limit) + " spend limit"
 		out = run(t)
 	}
-	s.log().Info("errands: step (computer)", "run", out.RunID, "state", out.State, "rounds", out.Rounds)
+	if out.State == computer.StateFailed {
+		// The card is the only other place the reason went (#484).
+		s.log().Warn("errands: step (computer)", "run", out.RunID, "state", out.State, "rounds", out.Rounds,
+			"summary", out.Summary)
+	} else {
+		s.log().Info("errands: step (computer)", "run", out.RunID, "state", out.State, "rounds", out.Rounds)
+	}
 	switch out.State {
 	case computer.StateDone:
 		msg := strings.TrimSpace(firstNonEmpty(out.Summary, "Done.") + " " + note)
