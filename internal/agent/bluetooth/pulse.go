@@ -172,7 +172,15 @@ func (n *Node) routeOutput(ctx context.Context, mac string) {
 			return
 		}
 	}
-	if cur, err := n.Pulse.DefaultSink(ctx); err == nil && cur != "" && !isBluezSink(cur) {
+	cur, err := n.Pulse.DefaultSink(ctx)
+	if err == nil && cur == sink {
+		// Routed already (the pair, its connection event and the reconnect loop all route).
+		n.mu.Lock()
+		n.routedTo = sink
+		n.mu.Unlock()
+		return
+	}
+	if err == nil && cur != "" && !isBluezSink(cur) {
 		n.mu.Lock()
 		n.homeSink = cur
 		n.mu.Unlock()
@@ -181,19 +189,44 @@ func (n *Node) routeOutput(ctx context.Context, mac string) {
 		n.log().Error("bluetooth: default sink not set", "sink", sink, "err", err)
 		return
 	}
+	n.mu.Lock()
+	n.routedTo = sink
+	n.mu.Unlock()
 	n.log().Info("bluetooth: output routed to the device", "mac", mac, "sink", sink)
+	n.restartPlayers(ctx, sink)
+}
+
+// restartPlayers runs RestartPlayers after the default sink moved to sink (#478).
+func (n *Node) restartPlayers(ctx context.Context, sink string) {
+	if n.RestartPlayers == nil {
+		return
+	}
+	if err := n.RestartPlayers(ctx); err != nil {
+		n.log().Warn("bluetooth: music players not restarted after the output moved; one may stay silent until it is restarted", "sink", sink, "err", err)
+	}
 }
 
 // unrouteOutput gives the output back when mac's sink has it: to the sink it replaced, or the
 // first one that isn't Bluetooth (a node restarted since).
 func (n *Node) unrouteOutput(ctx context.Context, mac string) {
 	cur, err := n.Pulse.DefaultSink(ctx)
-	if err != nil || !isSinkOf(cur, mac) {
+	n.mu.Lock()
+	home, routed := n.homeSink, n.routedTo
+	if isSinkOf(routed, mac) {
+		n.routedTo = ""
+	}
+	n.mu.Unlock()
+	if err != nil {
 		return
 	}
-	n.mu.Lock()
-	home := n.homeSink
-	n.mu.Unlock()
+	if !isSinkOf(cur, mac) {
+		if isSinkOf(routed, mac) && !isBluezSink(cur) {
+			// The device went and Pulse moved the output (and the players' streams) back itself.
+			n.log().Info("bluetooth: the device took the output with it", "mac", mac, "sink", cur)
+			n.restartPlayers(ctx, cur)
+		}
+		return
+	}
 	names, _ := n.Pulse.List(ctx, "sinks")
 	if !contains(names, home) {
 		// Gone since (the music's echo-cancel sink, #469): the node's own sink instead.
@@ -213,6 +246,7 @@ func (n *Node) unrouteOutput(ctx context.Context, mac string) {
 		return
 	}
 	n.log().Info("bluetooth: output back on the node's sink", "sink", home)
+	n.restartPlayers(ctx, home)
 }
 
 // unrouteAudio gives the output back (routeOutput) and unloads the phone's loopback, if there is

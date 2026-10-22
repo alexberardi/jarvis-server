@@ -139,6 +139,10 @@ type Node struct {
 	Pulse Pulse  // nil: no audio routing (no Pulse)
 	Store *Store // the devices to reconnect; nil keeps none
 	Log   *slog.Logger
+	// RestartPlayers restarts the music players whose Pulse stream may have died when the default
+	// sink moved to or from a speaker (#478: shairport-sync's stayed dead); nil restarts none. An
+	// error is logged, never fatal.
+	RestartPlayers func(ctx context.Context) error
 
 	// Timings (zero: the Python node's): ScanFor is the most a scan's discovery runs (10 s; N: ran
 	// BR/EDR then LE, max(12/2, 10) s each), and QuietFor ends it sooner once no new device has
@@ -160,6 +164,7 @@ type Node struct {
 	pairing  map[string]bool // addresses the pair handler is working on
 	seen     map[string]bool // request ids taken
 	homeSink string          // the default sink before a speaker took the output
+	routedTo string          // the speaker's sink the node made the default, until it gives it back
 }
 
 func or(d, def time.Duration) time.Duration {

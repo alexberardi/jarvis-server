@@ -7,6 +7,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/bluetooth"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 )
 
 // openBluetooth is the Pi's BlueZ (a var: the tests replace it).
@@ -25,6 +26,9 @@ func wireBluetooth(ctx context.Context, r *node.Runner, dir string, log *slog.Lo
 	}
 	st, err := bluetooth.OpenStore(filepath.Join(dir, bluetooth.StoreFile))
 	bt := &bluetooth.Node{Bus: bus, Pulse: bluetooth.Pactl{}, Store: st, Log: log}
+	// A music player's Pulse stream can die when the output moves to or from a speaker (#478).
+	sys := packages.NewSystem(log)
+	bt.RestartPlayers = func(ctx context.Context) error { return sys.RestartUnits(ctx, packages.MusicPlayers...) }
 	if err != nil {
 		log.Warn("bluetooth: saved devices not readable; nothing is reconnected or saved", "err", err)
 		bt.Store = nil

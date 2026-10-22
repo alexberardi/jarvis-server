@@ -12,4 +12,6 @@ package's system setup runs through sudoers (apt packages, apt sources, post_ins
 5.6), vendored unchanged from jarvis-node-setup `scripts/` (commit 73b3660). The agent calls them
 with `sudo -n` (`internal/agent/packages/system.go`). `install-pi.sh` carries a copy of each and
 puts it in `/usr/local/sbin` (root's, 0755) with one NOPASSWD line each; `scripts/install-pi-check.sh`
-fails when a copy differs. `jarvis-post-install` needs python3.
+fails when a copy differs. `jarvis-post-install` needs python3. It has one op the original
+doesn't: `restart-service` (#478), which try-restarts a unit only when the calling package's
+drop-in configures it.
