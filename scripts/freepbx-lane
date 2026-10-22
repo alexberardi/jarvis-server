@@ -106,7 +106,7 @@ guard_host() {
 guard_tools() {
   [ "$DRY" = 1 ] && return 0
   [ -e "$KVM" ] || die "no $KVM: the L2 lane needs KVM (install qemu, enable virtualization, add yourself to the kvm group)"
-  [ -r "$KVM" ] && [ -w "$KVM" ] || die "$KVM is not read-write for $(id -un) (add yourself to the kvm group)"
+  { [ -r "$KVM" ] && [ -w "$KVM" ]; } || die "$KVM is not read-write for $(id -un) (add yourself to the kvm group)"
   local t
   for t in qemu-system-x86_64 qemu-img ssh ssh-keygen curl; do
     command -v "$t" >/dev/null || die "$t not on PATH"
@@ -214,7 +214,9 @@ cmd_build() {
   [ "$DRY" = 1 ] || hostname >"$DIR/dev-box"
   [ "$DRY" = 1 ] || trap shutdown_vm EXIT
   step "the lane's own SSH key"
-  [ "$DRY" = 0 ] && [ -f "$DIR/id_ed25519" ] || x ssh-keygen -q -t ed25519 -N '' -C jarvis-freepbx-lane -f "$DIR/id_ed25519"
+  if [ "$DRY" = 1 ] || [ ! -f "$DIR/id_ed25519" ]; then
+    x ssh-keygen -q -t ed25519 -N '' -C jarvis-freepbx-lane -f "$DIR/id_ed25519"
+  fi
   step "Debian 12 cloud image ($IMAGE_URL), checked against its SHA512SUMS"
   if [ "$DRY" = 1 ] || [ ! -f "$DIR/$IMAGE" ]; then
     x curl -fsSL -o "$DIR/$IMAGE.part" "$IMAGE_URL/$IMAGE"
