@@ -39,7 +39,7 @@ type UA struct {
 	calls     map[string]*Call
 	closeOnce sync.Once
 
-	refresh chan struct{}  // Check: re-register now
+	refresh chan struct{} // Check: re-register now
 	trace   *traceAccount // this UA in the process-wide SIP trace
 }
 
