@@ -1,0 +1,26 @@
+{{define "content"}}<a href="#menu">Skip to Main content</a>
+<p><a role="button" class="btn secondary" href="/kitchen/?cart=open" aria-label="Cart with {{.D.Count}} items">Cart ({{.D.Count}})</a></p>
+<h1>Smokehouse Kitchen</h1>
+<p>Pickup only. Order online and we'll have it ready in 20 minutes.</p>
+<section id="menu">
+{{range .D.Menu}}<div class="result"><a href="/kitchen/item/{{.ID}}">{{.Name}}</a> <span>{{money .Price}}</span> <a role="button" class="btn secondary" href="/kitchen/item/{{.ID}}" aria-label="Add {{.Name}} to Cart">+</a></div>
+{{end}}</section>
+{{with .D.Item}}<div role="dialog" aria-modal="true" aria-label="{{.Name}}" class="dialog">
+<a role="button" href="/kitchen/" aria-label="Close">×</a>
+<h2>{{.Name}}</h2>
+<form method="post" action="/kitchen/cart/add"><input type="hidden" name="id" value="{{.ID}}">
+<fieldset><legend>Options</legend>{{range $.D.Options}}<label><input type="checkbox" name="opt" value="{{.}}"> {{.}}</label>{{end}}</fieldset>
+<label>Quantity <input type="number" name="qty" value="1" min="1" aria-label="Quantity"></label>
+<button class="btn" type="submit">Add to Cart {{money .Price}}</button></form>
+</div>{{end}}
+{{with .D.Cart}}<div role="dialog" aria-modal="true" aria-label="Your cart" class="dialog">
+<a role="button" href="/kitchen/" aria-label="Close">×</a>
+<h2>Your cart</h2>
+{{range $i, $it := .Items}}<div class="result"><span>{{$it.Qty}} × {{$it.Name}} {{money $it.Price}}</span>
+<form method="post" action="/kitchen/cart/remove"><input type="hidden" name="line" value="{{$i}}"><button class="btn secondary" type="submit" aria-label="Remove {{$it.Name}}">Remove</button></form></div>
+{{else}}<p>Your cart is empty.</p>{{end}}
+<h3>Add to your order</h3>
+{{range $.D.Upsells}}<form method="post" action="/kitchen/cart/add"><input type="hidden" name="id" value="{{.ID}}"><button class="btn secondary" type="submit">+ {{.Name}} {{money .Price}}</button></form>
+{{end}}
+{{if .Items}}<a role="button" class="btn" href="/kitchen/checkout">Checkout {{money .Total}}</a>{{end}}
+</div>{{end}}{{end}}

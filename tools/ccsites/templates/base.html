@@ -27,6 +27,7 @@ label { display: block; margin-top: 12px; font-weight: 600; }
 input[type=text], input[type=email], input[type=date], input[type=password], select, textarea { width: 100%; max-width: 420px; padding: 6px; font-size: 1em; }
 fieldset { border: 0; padding: 0; margin-top: 12px; }
 fieldset label { display: inline; font-weight: 400; margin-right: 12px; }
+.dialog { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); width: 480px; max-height: 80%; overflow: auto; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,.4); }
 </style>
 </head>
 <body>
@@ -35,6 +36,7 @@ fieldset label { display: inline; font-weight: 400; margin-right: 12px; }
 <a href="{{.U "/store/cart"}}">Cart</a></header>
 {{else if eq .Site "bank"}}<header><a class="brand" href="{{.U "/bank/statements"}}">Test Bank</a><a href="{{.U "/bank/statements"}}">Statements</a></header>
 {{else if eq .Site "card"}}<header><a class="brand" href="{{.U "/card/statements"}}">Test Card Services</a><a href="{{.U "/card/statements"}}">Statements</a></header>
+{{else if eq .Site "kitchen"}}<header><a class="brand" href="/kitchen/">Smokehouse Kitchen</a></header>
 {{else if eq .Site "form"}}<header><a class="brand" href="/form/">Springfield Community Gardens</a></header>
 {{else}}<header><span class="brand">Fixture sites</span></header>{{end}}
 <main>

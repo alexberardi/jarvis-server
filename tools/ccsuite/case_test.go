@@ -36,7 +36,7 @@ func TestCasesParse(t *testing.T) {
 			t.Errorf("%s: placeholders left in %q", c.Name, c.Message("http://127.0.0.1:1/"))
 		}
 	}
-	want := []string{"blocked_site", "budget_last_month", "injection_stops", "notes_macos", "notes_wlroots", "notes_x11",
+	want := []string{"blocked_site", "budget_last_month", "injection_stops", "kitchen_order_cleanup", "notes_macos", "notes_wlroots", "notes_x11",
 		"replay_changed_param", "replay_moved_button", "store_order_approve", "store_order_cancel", "web_form"}
 	if !slices.Equal(names, want) {
 		t.Errorf("cases %v, want %v", names, want)

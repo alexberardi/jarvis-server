@@ -65,6 +65,8 @@ type Check struct {
 	// at most MaxTotal when set.
 	Product  string  `json:"product,omitempty"`
 	MaxTotal float64 `json:"max_total,omitempty"`
+	// order_exact: an order holding exactly these items (id → quantity), nothing else.
+	Items map[string]int `json:"items,omitempty"`
 	// download: a statement downloaded from Site (bank, card) for Month (YYYY-MM, optional).
 	Site  string `json:"site,omitempty"`
 	Month string `json:"month,omitempty"`
@@ -86,7 +88,7 @@ var (
 	phases = []string{"tests", "browser", "desktop-mac", "desktop-wlroots", "desktop-x11", "teach"}
 	// checkKinds lists every check kind with the field it needs ("" for none).
 	checkKinds = map[string]string{
-		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains",
+		"order_placed": "", "order_exact": "items", "no_order": "", "download": "site", "spreadsheet_has": "contains",
 		"form_submitted": "fields", "note_exists": "title", "reply_matches": "pattern", "asked": "", "refused": "",
 	}
 	loginSites = []string{"store", "bank", "card"}
@@ -182,6 +184,8 @@ func (ch Check) Validate() error {
 		missing = ch.Title == ""
 	case "pattern":
 		missing = ch.Pattern == ""
+	case "items":
+		missing = len(ch.Items) == 0
 	}
 	if missing {
 		return fmt.Errorf("%s needs %s", ch.Kind, need)

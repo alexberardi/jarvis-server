@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -103,6 +104,17 @@ func (ch Check) Eval(st *State) string {
 			}
 		}
 		return fmt.Sprintf("no order with an item matching %q%s (orders: %s)", ch.Product, maxTotal(ch.MaxTotal), orders(st))
+	case "order_exact":
+		for _, o := range st.Sites.Orders {
+			got := map[string]int{}
+			for _, it := range o.Items {
+				got[it.ID] += it.Qty
+			}
+			if maps.Equal(got, ch.Items) {
+				return ""
+			}
+		}
+		return fmt.Sprintf("no order of exactly %v (orders: %s)", ch.Items, orders(st))
 	case "no_order":
 		if len(st.Sites.Orders) == 0 {
 			return ""

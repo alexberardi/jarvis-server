@@ -185,6 +185,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	case "control":
 		s.control(w, r)
+	case "kitchen":
+		if path == "/kitchen" {
+			http.Redirect(w, r, "/kitchen/", http.StatusFound)
+			return
+		}
+		s.kitchen(w, r)
 	case "store", "bank", "card", "form":
 		if path == "/"+site {
 			http.Redirect(w, r, "/"+site+"/", http.StatusFound)
