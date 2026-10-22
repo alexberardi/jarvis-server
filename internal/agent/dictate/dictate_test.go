@@ -750,10 +750,14 @@ func TestConfirmSubmit(t *testing.T) {
 	if out["status"] != "awaiting_confirmation" || id == "" || out["question"] != `Send "test def" to Claude?` {
 		t.Fatalf("ask: %v", out)
 	}
+	// Parked is not done (#420): nothing that reads success may take it for a sent message.
+	if out["success"] != false || out["done"] != false {
+		t.Fatalf("ask reads as done: %v", out)
+	}
 	if len(kb.typed) != 1 || len(win.focused) != 0 {
 		t.Fatal("acted before the answer")
 	}
-	if len(island) != 1 || !strings.Contains(island[0], "Send \"test def\" to Claude?") {
+	if len(island) != 1 || island[0] != `Waiting for your yes: Send "test def" to Claude?` {
 		t.Errorf("island %q", island)
 	}
 	out = call(t, ts, ToolConfirm, map[string]any{"confirmation_id": id, "answer": "OK, send it"})

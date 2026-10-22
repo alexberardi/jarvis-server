@@ -263,6 +263,12 @@ func LooksUnspeakable(text string) bool {
 	return strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[")
 }
 
+// AwaitingConfirmation reports a desktop node's parked action (dictate.Confirmer.Ask): success
+// is false because nothing was done yet, but it is a question for the user, not a failure.
+func AwaitingConfirmation(o *pyjson.Object) bool {
+	return o != nil && objGet(o, "status") == "awaiting_confirmation"
+}
+
 // ToolResultFallback is _tool_result_fallback: spoken text derived from the tool results when
 // the streamed reply had nothing usable — each output's message/response, or a success:false
 // output's error ("The command failed."), joined, CleanForTTS'd and stripped.
@@ -275,6 +281,8 @@ func ToolResultFallback(outputs []any) string {
 		}
 		if msg := pyOr(objGet(o, "message"), objGet(o, "response")); pyTruthy(msg) {
 			parts = append(parts, pyjson.Str(msg))
+		} else if q, ok := objGet(o, "question").(string); ok && AwaitingConfirmation(o) {
+			parts = append(parts, q) // beyond legacy (#420): a parked action asks, it didn't fail
 		} else if b, ok := objGet(o, "success").(bool); ok && !b {
 			parts = append(parts, errorOr(o))
 		}

@@ -97,8 +97,13 @@ func (c *Confirmer) timeout() time.Duration {
 	return DefaultConfirmTimeout
 }
 
+// WaitingPrefix marks a parked action's question on the island: asked, not done.
+const WaitingPrefix = "Waiting for your yes: "
+
 // Ask parks act behind question and returns the tool output that tells the model to ask the
-// user. A question still waiting is cancelled: only the newest can be confirmed.
+// user. A question still waiting is cancelled: only the newest can be confirmed. The output is
+// not a success (#420): a 3 ms "browser_fill succeeded" that filled nothing read as done to
+// the logs, the island and the model.
 func (c *Confirmer) Ask(question string, act func(ctx context.Context) (map[string]any, error)) map[string]any {
 	c.mu.Lock()
 	c.seq++
@@ -106,10 +111,10 @@ func (c *Confirmer) Ask(question string, act func(ctx context.Context) (map[stri
 	c.pending = p
 	c.mu.Unlock()
 	if c.Show != nil {
-		c.Show(question, c.timeout())
+		c.Show(WaitingPrefix+question, c.timeout())
 	}
 	return map[string]any{
-		"success": true, "done": false, "status": "awaiting_confirmation",
+		"success": false, "done": false, "status": "awaiting_confirmation",
 		"confirmation_id": p.id, "question": question,
 		"next": "Nothing has been done yet. Ask the user exactly this question (use request_validation with the options " +
 			"[\"Yes\", \"Cancel\"]), then call " + ToolConfirm + " with this confirmation_id and the user's own words. " +
