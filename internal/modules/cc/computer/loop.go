@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -450,6 +451,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if err != nil {
 		return Outcome{State: StateFailed, Summary: err.Error()}, true
 	}
+	l.logRound(r, obs, reply)
 	r.feedback, r.clipboard = "", ""
 	switch {
 	case reply.Done:
@@ -491,6 +493,31 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{}, false
 	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// logRound says what the model saw and chose, one line per round: a run that goes wrong on a
+// real page can be read from the log (the history keeps no elements).
+func (l *Loop) logRound(r *round, obs Observation, reply Reply) {
+	inDialog := 0
+	for _, e := range obs.Elements {
+		if slices.Contains(e.State, "in dialog") {
+			inDialog++
+		}
+	}
+	var acts []string
+	for _, a := range reply.Actions {
+		el := ""
+		for _, e := range obs.Elements {
+			if a.Ref != "" && e.Ref == a.Ref {
+				el = fmt.Sprintf(" %s %q%v", e.Role, e.Name, e.State)
+			}
+		}
+		acts = append(acts, strings.TrimSpace(a.Kind+" "+a.Ref+el))
+	}
+	l.log().Info("computer: round", "run", r.run.ID, "n", r.run.Rounds, "url", obs.URL,
+		"elements", len(obs.Elements), "in_dialog", inDialog, "thought", clip(reply.Thought, 300),
+		"actions", strings.Join(acts, "; "), "done", reply.Done, "summary", clip(reply.Summary, 300),
+		"ask", clip(reply.Ask, 300), "feedback", clip(r.feedback, 200))
 }
 
 // maxRepeats is how many times the model may ask again for a batch that left the page as it was
