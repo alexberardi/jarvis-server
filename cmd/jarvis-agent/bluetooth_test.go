@@ -15,17 +15,18 @@ import (
 // noRadio is a BlueZ with an adapter that's off: enough to start the handler.
 type noRadio struct{ agent chan struct{} }
 
-func (noRadio) Adapter(context.Context) (bluetooth.Adapter, error)  { return bluetooth.Adapter{}, nil }
-func (noRadio) SetAdapter(context.Context, string, any) error       { return nil }
-func (noRadio) Devices(context.Context) ([]bluetooth.Device, error) { return nil, nil }
-func (noRadio) Discover(context.Context, string) (func(), error)    { return func() {}, nil }
-func (noRadio) Remove(context.Context, string) error                { return nil }
-func (noRadio) Pair(context.Context, string) error                  { return nil }
-func (noRadio) Connect(context.Context, string) error               { return nil }
-func (noRadio) Disconnect(context.Context, string) error            { return nil }
-func (noRadio) SetTrusted(context.Context, string, bool) error      { return nil }
-func (r noRadio) RegisterAgent(context.Context) error               { close(r.agent); return nil }
-func (noRadio) Paired() <-chan string                               { return nil }
+func (noRadio) Adapter(context.Context) (bluetooth.Adapter, error)   { return bluetooth.Adapter{}, nil }
+func (noRadio) SetAdapter(context.Context, string, any) error        { return nil }
+func (noRadio) Devices(context.Context) ([]bluetooth.Device, error)  { return nil, nil }
+func (noRadio) AudioTransport(context.Context, string) (bool, error) { return false, nil }
+func (noRadio) Discover(context.Context, string) (func(), error)     { return func() {}, nil }
+func (noRadio) Remove(context.Context, string) error                 { return nil }
+func (noRadio) Pair(context.Context, string) error                   { return nil }
+func (noRadio) Connect(context.Context, string) error                { return nil }
+func (noRadio) Disconnect(context.Context, string) error             { return nil }
+func (noRadio) SetTrusted(context.Context, string, bool) error       { return nil }
+func (r noRadio) RegisterAgent(context.Context) error                { close(r.agent); return nil }
+func (noRadio) Paired() <-chan string                                { return nil }
 
 func TestWireBluetoothSubscribesTheSixTopics(t *testing.T) {
 	r := &node.Runner{Topics: map[string]func(context.Context, *node.CC, []byte){"k2/provision": nil}}
