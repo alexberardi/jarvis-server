@@ -2,9 +2,12 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/update"
 )
 
 // CheckEvery is how often the agent checks the server's version on its own: daily, plus at once
@@ -202,6 +205,12 @@ func (c *Checker) Step(ctx context.Context) {
 	}
 	c.mu.Unlock()
 	if err == nil {
+		return
+	}
+	if o.By == ByAuto && errors.Is(err, update.ErrNoRelease) {
+		// The server runs a build that was never published (a release dry run): nothing to
+		// follow, so nothing failed. decide waits a day before looking again.
+		c.log().Debug("update: the server's version has no published release", "to", o.Target, "err", err)
 		return
 	}
 	c.log().Warn("update: not updated", "to", o.Target, "err", err)
