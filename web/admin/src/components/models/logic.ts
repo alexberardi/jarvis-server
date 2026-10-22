@@ -19,7 +19,7 @@ import { errorMessage, errorStatus } from '@/lib/errors'
 import { formatMB } from '@/lib/format'
 
 /** currentModels maps each label to the model it runs now ("" when none). */
-export function currentModels(labels: LabelsResponse | undefined): Record<Label, string> {
+export function currentModels(labels: LabelsResponse | undefined): Partial<Record<Label, string>> {
   const out = Object.fromEntries(ALL_LABELS.map((l) => [l, ''])) as Record<Label, string>
   for (const l of labels?.labels ?? []) {
     if (l.label in out && l.config.engine !== 'off') out[l.label as Label] = l.config.model || ''
@@ -42,7 +42,7 @@ export function recommendedFor(entry: CatalogEntry, recommended: CatalogResponse
 export function defaultAssign(
   entry: CatalogEntry,
   recommended: CatalogResponse['recommended'],
-  current: Record<Label, string>,
+  current: Partial<Record<Label, string>>,
 ): Label[] {
   return recommendedFor(entry, recommended).filter((l) => !current[l])
 }

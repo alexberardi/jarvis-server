@@ -28,6 +28,7 @@ const MODES: Record<EngineLabel, string[]> = {
   background: ['local', 'shared', 'remote', 'off'],
   embeddings: ['local', 'remote', 'off'],
   stt: ['local', 'off'],
+  cloud: ['remote', 'off'],
 }
 
 const MODE_TITLE: Record<string, string> = {
@@ -49,6 +50,7 @@ const BUILD_KIND: Record<EngineLabel, string> = {
   background: 'llama-server',
   embeddings: 'llama-server',
   stt: 'whisper-server',
+  cloud: 'llama-server',
 }
 
 function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: string; children: ReactNode }) {
@@ -268,6 +270,12 @@ function EngineLabelCard({
         <p className="text-small text-warning">{cfg.problem || status.reason}</p>
       )}
       {cfg.note && <p className="text-small text-text-muted">{cfg.note}</p>}
+      {label === 'cloud' && (
+        <p className="text-small text-text-muted">
+          A provider's model, next to the ones on this machine. Nothing uses it until you pick it for a feature under
+          Feature models; leave the URL empty to keep everything on your network.
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Runs" htmlFor={id('engine')}>
@@ -290,8 +298,9 @@ function EngineLabelCard({
       {mode === 'remote' && (
         <div className="space-y-3">
           <Banner tone="warning" icon={<Globe size={16} />}>
-            Requests for this label leave this machine: prompts, conversation text
-            {isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.
+            {label === 'cloud'
+              ? 'Requests from the features you set to cloud leave this machine: their prompts and any images go to the endpoint below. Use it only with a provider you trust.'
+              : `Requests for this label leave this machine: prompts, conversation text${isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.`}
           </Banner>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Base URL" htmlFor={id('remote_url')}>
