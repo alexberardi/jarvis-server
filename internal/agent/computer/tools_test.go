@@ -214,6 +214,28 @@ func TestObserveWaitsForNewWindow(t *testing.T) {
 	}
 }
 
+// TestObserveWaitsAfterNavigate: a navigate action opens a new task window too, and the observe
+// after it (no url: a replayed workflow's next step) waits for that window's page (#418).
+func TestObserveWaitsAfterNavigate(t *testing.T) {
+	defer func(p time.Duration) { settlePoll = p }(settlePoll)
+	settlePoll = time.Millisecond
+	tl, b, _ := testTools(t)
+	observe(t, tl, "cr_1")
+	rs, _ := act(t, tl, "cr_1", []computeruse.Action{{Kind: "navigate", URL: store, Intent: "go"}})
+	wantCodes(t, rs, "ok")
+	b.loading, b.snaps = 2, 0
+	out := call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if out["success"] != true || b.snaps != 3 {
+		t.Fatalf("observe %v after %d snapshots", out, b.snaps)
+	}
+	// Its page seen once, the window is open: a restricted page there is the page.
+	b.loading, b.snaps = 1, 0
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if out["error_code"] != "restricted_page" || b.snaps != 1 {
+		t.Fatalf("observe %v after %d snapshots", out, b.snaps)
+	}
+}
+
 func TestObserveOpensTaskWindow(t *testing.T) {
 	tl, b, _ := testTools(t)
 	out := call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "url": store, "snapshot": true, "screenshot": true})

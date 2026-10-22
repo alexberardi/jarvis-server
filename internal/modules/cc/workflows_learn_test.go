@@ -622,8 +622,21 @@ func TestLearnStartPage(t *testing.T) {
 	if a := w.Steps[1].Action; a.Kind != "press" {
 		t.Fatalf("second step %+v", w.Steps[1])
 	}
-	// A recording that starts with a navigation has no step added.
-	if _, ok := startStep(w.Steps, "https://docs.jarvisautomation.dev/"); ok {
-		t.Fatal("a start step before a navigation")
+
+	// A recording that starts with a navigation has no step added: its first step is that one.
+	le = newLearnEnv(t, docsNavModel)
+	w = le.store("rec_docs2", json.RawMessage(docsNavTrace), "")
+	if len(w.Steps) != 2 || w.Steps[0].Action.Kind != "navigate" ||
+		w.Steps[0].Action.URL != "https://docs.jarvisautomation.dev/guide/start" || w.Steps[1].Action.Kind != "press" {
+		t.Fatalf("steps %+v", w.Steps)
 	}
 }
+
+// docsNavTrace is docsTrace recorded from a navigation to the page.
+const docsNavTrace = `[
+ {"seq":1,"ts":1759999999000,"kind":"navigate","url":"https://docs.jarvisautomation.dev/guide/start","tab":1},
+ {"seq":2,"ts":1760000000000,"kind":"click","url":"https://docs.jarvisautomation.dev/guide/start","tab":1,"element":{"role":"link","name":"Install","tag":"a","selector":"link \"Install\""}},
+ {"seq":3,"ts":1760000001000,"kind":"navigate","url":"https://docs.jarvisautomation.dev/guide/install","tab":1}
+]`
+
+const docsNavModel = `{"name":"Open the install guide","triggers":["open the install guide"],"steps":[{"intent":"Open the guide","event_seqs":[1],"target":"guide"},{"intent":"Open Install","event_seqs":[2,3],"target":"Install"}],"params":[],"success":{"url_contains":"/guide/install"}}`

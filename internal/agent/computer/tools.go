@@ -265,14 +265,14 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 	}
 	if a.Snapshot {
 		s, err := t.Browser.Snapshot(ctx, run.Tab, 0)
-		if a.URL != "" {
+		if run.Opening {
 			s, err = t.settledSnapshot(ctx, run.Tab, s, err)
 		}
 		if err != nil {
 			return failCode(errorCode(err), "%v", err)
 		}
 		t.runs().With(a.RunID, func(r *Run) {
-			r.Snap = &s
+			r.Snap, r.Opening = &s, false
 			if s.URL != "" {
 				r.URL = s.URL
 			}
@@ -323,9 +323,10 @@ var (
 	settlePoll = 300 * time.Millisecond
 )
 
-// settledSnapshot snapshots a task window just opened on a web address until its page has loaded,
-// from the first try's s and err: the new tab is about:blank for its first moments, which the
-// browser doesn't let extensions script (restricted_page), so that isn't the page yet (#418).
+// settledSnapshot snapshots a task window just opened on a web address (by observe's url or a
+// navigate action) until its page has loaded, from the first try's s and err: the new tab is
+// about:blank for its first moments, which the browser doesn't let extensions script
+// (restricted_page), so that isn't the page yet (#418).
 func (t *Tools) settledSnapshot(ctx context.Context, tab string, s computeruse.Snapshot, err error) (computeruse.Snapshot, error) {
 	deadline := time.Now().Add(settleFor)
 	for errorCode(err) == "restricted_page" && time.Now().Before(deadline) {
@@ -359,7 +360,7 @@ func (t *Tools) open(ctx context.Context, id, rawURL string, blocked []string) (
 	var old string
 	t.runs().With(id, func(r *Run) {
 		old = r.Tab
-		r.Tab, r.Window, r.URL, r.Snap = tab, window, rawURL, nil
+		r.Tab, r.Window, r.URL, r.Snap, r.Opening = tab, window, rawURL, nil, true
 	})
 	if old != "" && old != tab {
 		// Best effort: a tab the user closed meanwhile is gone already.
