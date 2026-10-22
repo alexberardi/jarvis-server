@@ -128,10 +128,11 @@ preflight() {
 # What this install needs from apt that Raspberry Pi OS may lack (N:install.sh:206-245):
 # PulseAudio (§8 Q2) with its Bluetooth modules, BlueZ and rfkill, iw, and hostapd/dnsmasq,
 # the provisioning AP's fallback when the NetworkManager AP fails (§8 Q7). The overlay
-# compiler and the ALSA tools too, and python3 for jarvis-post-install.
+# compiler and the ALSA tools too, the ALSA pulse plugin (asound.conf's output and jarvis_ec),
+# and python3 for jarvis-post-install.
 install_packages() {
   missing=""
-  for pkg in pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils python3; do
+  for pkg in pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils libasound2-plugins python3; do
     if [ -n "$ROOT" ] || ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
       missing="$missing $pkg"
     fi
@@ -311,6 +312,13 @@ pcm.dsnoopmic_hw {
 pcm.dsnoopmic {
     type plug
     slave.pcm "dsnoopmic_hw"
+}
+
+# The mic with the node's music echo-cancelled out: Pulse's webrtc canceller over dsnoopmic,
+# loaded by the node only while its music plays (internal/agent/music/echocancel.go).
+pcm.jarvis_ec {
+    type pulse
+    device jarvis_ec_source
 }
 
 # --- Default split: playback via PA, capture direct --------------------

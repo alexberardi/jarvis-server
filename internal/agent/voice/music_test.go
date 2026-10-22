@@ -92,3 +92,30 @@ func TestMusicRestoredAfterAPlainTurn(t *testing.T) {
 		t.Fatalf("music steps %v, want %v", got, want)
 	}
 }
+
+// heldCapture is a microphone that can be held (device.Switch), logging to the music's steps.
+type heldCapture struct {
+	*fakeCapture
+	m *fakeMusic
+}
+
+func (c heldCapture) Hold()    { c.m.add("hold") }
+func (c heldCapture) Release() { c.m.add("release") }
+
+// The microphone is held from the wake to the end of the turn and released before the restore,
+// so the echo canceller the restore engages never splits a command across two devices.
+func TestCaptureHeldForTheTurnAndReleasedBeforeTheRestore(t *testing.T) {
+	m := &fakeMusic{done: make(chan struct{})}
+	srv := newServer()
+	mic := oneWake()
+	r := newRig(t, heldCapture{mic, m}, srv)
+	r.p.Music = m
+	r.p.Cfg.FollowUp.ListenSecs = 0
+	stop := r.run(t)
+	r.turn(t)
+	_ = stop()
+	got := slices.DeleteFunc(m.list(), func(s string) bool { return s == "duck" })
+	if want := []string{"hold", "release", "restore"}; !slices.Equal(got, want) {
+		t.Fatalf("steps %v, want %v", got, want)
+	}
+}

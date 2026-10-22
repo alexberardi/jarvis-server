@@ -14,6 +14,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
+	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
 
 // The Pi's host keeps its timers and volume in the state dir, and gets command-center once
@@ -95,7 +96,7 @@ func TestAlertsOnTheHat(t *testing.T) {
 
 // Music ducking runs only on a Pi install: a dev box forced into --profile pi (node-sim, the
 // voice lane) gets none, so the user's own players are never stopped. The mic gain follows the
-// music only with the HAT.
+// music, and the echo canceller switches the mic, only with the HAT.
 func TestPiMusicOnlyOnAPi(t *testing.T) {
 	yes, no := func() bool { return true }, func() bool { return false }
 	marker := func(p string) bool { return p == piMarker }
@@ -103,10 +104,27 @@ func TestPiMusicOnlyOnAPi(t *testing.T) {
 	if d := newPiMusic(no, none, nil); d != nil {
 		t.Fatal("ducking on a box that is no Pi")
 	}
-	if d := newPiMusic(no, marker, nil); d == nil || d.Gain != nil {
-		t.Fatalf("Pi install without the HAT: %+v, want ducking without a gain", d)
+	if d := newPiMusic(no, marker, nil); d == nil || d.Gain != nil || d.EC != nil || micSwitch(d) != nil {
+		t.Fatalf("Pi install without the HAT: %+v, want ducking without a gain or echo cancel", d)
 	}
-	if d := newPiMusic(yes, none, nil); d == nil || d.Gain == nil {
-		t.Fatalf("Pi with the HAT: %+v, want ducking with its gain", d)
+	d := newPiMusic(yes, none, nil)
+	if d == nil || d.Gain == nil || d.EC == nil || micSwitch(d) == nil {
+		t.Fatalf("Pi with the HAT: %+v, want ducking with its gain and echo cancel", d)
+	}
+	if d.EC.Mic != "dsnoopmic" || d.EC.Sink != "jarvis_output" {
+		t.Fatalf("echo cancel on %s → %s, want install-pi.sh's dsnoopmic → jarvis_output", d.EC.Mic, d.EC.Sink)
+	}
+	if micSwitch(nil) != nil {
+		t.Fatal("a switch without music")
+	}
+	var o voice.Options
+	withPiMusic(&o, d)
+	if sw, _ := d.EC.Capture.(*device.Switch); o.Music != d || o.Switch == nil || o.Switch != sw {
+		t.Fatalf("voice options %+v: want the ducker and the echo canceller's switch as the mic", o)
+	}
+	o = voice.Options{}
+	withPiMusic(&o, nil)
+	if o.Music != nil || o.Switch != nil {
+		t.Fatalf("no music: options %+v", o)
 	}
 }
