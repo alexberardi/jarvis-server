@@ -13,7 +13,7 @@ import {
   type SipTestName,
   type SipTestRun,
 } from '@/api/phone'
-import { Alert, Badge, Button, Card, CardHeader, EmptyState, ErrorState, Input, PageHeader, Skeleton, Spinner, toast, type BadgeTone } from '@/components/ui'
+import { Alert, Badge, Button, buttonStyles, Card, CardHeader, EmptyState, ErrorState, Input, PageHeader, Skeleton, Spinner, toast, type BadgeTone } from '@/components/ui'
 import { errorMessage } from '@/lib/errors'
 import { formatServerTime, timeAgo } from '@/lib/time'
 
@@ -328,7 +328,7 @@ export default function PhonePage() {
                 title="No SIP account is running"
                 description="Calls go through Twilio unless phone.provider is sip. Set it, with the PBX's address and the extension's number and password (phone.sip.*), for the install or a household."
                 action={
-                  <Link to="/admin/settings" className="text-small font-medium text-primary underline-offset-2 hover:underline">
+                  <Link to="/admin/settings" className={buttonStyles()}>
                     Open Settings
                   </Link>
                 }

@@ -368,7 +368,7 @@ func (s *Service) connectionTest(ctx context.Context, t *testRun, line *sipLine)
 	res := line.ua.Check(ctx)
 	t.update(func(r *SIPTestRun) { r.RegisterRTTMs, r.OptionsRTTMs = ms(res.RegisterRTT), ms(res.OptionsRTT) })
 	if !res.Registered {
-		t.fail("The PBX did not accept the registration: "+orNone(res.Error), res.Hint)
+		t.fail("Not registered: "+orNone(res.Error), res.Hint)
 		return
 	}
 	t.step("Registered in %s", fmtMs(res.RegisterRTT))
