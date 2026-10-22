@@ -3,7 +3,6 @@ package phone
 import (
 	"bytes"
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -11,14 +10,14 @@ import (
 )
 
 // The absorbed dial worker (gateway services/dial_worker.py), in process (D16): claim CAS →
-// disclosure prewarm (no disclosure, no dial) → single-use stream token → TwiML → place the
-// call → wait for the media stream → in_call → heartbeat and watchdogs → wrap-up assessment,
-// recording, outcome. No Redis: the hand-off is a goroutine, and the confirmed → dialing CAS
+// provider ready → disclosure prewarm (no disclosure, no dial) → place the call (Provider.Dial)
+// → wait for its media → in_call → heartbeat and watchdogs → wrap-up assessment, recording,
+// outcome. No Redis: the hand-off is a goroutine, and the confirmed → dialing CAS
 // stays the only authorisation to dial. A crash between confirm and claim leaves the session
 // confirmed; the reaper fails it after 5 minutes.
 
-// MediaPath is where the provider's media WebSocket connects: MediaPath + <single-use token>.
-// It is the only route a public tunnel needs to expose.
+// MediaPath is where Twilio's media WebSocket connects: MediaPath + <single-use token>
+// (twilio_media.go). It is the only route a public tunnel needs to expose.
 const MediaPath = "/phone/media/"
 
 const (
@@ -41,15 +40,16 @@ type callRuntime struct {
 	pipeline    *turnPipeline
 	ctx         context.Context
 	cancel      context.CancelFunc
-	// tel is the household's provider and signing key, resolved once at dial time.
-	tel Telephony
 
-	started     chan struct{}
-	startOnce   sync.Once
-	done        chan struct{}
-	doneOnce    sync.Once
-	mu          sync.Mutex
-	callSID     string
+	started   chan struct{}
+	startOnce sync.Once
+	done      chan struct{}
+	doneOnce  sync.Once
+	mu        sync.Mutex
+	call      Call
+	// callID is call.ID(), the provider's call id (stored in the session's twilio_call_sid
+	// column, whose name predates other providers).
+	callID      string
 	cancelled   bool
 	cancelCause string
 }
@@ -57,10 +57,10 @@ type callRuntime struct {
 func (rt *callRuntime) markStarted() { rt.startOnce.Do(func() { close(rt.started) }) }
 func (rt *callRuntime) markDone()    { rt.doneOnce.Do(func() { close(rt.done) }) }
 
-func (rt *callRuntime) sid() string {
+func (rt *callRuntime) activeCall() Call {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	return rt.callSID
+	return rt.call
 }
 
 func (s *Service) runtime(id string) *callRuntime {
@@ -80,7 +80,7 @@ func (s *Service) cancelRuntime(id string) {
 }
 
 // enqueueDial resolves the household's telephony (AD6) and hands a confirmed session to the
-// dialer, which keeps that provider and signing key for the whole call.
+// dialer, which keeps that provider for the whole call.
 func (s *Service) enqueueDial(ctx context.Context, sess *Session) error {
 	tel, err := s.Telephony(ctx, sess.HouseholdID)
 	if err != nil {
@@ -93,20 +93,6 @@ func (s *Service) enqueueDial(ctx context.Context, sess *Session) error {
 		s.runCall(sess.ID, tel)
 	}()
 	return nil
-}
-
-func (s *Service) wssBase() string {
-	if s.Options.PublicWSSURL != "" {
-		return strings.TrimRight(s.Options.PublicWSSURL, "/")
-	}
-	u := strings.TrimRight(s.Options.PublicURL, "/")
-	switch {
-	case strings.HasPrefix(u, "https://"):
-		return "wss://" + u[len("https://"):]
-	case strings.HasPrefix(u, "http://"):
-		return "ws://" + u[len("http://"):]
-	}
-	return u
 }
 
 func orDefault(d, def time.Duration) time.Duration {
@@ -147,9 +133,8 @@ func (s *Service) runCall(id string, tel Telephony) {
 		fail("session has no dialed_number")
 		return
 	}
-	wss := s.wssBase()
-	if wss == "" {
-		fail("no public URL is configured for the call's media stream")
+	if err := tel.Provider.Ready(); err != nil {
+		fail(err.Error())
 		return
 	}
 	brief := live.Brief{Goal: sess.Goal, Details: sess.Details,
@@ -165,53 +150,54 @@ func (s *Service) runCall(id string, tel Telephony) {
 	rt := &callRuntime{
 		sessionID: id, householdID: sess.HouseholdID, brief: brief,
 		maxSeconds: s.intSetting(ctx, SettingMaxCallSeconds, sess.HouseholdID, 600),
-		escalation: &live.EscalationWindow{Timeout: s.EscalationWindow}, tel: tel,
-		recorder: &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,
+		escalation: &live.EscalationWindow{Timeout: s.EscalationWindow},
+		recorder:   &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,
 		started: make(chan struct{}), done: make(chan struct{}),
 	}
 	rt.pipeline = s.newTurnPipeline(rt, s.restrictedFor(ctx, sess))
 	s.mu.Lock()
 	s.runtimes[id] = rt
 	s.mu.Unlock()
-	token := s.tokens.Issue(id)
 	defer func() {
-		s.tokens.Revoke(token)
 		s.mu.Lock()
 		delete(s.runtimes, id)
 		s.mu.Unlock()
 	}()
 
-	twiml := live.StreamTwiML(wss+MediaPath+token, [][2]string{{"session_id", id}})
 	sctx, scancel := context.WithTimeout(ctx, 15*time.Second)
-	callSID, err := tel.Provider.StartCall(sctx, sess.DialedNumber, twiml)
+	call, err := tel.Provider.Dial(sctx, DialRequest{SessionID: id, HouseholdID: sess.HouseholdID, To: sess.DialedNumber})
 	scancel()
 	if err != nil {
-		fail("calls.create failed: " + err.Error())
+		fail(err.Error())
 		return
 	}
-	// Bind the stream token first: a media stream claimed before the token carries the call
-	// SID would skip the call-SID check in ValidateStreamStart.
-	s.tokens.BindCallSID(token, callSID)
+	defer call.Close()
+	callID := call.ID()
 	rt.mu.Lock()
-	rt.callSID = callSID
+	rt.call, rt.callID = call, callID
 	rt.mu.Unlock()
-	s.log().Info("phone: dialing", "session", id, "call_sid", callSID)
+	s.log().Info("phone: dialing", "session", id, "call_id", callID)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runMedia(rt, call)
+	}()
 
 	select {
 	case <-rt.started:
 	case <-time.After(orDefault(s.StreamStartTimeout, defaultStreamStart)):
-		s.endCallQuietly(tel.Provider, callSID)
+		s.endCallQuietly(call)
 		fail("no media stream within 60s (no answer?)")
 		return
 	case <-ctx.Done():
 		// Cancelled before the stream: the canceller already marked the session.
-		s.endCallQuietly(tel.Provider, callSID)
+		s.endCallQuietly(call)
 		return
 	}
-	if ok, _ := s.setState(ctx, id, StateInCall, "", callSID); !ok {
+	if ok, _ := s.setState(ctx, id, StateInCall, "", callID); !ok {
 		// The session moved on (cancelled or reaped) while ringing: hang up.
 		cancel()
-		s.endCallQuietly(tel.Provider, callSID)
+		s.endCallQuietly(call)
 		<-s.waitDone(rt, hangupGrace)
 		return
 	}
@@ -222,7 +208,7 @@ func (s *Service) runCall(id string, tel Telephony) {
 	s.wrapup(wctx, rt, sess)
 }
 
-// waitDone returns a channel closed when the media stream ended or after grace.
+// waitDone returns a channel closed when the call's media ended or after grace.
 func (s *Service) waitDone(rt *callRuntime, grace time.Duration) <-chan struct{} {
 	out := make(chan struct{})
 	go func() {
@@ -248,16 +234,16 @@ func (s *Service) supervise(ctx context.Context, rt *callRuntime) {
 			// A cancel closes the stream itself, so this branch can win the race with ctx.Done:
 			// hang up here too, or "End the call" leaves the provider's call up.
 			if ctx.Err() != nil {
-				s.endCallQuietly(rt.tel.Provider, rt.sid())
+				s.endCallQuietly(rt.activeCall())
 			}
 			return
 		case <-ctx.Done():
-			s.endCallQuietly(rt.tel.Provider, rt.sid())
+			s.endCallQuietly(rt.activeCall())
 			<-s.waitDone(rt, hangupGrace)
 			return
 		case <-limit.C:
 			s.log().Warn("phone: max_call_seconds reached — ending call", "session", rt.sessionID)
-			s.endCallQuietly(rt.tel.Provider, rt.sid())
+			s.endCallQuietly(rt.activeCall())
 			<-s.waitDone(rt, hangupGrace)
 			// The provider should have stopped the stream; if not, close it ourselves so the
 			// wrap-up never runs alongside a live turn.
@@ -277,14 +263,15 @@ func (s *Service) supervise(ctx context.Context, rt *callRuntime) {
 	}
 }
 
-func (s *Service) endCallQuietly(p Provider, callSID string) {
-	if callSID == "" || p == nil {
+// endCallQuietly hangs the call up at the provider; a failure is logged.
+func (s *Service) endCallQuietly(call Call) {
+	if call == nil || call.ID() == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.baseCtx()), 10*time.Second)
 	defer cancel()
-	if err := p.EndCall(ctx, callSID); err != nil {
-		s.log().Error("phone: hang-up failed", "call_sid", callSID, "err", err)
+	if err := call.Hangup(ctx); err != nil {
+		s.log().Error("phone: hang-up failed", "call_id", call.ID(), "err", err)
 	}
 }
 
