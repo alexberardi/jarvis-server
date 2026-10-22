@@ -98,6 +98,17 @@ func (e *EchoCancel) Engage(ctx context.Context, trigger string) bool {
 			"step", step, "err", err, "trigger", trigger)
 		return false
 	}
+	e.prevDefault = e.Sink
+	if out, err := e.Run(ctx, "pactl", "get-default-sink"); err == nil && strings.TrimSpace(out) != "" &&
+		strings.TrimSpace(out) != ECSink {
+		e.prevDefault = strings.TrimSpace(out)
+	}
+	// Bluetooth headphones or a speaker the node routed its output to (#469) are where the music
+	// plays, through the canceller; otherwise the node's own sink.
+	master := e.Sink
+	if strings.HasPrefix(e.prevDefault, "bluez_sink.") {
+		master = e.prevDefault
+	}
 	idx, err := e.load(ctx, "module-alsa-source", "device="+e.Mic, "source_name="+MicSource,
 		"rate=16000", "channels=1", "source_properties=device.description=jarvis-mic-raw")
 	if err != nil {
@@ -107,16 +118,11 @@ func (e *EchoCancel) Engage(ctx context.Context, trigger string) bool {
 	// The webrtc canceller's own gain controls stay off: the HAT's PGA is the music profile's.
 	idx, err = e.load(ctx, "module-echo-cancel", "aec_method=webrtc",
 		`aec_args="analog_gain_control=0 digital_gain_control=0"`,
-		"source_master="+MicSource, "sink_master="+e.Sink, "source_name="+ECSource, "sink_name="+ECSink)
+		"source_master="+MicSource, "sink_master="+master, "source_name="+ECSource, "sink_name="+ECSink)
 	if err != nil {
 		return fail("load_echo_cancel", err)
 	}
 	e.modules = append(e.modules, idx)
-	e.prevDefault = e.Sink
-	if out, err := e.Run(ctx, "pactl", "get-default-sink"); err == nil && strings.TrimSpace(out) != "" &&
-		strings.TrimSpace(out) != ECSink {
-		e.prevDefault = strings.TrimSpace(out)
-	}
 	// New streams (the player a deferred play just started, the replies) land on ECSink too.
 	if _, err := e.Run(ctx, "pactl", "set-default-sink", ECSink); err != nil {
 		e.log().Warn("music: echo cancel: default sink not moved; new streams skip the canceller", "err", err)
@@ -145,8 +151,14 @@ func (e *EchoCancel) Disengage(ctx context.Context, trigger string) {
 
 func (e *EchoCancel) disengageLocked(ctx context.Context, trigger string) {
 	e.Capture.Use("")
-	if _, err := e.Run(ctx, "pactl", "set-default-sink", e.prevDefault); err != nil {
-		e.log().Warn("music: echo cancel: default sink not restored", "sink", e.prevDefault, "err", err)
+	// A default sink someone else set meanwhile (the Bluetooth node routing the output to
+	// headphones that connected, #469) stays, and the music goes there.
+	restore := e.prevDefault
+	if out, err := e.Run(ctx, "pactl", "get-default-sink"); err == nil && strings.TrimSpace(out) != "" &&
+		strings.TrimSpace(out) != ECSink {
+		restore = strings.TrimSpace(out)
+	} else if _, err := e.Run(ctx, "pactl", "set-default-sink", restore); err != nil {
+		e.log().Warn("music: echo cancel: default sink not restored", "sink", restore, "err", err)
 	}
 	// Only what plays on ECSink: a stream a duck parked on the null sink stays parked.
 	var ec int
@@ -154,11 +166,11 @@ func (e *EchoCancel) disengageLocked(ctx context.Context, trigger string) {
 	if out, err := e.Run(ctx, "pactl", "list", "short", "sinks"); err == nil {
 		ec, ecOK = sinkIndex(out, ECSink)
 	}
-	moved := e.moveLocked(ctx, func(it sinkInput) bool { return ecOK && it.Sink != nil && *it.Sink == ec }, e.prevDefault)
+	moved := e.moveLocked(ctx, func(it sinkInput) bool { return ecOK && it.Sink != nil && *it.Sink == ec }, restore)
 	modules := e.modules
 	e.unloadLocked(ctx)
 	e.engaged = false
-	e.log().Info("music: echo cancel disengaged", "unloaded", modules, "moved", moved, "restore_sink", e.prevDefault,
+	e.log().Info("music: echo cancel disengaged", "unloaded", modules, "moved", moved, "restore_sink", restore,
 		"trigger", trigger)
 }
 

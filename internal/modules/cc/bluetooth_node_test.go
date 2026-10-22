@@ -85,7 +85,11 @@ func TestGoNodeBluetoothAgainstTheseRoutes(t *testing.T) {
 		t.Fatalf("status %v", s)
 	}
 
-	// A failed pair is reported as one (a re-pair drops the bond first, as N: does).
+	// A failed pair is reported as one. (A bonded device is connected with its bond, #469: this
+	// one has lost it.)
+	bus.mu.Lock()
+	bus.devices[mac].Paired = false
+	bus.mu.Unlock()
 	bus.pairErr = true
 	failed := e.do("POST", base+"/bluetooth/pair", map[string]any{"mac_address": mac}, bearer(tok)).want(201).json()
 	deliver()
@@ -213,3 +217,4 @@ func (r *radio) Disconnect(_ context.Context, mac string) error {
 func (r *radio) SetTrusted(context.Context, string, bool) error { return nil }
 func (r *radio) RegisterAgent(context.Context) error            { return nil }
 func (r *radio) Paired() <-chan string                          { return nil }
+func (r *radio) Connections() <-chan bluetooth.Connection       { return nil }

@@ -27,6 +27,7 @@ func (noRadio) Disconnect(context.Context, string) error             { return ni
 func (noRadio) SetTrusted(context.Context, string, bool) error       { return nil }
 func (r noRadio) RegisterAgent(context.Context) error                { close(r.agent); return nil }
 func (noRadio) Paired() <-chan string                                { return nil }
+func (noRadio) Connections() <-chan bluetooth.Connection             { return nil }
 
 func TestWireBluetoothSubscribesTheSixTopics(t *testing.T) {
 	r := &node.Runner{Topics: map[string]func(context.Context, *node.CC, []byte){"k2/provision": nil}}

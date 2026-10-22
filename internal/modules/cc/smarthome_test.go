@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -695,4 +696,60 @@ func TestBluetoothProgress(t *testing.T) {
 		}
 	}
 	e.do("POST", base+"/bluetooth/pair/"+prid+"/progress", map[string]any{}, n.h()).want(400)
+}
+
+// #469 (3): every device the node paired can be forgotten from the app's Saved devices, which
+// read GET …/bluetooth/status. A pair before any completed scan used to be dropped (nothing to
+// patch), and a pair that bonded but didn't connect was never listed at all.
+func TestBluetoothStatusListsEveryPairedDevice(t *testing.T) {
+	e := newEnv(t)
+	tok := e.auth.addUser(1, "hh1", authn.RoleMember)
+	n := e.createNode("n1", "hh1")
+	c := e.dialNode(n)
+	c.subscribe("jarvis/nodes/n1/#")
+	base := "/api/v0/nodes/n1"
+	pair := func(mac string, result map[string]any) {
+		t.Helper()
+		prid := e.do("POST", base+"/bluetooth/pair", map[string]any{"mac_address": mac}, bearer(tok)).want(201).json()["id"].(string)
+		c.next()
+		e.do("POST", base+"/bluetooth/pair/"+prid+"/results", result, n.h()).want(200)
+	}
+	status := func() (connected, paired []string) {
+		t.Helper()
+		s := e.do("GET", base+"/bluetooth/status", nil, bearer(tok)).want(200).json()
+		for _, d := range s["connected"].([]any) {
+			connected = append(connected, d.(map[string]any)["mac_address"].(string))
+		}
+		for _, d := range s["paired"].([]any) {
+			paired = append(paired, d.(map[string]any)["mac_address"].(string))
+		}
+		return connected, paired
+	}
+
+	// No scan yet: the pair still shows.
+	pair("EC:66:D1:B4:B5:D6", map[string]any{"success": true, "device_name": "Px7 S2"})
+	if conn, p := status(); !slices.Equal(conn, []string{"EC:66:D1:B4:B5:D6"}) || len(p) != 0 {
+		t.Fatalf("a pair before any scan: connected %v, paired %v", conn, p)
+	}
+	// Bonded, but the audio didn't come up: paired, not connected, so it can be forgotten.
+	pair("20:AF:1B:26:BD:B3", map[string]any{"success": false, "error": "connected, but its audio profile did not come up", "paired": true})
+	if conn, p := status(); !slices.Equal(conn, []string{"EC:66:D1:B4:B5:D6"}) || !slices.Equal(p, []string{"20:AF:1B:26:BD:B3"}) {
+		t.Fatalf("a bonded pair that failed: connected %v, paired %v", conn, p)
+	}
+	// A failed pair that left no bond isn't listed.
+	pair("11:22:33:44:55:66", map[string]any{"success": false, "error": "Device not found"})
+	if _, p := status(); len(p) != 1 {
+		t.Fatalf("a failed pair without a bond is listed: %v", p)
+	}
+	// Forget takes it off.
+	e.do("POST", base+"/bluetooth/release", map[string]any{"mac_address": "20:AF:1B:26:BD:B3", "forget": true}, bearer(tok)).want(202)
+	c.next()
+	if _, p := status(); len(p) != 0 {
+		t.Fatalf("forgotten, still listed: %v", p)
+	}
+	var rows int
+	e.d.Read.QueryRow(`SELECT COUNT(*) FROM cc_bluetooth_scan_requests WHERE node_id = 'n1'`).Scan(&rows)
+	if rows != 1 {
+		t.Fatalf("status rows %d, want 1 (one made for the first pair, then patched)", rows)
+	}
 }

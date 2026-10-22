@@ -87,19 +87,28 @@ func TestScanReportsWhatIsInRangeInJarvisdsShape(t *testing.T) {
 	bus.inRange[phone] = phoneDev()
 	bus.inRange["0C:0C:0C:0C:0C:0C"] = Device{Address: "0C:0C:0C:0C:0C:0C", Alias: "0C-0C-0C-0C-0C-0C"} // broadcast no name
 	bus.inRange["0D:0D:0D:0D:0D:0D"] = Device{Address: "0D:0D:0D:0D:0D:0D", Name: "Band", UUIDs: []string{"0000180d-0000-1000-8000-00805f9b34fb"}}
+	// #469: a bonded device BlueZ has no name for is still listed, so the app can forget it: by
+	// the name the node saved, else by its address.
+	bus.devices["20:AF:1B:26:BD:B3"] = &Device{Address: "20:AF:1B:26:BD:B3", Alias: "20-AF-1B-26-BD-B3", Icon: "audio-headset", Paired: true}
+	bus.devices["0E:0E:0E:0E:0E:0E"] = &Device{Address: "0E:0E:0E:0E:0E:0E", Alias: "0E-0E-0E-0E-0E-0E", Paired: true}
+	if err := n.Store.Paired("20:AF:1B:26:BD:B3", "Arctis GameBuds", "source", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 
 	send(t, n, api, TopicScan, map[string]any{"request_id": "r1", "role": "source"})
 
 	want := []any{
 		map[string]any{"name": "Band", "mac_address": "0D:0D:0D:0D:0D:0D", "device_type": "unknown", "paired": false, "connected": false},
+		map[string]any{"name": "0E:0E:0E:0E:0E:0E", "mac_address": "0E:0E:0E:0E:0E:0E", "device_type": "unknown", "paired": true, "connected": false},
 		map[string]any{"name": "Avery's iPhone", "mac_address": phone, "device_type": "phone", "paired": false, "connected": false},
+		map[string]any{"name": "Arctis GameBuds", "mac_address": "20:AF:1B:26:BD:B3", "device_type": "audio_sink", "paired": true, "connected": false},
 		map[string]any{"name": "JBL Flip 5", "mac_address": speaker, "device_type": "audio_sink", "paired": true, "connected": true},
 	}
 	if got := asJSON(t, api.scans["r1"]); !reflect.DeepEqual(got, map[string]any{"devices": want}) {
 		t.Fatalf("scan result:\n got %v\nwant %v", got, want)
 	}
-	if !slices.Equal(bus.discovering, []string{"bredr", "le"}) {
-		t.Errorf("discovery: %v, want BR/EDR then LE", bus.discovering)
+	if !slices.Equal(bus.discovering, []string{"bredr"}) {
+		t.Errorf("discovery: %v, want BR/EDR only (#469: LE added 10 s and no audio device)", bus.discovering)
 	}
 	if !slices.Contains(bus.Calls(), "Remove DE:AD:00:00:00:01") || slices.Contains(bus.Calls(), "Remove "+speaker) {
 		t.Errorf("only the unpaired cache entries are pruned: %v", bus.Calls())
@@ -173,12 +182,13 @@ func TestPairANewSpeaker(t *testing.T) {
 	}
 }
 
-func TestPairABondedDeviceRemovesTheBondFirst(t *testing.T) {
-	n, bus, _, api := rig(t)
+// #469: a retry after a pair whose audio failed. BlueZ still has the bond and the device has
+// left pairing mode: the node connects it with the bond it has instead of removing it first.
+func TestPairABondedDeviceConnectsWithTheBondItHas(t *testing.T) {
+	n, bus, pulse, api := rig(t)
 	s := speakerDev()
 	s.Paired = true
-	bus.devices[speaker] = &s
-	bus.inRange[speaker] = speakerDev()
+	bus.devices[speaker] = &s // not in range of a discovery: no longer in pairing mode
 	if err := n.Store.Paired(speaker, "JBL", "source", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -189,17 +199,62 @@ func TestPairABondedDeviceRemovesTheBondFirst(t *testing.T) {
 	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
 
 	if api.pairs["p1"]["success"] != true {
-		t.Fatalf("pair result %v", api.pairs["p1"])
+		t.Fatalf("pair result %v, calls %v", api.pairs["p1"], bus.Calls())
 	}
-	calls := bus.Calls()
-	if i, j := slices.Index(calls, "Remove "+speaker), slices.Index(calls, "Pair "+speaker); i < 0 || j < i {
-		t.Errorf("remove before pair: %v", calls)
+	if calls := bus.Calls(); slices.Contains(calls, "Remove "+speaker) || slices.Contains(calls, "Pair "+speaker) {
+		t.Errorf("a bonded device that connects was unpaired or re-paired: %v", calls)
 	}
-	if slices.Index(calls, "Connect "+speaker) < slices.Index(calls, "Pair "+speaker) {
-		t.Errorf("a connect before the pair ends the device's pairing mode: %v", calls)
+	if pulse.def != speakerSink {
+		t.Errorf("default sink %q, want the speaker's", pulse.def)
 	}
 	if r, _ := n.Store.Get(speaker); r.AutoConnect {
 		t.Error("a re-pair turned the user's auto-connect switch back on")
+	}
+}
+
+// A bonded device that won't connect (it forgot the node: reset, or paired elsewhere) is
+// re-paired, but its bond is only removed once a discovery sees it in pairing mode.
+func TestPairABondedDeviceThatLostTheBondIsRePaired(t *testing.T) {
+	n, bus, _, api := rig(t)
+	s := speakerDev()
+	s.Paired = true
+	bus.devices[speaker] = &s
+	bus.inRange[speaker] = speakerDev() // in pairing mode
+	bus.connErrOnce = map[string][]error{speaker: {BlueZError{Name: "org.bluez.Error.Failed", Message: "Input/output error"}}}
+
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+
+	if api.pairs["p1"]["success"] != true {
+		t.Fatalf("pair result %v, calls %v", api.pairs["p1"], bus.Calls())
+	}
+	calls := bus.Calls()
+	discover, remove, pair := slices.Index(calls, "Discover bredr"), slices.Index(calls, "Remove "+speaker), slices.Index(calls, "Pair "+speaker)
+	if discover < 0 || remove < discover || pair < remove {
+		t.Errorf("want discover (it is in pairing mode), then remove, then pair: %v", calls)
+	}
+}
+
+func TestPairABondedDeviceOutOfReachKeepsTheBond(t *testing.T) {
+	for name, setup := range map[string]func(*fakeBus){
+		"connect fails": func(b *fakeBus) {
+			b.connectErr[speaker] = BlueZError{Name: "org.bluez.Error.Failed", Message: "br-connection-page-timeout"}
+		},
+		"audio fails": func(b *fakeBus) { b.onConnect = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			n, bus, _, api := rig(t)
+			s := speakerDev()
+			s.Paired = true
+			bus.devices[speaker] = &s
+			setup(bus)
+			send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+			if slices.Contains(bus.Calls(), "Remove "+speaker) {
+				t.Errorf("the bond was removed although the device isn't in pairing mode: %v", bus.Calls())
+			}
+			if r := api.pairs["p1"]; r["success"] != false || r["paired"] != true {
+				t.Errorf("result %v: want a failure that says the device is still paired", r)
+			}
+		})
 	}
 }
 
@@ -252,7 +307,11 @@ func TestPairFailures(t *testing.T) {
 			n, bus, pulse, api := rig(t)
 			c.setup(bus, pulse)
 			send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
-			if got := asJSON(t, api.pairs["p1"]); !reflect.DeepEqual(got, map[string]any{"success": false, "error": c.want}) {
+			want := map[string]any{"success": false, "error": c.want}
+			if name == "connect fails" || name == "audio profile never comes up" {
+				want["paired"] = true // bonded: the app lists it, so it can be forgotten (#469)
+			}
+			if got := asJSON(t, api.pairs["p1"]); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got %v", got)
 			}
 			if _, ok := n.Store.Get(speaker); ok {
@@ -677,8 +736,8 @@ func TestARepeatedNudgeRunsOnce(t *testing.T) {
 	n, bus, _, api := rig(t)
 	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
 	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
-	if got := len(bus.discovering); got != 2 {
-		t.Fatalf("discoveries %d, want one scan (2 transports)", got)
+	if got := len(bus.discovering); got != 1 {
+		t.Fatalf("discoveries %d, want one scan", got)
 	}
 }
 
@@ -710,5 +769,81 @@ func waitFor(t *testing.T, ok func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// #469: a scan is one BR/EDR discovery that ends once no new device has turned up for QuietFor,
+// so headphones still in pairing mode can be paired.
+func TestScanEndsWhenNoNewDeviceTurnsUp(t *testing.T) {
+	n, bus, _, api := rig(t)
+	n.ScanFor, n.QuietFor, n.ProgressEvery = 5*time.Second, 30*time.Millisecond, 5*time.Millisecond
+	bus.inRange[speaker] = speakerDev()
+	start := time.Now()
+	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("scan took %v; the list stopped growing after the first poll", took)
+	}
+	if devs := api.scans["r1"]["devices"].([]ScanDevice); len(devs) != 1 {
+		t.Fatalf("scan result %v", api.scans["r1"])
+	}
+	if !slices.Equal(bus.discovering, []string{"bredr"}) {
+		t.Errorf("discovery %v", bus.discovering)
+	}
+
+	// Nothing new: the whole ScanFor (the device may still be coming).
+	delete(bus.inRange, speaker)
+	n.ScanFor = 80 * time.Millisecond
+	start = time.Now()
+	if _, err := n.Scan(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took < 80*time.Millisecond {
+		t.Errorf("a scan that found nothing new ended after %v", took)
+	}
+}
+
+// #469: headphones that power off and on reconnect by themselves; the node's output follows them
+// there and back (the Px7 S2 stayed on the HAT after its reconnect).
+func TestASavedSpeakerThatReconnectsItselfGetsTheOutput(t *testing.T) {
+	n, bus, pulse, _ := rig(t)
+	s := speakerDev()
+	s.Paired = true
+	bus.devices[speaker] = &s
+	_ = n.Store.Paired(speaker, "JBL", "source", time.Now())
+	n.FirstReconnect = time.Hour // only the device's own reconnect
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	n.Start(ctx)
+	def := func() string {
+		pulse.mu.Lock()
+		defer pulse.mu.Unlock()
+		return pulse.def
+	}
+
+	link := func(up bool) { // the device itself, then BlueZ's signal
+		bus.mu.Lock()
+		bus.devices[speaker].Connected = up
+		bus.mu.Unlock()
+		if up {
+			bus.onConnect(speaker) // Pulse brings the sink up
+		} else {
+			bus.onDisconnect(speaker) // Pulse drops the sink and falls back
+		}
+		bus.conns <- Connection{MAC: speaker, Connected: up}
+	}
+	link(true)
+	waitFor(t, func() bool { return def() == speakerSink })
+	link(false)
+	waitFor(t, func() bool { return def() == "jarvis_output" })
+	link(true)
+	waitFor(t, func() bool { return def() == speakerSink })
+
+	// A device the node has no record of is left alone.
+	other := "AA:BB:CC:DD:EE:09"
+	pulse.add("bluez_sink.AA_BB_CC_DD_EE_09.a2dp_sink", "")
+	bus.conns <- Connection{MAC: other, Connected: true}
+	time.Sleep(50 * time.Millisecond)
+	if def() != speakerSink {
+		t.Errorf("an unknown device took the output: %q", def())
 	}
 }

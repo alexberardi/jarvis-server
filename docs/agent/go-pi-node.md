@@ -949,8 +949,8 @@ system bus, no adapter) the node runs without Bluetooth. Decisions:
 
 | Topic (payload) | Does | Reply |
 |---|---|---|
-| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, BR/EDR then LE discovery 10 s each, list the named devices with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected`; the list so far is posted each second it grew | `POST …/bluetooth-scan/{rid}/progress` `{"progress": "scanning", "devices"}`, then `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
-| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | remove an existing bond, rescan ≤12 s if BlueZ doesn't know it, pair (30 s; a Page Timeout back within 4 s is retried once after 2 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 20 s, or have BlueZ's media transport up (a warning), or it is disconnected; `role: source` makes its bluez sink the default sink, `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/progress` `{"progress": "finding"/"pairing"/"connecting"/"audio"}` as each step starts, then `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages) |
+| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, one BR/EDR discovery of at most 10 s that ends 4 s after the last new device (#469), list the named devices and every paired one with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected`; the list so far is posted each second it grew | `POST …/bluetooth-scan/{rid}/progress` `{"progress": "scanning", "devices"}`, then `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
+| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | a bonded device is connected with its bond first; only if that connect fails and a discovery sees it in pairing mode is the bond removed (#469); rescan ≤12 s if BlueZ doesn't know it, pair (30 s; a Page Timeout back within 4 s is retried once after 2 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 20 s, or have BlueZ's media transport up (a warning), or it is disconnected; `role: source` makes its bluez sink the default sink, `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/progress` `{"progress": "finding"/"pairing"/"connecting"/"audio"}` as each step starts, then `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages; `"paired": true` when the device stayed bonded) |
 | `bluetooth-disconnect` (`mac_address`) | give the output back to the sink it replaced, unload its loopback, disconnect | – |
 | `bluetooth-discoverable` (`timeout`, default 120) | Powered, Pairable, DiscoverableTimeout, Discoverable, in N:'s order | – |
 | `bluetooth-release` (`mac_address`, `forget`) | as disconnect, and turn its auto-connect off; `forget`: remove the pairing (one BlueZ no longer knows is fine) and the record | – |
@@ -960,7 +960,8 @@ At start the agent is registered as BlueZ's default and the adapter made pairabl
 phone starts (the node discoverable) is trusted and connected, as N:'s agent does on
 `Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. A connected
 speaker or headphones (role `source`) are Pulse's default sink, so replies and music play on them;
-`jarvis_output` is the default again when they disconnect (#433).
+`jarvis_output` is the default again when they disconnect (#433). A saved device that connects by
+itself (headphones turned back on) gets the output again at once (#469).
 `install-pi.sh` installs `bluez`, `pulseaudio-module-bluetooth` and `rfkill`, unblocks the radio
 and sets BlueZ's Class of Device to audio (0x240404) in `/etc/bluetooth/main.conf`.
 

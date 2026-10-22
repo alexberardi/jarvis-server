@@ -21,18 +21,21 @@ type fakeBus struct {
 	connectErr   map[string]error
 	removeErr    error
 	pairErrOnce  map[string][]error // returned by the next Pair calls, in order, before pairErr
+	connErrOnce  map[string][]error // returned by the next Connect calls, in order, before connectErr
 	transport    map[string]bool    // a MediaTransport1 under the device (its audio profile is up)
 	discovering  []string           // transports, in order
 	calls        []string
 	agentCount   int
 	paired       chan string
+	conns        chan Connection
 	onConnect    func(mac string) // e.g. Pulse makes the sink
 	onDisconnect func(mac string)
 }
 
 func newFakeBus() *fakeBus {
 	return &fakeBus{adapter: Adapter{Powered: true}, props: map[string]any{}, devices: map[string]*Device{},
-		inRange: map[string]Device{}, pairErr: map[string]error{}, connectErr: map[string]error{}, paired: make(chan string, 4)}
+		inRange: map[string]Device{}, pairErr: map[string]error{}, connectErr: map[string]error{}, paired: make(chan string, 4),
+		conns: make(chan Connection, 4)}
 }
 
 func (b *fakeBus) call(f string, a ...any) {
@@ -91,10 +94,14 @@ func (b *fakeBus) Discover(_ context.Context, transport string) (func(), error) 
 			c := d
 			b.devices[mac] = &c
 		}
+		b.devices[mac].RSSI = -60
 	}
 	return func() {
 		b.mu.Lock()
 		b.call("StopDiscovery", transport)
+		for _, d := range b.devices {
+			d.RSSI = 0
+		}
 		b.mu.Unlock()
 	}, nil
 }
@@ -148,7 +155,10 @@ func (b *fakeBus) Connect(_ context.Context, mac string) error {
 	b.mu.Lock()
 	b.call("Connect", mac)
 	d, err := b.get(mac)
-	if err == nil {
+	if q := b.connErrOnce[mac]; err == nil && len(q) > 0 {
+		b.connErrOnce[mac] = q[1:]
+		err = q[0]
+	} else if err == nil {
 		err = b.connectErr[mac]
 	}
 	if err == nil {
@@ -197,6 +207,8 @@ func (b *fakeBus) RegisterAgent(context.Context) error {
 }
 
 func (b *fakeBus) Paired() <-chan string { return b.paired }
+
+func (b *fakeBus) Connections() <-chan Connection { return b.conns }
 
 func (b *fakeBus) AudioTransport(_ context.Context, mac string) (bool, error) {
 	b.mu.Lock()
