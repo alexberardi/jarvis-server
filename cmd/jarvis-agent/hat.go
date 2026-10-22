@@ -280,9 +280,13 @@ type piAudio interface {
 // wirePiNode gives the runner the Pi's verbs (update_node_config, preview_led_pattern,
 // measure_ambient_noise; internal/agent/pinode): changes go to the HAT's LEDs (hd, nil
 // without one), to the voice pipeline through live, to the speaker through audio (nil: none),
-// and into agent.json at path. It returns the settings snapshot's node_config, which reports them.
-func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, live *voice.Live, audio *sdkhost.Audio, path string, log *slog.Logger) func() map[string]any {
-	pn := pinode.New(piState(vf, hf), path, log)
+// and into agent.json at path. It returns the settings snapshot's node_config, which reports them,
+// and the settings in effect (the maintenance restart reads them: mf is its flags).
+func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, mf *maintFlags, hd *hatDevices, live *voice.Live, audio *sdkhost.Audio,
+	path string, log *slog.Logger) (func() map[string]any, func() pinode.State) {
+	st := piState(vf, hf)
+	st.Maintenance = mf.settings()
+	pn := pinode.New(st, path, log)
 	var pa piAudio
 	if audio != nil {
 		pn.Audio, pa = audio, audio
@@ -298,16 +302,16 @@ func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, hd *hatDevices, li
 		verbs[name] = func(ctx context.Context, cc *node.CC, det map[string]any) { v(ctx, cc, det) }
 	}
 	addVerbs(r, verbs)
-	return piNodeConfig(pn.State, vf.bargeIn, hd, pa, hat.Detected())
+	return piNodeConfig(pn.State, vf.bargeIn, hd, pa, hat.Detected()), pn.State
 }
 
 // piNodeConfig is the Pi profile's settings-snapshot node_config: the HAT (detected: hat.Detected;
 // the LEDs and button this agent actually opened) and the voice and LED settings it runs with
 // now (state: the flags, then the app's changes; bargeIn: the flag, not changed live yet), under
 // the Python node's keys (settings_snapshot_service.py build_snapshot), and the speaker's volume
-// and mute (audio; nil or unreadable: left out, as Python's). Keys the Go node has no setting for
-// yet (min/max record seconds, barge-in thresholds, maintenance restart, update consent) are
-// left out.
+// and mute (audio; nil or unreadable: left out, as Python's). The RSS ceiling is the one in
+// effect (the default resolved from the RAM). Keys the Go node has no setting for yet (min/max
+// record seconds, barge-in thresholds, update consent) are left out.
 func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio piAudio, detected bool) func() map[string]any {
 	return func() map[string]any {
 		leds := hd != nil && hd.leds != nil
@@ -322,6 +326,8 @@ func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio
 			"silence_duration":                      st.SilenceSecs,
 			"follow_up_min_record_after_onset_secs": st.FollowUpMinAfterOnset,
 			"follow_up_min_speech_secs":             st.FollowUpMinSpeech,
+			"maintenance_restart_enabled":           st.Maintenance.Enabled,
+			"maintenance_restart_at_time":           st.Maintenance.At,
 			"led_enabled":                           st.LEDEnabled,
 			"led_brightness_percent":                st.LEDBrightness,
 			"hardware": map[string]any{
@@ -330,6 +336,8 @@ func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio
 				"button_available":    leds && hd.closeLine != nil,
 			},
 		}
+		ram, _ := memTotalMB()
+		nc["maintenance_restart_rss_ceiling_mb"] = st.Maintenance.Ceiling(ram)
 		if audio != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

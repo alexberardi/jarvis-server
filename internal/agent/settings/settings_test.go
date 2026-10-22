@@ -15,25 +15,28 @@ import (
 func runFlags() (*flag.FlagSet, map[string]any) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	v := map[string]any{
-		"voice":                     fs.Bool("voice", false, ""),
-		"no-overlay":                fs.Bool("no-overlay", false, ""),
-		"confirm-dictation":         fs.String("confirm-dictation", "off", ""),
-		"no-browser":                fs.Bool("no-browser", false, ""),
-		"no-chimes":                 fs.Bool("no-chimes", false, ""),
-		"no-tray":                   fs.Bool("no-tray", false, ""),
-		"voice-input":               fs.String("voice-input", "default", ""),
-		"voice-output":              fs.String("voice-output", "default", ""),
-		"wake-threshold":            fs.Float64("wake-threshold", 0.4, ""),
-		"no-auto-update":            fs.Bool("no-auto-update", false, ""),
-		"follow-up":                 fs.Float64("follow-up", 4, ""),
-		"follow-up-silence":         fs.Float64("follow-up-silence", 1, ""),
-		"no-leds":                   fs.Bool("no-leds", false, ""),
-		"led-brightness":            fs.Int("led-brightness", 100, ""),
-		"computer-control":          fs.Bool("computer-control", false, ""),
-		"silence-threshold":         fs.Float64("silence-threshold", 300, ""),
-		"listen-silence":            fs.Float64("listen-silence", 0.8, ""),
-		"follow-up-min-after-onset": fs.Float64("follow-up-min-after-onset", 0.7, ""),
-		"follow-up-min-speech":      fs.Float64("follow-up-min-speech", 0.3, ""),
+		"voice":                      fs.Bool("voice", false, ""),
+		"no-overlay":                 fs.Bool("no-overlay", false, ""),
+		"confirm-dictation":          fs.String("confirm-dictation", "off", ""),
+		"no-browser":                 fs.Bool("no-browser", false, ""),
+		"no-chimes":                  fs.Bool("no-chimes", false, ""),
+		"no-tray":                    fs.Bool("no-tray", false, ""),
+		"voice-input":                fs.String("voice-input", "default", ""),
+		"voice-output":               fs.String("voice-output", "default", ""),
+		"wake-threshold":             fs.Float64("wake-threshold", 0.4, ""),
+		"no-auto-update":             fs.Bool("no-auto-update", false, ""),
+		"follow-up":                  fs.Float64("follow-up", 4, ""),
+		"follow-up-silence":          fs.Float64("follow-up-silence", 1, ""),
+		"no-leds":                    fs.Bool("no-leds", false, ""),
+		"led-brightness":             fs.Int("led-brightness", 100, ""),
+		"computer-control":           fs.Bool("computer-control", false, ""),
+		"silence-threshold":          fs.Float64("silence-threshold", 300, ""),
+		"listen-silence":             fs.Float64("listen-silence", 0.8, ""),
+		"follow-up-min-after-onset":  fs.Float64("follow-up-min-after-onset", 0.7, ""),
+		"follow-up-min-speech":       fs.Float64("follow-up-min-speech", 0.3, ""),
+		"no-maintenance-restart":     fs.Bool("no-maintenance-restart", false, ""),
+		"maintenance-restart-at":     fs.String("maintenance-restart-at", "03:00", ""),
+		"maintenance-rss-ceiling-mb": fs.Int("maintenance-rss-ceiling-mb", -1, ""),
 	}
 	return fs, v
 }
@@ -131,6 +134,9 @@ func TestBadValuesAreRefused(t *testing.T) {
 		`{"follow_up_min_speech": -0.1}`,
 		`{"led_brightness": 101}`,
 		`{"led_brightness": 50.5}`,
+		`{"maintenance_restart_at": "24:00"}`,
+		`{"maintenance_restart_at": "3"}`,
+		`{"maintenance_rss_ceiling_mb": -1}`,
 		`[1, 2]`,
 		`{"voice": tru`,
 	} {
@@ -144,7 +150,8 @@ func TestSetGetUnsetSaveRoundTrip(t *testing.T) {
 	var s Settings
 	for name, val := range map[string]string{"voice": "true", "island": "false", "confirm_dictation": "all", "wake_threshold": "0.55", "voice_output": "wav:out.wav",
 		"follow_up": "6", "follow_up_silence": "0.5", "leds": "false", "led_brightness": "40",
-		"silence_threshold": "1000", "listen_silence": "0.5", "follow_up_min_after_onset": "0.9", "follow_up_min_speech": "0"} {
+		"silence_threshold": "1000", "listen_silence": "0.5", "follow_up_min_after_onset": "0.9", "follow_up_min_speech": "0",
+		"maintenance_restart": "false", "maintenance_restart_at": "04:30", "maintenance_rss_ceiling_mb": "0"} {
 		k, ok := Lookup(name)
 		if !ok {
 			t.Fatal(name)

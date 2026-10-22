@@ -52,6 +52,10 @@ type Settings struct {
 	ListenSilence         *float64 `json:"listen_silence,omitempty"`
 	FollowUpMinAfterOnset *float64 `json:"follow_up_min_after_onset,omitempty"`
 	FollowUpMinSpeech     *float64 `json:"follow_up_min_speech,omitempty"`
+	// The Pi's maintenance restart (internal/agent/maintenance).
+	MaintenanceRestart      *bool   `json:"maintenance_restart,omitempty"`
+	MaintenanceRestartAt    *string `json:"maintenance_restart_at,omitempty"`
+	MaintenanceRSSCeilingMB *int    `json:"maintenance_rss_ceiling_mb,omitempty"`
 	// ComputerControl: Jarvis may use this computer (COMPUTER-CONTROL.md C11). Unset is off:
 	// a new install and an upgrade both start off; the menu's toggle sets it.
 	ComputerControl *bool `json:"computer_control,omitempty"`
@@ -90,6 +94,12 @@ var Keys = []Key{
 		func(s *Settings) any { return &s.FollowUpMinAfterOnset }},
 	{"follow_up_min_speech", "follow-up-min-speech", false, "a follow-up answer shorter than this many seconds of speech is noise",
 		func(s *Settings) any { return &s.FollowUpMinSpeech }},
+	{"maintenance_restart", "no-maintenance-restart", true, "a Pi restarts itself once a day and when its memory passes the ceiling",
+		func(s *Settings) any { return &s.MaintenanceRestart }},
+	{"maintenance_restart_at", "maintenance-restart-at", false, `a Pi's daily restart, "HH:MM" local time`,
+		func(s *Settings) any { return &s.MaintenanceRestartAt }},
+	{"maintenance_rss_ceiling_mb", "maintenance-rss-ceiling-mb", false, "a Pi restarts when its resident memory reaches this many MB (0: never)",
+		func(s *Settings) any { return &s.MaintenanceRSSCeilingMB }},
 	{"computer_control", "computer-control", false, `let Jarvis use this computer (off by default; the menu's "Computer control" sets it)`,
 		func(s *Settings) any { return &s.ComputerControl }},
 }
@@ -190,12 +200,26 @@ func (s Settings) Validate() error {
 	if s.LEDBrightness != nil && (*s.LEDBrightness < 0 || *s.LEDBrightness > 100) {
 		return fmt.Errorf("led_brightness is %d; use 0 to 100", *s.LEDBrightness)
 	}
+	if s.MaintenanceRestartAt != nil && !validHHMM(*s.MaintenanceRestartAt) {
+		return fmt.Errorf("maintenance_restart_at is %q; use HH:MM, 00:00 to 23:59", *s.MaintenanceRestartAt)
+	}
+	if s.MaintenanceRSSCeilingMB != nil && *s.MaintenanceRSSCeilingMB < 0 {
+		return fmt.Errorf("maintenance_rss_ceiling_mb is %d; use 0 (never) or more MB", *s.MaintenanceRSSCeilingMB)
+	}
 	for _, p := range []*string{s.VoiceInput, s.VoiceOutput} {
 		if p != nil && strings.TrimSpace(*p) == "" {
 			return errors.New("voice_input and voice_output can't be empty (unset them for the default device)")
 		}
 	}
 	return nil
+}
+
+// validHHMM is maintenance.ParseHHMM's check (repeated here so this package stays a leaf).
+func validHHMM(v string) bool {
+	h, m, ok := strings.Cut(strings.TrimSpace(v), ":")
+	hh, err1 := strconv.Atoi(h)
+	mm, err2 := strconv.Atoi(m)
+	return ok && err1 == nil && err2 == nil && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59
 }
 
 // Save writes the settings atomically, 0600 in a 0700 directory (it sits next to node.json).

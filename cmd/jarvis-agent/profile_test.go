@@ -116,7 +116,10 @@ func TestPiNodeConfig(t *testing.T) {
 		silenceThreshold: 1000, listenSilence: 0.5, followMinAfterOnset: 0.9, followMinSpeech: 0.45}
 	hf := &hatFlags{mode: "auto", brightness: 40}
 	st := piState(vf, hf)
+	st.Maintenance = (&maintFlags{at: "03:00", ceilingMB: -1}).settings()
 	state := func() pinode.State { return st }
+	defer func(f func() (int, bool)) { memTotalMB = f }(memTotalMB)
+	memTotalMB = func() (int, bool) { return 4096, true }
 	got := piNodeConfig(state, true, nil, nil, false)()
 	want := map[string]any{
 		"wake_word_threshold": 0.6, "wake_ack_audio_enabled": false,
@@ -124,6 +127,8 @@ func TestPiNodeConfig(t *testing.T) {
 		"silence_threshold": 1000, "silence_duration": 0.5,
 		"follow_up_min_record_after_onset_secs": 0.9, "follow_up_min_speech_secs": 0.45,
 		"led_enabled": true, "led_brightness_percent": 40,
+		// The ceiling in effect: max(320 MB, 35% of 4 GB).
+		"maintenance_restart_enabled": true, "maintenance_restart_at_time": "03:00", "maintenance_restart_rss_ceiling_mb": 1433,
 		"hardware": map[string]any{"hat_detected": false, "led_chain_available": false, "button_available": false},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -189,13 +194,14 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 		mixer = append(mixer, name+" "+strings.Join(args, " "))
 		return "", nil
 	}}
-	cfg := wirePiNode(r, vf, hf, nil, live, audio, path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	cfg, state := wirePiNode(r, vf, hf, &maintFlags{at: "03:00", ceilingMB: -1}, nil, live, audio, path, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if len(r.Verbs) != 3 {
 		t.Fatalf("verbs %v", r.Verbs)
 	}
 	b, _ := json.Marshal([]map[string]any{{"command": "update_node_config", "details": map[string]any{
 		"settings": map[string]any{"led_brightness_percent": 30, "wake_word_threshold": 0.7,
-			"silence_threshold": 1000, "silence_duration": 0.5, "volume_percent": 65}}}})
+			"silence_threshold": 1000, "silence_duration": 0.5, "volume_percent": 65,
+			"maintenance_restart_at_time": "04:30", "maintenance_restart_rss_ceiling_mb": 600}}}})
 	d := &node.Dispatcher{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Verbs: map[string]func(context.Context, map[string]any){}}
 	for name, v := range r.Verbs {
 		d.Verbs[name] = func(ctx context.Context, det map[string]any) { v(ctx, nil, det) }
@@ -203,8 +209,13 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 	d.Handle(context.Background(), b)
 	got := cfg()
 	if got["led_brightness_percent"] != 30 || got["wake_word_threshold"] != 0.7 || got["silence_threshold"] != 1000 ||
-		got["silence_duration"] != 0.5 || got["volume_percent"] != 65 || got["is_muted"] != false {
+		got["silence_duration"] != 0.5 || got["volume_percent"] != 65 || got["is_muted"] != false ||
+		got["maintenance_restart_at_time"] != "04:30" || got["maintenance_restart_rss_ceiling_mb"] != 600 {
 		t.Fatalf("node_config %v", got)
+	}
+	// The maintenance restart reads the same settings.
+	if m := state().Maintenance; !m.Enabled || m.At != "04:30" || m.CeilingMB != 600 {
+		t.Fatalf("maintenance %+v", m)
 	}
 	s, _, err := settings.Load(path)
 	if err != nil || *s.LEDBrightness != 30 || *s.WakeThreshold != 0.7 || *s.SilenceThreshold != 1000 || *s.ListenSilence != 0.5 {
@@ -223,7 +234,7 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 func TestAPiKeepsAllItsVerbs(t *testing.T) {
 	r := &node.Runner{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	wirePiNode(r, &voiceFlags{threshold: 0.4}, &hatFlags{mode: "auto", brightness: 100}, nil, voice.NewLive(), nil, "", log)
+	wirePiNode(r, &voiceFlags{threshold: 0.4}, &hatFlags{mode: "auto", brightness: 100}, &maintFlags{}, nil, voice.NewLive(), nil, "", log)
 	addVerbs(r, voiceProfileVerbs(piProfile, voice.NewMic(), log))
 	want := []string{"enroll_voice", "measure_ambient_noise", "preview_led_pattern", "update_node_config", "verify_voice"}
 	if got := slices.Sorted(maps.Keys(r.Verbs)); !slices.Equal(got, want) {

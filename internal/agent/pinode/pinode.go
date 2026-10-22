@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/maintenance"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -56,6 +57,8 @@ type State struct {
 	SilenceSecs           float64 // silence_duration: silence that ends a command
 	FollowUpMinAfterOnset float64 // follow_up_min_record_after_onset_secs
 	FollowUpMinSpeech     float64 // follow_up_min_speech_secs
+	// maintenance_restart_enabled, _at_time and _rss_ceiling_mb: read at every poll.
+	Maintenance maintenance.Settings
 }
 
 // Node handles the verbs. Set LEDs, Voice and Audio after New when the Pi has them.
@@ -205,6 +208,23 @@ func parse(key string, v any) (change, string) {
 		}
 		return change{state: func(s *State) { s.FollowUpMinSpeech = f }, save: func(s *settings.Settings) { s.FollowUpMinSpeech = &f },
 			tune: func(c *voice.Config) { c.FollowUp.MinSpeechSecs = f }}, ""
+	case "maintenance_restart_enabled":
+		b := truthy(v)
+		return change{state: func(s *State) { s.Maintenance.Enabled = b }, save: func(s *settings.Settings) { s.MaintenanceRestart = &b }}, ""
+	case "maintenance_restart_at_time":
+		at, ok := v.(string)
+		if _, _, valid := maintenance.ParseHHMM(at); !ok || !valid {
+			return change{}, "use HH:MM, 00:00 to 23:59"
+		}
+		at = strings.TrimSpace(at)
+		return change{state: func(s *State) { s.Maintenance.At = at }, save: func(s *settings.Settings) { s.MaintenanceRestartAt = &at }}, ""
+	case "maintenance_restart_rss_ceiling_mb":
+		f, ok := number(v)
+		if !ok || f < 0 {
+			return change{}, "use 0 (never) or more MB"
+		}
+		mb := int(f) // Python's int()
+		return change{state: func(s *State) { s.Maintenance.CeilingMB = mb }, save: func(s *settings.Settings) { s.MaintenanceRSSCeilingMB = &mb }}, ""
 	case "volume_percent":
 		f, ok := number(v)
 		if !ok {

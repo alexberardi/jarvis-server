@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/maintenance"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -104,7 +105,8 @@ func (f *fakeCC) PostAmbientResult(_ context.Context, rid string, p map[string]a
 
 func initial() State {
 	return State{WakeThreshold: 0.4, WakeAck: true, FollowUpListen: 4, FollowUpSilence: 1, LEDEnabled: true, LEDBrightness: 100,
-		SilenceThreshold: 300, SilenceSecs: 0.8, FollowUpMinAfterOnset: 0.7, FollowUpMinSpeech: 0.3}
+		SilenceThreshold: 300, SilenceSecs: 0.8, FollowUpMinAfterOnset: 0.7, FollowUpMinSpeech: 0.3,
+		Maintenance: maintenance.Settings{Enabled: true, At: "03:00", CeilingMB: -1}}
 }
 
 func newNode(t *testing.T) (*Node, *fakeLEDs, *fakeVoice, string) {
@@ -197,7 +199,7 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		t.Fatalf("voice cfg %+v", v.cfg)
 	}
 	want := State{WakeThreshold: 0.55, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40,
-		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45}
+		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45, Maintenance: initial().Maintenance}
 	if got := n.State(); got != want {
 		t.Fatalf("state %+v", got)
 	}
@@ -215,6 +217,40 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		if strings.Contains(string(b), k) {
 			t.Errorf("%s persisted:\n%s", k, b)
 		}
+	}
+}
+
+// The maintenance restart reads State at every poll: no pipeline or LED change, saved to
+// agent.json.
+func TestUpdateMaintenanceRestart(t *testing.T) {
+	n, leds, v, path := newNode(t)
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
+		"maintenance_restart_enabled":        "false",
+		"maintenance_restart_at_time":        "04:30",
+		"maintenance_restart_rss_ceiling_mb": 512.0,
+	}})
+	want := initial()
+	want.Maintenance = maintenance.Settings{Enabled: false, At: "04:30", CeilingMB: 512}
+	if got := n.State(); got != want {
+		t.Fatalf("state %+v", got.Maintenance)
+	}
+	if v.tunes != 0 || len(leds.enabled) != 0 {
+		t.Fatalf("tunes %d, leds %v", v.tunes, leds.enabled)
+	}
+	s, _, err := settings.Load(path)
+	if err != nil || s.MaintenanceRestart == nil || *s.MaintenanceRestart || s.MaintenanceRestartAt == nil || *s.MaintenanceRestartAt != "04:30" ||
+		s.MaintenanceRSSCeilingMB == nil || *s.MaintenanceRSSCeilingMB != 512 {
+		t.Fatalf("saved %+v %v", s, err)
+	}
+
+	// 0 turns the ceiling off (Python's ceiling_mb > 0 check); bad values are skipped.
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{"maintenance_restart_rss_ceiling_mb": 0.0}})
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
+		"maintenance_restart_at_time": "25:00", "maintenance_restart_rss_ceiling_mb": -5.0}})
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{"maintenance_restart_at_time": 3.0}})
+	want.Maintenance.CeilingMB = 0
+	if got := n.State(); got != want {
+		t.Fatalf("state after bad values %+v", got.Maintenance)
 	}
 }
 
