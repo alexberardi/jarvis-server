@@ -27,10 +27,10 @@ type UA struct {
 	contact   sip.ContactHeader
 	registrar sip.Uri
 
-	cancel  context.CancelFunc // stops the supervisor
-	sock    interface{ Close() error }
-	served  chan struct{} // the server has stopped reading the socket
-	done    chan struct{} // the supervisor has exited (after its unregister)
+	cancel context.CancelFunc // stops the supervisor
+	sock   interface{ Close() error }
+	served chan struct{} // the server has stopped reading the socket
+	done   chan struct{} // the supervisor has exited (after its unregister)
 
 	mu        sync.Mutex
 	status    Status

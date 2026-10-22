@@ -60,7 +60,10 @@ func testLog(t *testing.T) *slog.Logger {
 
 type testWriter struct{ t *testing.T }
 
-func (w *testWriter) Write(b []byte) (int, error) { w.t.Log(strings.TrimSpace(string(b))); return len(b), nil }
+func (w *testWriter) Write(b []byte) (int, error) {
+	w.t.Log(strings.TrimSpace(string(b)))
+	return len(b), nil
+}
 
 func newPBX(t *testing.T, password string) *fakePBX {
 	t.Helper()
