@@ -883,7 +883,7 @@ const maxRepeats = 2
 // lists the whole page, so a scroll never changes it.
 func (r *round) noChange(obs Observation, actions []computeruse.Action) (Outcome, bool, bool) {
 	key := batchKey(actions)
-	if key == "" {
+	if key == "" || downloads(obs, actions) {
 		return Outcome{}, false, false
 	}
 	page := pageKey(obs)
@@ -903,6 +903,26 @@ func (r *round) noChange(obs Observation, actions []computeruse.Action) (Outcome
 	}
 	r.repeats = 0
 	return Outcome{}, false, false
+}
+
+// downloadName is an element or intent that saves a file: its effect is in Downloads, not on the
+// page, so pressing it again on the same page isn't a press that did nothing (#485: a second
+// "Download CSV" ended budget_last_month as stuck).
+var downloadName = regexp.MustCompile(`(?i)\b(download|export|save|csv|pdf)\b`)
+
+// downloads reports a batch with an action that saves a file.
+func downloads(obs Observation, actions []computeruse.Action) bool {
+	for _, a := range actions {
+		if downloadName.MatchString(a.Intent) {
+			return true
+		}
+		for _, e := range obs.Elements {
+			if a.Ref != "" && e.Ref == a.Ref && downloadName.MatchString(e.Name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // batchKey is a batch's actions without their intents ("" when it only scrolls or waits).

@@ -1003,6 +1003,17 @@ func TestRepeatedNoChangeBatch(t *testing.T) {
 			t.Fatalf("outcome %+v batches %d", out, len(e.exec.batches))
 		}
 	})
+	t.Run("download again", func(t *testing.T) {
+		page := shopPage()
+		page.Elements = append(page.Elements, Element{Ref: "e7", Role: "link", Name: "Download CSV"})
+		e := newEnv(t, page)
+		e.script(actions(press("e7", "Get the statement")), actions(press("e7", "Get the statement")),
+			actions(press("e7", "Get the statement")), doneAnswer)
+		e.run()
+		if len(e.exec.batches) != 3 {
+			t.Fatalf("%d batches, want every download press run", len(e.exec.batches))
+		}
+	})
 	t.Run("scrolls", func(t *testing.T) {
 		e := newEnv(t)
 		scroll := `{"actions": [{"kind": "scroll", "dy": 600, "intent": "Scroll down"}]}`
