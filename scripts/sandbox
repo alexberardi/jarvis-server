@@ -206,6 +206,7 @@ json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 #                                                chat labels the sandbox's live label calls)
 #   INSTALLED_APP_ID=claude-harness
 #   INSTALLED_APP_KEY=...
+#   INSTALLED_LLM_CONTEXT=32768 INSTALLED_LLM_VISION=true   (optional: for a plain OpenAI server)
 CREDS=${JARVIS_HARNESS_ENV:-$HOME/.config/jarvis-harness/installed.env}
 load_creds() {
   INSTALLED_LLM_URL=http://127.0.0.1:7704 INSTALLED_LLM_LABEL=live INSTALLED_APP_ID= INSTALLED_APP_KEY=
@@ -273,6 +274,10 @@ point_llm() {
   local model
   model=$(installed_model) || { set_setting "$llm" llm.live.engine '"off"'; say "llm: off. $INSTALLED_LLM_URL/v1/models lists no model (is the installed jarvisd up?)"; return; }
   read -r alias ctx vision <<<"$model"
+  # A plain OpenAI server (llama-server, mlx_lm.server) doesn't say its window or vision the way
+  # jarvisd's /v1/models does: the harness env may.
+  ctx=${INSTALLED_LLM_CONTEXT:-$ctx} vision=${INSTALLED_LLM_VISION:-$vision}
+  [ "${ctx:-0}" -gt 0 ] 2>/dev/null || ctx=32768
   # Through the tap (tools/pipeline), which logs every call to llm.jsonl and adds the app
   # credentials, to the installed jarvisd's own LLM API: its $INSTALLED_LLM_LABEL label, its GPU engine, its
   # chat template and system-message folding (so folding is off here).
