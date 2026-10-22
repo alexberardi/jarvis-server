@@ -19,6 +19,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/install"
 )
 
 // --- native-messaging host mode (started by the browser) ---
@@ -79,6 +80,31 @@ func startBrowser(ctx context.Context, log *slog.Logger) (*browser.Hub, func()) 
 	return hub, func() {}
 }
 
+// refreshBrowserHosts runs when the agent starts: an app started from its bundle repoints the
+// browsers already registered at itself, so a moved or reinstalled app (say from ~/Downloads
+// to /Applications) doesn't leave browsers starting the old copy. Browsers the user didn't
+// register stay unregistered. A bare binary (a dev build, `go run`, a Linux or Windows
+// install) changes nothing: its registrations are `browser install`'s and the installer's.
+// The bundle is found by slashes, like Translocated, so the check reads the same on every OS.
+func refreshBrowserHosts(env browser.Env, exe string, log *slog.Logger) {
+	if install.BundleOf(filepath.ToSlash(exe)) == "" {
+		return
+	}
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	for _, r := range browser.Refresh(env, exe, browser.NativeRegistry()) {
+		switch {
+		case errors.Is(r.Err, browser.ErrTranslocated):
+			log.Warn("browser control: not repointing the browsers' native host", "err", r.Err)
+		case r.Err != nil:
+			log.Warn("browser control: repointing the native host", "browser", r.Target.Label, "err", r.Err)
+		default:
+			log.Info("browser control: native host now starts this app", "browser", r.Target.Label, "exe", exe)
+		}
+	}
+}
+
 // --- jarvis-agent browser install|uninstall|status|pack ---
 
 func browserEnv() (browser.Env, error) {
@@ -90,7 +116,8 @@ func browserEnv() (browser.Env, error) {
 	if err != nil {
 		return browser.Env{}, err
 	}
-	return browser.Env{GOOS: runtime.GOOS, Home: home, DataDir: filepath.Join(cfg, "jarvis-agent"), Getenv: os.Getenv}, nil
+	exe, _ := agentExe()
+	return browser.Env{GOOS: runtime.GOOS, Home: home, DataDir: filepath.Join(cfg, "jarvis-agent"), Getenv: os.Getenv, Exe: exe}, nil
 }
 
 func browserCmd(ctx context.Context, args []string) error {
@@ -162,6 +189,9 @@ func browserInstall(args []string, w io.Writer) error {
 	}
 	if strings.Contains(exe, string(filepath.Separator)+"go-build") {
 		return fmt.Errorf("%s is a temporary `go run` binary; build jarvis-agent first", exe)
+	}
+	if browser.Translocated(exe) {
+		return fmt.Errorf("%s: %w", exe, browser.ErrTranslocated)
 	}
 	results := browser.Register(env, exe, *all, browser.NativeRegistry())
 	fmt.Fprintf(w, "Registering the native-messaging host (%s -> %s):\n", browser.HostName, exe)
@@ -308,6 +338,8 @@ func browserStatus(w io.Writer) error {
 		switch {
 		case s.Registered && s.Problem != "":
 			line = "registered, BROKEN: " + s.Problem
+		case s.Registered && s.Warning != "":
+			line = "registered, WARNING: " + s.Warning
 		case s.Registered:
 			line = "registered -> " + s.HostPath
 		case s.Present:
@@ -445,10 +477,13 @@ func browserSummary() string {
 	}
 	var reg []string
 	for _, s := range browser.Inspect(env, browser.NativeRegistry()) {
-		if s.Registered && s.Problem == "" {
-			reg = append(reg, s.Target.Label)
-		} else if s.Registered {
+		switch {
+		case s.Registered && s.Problem != "":
 			reg = append(reg, s.Target.Label+" (broken)")
+		case s.Registered && s.Warning != "":
+			reg = append(reg, s.Target.Label+" (another copy: "+s.HostPath+")")
+		case s.Registered:
+			reg = append(reg, s.Target.Label)
 		}
 	}
 	r := "not set up (jarvis-agent browser install)"

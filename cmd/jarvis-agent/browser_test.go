@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,5 +183,58 @@ func TestInstallAccessNote(t *testing.T) {
 	if !strings.Contains(got, "Google Chrome: website access is off") || !strings.Contains(got, browser.WebsiteAccessSteps("Google Chrome")) ||
 		strings.Contains(got, "Firefox") {
 		t.Errorf("chrome off: %q", got)
+	}
+}
+
+// TestRefreshBrowserHostsAtStart: an app started from its bundle repoints the registrations
+// that start another copy; a translocated or bare binary leaves them alone.
+func TestRefreshBrowserHostsAtStart(t *testing.T) {
+	home := t.TempDir()
+	env := browser.Env{GOOS: "darwin", Home: home, DataDir: filepath.Join(home, "data")}
+	bin := func(p string) string {
+		p = filepath.Join(home, p)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	old := bin("Downloads/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent")
+	app := bin("Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent")
+	moved := bin("private/var/folders/x/T/AppTranslocation/U/d/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent")
+	dev := bin("src/jarvis-agent")
+	mkdir := filepath.Join(home, "Library", "Application Support", "Mozilla", "NativeMessagingHosts")
+	if err := os.MkdirAll(filepath.Join(home, "Library", "Application Support", "Firefox"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := browser.Register(env, old, false, nil); len(r) == 0 || r[0].Err != nil || !r[0].Done {
+		t.Fatalf("seed registration: %+v", r)
+	}
+	host := func() string {
+		b, err := os.ReadFile(filepath.Join(mkdir, browser.HostName+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m struct{ Path string }
+		_ = json.Unmarshal(b, &m)
+		return m.Path
+	}
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+
+	for _, exe := range []string{moved, dev} {
+		refreshBrowserHosts(env, exe, log)
+		if got := host(); got != old {
+			t.Errorf("started as %s: host now %s, want it left at %s", exe, got, old)
+		}
+	}
+	if !strings.Contains(logs.String(), "App Translocation") {
+		t.Errorf("translocated start didn't say why: %s", logs.String())
+	}
+	refreshBrowserHosts(env, app, log)
+	if got := host(); got != app {
+		t.Errorf("started from /Applications: host %s, want %s", got, app)
 	}
 }
