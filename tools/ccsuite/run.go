@@ -480,6 +480,7 @@ func answerFor(answers []Answer, c Card) (Answer, bool) {
 // reset puts the fixtures back: the sites' state (orders, downloads, forms, sessions), the
 // fake relay's pushes, the agent's ~/Documents/Jarvis and what its browser downloaded.
 func (e *Env) reset(ctx context.Context) error {
+	e.signIn(ctx)
 	req, _ := http.NewRequestWithContext(ctx, "POST", e.Sites+"/control/reset", nil)
 	if err := doJSON(req, nil); err != nil {
 		return err
@@ -594,6 +595,30 @@ func (e *Env) chat(ctx context.Context, node, message string) ([]string, error) 
 		}
 	}
 	return texts, sc.Err()
+}
+
+// signIn takes a fresh token for the sandbox's superuser before a run: the one sandbox up gave
+// expired during a long suite, and a run's inbox reads failed with 401 (web_form, 2026-10-22).
+// Best effort: without the credentials, or on an error, the old token stays.
+func (e *Env) signIn(ctx context.Context) {
+	auth, email, pw := e.Sbx["SBX_AUTH"], e.Sbx["SBX_EMAIL"], e.Sbx["SBX_PASSWORD"]
+	if auth == "" || email == "" || pw == "" {
+		return
+	}
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	b, _ := json.Marshal(map[string]string{"email": email, "password": pw})
+	req, err := http.NewRequestWithContext(ctx, "POST", auth+"/auth/login", bytes.NewReader(b))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if err := doJSON(req, &out); err != nil || out.AccessToken == "" {
+		e.logf("sign-in for a fresh token: %v (keeping the old one)", err)
+		return
+	}
+	e.Sbx["SBX_TOKEN"] = out.AccessToken
 }
 
 // inboxItem is an inbox card as GET /api/v0/inbox lists it.
