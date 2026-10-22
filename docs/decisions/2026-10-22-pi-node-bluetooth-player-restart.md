@@ -8,7 +8,10 @@ played nothing after that until `systemctl restart shairport-sync`. So after the
 default sink to or from a speaker (pair, its connection event, the reconnect loop, disconnect,
 forget, and headphones that power off and take the output with them), it restarts the music
 players that are running: shairport-sync, spotifyd and go-librespot (`packages.MusicPlayers`).
-Only when the default actually changed; best effort, logged, never fatal.
+Only when the default actually changed; best effort, logged, never fatal. The restarts run in
+the background, so a pair's reply doesn't wait on them (up to three units, each with its own
+timeout); switches made while one runs restart the players once more after it, so the last switch
+always gets a restart of its own. One switch of the default sink runs at a time.
 
 **How it gets the right to restart a system unit:** a new `restart-service` op in the
 `jarvis-post-install` root wrapper (`--package <pkg>`, payload `{"service": …}`), not new sudoers

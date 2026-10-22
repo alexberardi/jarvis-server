@@ -172,6 +172,8 @@ func (n *Node) routeOutput(ctx context.Context, mac string) {
 			return
 		}
 	}
+	n.route.Lock()
+	defer n.route.Unlock()
 	cur, err := n.Pulse.DefaultSink(ctx)
 	if err == nil && cur == sink {
 		// Routed already (the pair, its connection event and the reconnect loop all route).
@@ -196,19 +198,49 @@ func (n *Node) routeOutput(ctx context.Context, mac string) {
 	n.restartPlayers(ctx, sink)
 }
 
-// restartPlayers runs RestartPlayers after the default sink moved to sink (#478).
+// restartPlayers restarts the players (RestartPlayers) after the default sink moved to sink
+// (#478), in the background: a pair's reply doesn't wait on up to three restarts. A switch while
+// one runs restarts them once more after it, so the last switch always gets its own.
 func (n *Node) restartPlayers(ctx context.Context, sink string) {
 	if n.RestartPlayers == nil {
 		return
 	}
-	if err := n.RestartPlayers(ctx); err != nil {
-		n.log().Warn("bluetooth: music players not restarted after the output moved; one may stay silent until it is restarted", "sink", sink, "err", err)
+	n.mu.Lock()
+	n.restartSink = sink
+	if n.restarting {
+		n.restartAgain = true
+		n.mu.Unlock()
+		return
 	}
+	n.restarting = true
+	n.restarts.Add(1)
+	n.mu.Unlock()
+	ctx = context.WithoutCancel(ctx) // the request's context ends with its reply; RestartUnits has its own timeouts
+	go func() {
+		defer n.restarts.Done()
+		for {
+			n.mu.Lock()
+			sink := n.restartSink
+			n.mu.Unlock()
+			if err := n.RestartPlayers(ctx); err != nil {
+				n.log().Warn("bluetooth: music players not restarted after the output moved; one may stay silent until it is restarted", "sink", sink, "err", err)
+			}
+			n.mu.Lock()
+			again := n.restartAgain
+			n.restartAgain, n.restarting = false, again
+			n.mu.Unlock()
+			if !again {
+				return
+			}
+		}
+	}()
 }
 
 // unrouteOutput gives the output back when mac's sink has it: to the sink it replaced, or the
 // first one that isn't Bluetooth (a node restarted since).
 func (n *Node) unrouteOutput(ctx context.Context, mac string) {
+	n.route.Lock()
+	defer n.route.Unlock()
 	cur, err := n.Pulse.DefaultSink(ctx)
 	n.mu.Lock()
 	home, routed := n.homeSink, n.routedTo
