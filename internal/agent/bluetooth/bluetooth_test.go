@@ -106,6 +106,29 @@ func TestScanReportsWhatIsInRangeInJarvisdsShape(t *testing.T) {
 	}
 }
 
+// #433: the devices are posted as they are found, and the pair's steps as they start, so the app
+// shows progress instead of 20 s of nothing.
+func TestScanAndPairPostTheirProgress(t *testing.T) {
+	n, bus, _, api := rig(t)
+	n.ScanFor, n.ProgressEvery = 20*time.Millisecond, 5*time.Millisecond
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
+	if len(api.progress) != 1 || api.progress[0] != "scan r1 scanning 1 devices" {
+		t.Fatalf("scan progress %v (one post: the list grew once)", api.progress)
+	}
+	if devs := api.scans["r1"]["devices"].([]ScanDevice); len(devs) != 1 {
+		t.Fatalf("scan result %v", api.scans["r1"])
+	}
+
+	api.progress = nil
+	delete(bus.devices, speaker) // BlueZ forgot it: the pair finds it first
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+	want := []string{"pair p1 finding", "pair p1 pairing", "pair p1 connecting", "pair p1 audio"}
+	if !reflect.DeepEqual(api.progress, want) || api.pairs["p1"]["success"] != true {
+		t.Fatalf("pair progress %v, result %v", api.progress, api.pairs["p1"])
+	}
+}
+
 func TestScanWithoutAPoweredAdapterReportsTheError(t *testing.T) {
 	for name, set := range map[string]func(*fakeBus){
 		"no adapter":  func(b *fakeBus) { b.noAdapter = true },

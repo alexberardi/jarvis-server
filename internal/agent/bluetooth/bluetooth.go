@@ -107,6 +107,22 @@ type API interface {
 	PostBluetoothPairResult(ctx context.Context, rid string, body map[string]any) error
 }
 
+// ProgressAPI is what the node posts while a scan or pair runs (#433): the scan's devices so far
+// and the pair's step, so the app can show them. Best effort: an API without it, or a jarvisd
+// older than the routes (404), just gets the results.
+type ProgressAPI interface {
+	PostBluetoothScanProgress(ctx context.Context, rid string, body map[string]any) error
+	PostBluetoothPairProgress(ctx context.Context, rid string, body map[string]any) error
+}
+
+// The pair's steps, as the app gets them (ProgressAPI).
+const (
+	StepFinding    = "finding"    // the rescan for a device BlueZ doesn't know
+	StepPairing    = "pairing"    // Device1.Pair (and its retry)
+	StepConnecting = "connecting" // trust and Connect
+	StepAudio      = "audio"      // the wait for the audio profile and the output routing
+)
+
 // Node handles the topics. Fill it in, then Start it once.
 type Node struct {
 	Bus   Bus
@@ -125,6 +141,7 @@ type Node struct {
 	// SinkFor is the wait for a speaker's bluez sink before the output moves to it (10 s).
 	ScanFor, FindFor, AudioFor, AudioStable, BusyFor, SourceFor, PageRetryAfter, SinkFor time.Duration
 	FirstReconnect, ReconnectEvery                                                       time.Duration
+	ProgressEvery                                                                        time.Duration // a scan\'s devices so far, at most this often (1 s)
 	Poll                                                                                 time.Duration // 500 ms
 
 	op       sync.Mutex // one radio operation at a time
@@ -269,8 +286,21 @@ func ScanBody(devices []ScanDevice, err error) map[string]any {
 	return map[string]any{"devices": devices}
 }
 
+// progressTimeout bounds a progress post: it must not hold up the radio work.
+const progressTimeout = 3 * time.Second
+
 func (n *Node) scanAndPost(ctx context.Context, api API, rid string) {
-	devices, err := n.Scan(ctx)
+	var found func([]ScanDevice)
+	if pa, ok := api.(ProgressAPI); ok {
+		found = func(devices []ScanDevice) {
+			pctx, cancel := context.WithTimeout(ctx, progressTimeout)
+			defer cancel()
+			if err := pa.PostBluetoothScanProgress(pctx, rid, map[string]any{"progress": "scanning", "devices": devices}); err != nil {
+				n.log().Debug("bluetooth: scan progress not posted", "request_id", rid, "err", err)
+			}
+		}
+	}
+	devices, err := n.scan(ctx, found)
 	if err != nil {
 		n.log().Error("bluetooth: scan failed", "request_id", rid, "err", err)
 	} else {
@@ -284,7 +314,11 @@ func (n *Node) scanAndPost(ctx context.Context, api API, rid string) {
 // Scan is N:'s scan: drop the devices BlueZ remembers but isn't paired with (so the list is
 // what's in range now), discover on BR/EDR then LE, and list the devices with a real name.
 // Unlike N:, paired and connected are the devices' own.
-func (n *Node) Scan(ctx context.Context) ([]ScanDevice, error) {
+func (n *Node) Scan(ctx context.Context) ([]ScanDevice, error) { return n.scan(ctx, nil) }
+
+// scan is Scan, calling found (when not nil) with the list so far each time it grows during the
+// discovery, at most every ProgressEvery.
+func (n *Node) scan(ctx context.Context, found func([]ScanDevice)) ([]ScanDevice, error) {
 	n.op.Lock()
 	defer n.op.Unlock()
 	if !n.available(ctx) {
@@ -297,18 +331,46 @@ func (n *Node) Scan(ctx context.Context) ([]ScanDevice, error) {
 			}
 		}
 	}
+	reported := 0
 	for _, transport := range []string{"bredr", "le"} {
 		stop, err := n.Bus.Discover(ctx, transport)
 		if err != nil {
 			n.log().Warn("bluetooth: discovery failed", "transport", transport, "err", err)
 			continue
 		}
-		err = sleep(ctx, or(n.ScanFor, 10*time.Second))
+		err = n.discoverFor(ctx, or(n.ScanFor, 10*time.Second), found, &reported)
 		stop()
 		if err != nil {
 			return nil, err
 		}
 	}
+	return n.listed(ctx)
+}
+
+// discoverFor waits d while a discovery runs, giving found the list so far whenever it has more
+// devices than the *reported last given.
+func (n *Node) discoverFor(ctx context.Context, d time.Duration, found func([]ScanDevice), reported *int) error {
+	if found == nil {
+		return sleep(ctx, d)
+	}
+	end := time.Now().Add(d)
+	for {
+		step := min(time.Until(end), or(n.ProgressEvery, time.Second))
+		if step <= 0 {
+			return nil
+		}
+		if err := sleep(ctx, step); err != nil {
+			return err
+		}
+		if list, err := n.listed(ctx); err == nil && len(list) > *reported {
+			*reported = len(list)
+			found(list)
+		}
+	}
+}
+
+// listed is the devices BlueZ knows that have a real name, as the scan reports them.
+func (n *Node) listed(ctx context.Context) ([]ScanDevice, error) {
 	all, err := n.Bus.Devices(ctx)
 	if err != nil {
 		return nil, err
@@ -400,7 +462,17 @@ func PairBody(name string, err error) map[string]any {
 }
 
 func (n *Node) pairAndPost(ctx context.Context, api API, rid, mac, role string) {
-	name, err := n.Pair(ctx, mac, role)
+	var step func(string)
+	if pa, ok := api.(ProgressAPI); ok {
+		step = func(s string) {
+			pctx, cancel := context.WithTimeout(ctx, progressTimeout)
+			defer cancel()
+			if err := pa.PostBluetoothPairProgress(pctx, rid, map[string]any{"progress": s}); err != nil {
+				n.log().Debug("bluetooth: pair progress not posted", "request_id", rid, "err", err)
+			}
+		}
+	}
+	name, err := n.pair(ctx, mac, role, step)
 	if err != nil {
 		n.log().Warn("bluetooth: pair failed", "request_id", rid, "mac", mac, "err", err)
 	} else {
@@ -417,6 +489,14 @@ func (n *Node) pairAndPost(ctx context.Context, api API, rid, mac, role string) 
 // for the reconnect loop. It never tries a plain connect first: that ends the device's pairing
 // mode (bluetooth-pairing-state-2026-05-07.md, failure mode 4). It returns the device's name.
 func (n *Node) Pair(ctx context.Context, mac, role string) (string, error) {
+	return n.pair(ctx, mac, role, nil)
+}
+
+// pair is Pair, calling step (when not nil) with each Step* as it starts.
+func (n *Node) pair(ctx context.Context, mac, role string, step func(string)) (string, error) {
+	if step == nil {
+		step = func(string) {}
+	}
 	n.op.Lock()
 	defer n.op.Unlock()
 	n.mu.Lock()
@@ -441,19 +521,24 @@ func (n *Node) Pair(ctx context.Context, mac, role string) (string, error) {
 		n.log().Warn("bluetooth: pairing agent not registered", "err", err)
 	}
 	_ = n.Bus.SetAdapter(ctx, "Pairable", true)
-	if _, known := n.device(ctx, mac); !known && !n.find(ctx, mac) {
-		return "", errors.New("Device not found — put it in pairing mode and keep it close")
+	if _, known := n.device(ctx, mac); !known {
+		step(StepFinding)
+		if !n.find(ctx, mac) {
+			return "", errors.New("Device not found — put it in pairing mode and keep it close")
+		}
 	}
+	step(StepPairing)
 	err := n.pairOnce(ctx, mac)
 	if err != nil && !errors.Is(err, ErrAlreadyExists) {
 		n.log().Warn("bluetooth: pair failed", "mac", mac, "err", err)
 		d, _ := n.device(ctx, mac)
 		return "", pairError(err, displayName(d))
 	}
+	step(StepConnecting)
 	if err := n.Bus.SetTrusted(ctx, mac, true); err != nil {
 		n.log().Warn("bluetooth: trust failed", "mac", mac, "err", err)
 	}
-	if err := n.connect(ctx, mac); err != nil {
+	if err := n.connect(ctx, mac, step); err != nil {
 		n.log().Warn("bluetooth: connect after pair failed", "mac", mac, "err", err)
 		return "", errors.New("Paired but failed to connect" + bluezSuffix(err))
 	}
@@ -569,7 +654,7 @@ func (n *Node) find(ctx context.Context, mac string) bool {
 // connect even when Pulse has no sink for it yet (#433: the check gave up while bluetoothd had
 // the A2DP stream ready). If neither comes up the device is disconnected, which stops BlueZ
 // retrying AVDTP (the "click loop", failure mode 2).
-func (n *Node) connect(ctx context.Context, mac string) error {
+func (n *Node) connect(ctx context.Context, mac string, step func(string)) error {
 	d, _ := n.device(ctx, mac)
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	err := n.Bus.Connect(cctx, mac)
@@ -582,6 +667,9 @@ func (n *Node) connect(ctx context.Context, mac string) error {
 	}
 	if !isAudio(d) || n.Pulse == nil {
 		return nil
+	}
+	if step != nil {
+		step(StepAudio)
 	}
 	pulseUp, bluezUp := n.waitAudio(ctx, mac, deviceType(d) == "audio_sink")
 	switch {
@@ -818,7 +906,7 @@ func (n *Node) Reconnect(ctx context.Context) int {
 		n.op.Lock()
 		d, known := n.device(ctx, r.MAC)
 		if known && !d.Connected {
-			if err := n.connect(ctx, r.MAC); err == nil {
+			if err := n.connect(ctx, r.MAC, nil); err == nil {
 				n.routeAudio(ctx, r.MAC, r.Role)
 				count++
 				n.log().Info("bluetooth: reconnected", "name", r.Name, "mac", r.MAC)

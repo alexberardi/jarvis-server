@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -336,6 +337,58 @@ func (m *Module) patchBTStatus(ctx context.Context, nodeID, mac string, f func(m
 	return err
 }
 
+var progressRe = regexp.MustCompile(`^[a-z_]{1,32}$`)
+
+// handleBTProgress is the node's word on a scan or pair it is still working on (#433): what it is
+// doing ("scanning", "pairing", "connecting", "audio") and, for a scan, the devices found so
+// far. The request stays pending until the result upload; a post after it changes nothing.
+func (m *Module) handleBTProgress(k jobKind) nodeHandler {
+	return func(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+		nodeID, ok := uploadNode(w, r, n)
+		if !ok {
+			return
+		}
+		b, _, ok := readBody(w, r, false)
+		if !ok {
+			return
+		}
+		progress, _ := b.str("progress", true)
+		if progress != "" && !progressRe.MatchString(progress) {
+			b.fail("progress", "String should match pattern '^[a-z_]{1,32}$'")
+		}
+		var devices []any
+		hasDevices := k == btScanJob && b.has("devices")
+		if hasDevices {
+			devices = resultDevices(b, false)
+		}
+		if !b.done(w) {
+			return
+		}
+		ctx, rid := r.Context(), r.PathValue("request_id")
+		var exists int
+		err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT 1 FROM `+k.table+` WHERE id = ? AND node_id = ?`, rid, nodeID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			m.writeErr(w, fail(http.StatusNotFound, k.noun+" not found"))
+			return
+		}
+		if err != nil {
+			m.internalError(w, err)
+			return
+		}
+		sets, args := "progress = ?", []any{progress}
+		if hasDevices {
+			raw, _ := json.Marshal(devices)
+			sets, args = sets+", results_json = ?, device_count = ?", append(args, string(raw), len(devices))
+		}
+		args = append(args, rid, dbTime(m.now()))
+		if _, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE `+k.table+` SET `+sets+` WHERE id = ? AND status = 'pending' AND expires_at > ?`, args...); err != nil {
+			m.internalError(w, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	}
+}
+
 // jobState is the shared poll prelude: 404, household check (D4/D5), lazy expiry → 410.
 // It returns the status and the row's household.
 func (m *Module) jobState(ctx context.Context, a provAuth, k jobKind, rid, nodeID string) (string, string, error) {
@@ -560,15 +613,22 @@ func (m *Module) handlePollBTScan(w http.ResponseWriter, r *http.Request, a prov
 		m.writeErr(w, err)
 		return
 	}
-	var results, errMsg sql.NullString
-	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT results_json, error_message FROM cc_bluetooth_scan_requests WHERE id = ?`, rid).
-		Scan(&results, &errMsg); err != nil {
+	var results, errMsg, progress sql.NullString
+	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT results_json, error_message, progress FROM cc_bluetooth_scan_requests WHERE id = ?`, rid).
+		Scan(&results, &errMsg, &progress); err != nil {
 		m.internalError(w, err)
 		return
 	}
-	out := map[string]any{"status": status, "request_id": rid, "devices": nil, "device_count": nil, "error_message": nil}
+	out := map[string]any{"status": status, "request_id": rid, "devices": nil, "device_count": nil, "error_message": nil, "progress": nullable(progress)}
 	switch status {
 	case "pending":
+		if results.Valid { // the devices found so far (#433)
+			devices := []map[string]any{}
+			for _, d := range decodeResults(results) {
+				devices = append(devices, btDevice(d, getBool(d, "paired", false), getBool(d, "connected", false)))
+			}
+			out["devices"], out["device_count"] = devices, len(devices)
+		}
 	case "failed":
 		out["error_message"] = nullable(errMsg)
 	default:
@@ -589,13 +649,13 @@ func (m *Module) handlePollBTPair(w http.ResponseWriter, r *http.Request, a prov
 		m.writeErr(w, err)
 		return
 	}
-	var name, errMsg sql.NullString
-	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT device_name, error_message FROM cc_bluetooth_pair_requests WHERE id = ?`, rid).
-		Scan(&name, &errMsg); err != nil {
+	var name, errMsg, progress sql.NullString
+	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT device_name, error_message, progress FROM cc_bluetooth_pair_requests WHERE id = ?`, rid).
+		Scan(&name, &errMsg, &progress); err != nil {
 		m.internalError(w, err)
 		return
 	}
-	out := map[string]any{"status": status, "request_id": rid, "device_name": nil, "error_message": nil}
+	out := map[string]any{"status": status, "request_id": rid, "device_name": nil, "error_message": nil, "progress": nullable(progress)}
 	switch status {
 	case "pending":
 	case "failed":

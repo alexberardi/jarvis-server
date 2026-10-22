@@ -315,11 +315,26 @@ func (p *fakePulse) drop(mac string) {
 	}
 }
 
-// fakeAPI records the result POSTs.
+// fakeAPI records the result POSTs, and the progress ones in order.
 type fakeAPI struct {
-	mu    sync.Mutex
-	scans map[string]map[string]any
-	pairs map[string]map[string]any
+	mu       sync.Mutex
+	scans    map[string]map[string]any
+	pairs    map[string]map[string]any
+	progress []string // "scan rid N devices" / "pair rid step"
+}
+
+func (a *fakeAPI) PostBluetoothScanProgress(_ context.Context, rid string, body map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.progress = append(a.progress, fmt.Sprintf("scan %s %v %d devices", rid, body["progress"], len(body["devices"].([]ScanDevice))))
+	return nil
+}
+
+func (a *fakeAPI) PostBluetoothPairProgress(_ context.Context, rid string, body map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.progress = append(a.progress, fmt.Sprintf("pair %s %v", rid, body["progress"]))
+	return nil
 }
 
 func (a *fakeAPI) PostBluetoothScanResult(_ context.Context, rid string, body map[string]any) error {

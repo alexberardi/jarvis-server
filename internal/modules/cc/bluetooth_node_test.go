@@ -52,7 +52,7 @@ func TestGoNodeBluetoothAgainstTheseRoutes(t *testing.T) {
 	}
 	p := e.do("GET", base+"/bluetooth-scan/"+scan["id"].(string), nil, bearer(tok)).want(200).json()
 	devs, _ := p["devices"].([]any)
-	if p["status"] != "completed" || len(devs) != 1 || devs[0].(map[string]any)["mac_address"] != mac ||
+	if p["status"] != "completed" || p["progress"] != "scanning" || len(devs) != 1 || devs[0].(map[string]any)["mac_address"] != mac ||
 		devs[0].(map[string]any)["device_type"] != "audio_sink" {
 		t.Fatalf("scan poll %v", p)
 	}
@@ -61,7 +61,8 @@ func TestGoNodeBluetoothAgainstTheseRoutes(t *testing.T) {
 	if sub := deliver(); sub != bluetooth.TopicPair {
 		t.Fatalf("topic %q", sub)
 	}
-	if p := e.do("GET", base+"/bluetooth/pair/"+pair["id"].(string), nil, bearer(tok)).want(200).json(); p["status"] != "completed" || p["device_name"] != "JBL Flip 5" {
+	if p := e.do("GET", base+"/bluetooth/pair/"+pair["id"].(string), nil, bearer(tok)).want(200).json(); p["status"] != "completed" || p["device_name"] != "JBL Flip 5" ||
+		p["progress"] != bluetooth.StepConnecting {
 		t.Fatalf("pair poll %v", p)
 	}
 	// The status page shows the pair at once, without another scan.
