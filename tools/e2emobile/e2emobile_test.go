@@ -92,8 +92,10 @@ func TestBrokenHeaderIsAnError(t *testing.T) {
 
 // fakes writes a maestro and an adb that log their arguments to calls.log. The maestro fails
 // any flow whose path has "fail" in it (and writes a JUnit report saying why), sleeps on
-// "slow", and on "drop" dies the way an adb transport drop kills it, the first time only. The
-// adb's /health probe answers 200 on the emulator's port 7700 only.
+// "slow", and on "drop" dies the way an adb transport drop kills it, the first time only
+// ("droptwice": the first two times, "dropall": every time). A drop leaves the device offline to
+// adb's next two get-state calls. The adb's /health probe answers 200 on the emulator's port 7700
+// only.
 func fakes(t *testing.T) (maestro, adb, calls string) {
 	d := t.TempDir()
 	calls = filepath.Join(d, "calls.log")
@@ -113,9 +115,22 @@ while [ $# -gt 0 ]; do
 done
 case $flow in
   *slow*) sleep 3 ;;
+  *dropall*)
+    echo 2 >`+d+`/offline
+    echo "Exception in thread main dadb.DeviceServerDied: device offline"
+    exit 1 ;;
+  *droptwice*)
+    n=$(cat `+d+`/drops 2>/dev/null || echo 0)
+    if [ "$n" -lt 2 ]; then
+      echo $((n + 1)) >`+d+`/drops
+      echo 2 >`+d+`/offline
+      echo "Exception in thread main dadb.DeviceServerDied: device offline"
+      exit 1
+    fi ;;
   *drop*)
     if [ ! -f `+d+`/dropped ]; then
       touch `+d+`/dropped
+      echo 2 >`+d+`/offline
       echo "Exception in thread main dadb.DeviceServerDied: device offline"
       exit 1
     fi ;;
@@ -131,6 +146,15 @@ echo "[Passed] ok"
 	write(t, adb, `#!/bin/sh
 printf 'adb %s\n' "$*" >>`+calls+`
 case "$*" in
+  *" get-state")
+    n=$(cat `+d+`/offline 2>/dev/null || echo 0)
+    if [ "$n" -gt 0 ]; then
+      echo $((n - 1)) >`+d+`/offline
+      echo "error: device offline" >&2
+      exit 1
+    fi
+    echo device ;;
+  *"getprop sys.boot_completed"*) echo 1 ;;
   *"screencap -p"*) printf '\211PNG\r\n\032\nfake' ;;
   *"exec-out cat"*) echo '<hierarchy><node text="Chat"/></hierarchy>' ;;
   *"nc 127.0.0.1 7700"*) echo 'HTTP/1.0 200 OK' ;;
@@ -281,7 +305,9 @@ func prepCalls(t *testing.T, calls string) []string {
 		if !strings.HasPrefix(l, "adb -s emulator-5580 ") {
 			t.Errorf("adb call without the harness serial: %s", l)
 		}
-		if strings.Contains(l, "kill-server") || strings.Contains(l, "remove-all") || strings.Contains(l, "reconnect") {
+		// `adb -s S reconnect` kicks that one transport; `reconnect offline` (or `device`) is host-wide.
+		if strings.Contains(l, "kill-server") || strings.Contains(l, "remove-all") ||
+			(strings.Contains(l, "reconnect") && l != "adb -s emulator-5580 reconnect") {
 			t.Errorf("a global adb call: %s", l)
 		}
 		cur = append(cur, l)
@@ -297,6 +323,7 @@ func dropConfig(t *testing.T, flows map[string]string) (*config, []Flow, string)
 	}
 	c := &config{flowsDir: d, rel: ".maestro", out: filepath.Join(t.TempDir(), "mobile"), maestro: maestro, adb: adb,
 		serial: "emulator-5580", flowTimeout: time.Minute, adbTimeout: 10 * time.Second, probePause: time.Millisecond,
+		retryPause: time.Millisecond, pollPause: time.Millisecond, recoverTimeout: 5 * time.Second,
 		reverse: []string{"tcp:18710=tcp:18710", "tcp:7700=tcp:18700"}, healthPort: "7700"}
 	fl, err := Discover(d, ".maestro", nil)
 	if err != nil {
@@ -328,7 +355,10 @@ func TestRunReadiesTheDeviceBeforeEveryFlow(t *testing.T) {
 	}
 }
 
-func TestRunRetriesAFlowOnceWhenTheDeviceDrops(t *testing.T) {
+// A drop leaves the transport offline for a moment and Maestro's driver dead: before the retry
+// the runner kicks this one transport, waits until the device is steadily up, stops the driver
+// and readies the device again.
+func TestRunRecoversTheDeviceAndRetriesWhenItDrops(t *testing.T) {
 	c, flows, calls := dropConfig(t, map[string]string{"drop.yaml": "chat after a drop", "z-fail.yaml": "plain failure"})
 	res, err := run(context.Background(), c, flows)
 	if err != nil {
@@ -338,23 +368,83 @@ func TestRunRetriesAFlowOnceWhenTheDeviceDrops(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	d := res.Tests[0]
-	if d.Status != "passed" || !strings.Contains(d.Note, "retried once") || !strings.Contains(d.Note, "DeviceServerDied") {
+	if d.Status != "passed" || !strings.HasPrefix(d.Note, "retried 1×") || !strings.Contains(d.Note, "DeviceServerDied") {
 		t.Errorf("dropped flow: %+v", d)
 	}
 	f := res.Tests[1]
 	if f.Status != "failed" || f.Note != "" {
 		t.Errorf("an ordinary failure is not retried: %+v", f)
 	}
+	if res.DeviceRetries != 1 {
+		t.Errorf("device_retries = %d, want 1", res.DeviceRetries)
+	}
 	runs := prepCalls(t, calls)
 	if len(runs) != 3 {
 		t.Fatalf("%d maestro runs, want 3 (the dropped flow twice, the failing one once)", len(runs))
 	}
-	if !strings.Contains(runs[1], "reverse tcp:7700 tcp:18700") {
-		t.Errorf("the retry did not set the tunnels again:\n%s", runs[1])
+	retry := runs[1]
+	kick := strings.Index(retry, "adb -s emulator-5580 reconnect\n")
+	stop1 := strings.Index(retry, "adb -s emulator-5580 shell am force-stop dev.mobile.maestro.test")
+	stop2 := strings.Index(retry, "adb -s emulator-5580 shell am force-stop dev.mobile.maestro\n")
+	tunnel := strings.LastIndex(retry, "reverse tcp:7700 tcp:18700")
+	if kick < 0 || stop1 < kick || stop2 < kick || tunnel < stop2 {
+		t.Errorf("want reconnect, then the driver stopped, then the tunnels, got:\n%s", retry)
+	}
+	// Two offline answers, then two good checks in a row before the driver is stopped.
+	if n := strings.Count(retry[:stop1], "get-state"); n != 4 {
+		t.Errorf("%d get-state calls before the retry, want 4 (2 offline, 2 up):\n%s", n, retry)
+	}
+	if strings.Contains(runs[0], "reconnect") || strings.Contains(runs[2], "reconnect") {
+		t.Error("kicked a transport that had not dropped")
 	}
 	raw, _ := os.ReadFile(filepath.Join(c.out, "results.json"))
-	if !strings.Contains(string(raw), `"note": "retried once`) {
-		t.Errorf("results.json lacks the note:\n%s", raw)
+	if !strings.Contains(string(raw), `"note": "retried 1×`) || !strings.Contains(string(raw), `"device_retries": 1`) {
+		t.Errorf("results.json lacks the note or the count:\n%s", raw)
+	}
+}
+
+// Drops came about every 20 s on a bad run: one retry is not enough.
+func TestRunRetriesUpToThreeTries(t *testing.T) {
+	c, flows, calls := dropConfig(t, map[string]string{"droptwice.yaml": "two drops", "dropall.yaml": "always drops"})
+	res, err := run(context.Background(), c, flows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTitle := map[string]Record{}
+	for _, r := range res.Tests {
+		byTitle[r.Title] = r
+	}
+	if r := byTitle["two drops"]; r.Status != "passed" || !strings.HasPrefix(r.Note, "retried 2×") ||
+		!strings.Contains(r.Note, "on try 1") || !strings.Contains(r.Note, "on try 2") {
+		t.Errorf("two drops: %+v", r)
+	}
+	if r := byTitle["always drops"]; r.Status != "failed" || !strings.HasPrefix(r.Note, "retried 2× (tries 3 of 3)") {
+		t.Errorf("always drops: %+v", r)
+	}
+	if res.DeviceRetries != 4 {
+		t.Errorf("device_retries = %d, want 4", res.DeviceRetries)
+	}
+	if runs := prepCalls(t, calls); len(runs) != 6 {
+		t.Errorf("%d maestro runs, want 3 per flow", len(runs))
+	}
+}
+
+// A device that never comes back: the retry is still played (and fails on its own), the run
+// does not hang.
+func TestRecoverDeviceGivesUp(t *testing.T) {
+	c, _, calls := dropConfig(t, map[string]string{"a.yaml": "a"})
+	c.recoverTimeout = 50 * time.Millisecond
+	write(t, filepath.Join(filepath.Dir(calls), "offline"), "1000000\n")
+	err := c.recoverDevice(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "device offline") {
+		t.Fatalf("err = %v", err)
+	}
+	log, _ := os.ReadFile(calls)
+	if strings.Contains(string(log), "force-stop") {
+		t.Error("stopped the driver on a device that is not back")
+	}
+	if n := strings.Count(string(log), "adb -s emulator-5580 reconnect\n"); n < 1 {
+		t.Error("never kicked the transport")
 	}
 }
 
@@ -366,17 +456,17 @@ func TestRunFailsAFlowWhenTheSandboxIsUnreachable(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := res.Tests[0]
-	if r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "can't reach the sandbox") || !strings.Contains(r.Note, "retried once") {
+	if r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "can't reach the sandbox") || !strings.Contains(r.Note, "retried 2×") {
 		t.Errorf("%+v", r)
 	}
-	if !strings.HasPrefix(r.Note, "retried once: the emulator was not ready") || strings.Contains(r.Note, "transport dropped") {
+	if !strings.Contains(r.Note, "the emulator was not ready on try 1") || strings.Contains(r.Note, "transport dropped") {
 		t.Errorf("note %q: a failed readiness check is not a transport drop", r.Note)
 	}
 	log, _ := os.ReadFile(calls)
 	if strings.Contains(string(log), "maestro ") {
 		t.Error("ran the flow without a tunnel to the sandbox")
 	}
-	if n := strings.Count(string(log), "nc 127.0.0.1 7799"); n != 6 {
-		t.Errorf("%d probes, want 3 per try, 2 tries", n)
+	if n := strings.Count(string(log), "nc 127.0.0.1 7799"); n != 9 {
+		t.Errorf("%d probes, want 3 per try, 3 tries", n)
 	}
 }
