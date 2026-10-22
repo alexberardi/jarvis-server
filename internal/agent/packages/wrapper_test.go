@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,11 @@ import (
 // dir and systemctl recorded: it try-restarts a unit this package's drop-in configures, and
 // refuses any other.
 func TestPostInstallWrapperRestartService(t *testing.T) {
+	// The wrapper is the Pi's (Linux) root script. Off Linux, python3 may be the Store's stub
+	// (Windows) and print prints \r\n, so the test would check the host, not the wrapper.
+	if runtime.GOOS != "linux" {
+		t.Skip("jarvis-post-install runs on Linux only")
+	}
 	py, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("no python3")
