@@ -1017,8 +1017,9 @@ func TestLookSettlesAfterAction(t *testing.T) {
 		{Ref: "e1", Role: "button", Name: "Close", State: []string{"in dialog"}},
 		{Ref: "e2", Role: "button", Name: "Add to cart • $14", State: []string{"in dialog"}},
 	}
-	// The first look, then the press's: drawing, drawn, drawn (two agree).
-	e := newEnv(t, shopPage(), drawing, drawn, drawn)
+	// The first look (the page as it opened, twice: settled), then the press's: drawing, drawn,
+	// drawn (two agree).
+	e := newEnv(t, shopPage(), shopPage(), drawing, drawn, drawn)
 	slept := 0
 	e.loop.Settle = 3 * time.Second
 	e.loop.Sleep = func(context.Context, time.Duration) { slept++ }
@@ -1030,8 +1031,46 @@ func TestLookSettlesAfterAction(t *testing.T) {
 	if !strings.Contains(p, "Add to cart • $14") {
 		t.Fatalf("the second round saw the dialog still drawing:\n%s", p)
 	}
-	// Two after the first press (drawing → drawn → drawn), one after the second (drawn twice).
-	if slept != 3 {
-		t.Fatalf("slept %d times, want 3", slept)
+	// One on the first look, two after the first press (drawing → drawn → drawn), one after the
+	// second (drawn twice).
+	if slept != 4 {
+		t.Fatalf("slept %d times, want 4", slept)
 	}
+}
+
+// A buying task that closes a dialog offering checkout is pointed at the checkout once (#485: the
+// cart dialog with "Checkout $44.79" closed "to find the checkout on the main page").
+func TestSkippedCheckoutPointedAt(t *testing.T) {
+	cart := shopPage()
+	cart.Elements = []Element{
+		{Ref: "e1", Role: "button", Name: "Close", State: []string{"in dialog"}},
+		{Ref: "e2", Role: "button", Name: "Pulled Pork Sandwich $14.00", State: []string{"in dialog"}},
+		{Ref: "e3", Role: "link", Name: "Checkout $44.79", State: []string{"in dialog"}},
+		{Ref: "e4", Role: "link", Name: "Home"},
+	}
+	t.Run("pointed", func(t *testing.T) {
+		e := newEnv(t, cart)
+		e.script(actions(press("e1", "Close the cart")), actions(press("e3", "Check out")), doneAnswer)
+		tk := task()
+		tk.Goal = "Order me a pulled pork sandwich"
+		if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+			t.Fatalf("outcome %+v", out)
+		}
+		if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Ref != "e3" {
+			t.Fatalf("batches %+v", e.exec.batches)
+		}
+		if p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text; !strings.Contains(p, `"Checkout $44.79" (e3)`) {
+			t.Fatalf("no pointer to the checkout:\n%s", p)
+		}
+	})
+	t.Run("not a purchase", func(t *testing.T) {
+		e := newEnv(t, cart)
+		e.script(actions(press("e1", "Close the cart")), doneAnswer)
+		tk := task()
+		tk.Goal = "Tell me what's in my cart"
+		if out := e.loop.Run(context.Background(), tk); out.State != StateDone || len(e.exec.batches) != 1 ||
+			e.exec.batches[0].Actions[0].Ref != "e1" {
+			t.Fatalf("outcome %+v batches %+v", out, e.exec.batches)
+		}
+	})
 }

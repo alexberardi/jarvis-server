@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -296,8 +297,11 @@ type round struct {
 	acted   map[string]bool
 	repeats int
 	page    string // pageKey of this round's observation
-	// actedSinceLook: a batch ran since the last look, so the next one waits for the page to settle.
+	// actedSinceLook: a batch ran since the last look (or the page is just opening), so the
+	// next look waits for the page to settle.
 	actedSinceLook bool
+	// checkoutPointed are the pages where a closed checkout dialog was sent back once.
+	checkoutPointed map[string]bool
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -364,6 +368,43 @@ func unsentForm(history []Entry, obs Observation) *Element {
 	return nil
 }
 
+var (
+	// buyGoal is a task that buys something; checkoutName the button that goes on to pay.
+	buyGoal      = regexp.MustCompile(`(?i)\b(order|buy|purchase|check ?out|pay for|get me)\b`)
+	checkoutName = regexp.MustCompile(`(?i)^\s*(proceed to |continue to |go to )?(check ?out|place (your )?order|review (your )?order)\b`)
+	// leaveName closes or leaves a dialog.
+	leaveName = regexp.MustCompile(`(?i)^\s*(close|dismiss|cancel|back( to (menu|shopping|store))?|continue shopping|keep shopping|×|x)\s*$`)
+)
+
+// skippedCheckout is the dialog's checkout button when a buying task's batch closes or leaves a
+// dialog that offers it, else nil: the house model closed a cart dialog with "Checkout $44.79" in
+// it "to find the checkout on the main page", and started adding the item again (#485).
+func skippedCheckout(goal string, obs Observation, actions []computeruse.Action) *Element {
+	if !buyGoal.MatchString(goal) {
+		return nil
+	}
+	var checkout *Element
+	byRef := map[string]Element{}
+	for i, e := range obs.Elements {
+		if !slices.Contains(e.State, "in dialog") {
+			continue
+		}
+		byRef[e.Ref] = e
+		if checkout == nil && checkoutName.MatchString(e.Name) {
+			checkout = &obs.Elements[i]
+		}
+	}
+	if checkout == nil {
+		return nil
+	}
+	for _, a := range actions {
+		if e, ok := byRef[a.Ref]; ok && (a.Kind == "press" || a.Kind == "click") && leaveName.MatchString(e.Name) {
+			return checkout
+		}
+	}
+	return nil
+}
+
 // Run drives the task until it is done, needs the user, fails, is stopped or runs out of budget.
 // History is saved after every round, so a stop, a crash or a confirmation loses nothing.
 func (l *Loop) Run(ctx context.Context, t Task) Outcome {
@@ -377,7 +418,10 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
 	run.Model = pick.Model
-	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0}
+	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0,
+		// The first look is at a page that's still opening: a list still rendering renumbered
+		// the refs before the first press (#485).
+		actedSinceLook: true}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
@@ -507,6 +551,16 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		actions = append(actions, l.toImage(r, a))
 	}
 	if len(actions) == 0 {
+		return Outcome{}, false
+	}
+	if btn := skippedCheckout(r.task.Goal, obs, actions); btn != nil && !r.checkoutPointed[pageKey(obs)] {
+		// Once per page: said twice, it's the model's call.
+		if r.checkoutPointed == nil {
+			r.checkoutPointed = map[string]bool{}
+		}
+		r.checkoutPointed[pageKey(obs)] = true
+		r.feedback = fmt.Sprintf("this dialog has %q (%s): that's the next step for this task, not closing the dialog. Press it.",
+			btn.Name, btn.Ref)
 		return Outcome{}, false
 	}
 	if out, stuck, skip := r.noChange(obs, actions); stuck {
