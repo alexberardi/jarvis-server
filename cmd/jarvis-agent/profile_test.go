@@ -160,6 +160,11 @@ func TestPiNodeConfig(t *testing.T) {
 	if h := piNodeConfig(state, true, hd, nil, true)()["hardware"].(map[string]any); h["button_available"] != false || h["led_chain_available"] != true {
 		t.Errorf("button busy: %v", h)
 	}
+	// No HAT: the ACT LED is no chain and has no button.
+	act := &hatDevices{leds: hd.leds, act: true}
+	if h := piNodeConfig(state, true, act, nil, false)()["hardware"]; !reflect.DeepEqual(h, map[string]any{"hat_detected": false, "led_chain_available": false, "button_available": false}) {
+		t.Errorf("ACT LED: %v", h)
+	}
 }
 
 type snapAudio struct {
