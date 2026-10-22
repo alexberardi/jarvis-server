@@ -18,6 +18,7 @@ import LogsPage from '@/pages/LogsPage'
 import ModelsPage from '@/pages/ModelsPage'
 import NodesPage from '@/pages/NodesPage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import PhonePage from '@/pages/PhonePage'
 import RecordingsPage from '@/pages/RecordingsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import SetupWizard from '@/pages/SetupWizard'
@@ -50,6 +51,7 @@ const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'traces/:id', element: <TraceDetailPage /> },
   { path: 'nodes', element: <NodesPage /> },
   { path: 'users', element: <UsersPage /> },
+  { path: 'phone', element: <PhonePage /> },
   { path: 'update', element: <UpdatePage /> },
 ]
 
