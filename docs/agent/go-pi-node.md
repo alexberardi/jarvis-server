@@ -961,7 +961,12 @@ phone starts (the node discoverable) is trusted and connected, as N:'s agent doe
 `Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. A connected
 speaker or headphones (role `source`) are Pulse's default sink, so replies and music play on them;
 `jarvis_output` is the default again when they disconnect (#433). A saved device that connects by
-itself (headphones turned back on) gets the output again at once (#469).
+itself (headphones turned back on) gets the output again at once (#469). Each time the output
+moves to or from a speaker, the node restarts the music players that are running (shairport-sync,
+spotifyd, go-librespot; `packages.System.RestartUnits`): a sink switch can kill a player's Pulse
+stream for good (#478). A package's system unit goes through `jarvis-post-install restart-service`,
+a user unit through `systemctl --user restart`; a failure is logged, never fatal
+([decision](../decisions/2026-10-22-pi-node-bluetooth-player-restart.md)).
 `install-pi.sh` installs `bluez`, `pulseaudio-module-bluetooth` and `rfkill`, unblocks the radio
 and sets BlueZ's Class of Device to audio (0x240404) in `/etc/bluetooth/main.conf`.
 

@@ -12,6 +12,13 @@ forge.MANIFEST_SCHEMA["post_install"] mirrors these names):
   configure-systemd-service   — write a systemd drop-in for the named service
   set-config-file-value       — idempotent key=value in a structured config
 
+And two the node runs itself (not a manifest op):
+
+  remove-managed-dropins      — remove the package's drop-ins (uninstall)
+  restart-service             — try-restart a unit the package's drop-in
+                                configures (the Bluetooth output moved and a
+                                music player's Pulse stream died, #478)
+
 Both ops are bounded by a Pantry-side allow-list checked at submission
 time (jarvis-pantry/config/post-install-allowlist.yaml), so by the time
 input reaches this wrapper the (op_type, target) pair has been vetted.
@@ -82,6 +89,9 @@ _START_LIMIT_BURST = 5
 # ConditionPathExists= so a drop-in that outlives its package makes the
 # unit skip cleanly (inactive, condition failed) instead of crash-looping.
 _PACKAGE_PATH_MARKER = "/.jarvis/packages/"
+
+# systemd's unit directory, where restart-service looks for the drop-in.
+_SYSTEMD_DIR = Path("/etc/systemd/system")
 
 
 def _die(msg: str, code: int = 2) -> "None":
@@ -525,6 +535,26 @@ def _op_remove_managed_dropins(package: str) -> None:
     )
 
 
+def _op_restart_service(payload: dict, package: str) -> None:
+    """Restart a running unit this package configured (#478).
+
+    Payload: {"service": "<name>"}. Only a unit whose drop-in carries this
+    package's managed-by marker, so a package can restart no more than it
+    could already (configure-systemd-service restarts it too). try-restart
+    never starts a stopped or disabled unit.
+    """
+    service = _validate_service_name(payload.get("service"))
+    dropin = _SYSTEMD_DIR / f"{service}.service.d" / _DROPIN_FILENAME
+    try:
+        first_line = dropin.read_text().splitlines()[:1]
+    except OSError:
+        first_line = []
+    if not first_line or first_line[0].strip() != f"{_MANAGED_BY_PREFIX}{package}":
+        _die(f"restart-service: {service} has no drop-in from package {package!r}")
+    _systemctl("try-restart", service)
+    print(f"restart-service: try-restart {service}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Jarvis post-install op dispatcher")
     parser.add_argument(
@@ -537,6 +567,10 @@ def main() -> int:
     sub.add_parser(
         "remove-managed-dropins",
         help="Remove all drop-ins this package previously wrote (uninstall).",
+    )
+    sub.add_parser(
+        "restart-service",
+        help="try-restart a unit this package's drop-in configures.",
     )
     args = parser.parse_args()
 
@@ -553,6 +587,8 @@ def main() -> int:
         _op_configure_systemd_service(payload, package)
     elif args.op == "set-config-file-value":
         _op_set_config_file_value(payload, package)
+    elif args.op == "restart-service":
+        _op_restart_service(payload, package)
     else:
         _die(f"unknown op: {args.op}")
     return 0
