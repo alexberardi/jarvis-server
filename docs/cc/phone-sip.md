@@ -165,6 +165,24 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
 - CI: `.github/workflows/sip-lane.yml` on changes to `phone/**` or the lane, nightly, and by hand.
 - Until the SIP provider exists (step 2) a baresip stand-in registers as 100.
 
+**L2 as built** (2026-10-22; choices in
+[../decisions/2026-10-22-sip-l2-freepbx-lane.md](../decisions/2026-10-22-sip-l2-freepbx-lane.md)):
+
+```sh
+scripts/freepbx-lane build --dev-box <dev-box>   # once: Debian 12 VM, FreePBX 17, snapshots installed + provisioned
+scripts/freepbx-lane weekly [--no-update]        # update, provision 100 afresh, diff against L1; exit 1 on drift
+scripts/freepbx-lane timer                       # the weekly systemd user units, and how to enable them
+go run ./tools/siplane drift FILE                # the diff alone, on a saved `pjsip show endpoint/aor 100`
+```
+
+- qemu/KVM with user-mode networking (SSH and HTTP forwarded on loopback only), files in
+  `~/.cache/jarvis-harness/freepbx`; `scripts/freepbx-lane.d/` holds the provisioning
+  (bulkimport CSVs, `routes.sql`, `provision.sh`) and the timer's units.
+- Drift: every setting pjsip.conf spells out for 100, plus everything else L1's Asterisk shows
+  (`tools/siplane/testdata/l1-show-100.txt`), against the real FreePBX.
+- Not yet: one call each way and the firewall lockout path (after the SIP provider, step 2).
+  The VM path waits for the user to install qemu, build the VM and enable the timer.
+
 No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio account could front
 the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depends on it.
 

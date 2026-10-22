@@ -1,0 +1,11 @@
+# Weekly trigger for jarvis-freepbx-lane.service (scripts/freepbx-lane timer installs neither).
+[Unit]
+Description=Jarvis L2 SIP lane, weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

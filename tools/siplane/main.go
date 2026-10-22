@@ -4,6 +4,7 @@
 //
 //	scripts/sandbox up --name N --voice --sip     (TTS, whisper and the lane)
 //	go run ./tools/siplane [--sandbox N] [--filter RE] [--out DIR] [--list]
+//	go run ./tools/siplane drift FREEPBX.txt      (the L2 lane's check, drift.go)
 //
 // Exits 1 when a scenario fails, 2 when the lane or sandbox is missing. --out keeps every
 // far end's recording (<scenario>-<party>.wav), its transcript, the PBX's endpoint and
@@ -31,8 +32,9 @@ func main() {
 	defer stop()
 	err := run(ctx, os.Args[1:], os.Stdout)
 	var fail errFailed
+	var drifted errDrift
 	switch {
-	case errors.As(err, &fail):
+	case errors.As(err, &fail), errors.As(err, &drifted):
 		fmt.Fprintln(os.Stderr, "siplane:", err)
 		os.Exit(1)
 	case err != nil:
@@ -46,6 +48,9 @@ type errFailed struct{ n, of int }
 func (e errFailed) Error() string { return fmt.Sprintf("%d of %d scenarios failed", e.n, e.of) }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "drift" {
+		return runDrift(args[1:], stdout)
+	}
 	fs := flag.NewFlagSet("siplane", flag.ContinueOnError)
 	name := fs.String("sandbox", os.Getenv("JARVIS_SANDBOX"), "the sandbox (up with --voice --sip); default $JARVIS_SANDBOX, else default")
 	filter := fs.String("filter", "", "run only the scenarios whose name matches this regexp")

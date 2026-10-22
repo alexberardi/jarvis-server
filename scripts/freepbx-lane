@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# The L2 SIP lane (docs/cc/phone-sip.md §5): a real FreePBX 17 on Debian 12 in a qemu/KVM VM on
+# the dev box, built once and checked weekly for drift from what the L1 lane copies
+# (test/sip/asterisk/pjsip.conf). Never on another box, never a real PBX or carrier: the VM's only
+# trunk points at the host's loopback (10.0.2.2 from inside the VM) and nothing listens on the LAN.
+#
+#   scripts/freepbx-lane build --dev-box NAME [--dry-run]   (once; about an hour)
+#       the Debian 12 cloud image + a cloud-init seed, sng_freepbx_debian_install.sh inside,
+#       snapshot "installed"; then provisioning (scripts/freepbx-lane.d/provision.sh: extension
+#       100 and the inbound route by fwconsole bulkimport, the carrier trunk and the outbound route
+#       by SQL + fwconsole reload), snapshot "provisioned". NAME must be this box's hostname; it
+#       is kept next to the disk, and every other command refuses on any other host.
+#   scripts/freepbx-lane weekly [--no-update] [--dry-run]
+#       revert to "installed", boot, update FreePBX and Debian (fwconsole ma upgradeall, apt),
+#       provision extension 100 afresh with the new release's defaults, capture
+#       `pjsip show endpoint 100` + `pjsip show aor 100`, shut down, and diff them against L1
+#       (go run ./tools/siplane drift). --no-update reverts to "provisioned" instead (offline, the
+#       build's release). Exits 1 on drift. The report is in runs/<date>/ (drift.txt).
+#   scripts/freepbx-lane timer
+#       render the weekly timer's units (scripts/freepbx-lane.d/jarvis-freepbx-lane.*) for this
+#       checkout into $JARVIS_FREEPBX_DIR/systemd/ and print the systemctl --user lines that
+#       enable them (it enables nothing itself)
+#   scripts/freepbx-lane start | stop | ssh [CMD...]
+#       boot the disk as it is (the admin UI on http://127.0.0.1:WEB_PORT), power it off, a shell
+#       or a command in it (as "lane", sudo without a password)
+#
+# Everything lives in $JARVIS_FREEPBX_DIR (default ~/.cache/jarvis-harness/freepbx): the disk, the
+# lane's own SSH key and known_hosts (never ~/.ssh), the dev-box marker, runs/. The VM uses qemu's
+# user-mode network: SSH on 127.0.0.1:$FREEPBX_SSH_PORT (2247) and HTTP on 127.0.0.1:$FREEPBX_WEB_PORT
+# (8447), nothing else forwarded.
+#
+# Needs /dev/kvm (read-write), qemu-system-x86_64, qemu-img, ssh, ssh-keygen, curl, and
+# cloud-localds or xorriso/genisoimage/mkisofs for the seed. Building needs the network (Debian's
+# cloud images, Sangoma's repositories, GitHub); weekly needs it unless --no-update.
+# Choices: docs/decisions/2026-10-22-sip-l2-freepbx-lane.md.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+D=$ROOT/scripts/freepbx-lane.d
+DIR=${JARVIS_FREEPBX_DIR:-$HOME/.cache/jarvis-harness/freepbx}
+KVM=${FREEPBX_KVM:-/dev/kvm}
+SSH_PORT=${FREEPBX_SSH_PORT:-2247}
+WEB_PORT=${FREEPBX_WEB_PORT:-8447}
+MEM=${FREEPBX_MEM:-4096}
+CPUS=${FREEPBX_CPUS:-2}
+DISK_SIZE=40G
+IMAGE_URL=${FREEPBX_IMAGE_URL:-https://cloud.debian.org/images/cloud/bookworm/latest}
+IMAGE=debian-12-genericcloud-amd64.qcow2
+INSTALLER_REF=${FREEPBX_INSTALLER_REF:-master}
+INSTALLER_URL=https://github.com/FreePBX/sng_freepbx_debian_install/raw/$INSTALLER_REF/sng_freepbx_debian_install.sh
+DISK=$DIR/disk.qcow2
+PIDFILE=$DIR/qemu.pid
+say() { echo "freepbx-lane: $*" >&2; }
+die() { say "$*"; exit 1; }
+usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; }
+
+CMD=${1:-}
+[ -n "$CMD" ] || { usage; exit 2; }
+shift
+DRY=0 DEVBOX='' UPDATE=1
+while [ $# -gt 0 ]; do
+  case $1 in
+    --dry-run) DRY=1; shift ;;
+    --dev-box) DEVBOX=${2:-}; shift 2 ;;
+    --no-update) UPDATE=0; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown argument $1" ;;
+    *) break ;;
+  esac
+done
+
+# x runs a step, or prints it under --dry-run.
+x() {
+  if [ "$DRY" = 1 ]; then echo "+ $*"; else "$@"; fi
+}
+# xto FILE runs a step with its output in FILE; xtee FILE also shows it.
+xto() {
+  local f=$1; shift
+  if [ "$DRY" = 1 ]; then echo "+ $* > $f"; else "$@" >"$f" 2>&1; fi
+}
+xtee() {
+  local f=$1; shift
+  if [ "$DRY" = 1 ]; then echo "+ $* | tee $f"; else "$@" 2>&1 | tee "$f" >&2; fi
+}
+step() { if [ "$DRY" = 1 ]; then echo "# $*"; else say "$*"; fi; }
+
+# The lane runs only on the dev box: build names it (it must be this host) and leaves a marker
+# next to the disk; everything else refuses unless this host is the one in the marker.
+guard_host() {
+  local host
+  host=$(hostname)
+  if [ "$CMD" = build ]; then
+    [ -n "$DEVBOX" ] || die "--dev-box NAME is required (the dev box's hostname): the L2 lane runs nowhere else"
+    [ "$host" = "$DEVBOX" ] || die "this is $host, not the dev box $DEVBOX: refusing"
+  else
+    [ -f "$DIR/dev-box" ] || die "no VM built here ($DIR/dev-box missing): scripts/freepbx-lane build --dev-box NAME first"
+    [ "$host" = "$(cat "$DIR/dev-box")" ] || die "this is $host, not the dev box $(cat "$DIR/dev-box") the lane was built on: refusing"
+  fi
+}
+
+guard_tools() {
+  [ "$DRY" = 1 ] && return 0
+  [ -e "$KVM" ] || die "no $KVM: the L2 lane needs KVM (install qemu, enable virtualization, add yourself to the kvm group)"
+  [ -r "$KVM" ] && [ -w "$KVM" ] || die "$KVM is not read-write for $(id -un) (add yourself to the kvm group)"
+  local t
+  for t in qemu-system-x86_64 qemu-img ssh ssh-keygen curl; do
+    command -v "$t" >/dev/null || die "$t not on PATH"
+  done
+}
+
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+vssh() {
+  ssh -q -p "$SSH_PORT" -i "$DIR/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+    -o UserKnownHostsFile="$DIR/known_hosts" -o StrictHostKeyChecking=accept-new \
+    -o ConnectTimeout=5 -o ServerAliveInterval=30 lane@127.0.0.1 "$@"
+}
+
+vscp() {
+  scp -q -P "$SSH_PORT" -i "$DIR/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+    -o UserKnownHostsFile="$DIR/known_hosts" -o StrictHostKeyChecking=accept-new "$@"
+}
+
+# boot starts the VM in the background; restrict=1 cuts it off from the network (SSH and HTTP
+# forwards still work).
+boot() {
+  local restrict=${1:-0} net="user,id=n0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22,hostfwd=tcp:127.0.0.1:$WEB_PORT-:80"
+  [ "$restrict" = 1 ] && net="$net,restrict=on"
+  local seed=()
+  [ -f "$DIR/seed.iso" ] && seed=(-drive "file=$DIR/seed.iso,if=virtio,format=raw,readonly=on")
+  [ "$DRY" = 1 ] || ! running || die "the VM is already running (scripts/freepbx-lane stop)"
+  x qemu-system-x86_64 -name jarvis-freepbx-l2 -enable-kvm -cpu host -m "$MEM" -smp "$CPUS" \
+    -drive "file=$DISK,if=virtio,format=qcow2" "${seed[@]}" \
+    -netdev "$net" -device virtio-net-pci,netdev=n0 \
+    -display none -serial "file:$DIR/serial.log" -daemonize -pidfile "$PIDFILE"
+  wait_ssh
+}
+
+wait_ssh() {
+  step "waiting for SSH on 127.0.0.1:$SSH_PORT"
+  [ "$DRY" = 1 ] && return 0
+  for _ in $(seq 1 120); do
+    vssh true 2>/dev/null && return 0
+    running || die "the VM exited (see $DIR/serial.log)"
+    sleep 5
+  done
+  die "no SSH after 10 minutes (see $DIR/serial.log)"
+}
+
+shutdown_vm() {
+  step "powering the VM off"
+  [ "$DRY" = 1 ] && { echo "+ ssh lane@127.0.0.1 sudo poweroff"; return 0; }
+  running || return 0
+  vssh sudo poweroff 2>/dev/null || true
+  for _ in $(seq 1 60); do running || { rm -f "$PIDFILE"; return 0; }; sleep 2; done
+  say "no clean poweroff after 2 minutes; killing qemu"
+  kill "$(cat "$PIDFILE")" 2>/dev/null || true
+  rm -f "$PIDFILE"
+}
+
+seed_iso() {
+  local s=$DIR/seed
+  step "cloud-init seed: user lane with the lane's own SSH key"
+  x mkdir -p "$s"
+  if [ "$DRY" = 1 ]; then
+    echo "+ write $s/user-data, $s/meta-data; build $DIR/seed.iso (volume cidata)"
+    return 0
+  fi
+  cat >"$s/meta-data" <<EOF
+instance-id: jarvis-freepbx-l2
+local-hostname: freepbx-l2
+EOF
+  cat >"$s/user-data" <<EOF
+#cloud-config
+hostname: freepbx-l2
+users:
+  - name: lane
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - $(cat "$DIR/id_ed25519.pub")
+ssh_pwauth: false
+growpart: {mode: auto, devices: ['/']}
+EOF
+  if command -v cloud-localds >/dev/null; then
+    cloud-localds "$DIR/seed.iso" "$s/user-data" "$s/meta-data"
+  else
+    local mk
+    for mk in xorriso genisoimage mkisofs; do command -v "$mk" >/dev/null && break; mk=''; done
+    [ -n "$mk" ] || die "the cloud-init seed needs cloud-localds, xorriso, genisoimage or mkisofs"
+    if [ "$mk" = xorriso ]; then set -- xorriso -as mkisofs; else set -- "$mk"; fi
+    "$@" -quiet -o "$DIR/seed.iso" -V cidata -J -r "$s/user-data" "$s/meta-data"
+  fi
+}
+
+# provision copies scripts/freepbx-lane.d into the VM and runs provision.sh there as root.
+provision() {
+  step "provisioning: extension 100 and the inbound route (bulkimport), trunk and outbound route (SQL), fwconsole reload"
+  x vssh rm -rf lane-provision
+  x vscp -r "$D" "lane@127.0.0.1:lane-provision"
+  x vssh sudo bash lane-provision/provision.sh
+}
+
+cmd_build() {
+  guard_host
+  guard_tools
+  [ "$DRY" = 1 ] || [ ! -f "$DISK" ] || die "$DISK exists: the VM is built (remove $DIR to build it again)"
+  x mkdir -p "$DIR"
+  [ "$DRY" = 1 ] || hostname >"$DIR/dev-box"
+  [ "$DRY" = 1 ] || trap shutdown_vm EXIT
+  step "the lane's own SSH key"
+  [ "$DRY" = 0 ] && [ -f "$DIR/id_ed25519" ] || x ssh-keygen -q -t ed25519 -N '' -C jarvis-freepbx-lane -f "$DIR/id_ed25519"
+  step "Debian 12 cloud image ($IMAGE_URL), checked against its SHA512SUMS"
+  if [ "$DRY" = 1 ] || [ ! -f "$DIR/$IMAGE" ]; then
+    x curl -fsSL -o "$DIR/$IMAGE.part" "$IMAGE_URL/$IMAGE"
+    x curl -fsSL -o "$DIR/SHA512SUMS" "$IMAGE_URL/SHA512SUMS"
+    if [ "$DRY" = 1 ]; then
+      echo "+ sha512sum -c (the $IMAGE line of SHA512SUMS)"
+    else
+      (cd "$DIR" && grep " $IMAGE\$" SHA512SUMS | sed "s/ $IMAGE\$/ $IMAGE.part/" | sha512sum -c --quiet) ||
+        die "$IMAGE does not match SHA512SUMS"
+      mv "$DIR/$IMAGE.part" "$DIR/$IMAGE"
+    fi
+  fi
+  x qemu-img convert -O qcow2 "$DIR/$IMAGE" "$DISK"
+  x qemu-img resize -q "$DISK" "$DISK_SIZE"
+  seed_iso
+  boot 0
+  step "sng_freepbx_debian_install.sh ($INSTALLER_REF) inside the VM; its log is $DIR/install.log"
+  xtee "$DIR/install.log" vssh "curl -fsSL -o sng_freepbx_debian_install.sh '$INSTALLER_URL' && sha256sum sng_freepbx_debian_install.sh && sudo bash sng_freepbx_debian_install.sh"
+  x vssh "sudo fwconsole -V; sudo asterisk -rx 'core show version'"
+  shutdown_vm
+  step "snapshot installed (FreePBX as the installer leaves it; weekly updates and provisions from here)"
+  x qemu-img snapshot -c installed "$DISK"
+  boot 0
+  provision
+  shutdown_vm
+  step "snapshot provisioned"
+  x qemu-img snapshot -c provisioned "$DISK"
+  trap - EXIT
+  step "built: scripts/freepbx-lane weekly runs the drift check"
+}
+
+cmd_weekly() {
+  guard_host
+  guard_tools
+  [ "$DRY" = 1 ] || ! running || die "the VM is running (scripts/freepbx-lane stop first)"
+  local out snap=installed
+  out=$DIR/runs/$(date +%Y-%m-%d-%H%M)
+  [ "$UPDATE" = 1 ] || snap=provisioned
+  x mkdir -p "$out"
+  step "revert to the $snap snapshot"
+  x qemu-img snapshot -a "$snap" "$DISK"
+  [ "$DRY" = 1 ] || trap shutdown_vm EXIT
+  if [ "$UPDATE" = 1 ]; then
+    boot 0
+    step "update Debian and FreePBX to this week's release; log in $out/update.log"
+    xto "$out/update.log" vssh "sudo apt-get -q update && sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y full-upgrade && sudo fwconsole ma upgradeall && sudo fwconsole reload"
+    provision
+  else
+    boot 1
+  fi
+  step "capture extension 100 as this FreePBX shows it"
+  xto "$out/freepbx-show-100.txt" vssh "sudo asterisk -rx 'core waitfullybooted' >/dev/null && sudo asterisk -rx 'pjsip show endpoint 100' && sudo asterisk -rx 'pjsip show aor 100'"
+  xto "$out/versions.txt" vssh "sudo fwconsole -V; sudo asterisk -rx 'core show version'; sudo fwconsole ma list | grep -E '^\| (core|framework) '"
+  shutdown_vm
+  trap - EXIT
+  step "diff against L1 (go run ./tools/siplane drift); report in $out/drift.txt"
+  local go=(go)
+  command -v mise >/dev/null && go=(mise exec go@1.27 -- go)
+  if [ "$DRY" = 1 ]; then
+    echo "+ ${go[*]} run ./tools/siplane drift $out/freepbx-show-100.txt > $out/drift.txt"
+    return 0
+  fi
+  ln -sfn "$out" "$DIR/runs/latest"
+  local rc=0
+  (cd "$ROOT" && "${go[@]}" run ./tools/siplane drift "$out/freepbx-show-100.txt") >"$out/drift.txt" 2>&1 || rc=$?
+  cat "$out/drift.txt"
+  return "$rc"
+}
+
+cmd_timer() {
+  guard_host
+  local u=$DIR/systemd
+  x mkdir -p "$u"
+  xto "$u/jarvis-freepbx-lane.service" sed "s|@CHECKOUT@|$ROOT|g" "$D/jarvis-freepbx-lane.service"
+  x cp "$D/jarvis-freepbx-lane.timer" "$u/jarvis-freepbx-lane.timer"
+  echo "The units are in $u, for the checkout $ROOT. To run the lane weekly (Sundays 03:30):"
+  echo "  systemctl --user link $u/jarvis-freepbx-lane.service $u/jarvis-freepbx-lane.timer"
+  echo "  systemctl --user enable --now jarvis-freepbx-lane.timer"
+  echo "  loginctl enable-linger $(id -un)     # so it runs while you are logged out"
+}
+
+case $CMD in
+  timer) cmd_timer ;;
+  build) cmd_build ;;
+  weekly) cmd_weekly ;;
+  start) guard_host; guard_tools; boot 0; say "up: ssh with scripts/freepbx-lane ssh, admin UI on http://127.0.0.1:$WEB_PORT" ;;
+  stop) guard_host; shutdown_vm ;;
+  ssh) guard_host; x vssh "$@" ;;
+  *) usage; exit 2 ;;
+esac
