@@ -16,3 +16,7 @@ question arrives as a new turn (`internal/modules/cc/confirm_hint.go`).
 
 The browser extension's `fill` and `click` wait for a loading tab (≤ 5 s) and for a missing
 element (≤ 2 s) before `field_not_found` / `button_not_found` (extension 0.3.4).
+
+jarvis-agent's own voice pipeline does the same (`internal/agent/voice/tools.go` runRound): a parked
+result is not a failure, so the model's question is spoken, not "Sorry, that didn't work: …" from the
+call's `failure_message`. The trace still records `Success: false`.
