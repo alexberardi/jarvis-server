@@ -74,10 +74,10 @@ func inboundDefinitions() []settings.Definition {
 			Description: "Inbound calls: seconds an incoming call rings before Jarvis answers, so people in a ring group " +
 				"can pick up first (0 answers at once; for a direct route)."},
 		{Key: SettingInboundMaxSeconds, Category: "phone_calls", Type: settings.Int, Default: int64(defaultInboundMaxSeconds),
-			Validate: intBetween(30, 600),
+			Validate:    intBetween(30, 600),
 			Description: "Inbound calls: the longest an answered call may last; Jarvis then says goodbye and hangs up."},
 		{Key: SettingInboundCallsPerDay, Category: "phone_calls", Type: settings.Int, Default: int64(defaultInboundPerDay),
-			Validate: intBetween(1, 500),
+			Validate:    intBetween(1, 500),
 			Description: "Inbound calls: how many Jarvis answers per household per day (UTC); later calls get busy (voicemail)."},
 		{Key: SettingInboundMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1), Validate: intBetween(1, 5),
 			Description: "Inbound calls: how many Jarvis answers at once per household; another gets busy (voicemail)."},
