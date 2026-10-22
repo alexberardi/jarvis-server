@@ -23,13 +23,16 @@ func TestLaneCopiesFreePBXDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ext := range []string{"100", "101"} {
+	for _, ext := range []string{"100", "101", contactTakenExt} {
 		for k, want := range freePBXEndpoint {
 			if got := conf[ext+"/endpoint"][k]; got != want {
 				t.Errorf("endpoint %s: %s = %q, want %q (FreePBX 17's default)", ext, k, got, want)
 			}
 		}
 		for k, want := range freePBXAOR {
+			if ext == contactTakenExt && k == "remove_existing" {
+				want = "no"
+			}
 			if got := conf[ext+"/aor"][k]; got != want {
 				t.Errorf("aor %s: %s = %q, want %q (FreePBX 17's default)", ext, k, got, want)
 			}
@@ -50,7 +53,7 @@ func TestFreePBXDefaultsListed(t *testing.T) {
 			t.Errorf("freePBXEndpoint[%s] = %q, want %q", k, freePBXEndpoint[k], v)
 		}
 	}
-	for k, v := range map[string]string{"max_contacts": "1", "remove_existing": "no", "qualify_frequency": "60"} {
+	for k, v := range map[string]string{"max_contacts": "1", "remove_existing": "yes", "qualify_frequency": "60"} {
 		if freePBXAOR[k] != v {
 			t.Errorf("freePBXAOR[%s] = %q, want %q", k, freePBXAOR[k], v)
 		}
@@ -77,13 +80,13 @@ func TestShownSettings(t *testing.T) {
  send_pai                           : true
  timers                             : yes
  max_contacts                       : 1
- remove_existing                    : false
+ remove_existing                    : true
  qualify_frequency                  : 60
  100rel                             : yes
  mailboxes                          : 
 `
 	got := shownSettings(out)
-	if got["direct_media"] != "true" || got["qualify_frequency"] != "60" || got["remove_existing"] != "false" {
+	if got["direct_media"] != "true" || got["qualify_frequency"] != "60" || got["remove_existing"] != "true" {
 		t.Fatalf("got %v", got)
 	}
 	// Settings with digits in the name and empty values are read too: drift compares them.

@@ -344,7 +344,7 @@ func (s *Service) startInbound(t *inboundTicket, call Call) {
 // InboundCall is one row of cc_phone_inbound_calls.
 type InboundCall struct {
 	ID, HouseholdID, CallID                    string
-	CallerNumber, CallerIDName, CallerIDSource string
+	CallerNumber, CallerIDName, CallerIDSource string // source: pai, from, or withheld (no number)
 	CallerName, Reason, Message, Summary       string
 	Outcome, EndReason, AudioKey               string
 	TransferLabel, TransferResult              string // "" when no transfer was tried
@@ -596,10 +596,14 @@ func (s *Service) postInboundCard(ctx context.Context, c *InboundCall) {
 	if c.CallerIDName != "" {
 		cid = strings.TrimSpace(cid + " (" + c.CallerIDName + ")")
 	}
-	if cid == "" {
-		cid = "none"
+	switch {
+	case c.CallerIDSource == "withheld":
+		b.WriteString("**Caller ID:** withheld by the caller\n")
+	case cid == "":
+		b.WriteString("**Caller ID:** none\n")
+	default:
+		fmt.Fprintf(&b, "**Caller ID:** %s, not verified\n", cid)
 	}
-	fmt.Fprintf(&b, "**Caller ID:** %s, not verified\n", cid)
 	if c.Reason != "" {
 		fmt.Fprintf(&b, "**Reason:** %s\n", c.Reason)
 	}

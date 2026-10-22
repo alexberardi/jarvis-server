@@ -34,8 +34,9 @@ func TestRegistersWithAStableContactAndKeepsAlive(t *testing.T) {
 	// OPTIONS to the registrar every KeepAlive.
 	eventually(t, 2*time.Second, "OPTIONS keepalives", func() bool { return p.optionsSeen() >= 3 })
 
-	// A clean shutdown unregisters (Expires: 0), so a restart's REGISTER is not refused by
-	// max_contacts=1 + remove_existing=no.
+	// A clean shutdown unregisters (Expires: 0), so a restart's REGISTER is not refused where
+	// the PBX has max_contacts=1 + remove_existing=no (FreePBX 17's default is yes, older
+	// installs and some admins have no).
 	u.Close(context.Background())
 	all := p.registers()
 	last := all[len(all)-1]
