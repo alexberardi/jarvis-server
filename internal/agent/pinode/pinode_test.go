@@ -169,6 +169,7 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		"led_enabled":                "false",
 		"led_brightness_percent":     40.0,
 		"wake_word_threshold":        0.55,
+		"wake_word_threshold_auto":   "true",
 		"wake_ack_audio_enabled":     false,
 		"follow_up_listen_seconds":   0.0,
 		"follow_up_silence_duration": 0.7,
@@ -193,10 +194,10 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 	if !slices.Equal(leds.enabled, []bool{false}) || !slices.Equal(leds.bright, []int{40}) {
 		t.Fatalf("leds %v %v", leds.enabled, leds.bright)
 	}
-	if v.cfg.WakeThreshold != 0.55 || v.cfg.Chimes || v.cfg.FollowUp.ListenSecs != 0 || v.cfg.FollowUp.SilenceSecs != 0.7 {
+	if v.cfg.WakeThreshold != 0.55 || !v.cfg.WakeThresholdAuto || v.cfg.Chimes || v.cfg.FollowUp.ListenSecs != 0 || v.cfg.FollowUp.SilenceSecs != 0.7 {
 		t.Fatalf("voice cfg %+v", v.cfg)
 	}
-	want := State{WakeThreshold: 0.55, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40,
+	want := State{WakeThreshold: 0.55, WakeAuto: true, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40,
 		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45}
 	if got := n.State(); got != want {
 		t.Fatalf("state %+v", got)
@@ -205,7 +206,7 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 	if err != nil || len(unknown) != 0 {
 		t.Fatal(err, unknown)
 	}
-	if *s.Voice != true || *s.LEDs != false || *s.LEDBrightness != 40 || *s.WakeThreshold != 0.55 ||
+	if *s.Voice != true || *s.LEDs != false || *s.LEDBrightness != 40 || *s.WakeThreshold != 0.55 || !*s.WakeAuto ||
 		*s.Chimes != false || *s.FollowUp != 0 || *s.FollowUpSilence != 0.7 ||
 		*s.SilenceThreshold != 1000 || *s.ListenSilence != 0.5 || *s.FollowUpMinAfterOnset != 0.9 || *s.FollowUpMinSpeech != 0.45 {
 		t.Fatalf("saved %+v", s)

@@ -263,7 +263,7 @@ func hatCmd(ctx context.Context, args []string) error {
 
 // piState is the node settings the Pi starts with: its flags, after agent.json.
 func piState(vf *voiceFlags, hf *hatFlags) pinode.State {
-	return pinode.State{WakeThreshold: vf.threshold, WakeAck: !vf.noChimes, FollowUpListen: vf.followUp,
+	return pinode.State{WakeThreshold: vf.threshold, WakeAuto: vf.wakeAuto, WakeAck: !vf.noChimes, FollowUpListen: vf.followUp,
 		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDBrightness: hf.brightness,
 		SilenceThreshold: vf.silenceThreshold, SilenceSecs: vf.listenSilence,
 		FollowUpMinAfterOnset: vf.followMinAfterOnset, FollowUpMinSpeech: vf.followMinSpeech}
@@ -314,6 +314,7 @@ func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio
 		st := state()
 		nc := map[string]any{
 			"wake_word_threshold":                   st.WakeThreshold,
+			"wake_word_threshold_auto":              st.WakeAuto,
 			"wake_ack_audio_enabled":                st.WakeAck,
 			"follow_up_listen_seconds":              st.FollowUpListen,
 			"follow_up_silence_duration":            st.FollowUpSilence,

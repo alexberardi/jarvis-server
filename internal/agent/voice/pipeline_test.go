@@ -38,6 +38,7 @@ var (
 	noise  = square(50)   // the room: RMS 50, so the adaptive threshold is the 200 floor
 	speech = square(2000) // the command
 	wake   = square(5000) // what the fake detector calls "hey jarvis"
+	weak   = square(3600) // a "hey jarvis" it scores 0.5: above 0.4, under the cool-down's override
 )
 
 // script is the microphone's audio: the given chunks, then noise forever. The rig runs the
@@ -83,7 +84,7 @@ func (c *fakeCapture) push(parts ...[][]int16) {
 	c.chunks = append(c.chunks, slices.Concat(parts...)...)
 }
 
-// fakeDetector fires on loud audio.
+// fakeDetector fires on loud audio: 0.95 on the wake, 0.5 on a weak one.
 type fakeDetector struct {
 	mu     sync.Mutex
 	resets int
@@ -97,8 +98,11 @@ func (d *fakeDetector) Process(c []int16) (float32, error) {
 	for _, v := range c {
 		sum += float64(max(v, -v))
 	}
-	if sum/float64(len(c)) > 3000 {
+	switch avg := sum / float64(len(c)); {
+	case avg > 4200:
 		return 0.95, nil
+	case avg > 3000:
+		return 0.5, nil
 	}
 	return 0.01, nil
 }

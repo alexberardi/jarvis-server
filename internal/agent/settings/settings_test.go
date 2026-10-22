@@ -24,6 +24,7 @@ func runFlags() (*flag.FlagSet, map[string]any) {
 		"voice-input":               fs.String("voice-input", "default", ""),
 		"voice-output":              fs.String("voice-output", "default", ""),
 		"wake-threshold":            fs.Float64("wake-threshold", 0.4, ""),
+		"wake-threshold-auto":       fs.Bool("wake-threshold-auto", false, ""),
 		"no-auto-update":            fs.Bool("no-auto-update", false, ""),
 		"follow-up":                 fs.Float64("follow-up", 4, ""),
 		"follow-up-silence":         fs.Float64("follow-up-silence", 1, ""),

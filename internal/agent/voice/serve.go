@@ -30,6 +30,8 @@ type Options struct {
 	Music Music
 	// Computer, when set, is paused by the wake word and stopped by "stop" (Pipeline.Computer).
 	Computer Computer
+	// WakeScores is the calibration history (Pipeline.WakeScores), kept across restarts.
+	WakeScores *WakeScores
 }
 
 // Serve listens on Input until ctx ends. If the pipeline stops (a microphone unplugged or
@@ -64,10 +66,10 @@ func serveOnce(ctx context.Context, o Options) error {
 	defer mic.Close()
 	o.Detector.Reset()
 	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Tools: o.Tools, Log: o.Log, OnTurn: o.OnTurn, Indicator: o.Indicator,
-		Vocabulary: o.Vocabulary, Live: o.Live, Mic: o.Mic, Music: o.Music, Computer: o.Computer,
+		Vocabulary: o.Vocabulary, Live: o.Live, Mic: o.Mic, Music: o.Music, Computer: o.Computer, WakeScores: o.WakeScores,
 		Playback: func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
 	o.Log.Info("voice: listening", "input", o.Input, "output", o.Output, "backend", device.Backend(),
-		"wake_threshold", o.Config.WakeThreshold)
+		"wake_threshold", o.Config.WakeThreshold, "wake_threshold_auto", o.Config.WakeThresholdAuto)
 	err = p.Run(ctx)
 	if n := mic.Overruns(); n > 0 || p.Dropped() > 0 {
 		o.Log.Info("voice: capture stats", "overruns", n, "dropped_chunks", p.Dropped())

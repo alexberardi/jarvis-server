@@ -14,7 +14,8 @@ five pieces, each its own PR, in this order:
 3. **17c: tentative wake and `pre_wake_speech_seconds`** (`N:core/wake_loop.py:129-261`), needs 17a,
    and overlaps loop #229's listen pre-roll in `voice/pipeline.go`.
 4. **17d: wake auto-calibration and the false-wake / not_for_me cool-down**
-   (`N:core/wake_calibration.py`, `N:core/false_wake.py`).
+   (`N:core/wake_calibration.py`, `N:core/false_wake.py`). Built 2026-10-21 (loop #426,
+   [decision](2026-10-21-pi-node-wake-calibration-and-cooldown.md); `false_wake.py` not ported).
 5. **17e: wake greeting prefetch, maintenance restart, ACT-LED fallback.**
 
 Choices made in 17a:

@@ -13,6 +13,8 @@ type Music interface {
 	Restore(ctx context.Context)
 	// SetSelfPlaying records that the node's own music started (a deferred play ran).
 	SetSelfPlaying(ctx context.Context, on bool, trigger string)
+	// SelfPlaying is that flag now: a wake over the node's own music isn't calibrated on.
+	SelfPlaying() bool
 }
 
 // serial runs tasks off the pipeline goroutine, one at a time and in the order they were

@@ -58,13 +58,17 @@ type Config struct {
 	ToolTimeout   time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
 	FollowUp      FollowUpConfig
 	BargeIn       BargeInConfig
+	// WakeThresholdAuto calibrates the wake threshold from Pipeline.WakeScores
+	// (wake_word_threshold_auto; off: WakeThreshold as set).
+	WakeThresholdAuto bool
+	NotForMe          NotForMeConfig // the wake gate's cool-down after not_for_me
 }
 
 // DefaultConfig is the Python node's behaviour (go-pi-node.md §1.1).
 func DefaultConfig() Config {
 	return Config{WakeThreshold: 0.4, Debounce: 8 * time.Second, Endpointing: DefaultEndpointing(),
 		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true,
-		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp(), BargeIn: DefaultBargeIn()}
+		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp(), BargeIn: DefaultBargeIn(), NotForMe: DefaultNotForMe()}
 }
 
 // Outcome is how one exchange (an utterance and its reply) ended.
@@ -142,6 +146,9 @@ type Pipeline struct {
 	// Computer, when set, is paused by the wake word while Jarvis controls the computer or
 	// records, stopped by a "stop" turn and resumed after any other (computer.go).
 	Computer Computer
+	// WakeScores, when set, records the score of each legitimate wake, for the calibrated
+	// threshold (Config.WakeThresholdAuto).
+	WakeScores *WakeScores
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -160,6 +167,7 @@ type Pipeline struct {
 	ends    sync.WaitGroup // pending /conversation/end calls and background music steps
 	bg      serial         // the music steps, in order (music.go)
 	tuned   int            // Live.tunes applied so far
+	gate    wakeGate       // the debounce and the not_for_me cool-down (wakegate.go)
 }
 
 // Dropped counts captured chunks discarded because the pipeline was busy.
@@ -325,7 +333,6 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	var pend []int16
 	pre := &ring[float64]{n: preWakeChunks}
 	clip := &ring[[]int16]{n: wakeClipChunks}
-	var lastFire time.Time
 	var measure chan measureReq
 	if p.Live != nil {
 		measure = p.Live.measure
@@ -375,11 +382,9 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 				return fmt.Errorf("wake word: %w", err)
 			}
 			pend = append(pend[:0], pend[wakeChunk:]...)
-			now := p.Now()
-			if float64(score) <= p.Cfg.WakeThreshold || (!lastFire.IsZero() && now.Sub(lastFire) < p.Cfg.Debounce) {
+			if float64(score) <= p.wakeThreshold() || !p.fire(score) {
 				continue
 			}
-			lastFire = now
 			p.Detector.Reset() // oww is reset after a fire
 			p.turn(ctx, chunks, score, slices.Concat(clip.items...), slices.Clone(pre.items))
 			if ctx.Err() != nil {
@@ -414,8 +419,9 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 	t := Turn{ConversationID: p.NewID(), WakeScore: score}
 	log := p.Log.With("conversation_id", t.ConversationID)
 	log.Info("wake", "score", fmt.Sprintf("%.3f", score))
-	h := p.holdComputer(log) // first: the user is about to speak to Jarvis
-	p.duck(ctx)              // the music down while the user speaks (music.go)
+	selfPlaying := p.Music != nil && p.Music.SelfPlaying() // at the fire, before the duck refreshes it
+	h := p.holdComputer(log)                               // first: the user is about to speak to Jarvis
+	p.duck(ctx)                                            // the music down while the user speaks (music.go)
 
 	// Row 7: warm the conversation up while the user is still talking.
 	st := &pendingStart{done: make(chan struct{})}
@@ -455,6 +461,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "pre_roll_s", fmt.Sprintf("%.2f", t.PreRollSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
+		p.afterWake(log, &t, selfPlaying)
 		// The music back, then a command's deferred step (music.go). Off the pipeline
 		// goroutine: listening must not wait for it.
 		p.afterTurn(ctx, s)
