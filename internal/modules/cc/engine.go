@@ -653,8 +653,8 @@ func toolFailedThisTurn(msgs []chatMsg) bool {
 		switch {
 		case msgs[i].Role == "tool":
 			var o map[string]any
-			if json.Unmarshal([]byte(msgs[i].Content), &o) != nil {
-				continue
+			if json.Unmarshal([]byte(msgs[i].Content), &o) != nil || o["status"] == "awaiting_confirmation" {
+				continue // a parked action asks the user; it didn't fail
 			}
 			if e, ok := o["error"]; ok && e != nil && e != "" && e != false {
 				return true

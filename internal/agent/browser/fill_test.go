@@ -71,7 +71,7 @@ func TestFillAndClick(t *testing.T) {
 	desk := &dictate.Tools{Confirm: conf}
 	n := len(f.received())
 	out = call(ToolClick, map[string]any{"text": "OK"})
-	if out["status"] != "awaiting_confirmation" || len(f.received()) != n {
+	if out["status"] != "awaiting_confirmation" || out["success"] != false || len(f.received()) != n {
 		t.Fatalf("click not gated: %v", out)
 	}
 	res, _ := desk.Call(ctx, dictate.ToolConfirm, map[string]any{"confirmation_id": out["confirmation_id"], "answer": "yes"}, node.Request{})
@@ -79,7 +79,7 @@ func TestFillAndClick(t *testing.T) {
 		t.Errorf("confirmed click: %v", res)
 	}
 	out = call(ToolFill, map[string]any{"field": "password", "text": "hunter2", "submit": true})
-	if q, _ := out["question"].(string); out["status"] != "awaiting_confirmation" || strings.Contains(q, "hunter2") {
+	if q, _ := out["question"].(string); out["status"] != "awaiting_confirmation" || out["success"] != false || strings.Contains(q, "hunter2") {
 		t.Errorf("submitting fill: %v", out)
 	}
 	res, _ = desk.Call(ctx, dictate.ToolConfirm, map[string]any{"confirmation_id": out["confirmation_id"], "answer": "cancel"}, node.Request{})

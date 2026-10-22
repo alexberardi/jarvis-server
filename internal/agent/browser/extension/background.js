@@ -395,12 +395,13 @@ const COMMANDS = {
   },
 
   async fill(args) {
-    const t = await tabFor(args);
+    let t = await tabFor(args);
     const text = String(args.text ?? "");
     if (!text.trim()) throw fail("invalid_argument", "text is required");
     if (text.length > FILL_MAX) throw fail("invalid_argument", `text is longer than ${FILL_MAX} characters`);
     const field = clip(String(args.field ?? "").trim(), 100);
-    const frame = await uniqueFrame(t, fieldAct, [field, "", false, false], "field");
+    const [t2, frame] = await readyFrame(t, fieldAct, [field, "", false, false], "field");
+    t = t2;
     const [r] = await inject(t, { func: fieldAct, args: [field, text, !!args.submit, true], frameIds: [frame] });
     const res = r?.result;
     if (!res) throw fail("failed", "the page returned nothing");
@@ -409,10 +410,11 @@ const COMMANDS = {
   },
 
   async click(args) {
-    const t = await tabFor(args);
+    let t = await tabFor(args);
     const label = clip(String(args.text ?? "").trim(), 100);
     if (!label) throw fail("invalid_argument", "text (the button's label) is required");
-    const frame = await uniqueFrame(t, buttonAct, [label, false], "button");
+    const [t2, frame] = await readyFrame(t, buttonAct, [label, false], "button");
+    t = t2;
     const [r] = await inject(t, { func: buttonAct, args: [label, true], frameIds: [frame] });
     const res = r?.result;
     if (!res) throw fail("failed", "the page returned nothing");
@@ -682,6 +684,26 @@ async function uniqueFrame(t, func, args, what) {
   const err = probes.find((p) => p.result.error);
   if (err) throw fail(err.result.code ?? "failed", err.result.error);
   throw fail(`${what}_not_found`, `no visible ${what} matches` + (avail.length ? `; the page has: ${avail.join("; ")}` : ""));
+}
+
+// readyFrame is uniqueFrame for fill and click, which often come right after open (#420: a
+// fill 1.4 s after opening google.com, on a tab still loading): it waits (≤ 5 s) for the tab to
+// load, then gives a missing element a few more tries (≤ 2 s) while the page's script adds it.
+// It returns the loaded tab and the frame; a page without the element still fails.
+async function readyFrame(t, func, args, what) {
+  const wait = () => new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; i < 20 && t.status === "loading"; i++) {
+    await wait();
+    t = await tabByID(t.id);
+  }
+  for (let i = 0; ; i++) {
+    try {
+      return [t, await uniqueFrame(t, func, args, what)];
+    } catch (e) {
+      if (e.code !== `${what}_not_found` || i >= 8) throw e;
+    }
+    await wait();
+  }
 }
 
 // Media tabs in order of preference: the given tab; else tabs playing sound (focused window

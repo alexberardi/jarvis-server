@@ -104,14 +104,15 @@ const toolsFailedNote = "[TOOLS_FAILED] Every tool call just now failed (success
 	"Do not say it worked or that anything was done. Tell the user it failed, using each result's error, " +
 	"and ask what they want to do."
 
-// allToolsFailed reports whether every result is an object with success: false.
+// allToolsFailed reports whether every result is an object with success: false (a parked
+// action waiting for the user's yes is not a failure).
 func allToolsFailed(results []toolResult) bool {
 	if len(results) == 0 {
 		return false
 	}
 	for _, r := range results {
 		o := outputObject(r.Output)
-		if o == nil {
+		if o == nil || tf.AwaitingConfirmation(o) {
 			return false
 		}
 		v, _ := o.Get("success")
@@ -200,6 +201,7 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	}
 	defer conv.mu.Unlock()
 	stashReferenced(conv, results)
+	m.notePendingConfirm(conv, results)
 	results = m.prepareToolImages(ctx, results)
 	msgs := cloneMsgs(conv.messages)
 	for _, tr := range results {
@@ -268,6 +270,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 		return nil // the typing is still owed: the blocking continue runs the loop
 	}
 	stashReferenced(conv, results)
+	m.notePendingConfirm(conv, results)
 	results = m.prepareToolImages(ctx, results)
 	msgs := m.visionGuard(ctx, cloneMsgs(conv.messages))
 	native := conv.mode.Native()
