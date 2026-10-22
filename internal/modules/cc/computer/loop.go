@@ -307,6 +307,8 @@ type round struct {
 	checkoutPointed map[string]bool
 	// unaskedSent are the items an add the task didn't ask for was sent back for, once each.
 	unaskedSent map[string]bool
+	// sentBack counts each batch (on its page) that was sent back whole, unrun.
+	sentBack map[string]int
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -487,6 +489,34 @@ func firstNonEmptyStr(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+var (
+	cartPage = regexp.MustCompile(`(?i)\b(cart|checkout|check-out|basket|bag)\b`)
+	// notCartLine names something a cart's remove button never is.
+	notCartLine = regexp.MustCompile(`(?i)\b(account|profile|card|address|payment|subscription|user|member|device|data|history|password|key)s?\b`)
+)
+
+// cartLineRemoval reports a remove button for one line of a cart: "Remove <item>" (or "Delete
+// <item>") naming no account, card or the like, on a page that is a cart or checkout (its address
+// or title says so, or it offers Checkout).
+func cartLineRemoval(obs Observation, el *computeruse.Element) bool {
+	if el == nil {
+		return false
+	}
+	m := removedItem.FindStringSubmatch(el.Name)
+	if m == nil || notCartLine.MatchString(m[1]) {
+		return false
+	}
+	if cartPage.MatchString(obs.URL) || cartPage.MatchString(obs.Title) {
+		return true
+	}
+	for _, e := range obs.Elements {
+		if checkoutName.MatchString(e.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 // misstep is why a batch is sent back before it runs, when it contradicts itself or the task
@@ -701,16 +731,48 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if len(actions) == 0 {
 		return Outcome{}, false
 	}
-	if fb, key := misstep(r.task.Goal, obs, actions); fb != "" && (key == "" || !r.unaskedSent[key]) {
+	// Each action on its own: a misstep is dropped and the rest of the batch runs (#485: the 27B's
+	// "remove the burger; remove the potato salad" pressed an upsell for the second, and sending
+	// the whole batch back lost the burger's removal, 38 times over).
+	var kept []computeruse.Action
+	var dropped []string
+	for _, a := range actions {
+		fb, key := misstep(r.task.Goal, obs, []computeruse.Action{a})
+		if fb == "" || key != "" && r.unaskedSent[key] {
+			kept = append(kept, a)
+			continue
+		}
 		if key != "" {
 			if r.unaskedSent == nil {
 				r.unaskedSent = map[string]bool{}
 			}
 			r.unaskedSent[key] = true
 		}
-		r.feedback = fb
-		return Outcome{}, false
+		dropped = append(dropped, fb)
 	}
+	dropNote := ""
+	if len(dropped) > 0 {
+		dropNote = "Not run: " + strings.Join(dropped, " ")
+		if len(kept) == 0 {
+			// The same batch sent back again on the same page is a repeat too.
+			k := batchKey(actions) + "\x00" + pageKey(obs)
+			if r.sentBack == nil {
+				r.sentBack = map[string]int{}
+			}
+			if r.sentBack[k]++; r.sentBack[k] > maxRepeats {
+				return Outcome{State: StateFailed, Summary: fmt.Sprintf("I got stuck: I kept trying %q, which can't do what I meant, so I stopped.",
+					strings.TrimSpace(actions[0].Intent))}, true
+			}
+			r.feedback = dropNote
+			return Outcome{}, false
+		}
+		actions = kept
+	}
+	defer func() {
+		if dropNote != "" {
+			r.feedback = strings.TrimSpace(dropNote + " " + r.feedback)
+		}
+	}()
 	if btn := skippedCheckout(r.task.Goal, obs, actions); btn != nil && !r.checkoutPointed[pageKey(obs)] {
 		// Once per page: said twice, it's the model's call.
 		if r.checkoutPointed == nil {
@@ -1218,6 +1280,11 @@ func (l *Loop) decide(ctx context.Context, t Task, tgt computeruse.Target, obs O
 		}
 	}
 	d.risk = computeruse.Classify(a, el, computeruse.Target{Kind: tgt.Kind, Site: d.site, App: d.app})
+	if d.risk.Category == computeruse.CatDelete && cartLineRemoval(obs, el) {
+		// Taking a line out of a cart spends nothing and is put back with one press: asking for
+		// each one made a cart with leftovers a string of phone taps (#485).
+		d.risk = computeruse.Risk{Level: computeruse.LevelNone}
+	}
 	if d.risk.Level == computeruse.LevelDeny {
 		d.verdict = policy.Verdict{Effect: policy.Block, Reason: d.risk.Reason}
 		return d

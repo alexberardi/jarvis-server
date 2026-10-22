@@ -1211,3 +1211,63 @@ func TestBuyGate(t *testing.T) {
 		}
 	})
 }
+
+// A misstep in a batch is dropped and the rest runs; the same all-misstep batch sent again is a
+// repeat that ends the task (#485: the 27B sent one batch 38 times, its good half never run).
+func TestMisstepDropsOnlyTheBadAction(t *testing.T) {
+	cart := Observation{URL: "https://order.example/?cart=open", Elements: []Element{
+		{Ref: "e1", Role: "button", Name: "Close", State: []string{"in dialog"}},
+		{Ref: "e2", Role: "button", Name: "Remove Pulled Pork Sandwich", State: []string{"in dialog"}},
+		{Ref: "e3", Role: "button", Name: "Remove Smokehouse Thick Burger", State: []string{"in dialog"}},
+		{Ref: "e5", Role: "button", Name: "+ Texas Carolina Potato Salad - Pt. $10.00", State: []string{"in dialog"}},
+	}}
+	goal := "Order one pulled pork sandwich from Smokehouse Kitchen"
+	both := `{"actions": [` + press("e3", "Remove Smokehouse Thick Burger from cart") + `, ` +
+		press("e5", "Remove Texas Carolina Potato Salad from cart") + `]}`
+	t.Run("good half runs", func(t *testing.T) {
+		e := newEnv(t, cart, func() Observation { p := cart; p.URL += "&removed"; return p }())
+		e.script(both)
+		tk := task()
+		tk.Goal = goal
+		e.loop.Run(context.Background(), tk) // ends when the script runs out
+		if len(e.exec.batches) != 1 || len(e.exec.batches[0].Actions) != 1 || e.exec.batches[0].Actions[0].Ref != "e3" {
+			t.Fatalf("batches %+v, want only the burger's removal", e.exec.batches)
+		}
+		if p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "Not run:") || !strings.Contains(p, "adds, it doesn't remove") {
+			t.Fatalf("no note of the dropped action:\n%s", p)
+		}
+	})
+	t.Run("same bad batch again is stuck", func(t *testing.T) {
+		e := newEnv(t, cart)
+		bad := `{"actions": [` + press("e5", "Remove the potato salad") + `]}`
+		e.script(bad, bad, bad, bad, bad)
+		tk := task()
+		tk.Goal = goal
+		out := e.loop.Run(context.Background(), tk)
+		if out.State != StateFailed || !strings.Contains(out.Summary, "got stuck") || len(e.exec.batches) != 0 || len(e.llm.reqs) != 3 {
+			t.Fatalf("outcome %+v batches %d calls %d", out, len(e.exec.batches), len(e.llm.reqs))
+		}
+	})
+}
+
+// Taking a line out of a cart doesn't ask; other removals still do.
+func TestCartLineRemoval(t *testing.T) {
+	cart := Observation{URL: "https://order.example/?cart=open", Elements: []Element{{Ref: "e9", Role: "link", Name: "Checkout $47.00"}}}
+	plain := Observation{URL: "https://mail.example/inbox", Title: "Inbox"}
+	for _, c := range []struct {
+		obs  Observation
+		name string
+		want bool
+	}{
+		{cart, "Remove Smokehouse Thick Burger", true},
+		{Observation{URL: "https://shop.example/basket"}, "Delete Lavender soap", true},
+		{cart, "Remove payment card ending 4242", false},
+		{cart, "Remove my account", false},
+		{plain, "Remove Smokehouse Thick Burger", false},
+		{cart, "Close", false},
+	} {
+		if got := cartLineRemoval(c.obs, &computeruse.Element{Role: "button", Name: c.name}); got != c.want {
+			t.Errorf("%s on %s: %v, want %v", c.name, c.obs.URL, got, c.want)
+		}
+	}
+}
