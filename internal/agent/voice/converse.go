@@ -35,6 +35,9 @@ type session struct {
 	userID     *int64   // the last speaker STT identified
 	onComplete []func() error
 	held       *held // the computer task the wake word paused (computer.go)
+	// The wake's pre_wake_speech_seconds and self-playback snapshot, sent with the woken command.
+	preWakeSpeech float64
+	selfPlaying   bool
 }
 
 // ValidationRequest is a 202's validation_request.
