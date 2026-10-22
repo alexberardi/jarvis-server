@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Check of pi-soak.sh (go-pi-node.md §3.19) without a Pi: a fake /proc (the agent, its sidecar
-# child, an unrelated process), a fake /sys temperature, and stand-ins for hostname, sudo,
-# systemctl (two units that conflict, as jarvis-agent.service and jarvis-node.service do; CPU
-# ticks and NRestarts that grow with each sample), journalctl (a fixture journal, and one per
-# scripted turn) and aplay. It checks the refusals, a short run (the units stopped and put back
+# child, an unrelated process; smaps_rollup readable only through sudo, as on the Pi), a fake /sys
+# temperature, and stand-ins for hostname, sudo, cat, systemctl (two units that conflict, as
+# jarvis-agent.service and jarvis-node.service do; CPU ticks and NRestarts that grow with each
+# sample), journalctl (a fixture journal, and one per scripted turn) and aplay. It checks the refusals, a short run (the units stopped and put back
 # in order, the samples and their CPU, the scripted turns: passed, wrong reply, non_speech, no
-# turn; the summary's counts) and a run stopped by TERM, which must still put the Python node
+# turn; the summary's counts), a run whose agent memory is unreadable (empty columns, one warning,
+# "unreadable" in the summary) and a run stopped by TERM, which must still put the Python node
 # back.
 #
 #   scripts/pi-soak-check.sh
@@ -24,10 +25,25 @@ cat >"$T/bin/hostname" <<'EOF'
 #!/bin/sh
 echo "$FAKE_HOST"
 EOF
+# sudo: logs the call and runs it with FAKE_SUDO=1, which is what lets the stand-in cat read a
+# smaps_rollup (on the Pi the agent is non-dumpable under its unit, so its own user gets EACCES).
 cat >"$T/bin/sudo" <<'EOF'
 #!/bin/sh
+echo "sudo $*" >>"$FAKE_T/sudo.log"
 [ "$1" = -n ] && shift
-exec "$@"
+FAKE_SUDO=1 exec "$@"
+EOF
+# cat: refuses a smaps_rollup without sudo, and under sudo too for the PIDs in FAKE_SMAPS_FAIL.
+cat >"$T/bin/cat" <<'EOF'
+#!/bin/sh
+for f; do
+  case $f in */smaps_rollup)
+    pid=${f%/smaps_rollup} pid=${pid##*/}
+    case " ${FAKE_SMAPS_FAIL:-} " in *" $pid "*) FAKE_SUDO= ;; esac
+    [ "${FAKE_SUDO:-}" = 1 ] || { echo "cat: $f: Permission denied" >&2; exit 1; } ;;
+  esac
+done
+exec "$FAKE_CAT" "$@"
 EOF
 # systemctl: a unit is active while $T/units/NAME exists; starting one stops the other. Each
 # sample (its MainPID lookup) is counted, the agent and the sidecar use AGENT_TICKS and SIDE_TICKS
@@ -109,9 +125,10 @@ echo 'level=WARN msg="voice turn" outcome=non_speech transcript="" reply="" foll
 
 AGENT_TICKS=60 SIDE_TICKS=25
 TCK=$(getconf CLK_TCK 2>/dev/null || echo 100)
+FAKE_CAT=$(command -v cat)
 export PATH="$T/bin:$PATH" SOAK_PROC=$T/proc SOAK_SYS=$T/sys PLAY=$T/bin/play SOAK_FIRST_TURN=0 SOAK_TURN_GAP=0 \
-  FAKE_T=$T AGENT_TICKS SIDE_TICKS
-reset_units() { rm -f "$T/units/"* "$T/calls.log" "$T/samples"; touch "$T/units/jarvis-node.service"; }
+  FAKE_T=$T FAKE_CAT AGENT_TICKS SIDE_TICKS
+reset_units() { rm -f "$T/units/"* "$T/calls.log" "$T/sudo.log" "$T/samples"; touch "$T/units/jarvis-node.service"; }
 
 # 1. The refusals: another host, a kitchen node, no --lab-host. Nothing stopped. Each would be a
 # 2 s run if its refusal broke, so a broken one fails here instead of soaking for 24 h.
@@ -142,6 +159,10 @@ head -1 "$S" | grep -q '^ts,pid,agent_cpu_pct,agent_rss_kb' || fail "samples.csv
 # starts at 3 (the fake's 2 + the first sample).
 sed -n 2p "$S" | grep -q '^[0-9]*,4242,,87040,40000,24268,12,1,,61440,50000,200000,104856,0.52,54.8,,3$' ||
   fail "first sample: $(sed -n 2p "$S")"
+# Memory is read through sudo (the stand-in cat refuses smaps_rollup without it).
+grep -qx "sudo -n cat $T/proc/4242/smaps_rollup" "$T/sudo.log" || fail "the agent's smaps_rollup not read with sudo -n"
+grep -qx "sudo -n cat $T/proc/4300/smaps_rollup" "$T/sudo.log" || fail "the sidecar's smaps_rollup not read with sudo -n"
+! grep -q smaps_rollup "$T/run.err" || fail "a memory warning on a readable run: $(cat "$T/run.err")"
 sed -n 3p "$S" | grep -q '^[0-9]*,4242,[0-9.]*,87040,40000,24268,12,1,[0-9.]*,61440,50000,' || fail "second sample: $(sed -n 3p "$S")"
 # Later rows: AGENT_TICKS and SIDE_TICKS over the seconds since the row before, as % of one core
 # (none in a row taken the same second as the one before).
@@ -166,6 +187,7 @@ M=$T/out/summary.md
 has "$M" '# Go Pi node soak: lab-pi4'
 has "$M" '| Agent RSS MB: min / mean / max (first → last) | 85.0 / 85.0 / 85.0 (85.0 → 85.0) |'
 has "$M" '| Agent anonymous MB: mean / max (first → last) | 23.7 / 23.7 (23.7 → 23.7) |'
+has "$M" '| Samples with the agent up but its memory unreadable | 0 |'
 has "$M" "$cpu_line"
 has "$M" "| Sidecar CPU % mean; RSS MB mean / max | $side_cpu; 60.0 / 60.0 |"
 has "$M" "| Unit restarts (NRestarts) | $(($(wc -l <"$S") - 2)) |"
@@ -188,7 +210,23 @@ cp "$M" "$T/summary.first"
 "$SCRIPT" summarize "$T/out" 2>/dev/null
 diff -q "$T/summary.first" "$M" >/dev/null || fail "summarize differs from run's summary"
 
-# 3. TERM in the middle of a long run: the Python node is back.
+# 3. The agent's smaps_rollup unreadable even through sudo: its memory columns are empty, not
+# zeros (the sidecar's still read), the run says so once, the summary says unreadable, and the
+# units are put back.
+reset_units
+FAKE_SMAPS_FAIL=4242 FAKE_HOST=lab-pi4 "$SCRIPT" run --lab-host lab-pi4 --duration 3s --interval 1 \
+  --out "$T/unread" 2>"$T/unread.err" || { cat "$T/unread.err"; fail "unreadable run failed"; }
+if [ ! -e "$T/units/jarvis-node.service" ] || [ -e "$T/units/jarvis-agent.service" ]; then fail "unreadable: not back as before"; fi
+U=$T/unread/samples.csv
+[ "$(wc -l <"$U")" -ge 3 ] || fail "unreadable: too few samples: $(cat "$U")"
+awk -F, 'NR>1 && !($2==4242 && $4=="" && $5=="" && $6=="" && $7=="" && $8==1 && $10==61440 && $11==50000){print; bad=1}
+  END{exit bad}' "$U" >&2 || fail "unreadable: want empty agent memory and the sidecar's: $(cat "$U")"
+[ "$(grep -c "cannot read $T/proc/4242/smaps_rollup" "$T/unread.err")" = 1 ] || fail "unreadable: want one warning: $(cat "$T/unread.err")"
+has "$T/unread/summary.md" "| Samples with the agent up but its memory unreadable | $(($(wc -l <"$U") - 1)) |"
+has "$T/unread/summary.md" '| Agent RSS MB: min / mean / max (first → last) | unreadable |'
+has "$T/unread/summary.md" '| Agent anonymous MB: mean / max (first → last) | unreadable |'
+
+# 4. TERM in the middle of a long run: the Python node is back.
 reset_units
 FAKE_HOST=lab-pi4 "$SCRIPT" run --lab-host lab-pi4 --duration 1h --interval 1 --out "$T/term" 2>"$T/term.err" &
 pid=$!
