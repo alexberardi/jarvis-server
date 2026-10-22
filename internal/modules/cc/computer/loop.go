@@ -436,6 +436,18 @@ func itemWords(s string) []string {
 	return out
 }
 
+// hasRemoveFor reports a remove button on the page for the item said names (most of its words).
+func hasRemoveFor(obs Observation, said []string) bool {
+	for _, e := range obs.Elements {
+		if m := removedItem.FindStringSubmatch(e.Name); m != nil {
+			if named := itemWords(m[1]); len(named) > 0 && overlap(named, said)*2 > len(said) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // overlap counts the words of b that are in a.
 func overlap(a, b []string) int {
 	n := 0
@@ -543,7 +555,11 @@ func misstep(goal string, obs Observation, actions []computeruse.Action) (feedba
 			// Only a button that names its item ("Remove item" names none).
 			named, said := itemWords(m[1]), itemWords(removeIntent.ReplaceAllString(a.Intent, " "))
 			if len(named) > 0 && len(said) > 0 && overlap(named, said)*2 <= len(said) {
-				return fmt.Sprintf("%q (%s) removes %q, not what you meant (%q): find the remove button for that item, and check the cart lists it.",
+				if !hasRemoveFor(obs, said) {
+					return fmt.Sprintf("there's no remove button for what you meant (%q) on this page: it isn't in the cart any more (or never was). Read what the cart lists now and go on from there.",
+						a.Intent), ""
+				}
+				return fmt.Sprintf("%q (%s) removes %q, not what you meant (%q): use that item's own remove button.",
 					e.Name, e.Ref, m[1], a.Intent), ""
 			}
 		}
@@ -551,6 +567,10 @@ func misstep(goal string, obs Observation, actions []computeruse.Action) (feedba
 			continue
 		}
 		if removeIntent.MatchString(a.Intent) {
+			if said := itemWords(removeIntent.ReplaceAllString(a.Intent, " ")); len(said) > 0 && !hasRemoveFor(obs, said) {
+				return fmt.Sprintf("%q (%s) adds, it doesn't remove; and there's no remove button for what you meant (%q) on this page: it isn't in the cart any more (or never was). Read what the cart lists now.",
+					e.Name, e.Ref, a.Intent), ""
+			}
 			return fmt.Sprintf("%q (%s) adds, it doesn't remove: to take an item out, use its remove button or set its quantity lower (often inside the cart). Nothing ran.",
 				e.Name, e.Ref), ""
 		}

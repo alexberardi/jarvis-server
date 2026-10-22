@@ -1275,3 +1275,18 @@ func TestCartLineRemoval(t *testing.T) {
 		}
 	}
 }
+
+// Removing an item whose remove button is gone says it isn't in the cart (#485: the burger was
+// removed, and the model went on trying to remove it with the sandwich's button and an upsell).
+func TestMisstepItemGone(t *testing.T) {
+	page := Observation{URL: "https://order.example/?cart=open", Elements: []Element{
+		{Ref: "e2", Role: "button", Name: "Remove Pulled Pork Sandwich"},
+		{Ref: "e3", Role: "button", Name: "+ Smokehouse Thick Burger $19.00"},
+	}}
+	for _, ref := range []string{"e2", "e3"} {
+		fb, _ := misstep("Order one pulled pork sandwich", page, []computeruse.Action{{Kind: "press", Ref: ref, Intent: "Remove the Smokehouse Thick Burger from the cart"}})
+		if !strings.Contains(fb, "isn't in the cart any more") {
+			t.Errorf("%s: %q", ref, fb)
+		}
+	}
+}

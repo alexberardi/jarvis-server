@@ -2,6 +2,7 @@
 <p><a href="/kitchen/">Back to menu</a></p>
 {{with .D.Cart}}{{if .Items}}<h2>Order details ({{$.D.Count}})</h2>
 {{range $i, $it := .Items}}<div class="result"><span>{{$it.Qty}} × {{$it.Name}} {{money $it.Price}}</span>
+<form method="post" action="/kitchen/cart/dec"><input type="hidden" name="line" value="{{$i}}"><input type="hidden" name="from" value="checkout"><button class="btn secondary" type="submit" aria-label="Decrease quantity of {{$it.Name}}">−</button></form>
 <form method="post" action="/kitchen/cart/remove"><input type="hidden" name="line" value="{{$i}}"><input type="hidden" name="from" value="checkout"><button class="btn secondary" type="submit" aria-label="Remove {{$it.Name}}">Remove</button></form></div>
 {{end}}
 <p>Total: <strong>{{money .Total}}</strong></p>

@@ -17,6 +17,7 @@
 <a role="button" href="/kitchen/" aria-label="Close">×</a>
 <h2>Your cart</h2>
 {{range $i, $it := .Items}}<div class="result"><span>{{$it.Qty}} × {{$it.Name}} {{money $it.Price}}</span>
+<form method="post" action="/kitchen/cart/dec"><input type="hidden" name="line" value="{{$i}}"><button class="btn secondary" type="submit" aria-label="Decrease quantity of {{$it.Name}}">−</button></form>
 <form method="post" action="/kitchen/cart/remove"><input type="hidden" name="line" value="{{$i}}"><button class="btn secondary" type="submit" aria-label="Remove {{$it.Name}}">Remove</button></form></div>
 {{else}}<p>Your cart is empty.</p>{{end}}
 <h3>Add to your order</h3>

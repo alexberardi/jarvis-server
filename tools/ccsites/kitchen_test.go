@@ -37,17 +37,20 @@ func TestKitchen(t *testing.T) {
 		}
 	}
 
-	// Clear it down to one sandwich and order: the order holds exactly that.
+	// Clear it down to one sandwich: the burger out, the sandwiches one fewer.
 	post(t, c, hs.URL+"/kitchen/cart/remove", url.Values{"line": {"1"}}) // the burger
-	post(t, c, hs.URL+"/kitchen/cart/remove", url.Values{"line": {"0"}}) // the two sandwiches
+	post(t, c, hs.URL+"/kitchen/cart/dec", url.Values{"line": {"0"}})    // 2 → 1 sandwich
+	_, _, body = get(t, c, hs.URL+"/kitchen/checkout")
+	if !strings.Contains(body, "1 × Pulled Pork Sandwich $14.00") || strings.Contains(body, "Burger") || !strings.Contains(body, "Place Order") ||
+		!strings.Contains(body, `aria-label="Decrease quantity of Pulled Pork Sandwich"`) {
+		t.Fatalf("checkout:\n%s", body)
+	}
+	// An added one with options is its own line.
 	code, h, _ := post(t, c, hs.URL+"/kitchen/cart/add", url.Values{"id": {KitchenDish}, "qty": {"1"}, "opt": {"No Pickles"}})
 	if code != 303 || h.Get("Location") != "/kitchen/?cart=open" {
 		t.Fatalf("add: %d %s", code, h.Get("Location"))
 	}
-	_, _, body = get(t, c, hs.URL+"/kitchen/checkout")
-	if !strings.Contains(body, "1 × Pulled Pork Sandwich (No Pickles) $14.00") || !strings.Contains(body, "Place Order") {
-		t.Fatalf("checkout:\n%s", body)
-	}
+	post(t, c, hs.URL+"/kitchen/cart/dec", url.Values{"line": {"1"}, "from": {"checkout"}}) // and gone again
 	code, h, _ = post(t, c, hs.URL+"/kitchen/checkout", nil)
 	if code != 303 || !strings.HasPrefix(h.Get("Location"), "/kitchen/order/SK-") {
 		t.Fatalf("place order: %d %s", code, h.Get("Location"))

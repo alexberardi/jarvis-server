@@ -16,7 +16,8 @@ import (
 //	GET  /kitchen/                 the menu (?cart=open: with the cart dialog)
 //	GET  /kitchen/item/<id>        the menu with the item's options dialog
 //	POST /kitchen/cart/add         id, qty, opt (repeated) → the menu with the cart dialog
-//	POST /kitchen/cart/remove      id → the menu with the cart dialog
+//	POST /kitchen/cart/dec         line → one fewer of that line (gone at 0)
+//	POST /kitchen/cart/remove      line → the menu with the cart dialog
 //	GET  /kitchen/checkout         order details and Place Order
 //	POST /kitchen/checkout         places the order → /kitchen/order/<number>
 
@@ -179,6 +180,29 @@ func (s *Server) kitchen(w http.ResponseWriter, r *http.Request) {
 		s.save()
 		s.mu.Unlock()
 		http.Redirect(w, r, "/kitchen/?cart=open", http.StatusSeeOther)
+	case path == "/cart/dec" && r.Method == http.MethodPost:
+		// One fewer of a line (the line goes at 0), like the real cart's "−".
+		s.mu.Lock()
+		var cart []CartItem
+		for i, it := range s.kitchenCartItems() {
+			if strconv.Itoa(i) == r.FormValue("line") {
+				it.Qty--
+			}
+			if it.Qty > 0 {
+				cart = append(cart, it)
+			}
+		}
+		if cart == nil {
+			cart = []CartItem{}
+		}
+		s.carts[kitchenCart] = cart
+		s.save()
+		s.mu.Unlock()
+		back := "/kitchen/?cart=open"
+		if r.FormValue("from") == "checkout" {
+			back = "/kitchen/checkout"
+		}
+		http.Redirect(w, r, back, http.StatusSeeOther)
 	case path == "/cart/remove" && r.Method == http.MethodPost:
 		s.mu.Lock()
 		var cart []CartItem
