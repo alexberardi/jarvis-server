@@ -1150,8 +1150,11 @@ error. It writes to one directory:
 
 - `samples.csv`: one row every `--interval` (60 s). The agent's CPU as % of one core (from
   `/proc/PID/stat` deltas, as §3.11 measured it), its RSS, PSS, anonymous and swap
-  (`smaps_rollup`), the same for its child processes (the command sidecar), MemAvailable, swap in
-  use, load, SoC temperature, `vcgencmd get_throttled`, and the unit's `NRestarts`.
+  (`smaps_rollup`, read with `sudo -n cat`: the agent is non-dumpable under its unit, so the file
+  is EACCES to the node's own user), the same for its child processes (the command sidecar),
+  MemAvailable, swap in use, load, SoC temperature, `vcgencmd get_throttled`, and the unit's
+  `NRestarts`. A smaps_rollup that still cannot be read leaves those columns empty (never 0), the
+  run warns once, and the summary counts those samples and says `unreadable` instead of 0 MB.
 - `turns.log`: one scripted turn per command family every `--turns-every` (4 h; the first round
   5 min in). `<family>.wav` from `--wavs DIR` plays out of the HAT's speaker (`aplay -D output`)
   to the running node. It passes when the node logs `msg="voice turn" outcome=spoken` within
