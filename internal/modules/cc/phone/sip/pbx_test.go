@@ -36,6 +36,7 @@ type fakePBX struct {
 	options  int
 	regMode  []string // per REGISTER, in order; "" answers normally, "forbid" 403, "drop" nothing; the last repeats
 	onInvite func(d *diago.DialogServerSession)
+	onRefer  func(req *sip.Request, tx sip.ServerTransaction)
 	invites  []*sip.Request
 	requests []*sip.Request // every request the PBX got, of any method
 }
@@ -91,6 +92,19 @@ func newPBX(t *testing.T, password string) *fakePBX {
 			}
 		}))
 	srv.OnRegister(p.handleRegister)
+	// Its calls to the UA are plain sipgo dialogs diago does not know, so a REFER on one is
+	// the test's to answer (setRefer); without a handler it is refused 405.
+	srv.OnRefer(func(req *sip.Request, tx sip.ServerTransaction) {
+		p.mu.Lock()
+		p.requests = append(p.requests, req.Clone())
+		f := p.onRefer
+		p.mu.Unlock()
+		if f == nil {
+			tx.Respond(sip.NewResponseFromRequest(req, sip.StatusMethodNotAllowed, "Method Not Allowed", nil))
+			return
+		}
+		f(req, tx)
+	})
 	srv.OnOptions(func(req *sip.Request, tx sip.ServerTransaction) {
 		p.mu.Lock()
 		p.options++
@@ -208,6 +222,12 @@ func (p *fakePBX) optionsSeen() int {
 func (p *fakePBX) setRegMode(modes ...string) {
 	p.mu.Lock()
 	p.regMode = modes
+	p.mu.Unlock()
+}
+
+func (p *fakePBX) setRefer(f func(req *sip.Request, tx sip.ServerTransaction)) {
+	p.mu.Lock()
+	p.onRefer = f
 	p.mu.Unlock()
 }
 

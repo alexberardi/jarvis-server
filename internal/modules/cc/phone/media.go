@@ -30,6 +30,9 @@ type callLine interface {
 	armIdleHangup()
 	// cutOff reports whether this turn's utterance barged in on the agent's last reply.
 	cutOff() bool
+	// requestTransfer runs transfer once the turn's reply has played (the receptionist's
+	// transfer); what it returns is said next, if the call goes on.
+	requestTransfer(transfer func() []int16)
 }
 
 // runMedia runs one call's loop until its media ends or the call is cancelled, then releases
@@ -65,6 +68,7 @@ type callSession struct {
 	playEnd       int64 // where the last buffer played ends
 	disclosureEnd int64 // where the disclosure ends; nothing before it is flushed
 	idleDeadline  time.Time
+	transfer      func() []int16
 }
 
 var _ callLine = (*callSession)(nil)
@@ -74,6 +78,8 @@ func (m *callSession) requestHangup() { m.hangup = true }
 func (m *callSession) armIdleHangup() { m.idleDeadline = time.Now().Add(idleHangupAfterDefers) }
 
 func (m *callSession) cutOff() bool { return m.bargedIn }
+
+func (m *callSession) requestTransfer(f func() []int16) { m.transfer = f }
 
 func (m *callSession) run() {
 	select {
@@ -112,6 +118,17 @@ func (m *callSession) run() {
 			m.idleDeadline = time.Time{}
 			m.runTurn(utt)
 			m.bargedIn = false
+			if m.transfer != nil {
+				f := m.transfer
+				m.transfer = nil
+				m.awaitPlayback()
+				m.speak(f())
+				select {
+				case <-m.call.Done():
+					return
+				default:
+				}
+			}
 			if m.hangup {
 				m.awaitPlayback()
 				return

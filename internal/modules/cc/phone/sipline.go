@@ -598,6 +598,28 @@ func (a *sipCallAdapter) SendDTMF(digits string) error {
 	}
 }
 
+// Transfer is a blind REFER of an answered inbound call (package sip waits for the PBX's
+// final NOTIFY).
+func (a *sipCallAdapter) Transfer(ctx context.Context, target string) error {
+	t, ok := a.c.(interface {
+		Transfer(ctx context.Context, target string) error
+	})
+	if !ok {
+		return ErrUnsupported
+	}
+	err := t.Transfer(ctx, target)
+	var te *sip.TransferError
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, sip.ErrUnsupported):
+		return ErrUnsupported
+	case errors.As(err, &te):
+		return &TransferError{Gone: te.Gone, Detail: te.Detail}
+	}
+	return &TransferError{Detail: err.Error()}
+}
+
 func (a *sipCallAdapter) EndReason() EndReason {
 	end, _ := a.c.End()
 	switch end {
@@ -617,6 +639,8 @@ func (a *sipCallAdapter) EndReason() EndReason {
 		return EndNoMedia
 	case sip.EndTransport:
 		return EndTransport
+	case sip.EndTransferred:
+		return EndTransferred
 	}
 	return EndFailed
 }

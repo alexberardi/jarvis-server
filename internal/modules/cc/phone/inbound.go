@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/sip"
@@ -36,6 +39,7 @@ const (
 	SettingInboundMaxSeconds    = "phone.inbound.max_call_seconds"
 	SettingInboundCallsPerDay   = "phone.inbound.calls_per_day"
 	SettingInboundMaxConcurrent = "phone.inbound.max_concurrent_calls"
+	SettingInboundTransfers     = "phone.inbound.transfer_targets"
 )
 
 const (
@@ -81,7 +85,92 @@ func inboundDefinitions() []settings.Definition {
 			Description: "Inbound calls: how many Jarvis answers per household per day (UTC); later calls get busy (voicemail)."},
 		{Key: SettingInboundMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1), Validate: intBetween(1, 5),
 			Description: "Inbound calls: how many Jarvis answers at once per household; another gets busy (voicemail)."},
+		{Key: SettingInboundTransfers, Category: "phone_calls", Type: settings.JSON, Default: []any{},
+			Validate: func(v any) error { _, err := parseTransferTargets(v); return err },
+			Description: "Inbound calls: who Jarvis may put a caller through to, and when, as a list of up to 5 " +
+				`{"label": "Alex", "number": "101", "when": "the caller is from Alex's school or says it is urgent"}` +
+				" (number: an extension or phone number on your PBX, digits only). Jarvis only ever transfers to these, " +
+				"judging \"when\" from what the caller says (which proves nothing), once per call; the caller never picks " +
+				"the number. Empty (the default): no transfers. Your PBX must allow transfers on Jarvis's extension."},
 	}
+}
+
+// TransferTarget is one person the receptionist may put a caller through to
+// (phone.inbound.transfer_targets): its name and condition go to the model, its number only to
+// the PBX.
+type TransferTarget struct {
+	Label  string `json:"label"`
+	Number string `json:"number"`
+	When   string `json:"when"`
+}
+
+const maxTransferTargets = 5
+
+// parseTransferTargets reads and checks phone.inbound.transfer_targets: at most 5, each a name
+// (letters, digits, spaces and .'- only: it is matched in [TRANSFER: name]), an extension or
+// number (digits, optionally after a +; never a URI or a feature code) and a condition, names
+// unique without regard to case.
+func parseTransferTargets(v any) ([]TransferTarget, error) {
+	if v == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var ts []TransferTarget
+	if err := dec.Decode(&ts); err != nil {
+		return nil, errors.New(`a list of {"label", "number", "when"}`)
+	}
+	if len(ts) > maxTransferTargets {
+		return nil, fmt.Errorf("at most %d transfer targets", maxTransferTargets)
+	}
+	seen := map[string]bool{}
+	for i := range ts {
+		t := &ts[i]
+		t.Label, t.Number, t.When = strings.Join(strings.Fields(t.Label), " "), strings.TrimSpace(t.Number), strings.Join(strings.Fields(t.When), " ")
+		switch {
+		case t.Label == "" || utf8.RuneCountInString(t.Label) > 40 || strings.IndexFunc(t.Label, notLabelRune) >= 0:
+			return nil, fmt.Errorf("transfer target %d: label: 1 to 40 letters, digits, spaces and . ' -", i+1)
+		case seen[strings.ToLower(t.Label)]:
+			return nil, fmt.Errorf("transfer target %q is listed twice", t.Label)
+		case !transferNumber(t.Number):
+			return nil, fmt.Errorf("transfer target %q: number: an extension or phone number, digits only (optionally after a +), no * or #", t.Label)
+		case t.When == "" || utf8.RuneCountInString(t.When) > 200 || strings.ContainsAny(t.When, "[]"):
+			return nil, fmt.Errorf("transfer target %q: when: 1 to 200 characters saying when to transfer, no [ ]", t.Label)
+		}
+		seen[strings.ToLower(t.Label)] = true
+	}
+	return ts, nil
+}
+
+func notLabelRune(r rune) bool {
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(" .'-", r)
+}
+
+func transferNumber(n string) bool {
+	d := strings.TrimPrefix(n, "+")
+	return d != "" && len(d) <= 20 && strings.Trim(d, "0123456789") == ""
+}
+
+// transferTargets is hh's transfer targets; a value that does not parse (written before a
+// check existed, or by hand) is none.
+func (s *Service) transferTargets(ctx context.Context, hh string) []TransferTarget {
+	if s.Settings == nil {
+		return nil
+	}
+	v, err := s.Settings.Get(ctx, SettingInboundTransfers, settings.Scope{HouseholdID: hh})
+	if err != nil || v.Value == nil {
+		return nil
+	}
+	ts, err := parseTransferTargets(v.Value)
+	if err != nil {
+		s.log().Warn("phone: ignoring the household's transfer targets", "household", hh, "err", err)
+		return nil
+	}
+	return ts
 }
 
 // inboundState counts the inbound calls each household has admitted and not yet finished.
@@ -97,6 +186,7 @@ type inboundTicket struct {
 	caller     sip.Incoming
 	delay      time.Duration
 	brief      live.InboundBrief
+	transfers  []TransferTarget
 	disclosure []int16
 	release    func()
 }
@@ -144,7 +234,11 @@ func (s *Service) admitInbound(ctx context.Context, acct SIPAccount, in sip.Inco
 		log.Info("phone: inbound call refused busy: the household's daily cap", "today", today, "cap", max)
 		return nil, sip.RefuseBusy
 	}
+	transfers := s.transferTargets(ctx, hh)
 	brief := live.InboundBrief{Household: s.householdName(ctx, hh)}
+	for _, tt := range transfers {
+		brief.Transfers = append(brief.Transfers, live.InboundTransfer{Label: tt.Label, When: tt.When})
+	}
 	disclosure, _ := s.synthesize(ctx, live.BuildInboundDisclosure(brief))
 	if len(disclosure) == 0 {
 		log.Error("phone: inbound call refused: the disclosure could not be synthesized (TTS down?)")
@@ -159,7 +253,7 @@ func (s *Service) admitInbound(ctx context.Context, acct SIPAccount, in sip.Inco
 	s.inbound.active[hh]++
 	s.inbound.mu.Unlock()
 	var once sync.Once
-	t := &inboundTicket{hh: hh, acct: acct, caller: in, brief: brief, disclosure: disclosure,
+	t := &inboundTicket{hh: hh, acct: acct, caller: in, brief: brief, transfers: transfers, disclosure: disclosure,
 		delay: time.Duration(s.intSetting(ctx, SettingInboundAnswerDelay, hh, 0)) * time.Second,
 		release: func() {
 			once.Do(func() {
@@ -168,7 +262,7 @@ func (s *Service) admitInbound(ctx context.Context, acct SIPAccount, in sip.Inco
 				s.inbound.mu.Unlock()
 			})
 		}}
-	log.Info("phone: inbound call admitted", "answer_delay", t.delay)
+	log.Info("phone: inbound call admitted", "answer_delay", t.delay, "transfer_targets", len(transfers))
 	return t, 0
 }
 
@@ -253,6 +347,8 @@ type InboundCall struct {
 	CallerNumber, CallerIDName, CallerIDSource string
 	CallerName, Reason, Message, Summary       string
 	Outcome, EndReason, AudioKey               string
+	TransferLabel, TransferResult              string // "" when no transfer was tried
+	TransferDetail                             string
 	Turns                                      int
 	StartedAt, EndedAt                         time.Time
 	Duration                                   *int64
@@ -279,7 +375,7 @@ func (s *Service) runInbound(t *inboundTicket, call Call) {
 	rt := &callRuntime{sessionID: id, householdID: t.hh, recorder: &live.Recorder{}, disclosure: t.disclosure,
 		ctx: ctx, cancel: cancel, started: make(chan struct{}), done: make(chan struct{}), call: call, callID: call.ID(),
 		timeLimit: time.Now().Add(limit), timeUpLine: live.InboundTimeUpLine}
-	agent := s.newInboundAgent(rt, t.brief)
+	agent := s.newInboundAgent(rt, t.brief, t.transfers)
 	rt.inbound = agent
 	s.log().Info("phone: inbound call answered", "inbound_call", id, "household", t.hh, "caller", t.caller.Number, "limit", limit)
 	s.wg.Add(1)
@@ -384,16 +480,21 @@ func (s *Service) finishInbound(ctx context.Context, id string, t *inboundTicket
 	if a.message != nil {
 		msg = *a.message
 	}
+	var xfer transferAttempt
+	if a.transfer != nil {
+		xfer = *a.transfer
+	}
 	end := s.now()
 	dur := int64(end.Sub(start).Seconds())
 	if _, err := s.DB.Write.ExecContext(ctx, `UPDATE cc_phone_inbound_calls SET caller_name = ?, reason = ?,
 		message = ?, summary = ?, outcome = ?, end_reason = ?, audio_object_key = ?, turns = ?, ended_at = ?,
-		duration_seconds = ? WHERE id = ?`, nullStr(msg.CallerName), nullStr(msg.Reason), nullStr(msg.Message),
-		nullStr(summary), outcome, nullStr(endReason), nullStr(audioKey), len(a.records), dbTime(end), dur, id); err != nil {
+		duration_seconds = ?, transfer_label = ?, transfer_result = ?, transfer_detail = ? WHERE id = ?`,
+		nullStr(msg.CallerName), nullStr(msg.Reason), nullStr(msg.Message), nullStr(summary), outcome, nullStr(endReason),
+		nullStr(audioKey), len(a.records), dbTime(end), dur, nullStr(xfer.Label), nullStr(xfer.Result), nullStr(xfer.Detail), id); err != nil {
 		s.log().Error("phone: inbound call outcome failed", "inbound_call", id, "err", err)
 	}
 	s.log().Info("phone: inbound call ended", "inbound_call", id, "outcome", outcome, "end", endReason,
-		"turns", len(a.records), "refused_commands", strings.Join(a.refused, ","))
+		"turns", len(a.records), "refused_commands", strings.Join(a.refused, ","), "transfer", xfer.Label, "transfer_result", xfer.Result)
 	call, err := s.inboundCall(ctx, id)
 	if err != nil {
 		s.log().Error("phone: reading the inbound call back failed", "inbound_call", id, "err", err)
@@ -436,19 +537,22 @@ func (s *Service) summarizeInbound(ctx context.Context, a *inboundAgent) string 
 func (s *Service) inboundCall(ctx context.Context, id string) (*InboundCall, error) {
 	var c InboundCall
 	var callID, num, cidName, cidSrc, name, reason, msg, summary, outcome, end, audio, ended sql.NullString
+	var xLabel, xResult, xDetail sql.NullString
 	var started string
 	var dur sql.NullInt64
 	err := s.DB.Read.QueryRowContext(ctx, `SELECT id, household_id, call_id, caller_number, caller_id_name,
 		caller_id_source, caller_name, reason, message, summary, outcome, end_reason, audio_object_key, turns,
-		started_at, ended_at, duration_seconds FROM cc_phone_inbound_calls WHERE id = ?`, id).Scan(
+		started_at, ended_at, duration_seconds, transfer_label, transfer_result, transfer_detail
+		FROM cc_phone_inbound_calls WHERE id = ?`, id).Scan(
 		&c.ID, &c.HouseholdID, &callID, &num, &cidName, &cidSrc, &name, &reason, &msg, &summary, &outcome, &end,
-		&audio, &c.Turns, &started, &ended, &dur)
+		&audio, &c.Turns, &started, &ended, &dur, &xLabel, &xResult, &xDetail)
 	if err != nil {
 		return nil, err
 	}
 	c.CallID, c.CallerNumber, c.CallerIDName, c.CallerIDSource = callID.String, num.String, cidName.String, cidSrc.String
 	c.CallerName, c.Reason, c.Message, c.Summary = name.String, reason.String, msg.String, summary.String
 	c.Outcome, c.EndReason, c.AudioKey = outcome.String, end.String, audio.String
+	c.TransferLabel, c.TransferResult, c.TransferDetail = xLabel.String, xResult.String, xDetail.String
 	c.StartedAt, c.EndedAt = parseTS(started), parseTS(ended.String)
 	if dur.Valid {
 		c.Duration = &dur.Int64
@@ -474,10 +578,12 @@ func (s *Service) closeInterruptedInbound(ctx context.Context) {
 func (s *Service) postInboundCard(ctx context.Context, c *InboundCall) {
 	who := firstNonEmpty(c.CallerName, c.CallerIDName, c.CallerNumber, "an unknown caller")
 	var title string
-	switch c.Outcome {
-	case InboundMessage:
+	switch {
+	case c.TransferResult == transferDone:
+		title = "📞 Put through to " + c.TransferLabel + ": " + who
+	case c.Outcome == InboundMessage:
 		title = "📞 Message from " + who
-	case InboundHungUp:
+	case c.Outcome == InboundHungUp:
 		title = "🚫 Call screened: " + who
 	default:
 		title = "📞 Missed call from " + who
@@ -500,12 +606,22 @@ func (s *Service) postInboundCard(ctx context.Context, c *InboundCall) {
 	if c.Message != "" {
 		fmt.Fprintf(&b, "**Message:** %s\n", c.Message)
 	}
+	switch c.TransferResult {
+	case transferDone:
+		fmt.Fprintf(&b, "**Put through to:** %s (Jarvis transferred the call; what happened next is your phone system's)\n", c.TransferLabel)
+	case transferFailed:
+		fmt.Fprintf(&b, "**Transfer to %s failed:** %s\n", c.TransferLabel, c.TransferDetail)
+	}
 	fmt.Fprintf(&b, "\n%s\n\n_Jarvis answered this call as your receptionist. What the caller said, and their caller ID, "+
 		"are their own claims: Jarvis cannot verify who called._", c.Summary)
 	meta := hhMeta(c.HouseholdID)
 	meta["inbound_call_id"] = c.ID
 	meta["direction"] = "inbound"
 	meta["audio_available"] = c.AudioKey != ""
+	if c.TransferLabel != "" {
+		meta["transfer_label"] = c.TransferLabel
+		meta["transfer_result"] = c.TransferResult
+	}
 	if c.AudioKey != "" {
 		meta["audio_object_key"] = c.AudioKey
 	}

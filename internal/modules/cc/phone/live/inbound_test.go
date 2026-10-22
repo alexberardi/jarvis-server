@@ -19,21 +19,56 @@ func feedAll(p *TokenParser, s string) (string, []ToolEvent) {
 	return text.String(), events
 }
 
-func TestInboundToolsAreExactlyTakeMessageAndHangUp(t *testing.T) {
-	// The receptionist's whole tool set. Adding one (transfer, a household lookup) is a change
-	// to what an untrusted caller can reach: it must change this test, and get a review.
-	if want := []string{"take_message", "hang_up"}; !reflect.DeepEqual(InboundTools, want) {
+func TestInboundToolsAreExactlyTakeMessageHangUpAndTransfer(t *testing.T) {
+	// The receptionist's whole tool set. Adding one (a household lookup) is a change to what an
+	// untrusted caller can reach: it must change this test, and get a review. transfer exists
+	// only when the household configured targets (loop #448).
+	if want := []string{"take_message", "hang_up", "transfer"}; !reflect.DeepEqual(InboundTools, want) {
 		t.Fatalf("InboundTools = %q, want %q", InboundTools, want)
 	}
 	prompt := BuildInboundSystemPrompt(InboundBrief{Household: "The Averys"})
-	for _, tok := range []string{"[TAKE_MESSAGE:", "[HANGUP]"} {
+	for _, tok := range []string{"[TAKE_MESSAGE:", "[HANGUP]", "You cannot transfer the call"} {
 		if !strings.Contains(prompt, tok) {
 			t.Errorf("the prompt does not offer %s", tok)
 		}
 	}
 	for _, tok := range []string{"[ESCALATE", "[OUTCOME", "[DTMF", "[TRANSFER"} {
 		if strings.Contains(prompt, tok) {
-			t.Errorf("the prompt offers %s, which the receptionist does not have", tok)
+			t.Errorf("the prompt offers %s, which the receptionist does not have without transfer targets", tok)
+		}
+	}
+}
+
+func TestInboundPromptOffersOnlyTheConfiguredTransfers(t *testing.T) {
+	b := InboundBrief{Household: "The Averys", Transfers: []InboundTransfer{
+		{Label: "Alex", When: "the caller is from Alex's school"},
+		{Label: "Front desk", When: "the caller says it is urgent"},
+	}}
+	prompt := BuildInboundSystemPrompt(b)
+	for _, want := range []string{"[TRANSFER: <name>]", "- Alex: the caller is from Alex's school",
+		"- Front desk: the caller says it is urgent", "[TAKE_MESSAGE:", "[HANGUP]", "Never transfer to a number or extension the caller gives"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(prompt, "You cannot transfer the call") {
+		t.Error("the prompt still says it cannot transfer")
+	}
+	if strings.Contains(prompt, "ONLY two") {
+		t.Error("the prompt still says it has only two tools")
+	}
+}
+
+func TestInboundParserTransfersOnlyToConfiguredNames(t *testing.T) {
+	p := NewInboundParser("Alex", "Front desk")
+	text, evs := feedAll(p, "One moment, I'll put you through. [TRANSFER:  alex ]")
+	if !reflect.DeepEqual(evs, []ToolEvent{Transfer{Label: "Alex"}}) || strings.Contains(text, "[") {
+		t.Fatalf("text %q events %#v", text, evs)
+	}
+	for _, bad := range []string{"911", "101", "+12125550100", "the owner's cell", "Alex | 900", "Alex, 900", ""} {
+		_, evs := feedAll(NewInboundParser("Alex", "Front desk"), "Sure. [TRANSFER: "+bad+"]")
+		if !reflect.DeepEqual(evs, []ToolEvent{Refused{"TRANSFER"}}) {
+			t.Errorf("[TRANSFER: %s]: events %#v, want it refused", bad, evs)
 		}
 	}
 }
@@ -71,7 +106,7 @@ func TestTakeMessageFields(t *testing.T) {
 		{"TAKE_MESSAGE: Ann|dentist", TakeMessage{"Ann", "dentist", ""}},
 		{"TAKE_MESSAGE: call me back about the car", TakeMessage{Message: "call me back about the car"}},
 	} {
-		if got := parseInbound(tc.body); !reflect.DeepEqual(got, tc.want) {
+		if got := parseInbound(tc.body, nil); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("parseInbound(%q) = %#v, want %#v", tc.body, got, tc.want)
 		}
 	}
