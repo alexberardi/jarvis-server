@@ -211,7 +211,7 @@ func TestTranscribeUploadCap(t *testing.T) {
 
 func TestTranscribeEngineErrors(t *testing.T) {
 	e := setup(t, func(m *Module) {
-		m.Engine = ResolveFunc(func(context.Context, string) (string, error) { return "", errors.New("not configured") })
+		m.Engine = ResolveFunc(func(context.Context, string) (Endpoint, error) { return Endpoint{}, errors.New("not configured") })
 	})
 	if c, body := e.post(t, "/transcribe", nil, file("file", sineWAV(16000, 1, 440))); c != 503 {
 		t.Errorf("unresolvable engine: %d %v", c, body)

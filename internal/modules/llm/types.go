@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Labels (LD1): the two chat labels, and the embeddings engine. cloud is the optional remote
@@ -46,6 +47,8 @@ type Endpoint struct {
 	// NoReasoningBudget: the engine refuses reasoning_budget (transformers serve answers 422);
 	// thinking goes by chat_template_kwargs alone.
 	NoReasoningBudget bool
+	// Timeout bounds one request to a remote endpoint (remote_timeout_ms, stt); 0 = none.
+	Timeout time.Duration
 }
 
 // Endpoint dialects (engine.APIOpenAI, engine.APIAnthropic).

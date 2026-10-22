@@ -109,11 +109,11 @@ func (f *fakeWhisper) last() (map[string]string, int, int) {
 }
 
 func (f *fakeWhisper) resolver() STTEngine {
-	return ResolveFunc(func(_ context.Context, label string) (string, error) {
+	return ResolveFunc(func(_ context.Context, label string) (Endpoint, error) {
 		if label != "stt" {
-			return "", io.ErrUnexpectedEOF
+			return Endpoint{}, io.ErrUnexpectedEOF
 		}
-		return f.srv.URL, nil
+		return Endpoint{BaseURL: f.srv.URL}, nil
 	})
 }
 

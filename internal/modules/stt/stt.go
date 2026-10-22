@@ -3,7 +3,9 @@
 //
 //   - Speech-to-text runs on a supervised whisper.cpp whisper-server (D7). The llm module's
 //     engine stack owns the process; this module only asks the resolver for the "stt" label's
-//     root URL and posts each clip to /inference with the legacy decode parameters.
+//     root URL and posts each clip to /inference with the legacy decode parameters. With
+//     stt.engine=remote the clip goes to an OpenAI-compatible provider instead
+//     (remote_openai.go; docs/llm/07-remote-speech.md).
 //   - Speaker identification runs in-binary with sherpa-onnx (ERes2Net; the model manager
 //     gives the .onnx path). One threshold plus a margin gate (D33), off by default per
 //     household (D35), voiceprints only (D34), per (household, user) (D36), an enrollment
@@ -45,10 +47,29 @@ func Migrations() fs.FS {
 // ServiceName is the legacy service name.
 const ServiceName = "jarvis-whisper-api"
 
-// STTEngine resolves an engine label to its base URL; for "stt" that is whisper-server's root
-// (POST /inference). The llm module's engine.Resolver satisfies it through a small adapter.
+// Endpoint is where a label's transcription goes: a local whisper-server's root (POST
+// /inference), or a remote provider (docs/llm/07-remote-speech.md §2).
+type Endpoint struct {
+	BaseURL string
+	// Remote: BaseURL is a provider's OpenAI-compatible base (POST {BaseURL}/audio/transcriptions).
+	Remote bool
+	// API is a remote endpoint's dialect (APIOpenAI).
+	API string
+	// APIKey goes in "Authorization: Bearer"; never logged or put in an error.
+	APIKey string
+	// Model is the remote request's "model".
+	Model string
+	// Timeout bounds one remote request; 0 = the HTTP client's.
+	Timeout time.Duration
+}
+
+// Remote dialects.
+const APIOpenAI = "openai"
+
+// STTEngine resolves an engine label to its endpoint. The llm module's engine.Resolver
+// satisfies it through a small adapter.
 type STTEngine interface {
-	Resolve(ctx context.Context, label string) (baseURL string, err error)
+	Resolve(ctx context.Context, label string) (Endpoint, error)
 }
 
 // ModelPaths resolves a voice model kind ("speaker") to a file. The llm module's model
@@ -58,9 +79,16 @@ type ModelPaths interface {
 }
 
 // ResolveFunc adapts a function to STTEngine.
-type ResolveFunc func(ctx context.Context, label string) (string, error)
+type ResolveFunc func(ctx context.Context, label string) (Endpoint, error)
 
-func (f ResolveFunc) Resolve(ctx context.Context, label string) (string, error) { return f(ctx, label) }
+func (f ResolveFunc) Resolve(ctx context.Context, label string) (Endpoint, error) {
+	return f(ctx, label)
+}
+
+// LocalURL is an STTEngine that always answers a local whisper-server at url (tests, tools).
+func LocalURL(url string) STTEngine {
+	return ResolveFunc(func(context.Context, string) (Endpoint, error) { return Endpoint{BaseURL: url}, nil })
+}
 
 // ModelPathFunc adapts a function to ModelPaths.
 type ModelPathFunc func(ctx context.Context, kind string) (string, bool)
