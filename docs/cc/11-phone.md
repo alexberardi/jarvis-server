@@ -421,6 +421,8 @@ Defined at `settings_definitions.py:776-859`. The mobile household-controllable 
 
 `_int_setting` (`:98-112`) returns the default for None, for a bool, or on any exception.
 
+> **jarvisd-only (2026-10-21, [phone-sip.md](phone-sip.md) step 1):** `phone.provider` (household → system → default `twilio`; options `twilio` only until SIP lands) picks the provider whose credentials Telephony resolves. A value this build doesn't know is "phone not configured" with a provider-neutral message. Not in the mobile household settings yet.
+
 ---
 
 ## 6. Dependencies

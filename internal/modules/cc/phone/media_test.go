@@ -26,7 +26,7 @@ func TestMediaSignatureURL(t *testing.T) {
 			if c.prefix != "" {
 				r = httpx.WithMountPrefix(r, c.prefix)
 			}
-			if got := s.signatureURL(r); got != c.want {
+			if got := newTwilioMedia(s).signatureURL(r); got != c.want {
 				t.Errorf("signatureURL = %q, want %q", got, c.want)
 			}
 		})

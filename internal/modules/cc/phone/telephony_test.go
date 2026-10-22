@@ -29,7 +29,7 @@ type accounts struct {
 
 func newAccounts() *accounts { return &accounts{fakes: map[string]*fakeProvider{}} }
 
-func (a *accounts) build(c Credentials) Provider {
+func (a *accounts) build(c Credentials) TwilioAPI {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.built = append(a.built, c)
@@ -55,10 +55,18 @@ func (a *accounts) fake(sid string) *fakeProvider {
 // perHousehold switches the env from the single fake provider to per-household resolution.
 func (e *env) perHousehold() *accounts {
 	a := newAccounts()
-	e.s.Provider = nil
+	e.s.Twilio = nil
 	e.s.Options.AuthToken = ""
-	e.s.NewProvider = a.build
+	e.s.NewTwilio = a.build
 	return a
+}
+
+// twilioAPI is the REST client behind a resolved Twilio provider (nil for another provider).
+func twilioAPI(tel Telephony) TwilioAPI {
+	if p, ok := tel.Provider.(*twilioProvider); ok {
+		return p.api
+	}
+	return nil
 }
 
 func (e *env) setCreds(sc settings.Scope, sid, token, from string) {
@@ -81,7 +89,7 @@ func TestTelephonyResolutionOrder(t *testing.T) {
 	// Env only.
 	e.s.EnvCredentials = Credentials{AccountSID: "AC-env", AuthToken: "token-env", FromNumber: "+15550000000"}
 	tel, err := e.s.Telephony(ctx, hh)
-	if err != nil || tel.Source != SourceEnv || tel.SigningKey != "token-env" || tel.Provider != a.fake("AC-env") {
+	if err != nil || tel.Source != SourceEnv || tel.SigningKey != "token-env" || twilioAPI(tel) != a.fake("AC-env") {
 		t.Fatalf("env: %+v %v", tel, err)
 	}
 
@@ -94,7 +102,7 @@ func TestTelephonyResolutionOrder(t *testing.T) {
 	// The household's own account beats both, for that household only.
 	e.setCreds(settings.Scope{HouseholdID: hh}, "AC-A", "token-A", "+15550000001")
 	if tel, err = e.s.Telephony(ctx, hh); err != nil || tel.Source != SourceHousehold || tel.SigningKey != "token-A" ||
-		tel.Provider != a.fake("AC-A") {
+		twilioAPI(tel) != a.fake("AC-A") {
 		t.Fatalf("household: %+v %v", tel, err)
 	}
 	if tel, err = e.s.Telephony(ctx, otherHH); err != nil || tel.Source != SourceSystem || tel.SigningKey != "token-sys" {

@@ -35,7 +35,7 @@ func (s *Service) heartbeat(ctx context.Context, id string) {
 // setState is the "state" event: a legal transition plus heartbeat; a failure stores its
 // reason (fixes oddity 3: the gateway's reason was dropped) and posts the failure card; a
 // terminal state resumes a waiting errand.
-func (s *Service) setState(ctx context.Context, id, to, reason, callSID string) (bool, error) {
+func (s *Service) setState(ctx context.Context, id, to, reason, callID string) (bool, error) {
 	sess, err := s.session(ctx, s.DB.Read, id)
 	if err != nil {
 		return false, err
@@ -44,8 +44,8 @@ func (s *Service) setState(ctx context.Context, id, to, reason, callSID string) 
 	if reason != "" {
 		extra["error_message"] = reason
 	}
-	if callSID != "" {
-		extra["twilio_call_sid"] = callSID
+	if callID != "" {
+		extra["twilio_call_sid"] = callID // the provider's call id (column name predates other providers)
 	}
 	ok, err := s.transition(ctx, sess, to, extra)
 	if err != nil || !ok {

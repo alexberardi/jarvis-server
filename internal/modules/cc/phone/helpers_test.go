@@ -181,6 +181,8 @@ func (f *fakeTTS) spoken() []string {
 
 type startedCall struct{ to, twiml string }
 
+// fakeProvider is a fake Twilio REST API (TwilioAPI): the real Twilio provider and media
+// WebSocket run over it.
 type fakeProvider struct {
 	mu       sync.Mutex
 	started  chan startedCall
@@ -300,7 +302,7 @@ func newEnv(t *testing.T) *env {
 	e.s = &Service{
 		DB: d, Log: log, Settings: svc,
 		Roles: &fakeRoles{members: map[string]map[int64]bool{hh: {1: true, 2: true}, otherHH: {9: true}}},
-		LLM:   e.llm, STT: e.stt, TTS: e.tts, Notify: e.notify, Provider: e.provider, Search: e.search,
+		LLM:   e.llm, STT: e.stt, TTS: e.tts, Notify: e.notify, Twilio: e.provider, Search: e.search,
 		Names: names{1: "Alex"}, Errands: e.errands, Options: Options{PublicURL: publicURL, AuthToken: authToken},
 		Now: e.now, HeartbeatInterval: time.Hour, EscalationWindow: 2 * time.Second,
 	}
