@@ -213,7 +213,7 @@ func modules(env config.Env) []module.Module {
 			admin.SettingsSources = append(admin.SettingsSources, src)
 		}
 	}
-	admin.Traces, admin.Prompts = cc, cc
+	admin.Traces, admin.Prompts, admin.Phone = cc, cc, cc
 	admin.Accounts, admin.Households = auth, auth
 	admin.Models = llm
 	admin.TTS = ttsm // the wizard's voice sample (AD3b)

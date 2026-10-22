@@ -128,9 +128,10 @@ Risks and what we do about them:
    extension, password, local port, dial format, dial prefix; system or household scope, not
    in the mobile household settings), one UA per account started with cc; final codes →
    `EndReason` and an immediate failure reason; a first utterance that is a recorded
-   intercept fails the call. Verified on L1 (the `jarvis-*` scenarios). Left: status in admin,
-   self-tests and the SIP trace (piece 3); the `twilio_call_sid` → neutral column rename (step 1's
-   carry-over, not done here).
+   intercept fails the call. Verified on L1 (the `jarvis-*` scenarios). Left: the
+   `twilio_call_sid` → neutral column rename (step 1's carry-over, not done here).
+   **Status, self-tests and the SIP trace (§6): done** (loop #444; the admin's Phone page,
+   `docs/install/freepbx-sip.md`; [decision](../decisions/2026-10-22-sip-support-tools.md)).
 3. **Inbound receptionist**: answer, prompt, `take_message`, notification, `phone_inbound_calls`,
    caps, barge-in. New caller class: held for the user's review.
 4. **Transfer** (REFER) to configured targets.
@@ -165,7 +166,7 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   RTP 20000–20199 plus the sandbox's offset.
 - `test/sip/farend/`: baresip (WAV in, WAV out, driven over `ctrl_tcp`), SIPp, sox.
   `test/sip/sipp/`: the signalling-only scenarios.
-- `tools/siplane`: 20 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
+- `tools/siplane`: 25 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
   an internal call, the inbound route (DID 5551230000 → 100), the outbound route (→ carrier),
   ring group 600 (DID 5551230600), call waiting, busy with call waiting off (486), trunk busy
   (486, SIPp), no answer (183 + 503, SIPp), all trunks busy (200 + recording), a second contact
@@ -173,7 +174,9 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   (`phone/sip`, run in the runner's process as 100): it registers, unregisters on shutdown and
   registers again on the same port; a wrong password stops it after exactly 3 attempts; it
   dials a 10-digit number through the outbound route with audio both ways; busy, no answer and
-  all trunks busy come out as their outcomes. Audio is checked both ways: each far end's
+  all trunks busy come out as their outcomes; and its self-tests (§6, `jarvis-selftest-*`):
+  connection, `*43` echo (WER and delay), `*65`, the inbound watch, and a trace with the digest
+  answer redacted and the password nowhere. Audio is checked both ways: each far end's
   recording, and jarvisd's, is transcribed by the sandbox's CPU whisper, max WER 0.25.
 - CI: `.github/workflows/sip-lane.yml` on changes to `phone/**` or the lane, nightly, and by hand.
 - A baresip stand-in holds 100 for the scenarios that play a desk phone or the inbound route
@@ -202,6 +205,13 @@ No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio ac
 the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depends on it.
 
 ## 6. Support without seeing the user's PBX
+
+**Built** (loop #444): `GET /api/phone/sip` and the admin's **Phone** page, self-tests run from
+it (`POST /api/phone/sip/{port}/tests/{test}`), the trace at `GET /api/phone/sip/trace`
+(`?format=text` is the export), all superuser; the guide is
+[../install/freepbx-sip.md](../install/freepbx-sip.md), text only until the FreePBX VM (L2) can
+take screenshots. Not yet: the inbound caller's audio level (needs inbound calls answered, step 3).
+Choices: [../decisions/2026-10-22-sip-support-tools.md](../decisions/2026-10-22-sip-support-tools.md).
 
 - **Status**: registration state, last error with a plain hint (auth failed, blocked by the
   PBX firewall, no route, unreachable), OPTIONS round-trip time, active calls.

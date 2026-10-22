@@ -13,7 +13,7 @@
 #                power (Robin, a power user), member (Sam), or a seeded user's email. Anyone
 #                but the superuser is refused the admin pages (they show a notice instead).
 #   --pages      page names (the sidebar's, as slugs: chat, addons, inbox, workflows, recordings, dashboard, models,
-#                settings, connections, logs, traces, nodes, users, update; plus trace-detail,
+#                settings, connections, logs, traces, nodes, users, phone, update; plus trace-detail,
 #                account, login, change-password, setup, not-found, nav-drawer) or raw paths
 #                starting with /. Default: all of them; for anyone but the superuser, chat,
 #                addons, inbox, workflows, recordings and account. An admin page asked for by a non-superuser records

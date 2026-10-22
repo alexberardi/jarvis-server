@@ -24,6 +24,7 @@
     "/admin/traces/:id": { "tests": ["e2e/web/tests/admin/traces.spec.ts"] },
     "/admin/nodes": { "tests": ["e2e/web/tests/admin/nodes.spec.ts", "e2e/web/tests/pairing.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/users": { "tests": ["e2e/web/tests/admin/users.spec.ts", "e2e/web/tests/roles.spec.ts"] },
+    "/admin/phone": { "tests": ["e2e/web/tests/admin/phone.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/update": { "tests": ["e2e/web/tests/admin/update.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/services": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/admin/*": { "tests": ["e2e/web/tests/roles.spec.ts"] },
@@ -36,6 +37,7 @@
     "/traces/:id": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/nodes": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/users": { "tests": ["e2e/web/tests/roles.spec.ts"] },
+    "/phone": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/update": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/services": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/*": { "tests": ["e2e/web/tests/roles.spec.ts"] }
