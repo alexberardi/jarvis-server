@@ -32,7 +32,7 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	store := &computer.Store{DB: m.deps.DB, Now: m.now}
 	loop := &computer.Loop{
 		LLM: m.LLM, Exec: computerExec{m: m, store: store}, Policy: m.policy, Store: store,
-		Approvals: computerApprovals{m}, Settings: m.settings, Now: m.now, Workflows: taughtWorkflows{m},
+		Approvals: computerApprovals{m}, Settings: m.settings, Now: m.now, Workflows: taughtWorkflows{m}, Log: m.deps.Log,
 		Models: computer.Models{
 			Endpoint: func(ctx context.Context, label string) (llm.Endpoint, error) {
 				if m.Endpoints == nil {

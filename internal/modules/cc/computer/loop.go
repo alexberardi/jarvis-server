@@ -9,10 +9,12 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -102,6 +104,25 @@ type Loop struct {
 	Models    Models
 	Workflows WorkflowStore // nil: a replay's healed steps aren't stored
 	Now       func() time.Time
+	Log       *slog.Logger // nil: slog.Default()
+}
+
+// clip keeps a log value to n bytes, on a rune boundary.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}
+
+func (l *Loop) log() *slog.Logger {
+	if l.Log != nil {
+		return l.Log
+	}
+	return slog.Default()
 }
 
 // Task is one computer task: a new run, or the resumption of RunID (after a confirmation or a
@@ -602,6 +623,10 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		if err == nil {
 			return reply, nil
 		}
+		// What the model said is the only way to tell a cut-off answer from a wrong shape (#485).
+		l.log().Warn("computer: model answer unreadable", "run", r.run.ID, "attempt", attempt+1, "err", err,
+			"finish", resp.FinishReason, "prompt_tokens", resp.Usage.PromptTokens,
+			"completion_tokens", resp.Usage.CompletionTokens, "answer", clip(resp.Content, 2000))
 		lastErr = err
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", Content: llm.TextContent(resp.Content)},
