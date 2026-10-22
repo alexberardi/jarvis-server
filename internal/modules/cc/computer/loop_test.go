@@ -1133,7 +1133,7 @@ func TestMisstep(t *testing.T) {
 		{"e4", "Add it to the cart", false, false},
 		{"e2", "Remove the burger from the cart", true, false},
 		{"e5", "Decrease the quantity to 1", true, false},
-		{"e2", "Add a burger", true, true},
+		{"e2", "Add a burger", false, false}, // a menu's own add, not an upsell
 		{"e3", "Add potato salad", true, true},
 		{"e6", "Remove the burger", false, false},
 		{"e7", "Remove Chopped Brisket Sandwich from cart", true, false},
@@ -1145,18 +1145,23 @@ func TestMisstep(t *testing.T) {
 			t.Errorf("%s %q: feedback %q key %q", c.ref, c.intent, fb, key)
 		}
 	}
+	// A product page's add for a task that names no product ("the best-rated watch") isn't sent back.
+	watch := Observation{Elements: []Element{{Ref: "e1", Role: "button", Name: "Add Pulse Active 2 to cart"}}}
+	if fb, _ := misstep("Order me the best-rated smart watch under $300", watch, []computeruse.Action{{Kind: "press", Ref: "e1", Intent: "Add it"}}); fb != "" {
+		t.Errorf("product page add sent back: %q", fb)
+	}
 	// Not a purchase: adding anything is the user's business.
 	if fb, _ := misstep("Add a burger to my wishlist", page, []computeruse.Action{{Kind: "press", Ref: "e2", Intent: "Add it"}}); fb != "" {
 		t.Errorf("non-buying task sent back: %q", fb)
 	}
 	// In the loop: the unasked add is sent back once, then runs if the model insists.
 	e := newEnv(t, page, func() Observation { p := page; p.URL += "?burger"; return p }())
-	e.script(actions(press("e2", "Add a burger")), actions(press("e2", "Add a burger")))
+	e.script(actions(press("e3", "Add potato salad")), actions(press("e3", "Add potato salad")))
 	tk := task()
 	tk.Goal = goal
 	e.loop.Run(context.Background(), tk) // ends when the script runs out
-	if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Ref != "e2" {
-		t.Fatalf("batches %+v, want the burger once (after the send-back)", e.exec.batches)
+	if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Ref != "e3" {
+		t.Fatalf("batches %+v, want the potato salad once (after the send-back)", e.exec.batches)
 	}
 	if p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "doesn't ask for") {
 		t.Fatalf("no send-back feedback:\n%s", p)

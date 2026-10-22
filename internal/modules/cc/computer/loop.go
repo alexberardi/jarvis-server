@@ -436,6 +436,25 @@ func itemWords(s string) []string {
 	return out
 }
 
+// upsell reports an add button that sells something more next to the cart: a "+ X" button, or an
+// add inside a dialog that offers Checkout. A product page's own "Add to cart" isn't one: a task
+// like "the best-rated watch under $300" names no product, and its add is the point (#485's guard
+// sent the store suite's watch back).
+func upsell(obs Observation, e Element) bool {
+	if strings.HasPrefix(strings.TrimSpace(e.Name), "+") {
+		return true
+	}
+	if !slices.Contains(e.State, "in dialog") {
+		return false
+	}
+	for _, o := range obs.Elements {
+		if slices.Contains(o.State, "in dialog") && checkoutName.MatchString(o.Name) {
+			return true
+		}
+	}
+	return false
+}
+
 // hasRemoveFor reports a remove button on the page for the item said names (most of its words).
 func hasRemoveFor(obs Observation, said []string) bool {
 	for _, e := range obs.Elements {
@@ -575,7 +594,7 @@ func misstep(goal string, obs Observation, actions []computeruse.Action) (feedba
 				e.Name, e.Ref), ""
 		}
 		m := addedItem.FindStringSubmatch(e.Name)
-		if m == nil || !buyGoal.MatchString(goal) {
+		if m == nil || !buyGoal.MatchString(goal) || !upsell(obs, e) {
 			continue
 		}
 		// Most of the item's words must be in the task: the shop's own name is in it too
