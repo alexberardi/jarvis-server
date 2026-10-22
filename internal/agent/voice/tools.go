@@ -80,7 +80,11 @@ func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls
 		}
 		ok, _ := out["success"].(bool)
 		run := ToolRun{Name: c.Function.Name, Args: args, Success: ok, Took: p.Now().Sub(start)}
-		if !ok {
+		if !ok && out["status"] == "awaiting_confirmation" {
+			// A parked action (dictate.Confirmer.Ask): nothing done yet, so not a success, but a
+			// question for the user, not a failure: the model's reply asks it (#420).
+			r.allFailed = false
+		} else if !ok {
 			run.Error, _ = out["error"].(string)
 			if r.firstErr == "" {
 				r.firstErr = run.Error
