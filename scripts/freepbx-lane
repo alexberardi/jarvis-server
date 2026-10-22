@@ -270,7 +270,9 @@ cmd_weekly() {
     boot 1
   fi
   step "capture extension 100 as this FreePBX shows it"
-  xto "$out/freepbx-show-100.txt" vssh "sudo asterisk -rx 'core waitfullybooted' >/dev/null && sudo asterisk -rx 'pjsip show endpoint 100' && sudo asterisk -rx 'pjsip show aor 100'"
+  # SSH answers before Asterisk has started, and `core waitfullybooted` needs a running Asterisk to
+  # connect to, so wait (up to 3 min) for it to accept a console connection first.
+  xto "$out/freepbx-show-100.txt" vssh "for _ in \$(seq 90); do sudo asterisk -rx 'core waitfullybooted' >/dev/null 2>&1 && break; sleep 2; done; sudo asterisk -rx 'core waitfullybooted' >/dev/null && sudo asterisk -rx 'pjsip show endpoint 100' && sudo asterisk -rx 'pjsip show aor 100'"
   xto "$out/versions.txt" vssh "sudo fwconsole -V; sudo asterisk -rx 'core show version'; sudo fwconsole ma list | grep -E '^\| (core|framework) '"
   shutdown_vm
   trap - EXIT
