@@ -826,10 +826,7 @@ func runAgent(ctx context.Context, args []string) error {
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
 		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
-		if duck != nil {
-			o.Music = duck
-			o.Switch = micSwitch(duck)
-		}
+		withPiMusic(&o, duck)
 		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }

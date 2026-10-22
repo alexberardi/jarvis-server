@@ -76,7 +76,8 @@ func (e *EchoCancel) Engaged() bool {
 }
 
 // Engage loads the canceller, makes ECSink the default sink, moves the players' streams onto it
-// and switches capture (enable_echo_cancel). Never call it while a recording runs. False: not
+// and switches capture (enable_echo_cancel). A recording that runs meanwhile stays on the plain
+// mic: the pipeline holds its Switch for the turn and the Use applies after. False: not
 // engaged (not applicable, failed now or earlier since the last Rearm).
 func (e *EchoCancel) Engage(ctx context.Context, trigger string) bool {
 	if e == nil || e.Capture == nil {

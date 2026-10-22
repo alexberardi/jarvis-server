@@ -166,6 +166,16 @@ func micSwitch(d *music.Ducker) *device.Switch {
 	return sw
 }
 
+// withPiMusic gives the voice pipeline the Pi's music (nil: none): ducked for each turn, and the
+// microphone through the echo canceller's switch.
+func withPiMusic(o *voice.Options, d *music.Ducker) {
+	if d == nil {
+		return
+	}
+	o.Music = d
+	o.Switch = micSwitch(d)
+}
+
 // hatGain is the HAT codec's mic PGA.
 type hatGain struct{}
 

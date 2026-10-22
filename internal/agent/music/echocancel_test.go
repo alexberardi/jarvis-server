@@ -324,6 +324,29 @@ func TestDuckerDrivesEchoCancel(t *testing.T) {
 	}
 }
 
+// Parked streams go back to jarvis_ec_sink by name (N:), not to the default sink: when Engage
+// could not make the canceller's sink the default, the default is still the HAT's, and a stream
+// restored there would play past the canceller.
+func TestDuckerRestoresParkedStreamsToTheCancellersSink(t *testing.T) {
+	p := newECPulse(ecStream{7, "mpv", "jarvis_output"})
+	p.fail["pactl set-default-sink "+ECSink] = true
+	ec, _ := newEC(p)
+	d := &Ducker{Run: p.run, DuckPercent: 20, EC: ec}
+	ctx := context.Background()
+	d.SetSelfPlaying(ctx, true, "deferred_play")
+	if !ec.Engaged() || p.def != DefaultSink || p.sinkOf(7) != ECSink {
+		t.Fatalf("engage: engaged %v, default %s, stream on %s", ec.Engaged(), p.def, p.sinkOf(7))
+	}
+	d.Duck(ctx)
+	if p.sinkOf(7) != NullSink {
+		t.Fatalf("duck: stream on %s", p.sinkOf(7))
+	}
+	d.Restore(ctx)
+	if p.sinkOf(7) != ECSink || !slices.Contains(p.changes(), "pactl move-sink-input 7 "+ECSink) {
+		t.Fatalf("restore: stream on %s, calls %v; want it moved back to %s", p.sinkOf(7), p.changes(), ECSink)
+	}
+}
+
 func TestDuckerRestoreEngagesForMusicStartedElsewhere(t *testing.T) {
 	// Music a phone started (AirPlay): the first duck sees it, the restore engages and the
 	// parked stream lands on the canceller's sink.

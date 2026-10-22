@@ -8,11 +8,13 @@ import (
 
 // Switch is a microphone that can move to another device between reads: the Pi's echo-cancelled
 // capture while its own music plays (internal/agent/music's EchoCancel). Use names the device
-// the next Read opens; a Read never spans two devices. When that other device fails to open,
+// the next Read opens; a Read never spans two devices, and while a Hold is on (the voice
+// pipeline's turn: the command and its follow-ups) a Use waits for the Release. When that other device fails to open,
 // errors or stays dead silent for SilentFor, the Switch goes back to its base by itself and reports
 // it once through OnFallback, so a broken echo-cancel stack never costs the wake word.
 //
-// Read and Close belong to one goroutine, like any Capture; Use and Current are safe from any.
+// Read and Close belong to one goroutine, like any Capture; Use, Hold, Release and Current are
+// safe from any.
 type Switch struct {
 	Rate, Channels int
 	// SilentFor is how long the other device may read nothing but samples within ±SilenceFloor
@@ -29,6 +31,7 @@ type Switch struct {
 	mu   sync.Mutex
 	base string
 	want string // "" is the base
+	held int    // Holds not yet Released
 
 	cur      Capture
 	curName  string
@@ -71,6 +74,29 @@ func (s *Switch) Use(name string) {
 	s.mu.Unlock()
 }
 
+// Hold keeps Reads on the device they come from now until the matching Release: a recording
+// must not be split across two devices. A fallback still happens (a dead device is no recording).
+func (s *Switch) Hold() {
+	s.mu.Lock()
+	s.held++
+	s.mu.Unlock()
+}
+
+// Release ends a Hold; once none is left, the next Read moves to what Use last asked for.
+func (s *Switch) Release() {
+	s.mu.Lock()
+	if s.held > 0 {
+		s.held--
+	}
+	s.mu.Unlock()
+}
+
+func (s *Switch) holding() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.held > 0
+}
+
 // Current is the device Reads come from now, or are about to (Use's last word).
 func (s *Switch) Current() string {
 	s.mu.Lock()
@@ -88,10 +114,10 @@ func (s *Switch) open(name string) (Capture, error) {
 	return OpenCapture(name, s.Rate, s.Channels)
 }
 
-// sync makes cur the wanted device.
+// sync makes cur the wanted device, unless a Hold keeps the open one.
 func (s *Switch) sync() error {
 	name, base := s.Current(), s.Base()
-	if s.cur != nil && s.curName == name {
+	if s.cur != nil && (s.curName == name || s.holding()) {
 		return nil
 	}
 	s.closeCur()

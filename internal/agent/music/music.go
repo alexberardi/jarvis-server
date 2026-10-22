@@ -15,8 +15,10 @@
 //     the music stops. Changes happen only at duck and restore time, never mid-recording.
 //   - Echo cancellation (17b, echocancel.go): while the node's own music plays, the music goes
 //     through Pulse's webrtc canceller and the voice pipeline hears the cancelled mic. It follows
-//     the cached "self playing" flag at restore time and when a deferred play starts (between
-//     recordings), never at a duck: switching capture at the wake fire would lose the command.
+//     the cached "self playing" flag at restore time and when a deferred play starts, never at a
+//     duck: switching capture at the wake fire would lose the command. A wake that fires while
+//     those run is safe too: the voice pipeline holds its mic (device.Switch.Hold) for the turn,
+//     and the switch applies once the turn is over.
 //
 // Everything is best-effort and never fatal: pactl, pkill or amixer failing (no PulseAudio, no
 // HAT, a desktop) leaves the music as it was.

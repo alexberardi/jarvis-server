@@ -1062,6 +1062,7 @@ mic as a `device.Switch`, and asound.conf's `pcm.jarvis_ec` (type pulse, device
 |---|---|
 | The node's own music starts (a deferred play), or a restore finds it playing (also music a phone started) | `EchoCancel.Engage`: `module-alsa-source device=dsnoopmic source_name=jarvis_mic_raw rate=16000 channels=1`, `module-echo-cancel aec_method=webrtc` (its gain controls off; the PGA is the music profile's) with `source_master=jarvis_mic_raw sink_master=jarvis_output`, `set-default-sink jarvis_ec_sink`, the players' streams moved there, and the pipeline's mic switched to `jarvis_ec` before its next read ("music: echo cancel engaged") |
 | A wake fires during the music | Nothing: a duck never touches the canceller, so the command is recorded on the same device as the wake |
+| A wake fires while a restore's engage or disengage still runs (the background queue) | The pipeline holds its mic (`Switch.Hold`) from the wake to the end of the turn, and for a take; the switch asked for meanwhile applies at the release, so the command and its follow-ups stay on one device |
 | The restore after a turn whose duck saw no music | `Disengage`: the mic back on `dsnoopmic`, the default sink back to what it was, the streams on `jarvis_ec_sink` moved there, the two modules it loaded unloaded (last first) |
 | An engage step fails | What it loaded is unloaded, capture stays on `dsnoopmic`, one warning; no retry until the music stops and starts again |
 | `jarvis_ec` won't open, errors, or reads 3 s of pure digital silence (\|s\| ≤ 1) | The switch goes back to `dsnoopmic` by itself (no read error reaches the pipeline), then the canceller disengages; no retry until the next start ("voice: echo-cancelled capture failed") |
@@ -1074,7 +1075,10 @@ self-playback bypass of the adaptive silence threshold (`wake_loop.py:575`).
 **Verified** with unit tests over a fake Pulse (`music/echocancel_test.go`: the engage and
 disengage calls in order and exactly the modules loaded, each failing step leaving nothing,
 no retry before a rearm, the stale-module cleanup, the Ducker's edges) and fake captures
-(`device/switch_test.go`: switching only between reads, the open/read/silence fallbacks).
+(`device/switch_test.go`: switching only between reads, a Use held until the Release, the
+open/read/silence fallbacks), the pipeline holding the mic for a turn and releasing it before
+the restore (`voice/music_test.go`), and `voice.Serve` reading through the switch started on
+the input (`voice/serve_test.go`).
 **Not yet on a Pi**, and the webrtc canceller's CPU on a Zero 2 W is unmeasured. On the lab Pi:
 
 ```bash
@@ -1084,6 +1088,7 @@ pactl list short sink-inputs                              # the player on jarvis
 top -b -n 1 | grep pulseaudio                             # the canceller's CPU (Zero 2 W: QA)
 # "Hey Jarvis" over loud music: it fires (compare with 17a alone)
 # "Hey Jarvis, stop the music", then any turn: "music: echo cancel disengaged", modules gone
+# a wake right after a turn during music: the command still transcribes across the switch
 ```
 
 ### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)

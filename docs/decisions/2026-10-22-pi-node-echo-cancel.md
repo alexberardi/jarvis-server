@@ -18,10 +18,14 @@ inert on dsnoop, or closing 17b):
   streams are restored there, and the voice pipeline reads `jarvis_ec_source` through
   asound.conf's `pcm.jarvis_ec` (the ALSA pulse plugin). The mic is a `device.Switch` that
   changes device only between reads.
-- **When it changes:** at a restore (the turn is over) and when a deferred play starts, both
-  between recordings, following the "self playing" flag the duck refreshes. Never at a duck: the
-  wake has just fired and the command must be recorded on the same device. So after the music
-  stops the canceller stays loaded until the next turn's restore.
+- **When it changes:** at a restore (the turn is over) and when a deferred play starts,
+  following the "self playing" flag the duck refreshes. Never at a duck: the wake has just fired
+  and the command must be recorded on the same device. Both run on the pipeline's background
+  queue, so a new wake can fire while the pactl calls run; the pipeline holds the mic
+  (`Switch.Hold`) from the wake to the end of the turn (and for a take), and a switch asked for
+  meanwhile applies once it is released. So a recording never spans two devices (only audio
+  already queued before the wake can come from the other one). After the music stops the
+  canceller stays loaded until the next turn's restore.
 - **Fail open.** A failed engage step unloads what it loaded and leaves the plain mic. A
   cancelled capture that won't open, errors or reads 3 s of pure digital silence (N:'s
   silent-capture watchdog) puts the mic back on `dsnoopmic` by itself and disengages. Either way

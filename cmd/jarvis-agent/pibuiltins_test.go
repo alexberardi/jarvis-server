@@ -14,6 +14,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
+	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
 
 // The Pi's host keeps its timers and volume in the state dir, and gets command-center once
@@ -115,5 +116,15 @@ func TestPiMusicOnlyOnAPi(t *testing.T) {
 	}
 	if micSwitch(nil) != nil {
 		t.Fatal("a switch without music")
+	}
+	var o voice.Options
+	withPiMusic(&o, d)
+	if sw, _ := d.EC.Capture.(*device.Switch); o.Music != d || o.Switch == nil || o.Switch != sw {
+		t.Fatalf("voice options %+v: want the ducker and the echo canceller's switch as the mic", o)
+	}
+	o = voice.Options{}
+	withPiMusic(&o, nil)
+	if o.Music != nil || o.Switch != nil {
+		t.Fatalf("no music: options %+v", o)
 	}
 }

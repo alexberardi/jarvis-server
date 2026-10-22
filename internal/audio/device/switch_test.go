@@ -95,6 +95,43 @@ func TestSwitchMovesBetweenReadsOnly(t *testing.T) {
 	}
 }
 
+// A Use while a Hold is on (a recording) waits for the last Release, both ways; a fallback
+// does not wait.
+func TestSwitchHoldDefersUseUntilRelease(t *testing.T) {
+	s, opened, _ := switchOver(t)
+	start(t, s)
+	read(t, s)
+	s.Hold()
+	s.Hold()
+	s.Use("ec")
+	if got := read(t, s); got != 100 || len(opened["ec"]) != 0 {
+		t.Fatalf("held: read %d, ec opens %d; the recording must stay on the mic", got, len(opened["ec"]))
+	}
+	s.Release()
+	if got := read(t, s); got != 100 {
+		t.Fatalf("one hold left: read %d", got)
+	}
+	s.Release()
+	if got := read(t, s); got != 200 {
+		t.Fatalf("released: read %d, want ec's", got)
+	}
+	s.Hold()
+	s.Use("")
+	if got := read(t, s); got != 200 {
+		t.Fatalf("held on ec: read %d", got)
+	}
+	opened["ec"][0].readErr = errors.New("pulse went away")
+	if got := read(t, s); got != 100 {
+		t.Fatalf("a dead device under a hold: read %d, want the mic's", got)
+	}
+	s.Release()
+	s.Release() // an extra Release is harmless
+	s.Use("ec")
+	if got := read(t, s); got != 200 {
+		t.Fatalf("after the holds: read %d", got)
+	}
+}
+
 func TestSwitchFallsBackWhenTheOtherDeviceWontOpen(t *testing.T) {
 	s, _, falls := switchOver(t, "ec")
 	start(t, s)
