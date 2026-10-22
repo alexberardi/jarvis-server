@@ -13,11 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/winmatch"
 )
 
 // Tool names. Function names can't contain dots, so they don't spell the capability names,
@@ -100,7 +102,7 @@ type Tools struct {
 func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	t := &Tools{Host: h, Policy: policy, Apps: list}
 	winID := node.Param{Name: "window_id", Type: "string", Required: true,
-		Description: "Opaque window id exactly as returned by desktop_list_windows"}
+		Description: "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')"}
 	t.tools = []tool{
 		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text.",
 			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "The app's name as said, or a URL"}},
@@ -177,7 +179,15 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 			o["error_code"] = code(err)
 			var amb *apps.AmbiguousError
 			var nf *apps.NotFoundError
-			if errors.As(err, &amb) {
+			var we *windowError
+			if errors.As(err, &we) {
+				if len(we.match.Candidates) > 0 {
+					o["candidates"] = we.match.Candidates // ask the user which one
+				}
+				if we.windows != nil {
+					o["windows"] = we.windows // retry with an id from these, in the same turn
+				}
+			} else if errors.As(err, &amb) {
 				o["candidates"] = amb.Candidates // ask the user which one
 			} else if errors.As(err, &nf) && len(nf.Suggestions) > 0 {
 				o["suggestions"] = nf.Suggestions
@@ -191,7 +201,10 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 }
 
 func code(err error) string {
+	var we *windowError
 	switch {
+	case errors.As(err, &we):
+		return we.match.Code
 	case errors.Is(err, host.ErrNotSupported):
 		return "not_supported"
 	case errors.Is(err, host.ErrWindowNotFound):
@@ -379,9 +392,73 @@ func (t *Tools) windowAction(a host.WindowAction) func(context.Context, map[stri
 		if id == "" {
 			return nil, fmt.Errorf("%w: window_id is required", errBadArgs)
 		}
+		out := map[string]any{}
+		if w, ok, err := t.resolveWindow(ctx, id); err != nil {
+			return nil, err
+		} else if ok && w.ID != id {
+			id, out["matched_window"] = w.ID, windowName(w)
+		}
 		if err := t.Host.WindowDo(ctx, a, id); err != nil {
 			return nil, err
 		}
-		return map[string]any{"window_id": id, "action": string(a)}, nil
+		out["window_id"], out["action"] = id, string(a)
+		return out, nil
 	}
+}
+
+// windowError is a window_id that names no single window, with the open windows so the model
+// can retry with a real id in the same turn.
+type windowError struct {
+	match   *winmatch.Error
+	windows []host.Window
+}
+
+func (e *windowError) Error() string { return e.match.Msg }
+func (e *windowError) Unwrap() error { return e.match }
+
+// resolveWindow: the model often passes a name or a guessed id ("text-edit-window",
+// "terminal-1") instead of one from desktop_list_windows. An exact id is used as is; anything
+// else is matched against the window list the way dictation names windows. ok is false when
+// the list can't be read (the id is then passed through for the host to judge).
+func (t *Tools) resolveWindow(ctx context.Context, id string) (host.Window, bool, error) {
+	ws, err := t.Host.ListWindows(ctx)
+	if err != nil {
+		return host.Window{}, false, nil
+	}
+	cands := make([]winmatch.Candidate, len(ws))
+	for i, w := range ws {
+		if w.ID == id {
+			return w, true, nil
+		}
+		cands[i] = winmatch.Candidate{Apps: []string{w.App}, Title: w.Title, Recency: i, Visible: !w.Minimized}
+	}
+	m, err := winmatch.PickUniqueMatch(cands, windowQuery(id), -1)
+	if err != nil {
+		var we *winmatch.Error
+		if errors.As(err, &we) {
+			return host.Window{}, false, &windowError{match: we, windows: ws}
+		}
+		return host.Window{}, false, err
+	}
+	return ws[m.Index], true, nil
+}
+
+// windowQuery turns a guessed id into words: "text-edit-window" → "text edit window",
+// "terminal-1" → "terminal".
+func windowQuery(id string) string {
+	words := strings.FieldsFunc(id, func(r rune) bool { return r == '-' || r == '_' || unicode.IsSpace(r) })
+	if n := len(words); n > 1 {
+		if _, err := strconv.Atoi(words[n-1]); err == nil {
+			words = words[:n-1]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// windowName is how a reply names the window acted on: "TextEdit — Untitled".
+func windowName(w host.Window) string {
+	if w.Title == "" {
+		return w.App
+	}
+	return w.App + " — " + w.Title
 }

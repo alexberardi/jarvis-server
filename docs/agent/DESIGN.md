@@ -491,6 +491,16 @@ implemented (registry via `golang.org/x/sys/windows/registry`, fake-registry tes
 **untested on real Windows**. Without a signed .xpi in the build, install writes an unpacked
 Firefox copy and prints the about:debugging temporary-install steps.
 
+**Moved apps and App Translocation (#450).** A quarantined app opened where it was downloaded
+runs from a temporary copy macOS makes (`/private/var/folders/…/AppTranslocation/…`), which
+disappears; a manifest naming it breaks later and keeps browsers on the old copy meanwhile.
+So: no registration ever writes a translocated path (`browser install` and the setup page refuse
+it and say to move the app to /Applications); the agent started from an app bundle (`run`,
+`listen`) repoints every registration that starts another binary at itself, leaving
+unregistered browsers alone (bare binaries, i.e. dev builds and Linux/Windows installs, don't);
+and `browser status` / `status` flag a manifest naming a translocated copy as broken and one
+naming another copy of the agent with a warning.
+
 **Signing** (`scripts/browser-ext-sign.sh`): `AMO_JWT_ISSUER`/`AMO_JWT_SECRET` from the user's
 AMO account → `web-ext sign --channel=unlisted` → `internal/agent/browser/signed/jarvis-browser.xpi`
 (commit it; the binary embeds it). Bump the manifest version per signing. `scripts/browser-ext-lint.sh`

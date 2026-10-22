@@ -19,7 +19,10 @@ type fakeBus struct {
 	inRange      map[string]Device
 	pairErr      map[string]error
 	connectErr   map[string]error
-	discovering  []string // transports, in order
+	removeErr    error
+	pairErrOnce  map[string][]error // returned by the next Pair calls, in order, before pairErr
+	transport    map[string]bool    // a MediaTransport1 under the device (its audio profile is up)
+	discovering  []string           // transports, in order
 	calls        []string
 	agentCount   int
 	paired       chan string
@@ -111,6 +114,9 @@ func (b *fakeBus) Remove(_ context.Context, mac string) error {
 	if _, err := b.get(mac); err != nil {
 		return err
 	}
+	if b.removeErr != nil {
+		return b.removeErr
+	}
 	delete(b.devices, mac)
 	return nil
 }
@@ -122,6 +128,10 @@ func (b *fakeBus) Pair(_ context.Context, mac string) error {
 	d, err := b.get(mac)
 	if err != nil {
 		return err
+	}
+	if q := b.pairErrOnce[mac]; len(q) > 0 {
+		b.pairErrOnce[mac] = q[1:]
+		return q[0]
 	}
 	if err := b.pairErr[mac]; err != nil {
 		return err
@@ -188,22 +198,75 @@ func (b *fakeBus) RegisterAgent(context.Context) error {
 
 func (b *fakeBus) Paired() <-chan string { return b.paired }
 
+func (b *fakeBus) AudioTransport(_ context.Context, mac string) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.get(mac); err != nil {
+		return false, err
+	}
+	return b.transport[mac], nil
+}
+
 // fakePulse is PulseAudio's sinks, sources and modules.
 type fakePulse struct {
-	mu      sync.Mutex
-	sinks   []string
-	sources []string
-	modules []Module
-	next    int
+	mu        sync.Mutex
+	sinks     []string
+	sources   []string
+	cards     []string
+	modules   []Module
+	next      int
+	def       string            // the default sink
+	listErr   error             // every pactl call fails (no PulseAudio reachable)
+	profiles  map[string]string // card -> the profile set
+	onProfile func(card, profile string)
 }
 
 func (p *fakePulse) List(_ context.Context, kind string) ([]string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if kind == "sinks" {
+	if p.listErr != nil {
+		return nil, p.listErr
+	}
+	switch kind {
+	case "sinks":
 		return slices.Clone(p.sinks), nil
+	case "cards":
+		return slices.Clone(p.cards), nil
 	}
 	return slices.Clone(p.sources), nil
+}
+
+func (p *fakePulse) DefaultSink(context.Context) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.listErr != nil {
+		return "", p.listErr
+	}
+	return p.def, nil
+}
+
+func (p *fakePulse) SetDefaultSink(_ context.Context, name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !slices.Contains(p.sinks, name) {
+		return fmt.Errorf("no sink %s", name)
+	}
+	p.def = name
+	return nil
+}
+
+func (p *fakePulse) SetCardProfile(_ context.Context, card, profile string) error {
+	p.mu.Lock()
+	if p.profiles == nil {
+		p.profiles = map[string]string{}
+	}
+	p.profiles[card] = profile
+	hook := p.onProfile
+	p.mu.Unlock()
+	if hook != nil {
+		hook(card, profile)
+	}
+	return nil
 }
 
 func (p *fakePulse) Modules(context.Context) ([]Module, error) {
@@ -246,13 +309,32 @@ func (p *fakePulse) drop(mac string) {
 	keep := func(s string) bool { return strings.Contains(s, m) }
 	p.sinks = slices.DeleteFunc(p.sinks, keep)
 	p.sources = slices.DeleteFunc(p.sources, keep)
+	p.cards = slices.DeleteFunc(p.cards, keep)
+	if keep(p.def) { // Pulse falls back to another sink
+		p.def = "jarvis_output"
+	}
 }
 
-// fakeAPI records the result POSTs.
+// fakeAPI records the result POSTs, and the progress ones in order.
 type fakeAPI struct {
-	mu    sync.Mutex
-	scans map[string]map[string]any
-	pairs map[string]map[string]any
+	mu       sync.Mutex
+	scans    map[string]map[string]any
+	pairs    map[string]map[string]any
+	progress []string // "scan rid N devices" / "pair rid step"
+}
+
+func (a *fakeAPI) PostBluetoothScanProgress(_ context.Context, rid string, body map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.progress = append(a.progress, fmt.Sprintf("scan %s %v %d devices", rid, body["progress"], len(body["devices"].([]ScanDevice))))
+	return nil
+}
+
+func (a *fakeAPI) PostBluetoothPairProgress(_ context.Context, rid string, body map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.progress = append(a.progress, fmt.Sprintf("pair %s %v", rid, body["progress"]))
+	return nil
 }
 
 func (a *fakeAPI) PostBluetoothScanResult(_ context.Context, rid string, body map[string]any) error {

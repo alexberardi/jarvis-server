@@ -15,6 +15,7 @@ type Env struct {
 	Home    string
 	DataDir string // the agent's own dir (<user config dir>/jarvis-agent): Windows manifests, extension copies
 	Getenv  func(string) string
+	Exe     string // the running agent's binary, if known: Inspect warns about a host that starts another copy
 }
 
 func (e Env) getenv(k string) string {
@@ -157,16 +158,53 @@ type Result struct {
 	Err     error
 }
 
+// ErrTranslocated is why a host isn't registered from an app macOS runs from a temporary copy.
+var ErrTranslocated = errors.New("the app is running from a temporary copy macOS made (App Translocation), " +
+	"which goes away; move Jarvis Automation Agent.app to /Applications and open it again")
+
+// Translocated reports whether path is inside a copy macOS made to run a quarantined app
+// opened where it was downloaded (Gatekeeper's App Translocation, under
+// /private/var/folders/…/AppTranslocation/). The copy disappears, so no manifest may name it.
+func Translocated(path string) bool {
+	return strings.Contains(filepath.ToSlash(path), "/AppTranslocation/")
+}
+
 // Register writes the host manifest for every present browser (all with all=true), pointing
-// at exe. On Windows reg must be the real registry (NativeRegistry).
+// at exe. On Windows reg must be the real registry (NativeRegistry). A translocated exe is
+// refused (ErrTranslocated on each target, nothing written).
 func Register(e Env, exe string, all bool, reg Registry) []Result {
 	var out []Result
 	for _, t := range Targets(e) {
 		r := Result{Target: t, Present: t.Present(), Path: t.ManifestPath(e)}
 		if r.Present || all {
-			r.Err = register(e, t, exe, reg)
+			if Translocated(exe) {
+				r.Err = ErrTranslocated
+			} else {
+				r.Err = register(e, t, exe, reg)
+			}
 			r.Done = r.Err == nil
 		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// Refresh points every existing registration that starts another binary at exe, the running
+// agent, so moving the app (or updating it to a new place) doesn't leave browsers starting an
+// old copy. Browsers that aren't registered stay that way. It returns only the targets it
+// touched; from a translocated exe it writes nothing and returns one ErrTranslocated result.
+func Refresh(e Env, exe string, reg Registry) []Result {
+	var out []Result
+	for _, s := range Inspect(e, reg) {
+		if !s.Registered || s.HostPath == exe {
+			continue
+		}
+		if Translocated(exe) {
+			return []Result{{Target: s.Target, Present: s.Present, Path: s.Target.ManifestPath(e), Err: ErrTranslocated}}
+		}
+		r := Result{Target: s.Target, Present: s.Present, Path: s.Target.ManifestPath(e)}
+		r.Err = register(e, s.Target, exe, reg)
+		r.Done = r.Err == nil
 		out = append(out, r)
 	}
 	return out
@@ -219,6 +257,7 @@ type TargetStatus struct {
 	HostPath   string // the binary that manifest starts
 	HostOK     bool   // that binary exists
 	Problem    string // why the registration won't work, if it won't
+	Warning    string // it works, but starts another copy of the agent than Env.Exe
 }
 
 // Inspect reports each target's registration.
@@ -261,9 +300,14 @@ func Inspect(e Env, reg Registry) []TargetStatus {
 				s.Problem = "manifest names another host"
 			case !s.HostOK:
 				s.Problem = "the binary it starts is gone (re-run: jarvis-agent browser install)"
+			case Translocated(m.Path):
+				s.Problem = "it starts a temporary copy macOS made of an app opened from Downloads, which goes away " +
+					"(move Jarvis Automation Agent.app to /Applications, open it, re-run: jarvis-agent browser install)"
 			case t.Family == TargetFirefox && !contains(m.AllowedExtensions, FirefoxExtensionID),
 				t.Family == TargetChromium && !containsAll(m.AllowedOrigins, AllowedOrigins):
 				s.Problem = "manifest doesn't admit the Jarvis extension (re-run: jarvis-agent browser install)"
+			case e.Exe != "" && m.Path != e.Exe:
+				s.Warning = "starts another copy of the agent: " + m.Path + " (re-run: jarvis-agent browser install)"
 			}
 		}
 		out = append(out, s)

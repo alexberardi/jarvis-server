@@ -55,6 +55,7 @@ type fakeCall struct {
 	pos     int64
 	changed chan struct{}
 	hangups int
+	flushes int
 	reason  EndReason
 }
 
@@ -83,7 +84,6 @@ func (c *fakeCall) ID() string               { return "CALL-" + c.req.SessionID[
 func (c *fakeCall) Started() <-chan struct{} { return c.started }
 func (c *fakeCall) Frames() <-chan []int16   { return c.frames }
 func (c *fakeCall) Done() <-chan struct{}    { return c.done }
-func (c *fakeCall) Flush() error             { return nil }
 func (c *fakeCall) SendDTMF(string) error    { return ErrUnsupported }
 
 func (c *fakeCall) Play(pcm []int16, cue string) (int64, error) {
@@ -92,6 +92,24 @@ func (c *fakeCall) Play(pcm []int16, cue string) (int64, error) {
 	c.plays = append(c.plays, fakePlay{cue: cue, samples: len(pcm)})
 	c.queued += int64(len(pcm))
 	return c.queued, nil
+}
+
+// Flush drops what is queued the way Twilio's clear does: playback jumps to the end of it
+// (its marks are echoed at once), so a later Play's end stays on the same scale.
+func (c *fakeCall) Flush() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.flushes++
+	c.pos = c.queued
+	close(c.changed)
+	c.changed = make(chan struct{})
+	return nil
+}
+
+func (c *fakeCall) flushed() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.flushes
 }
 
 func (c *fakeCall) Played() (int64, <-chan struct{}) {
@@ -155,12 +173,15 @@ func (c *fakeCall) ended() bool {
 }
 
 // say plays one far-end utterance: speech, then enough silence for the VAD to endpoint.
-func (c *fakeCall) say() {
+func (c *fakeCall) say() { c.sayAt(4000, 10) }
+
+// sayAt plays frames 20 ms frames of a tone at amplitude amp, then silence.
+func (c *fakeCall) sayAt(amp float64, frames int) {
 	tone := make([]int16, 160)
 	for i := range tone {
-		tone[i] = int16(4000 * math.Sin(2*math.Pi*440*float64(i)/8000))
+		tone[i] = int16(amp * math.Sin(2*math.Pi*440*float64(i)/8000))
 	}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < frames; i++ {
 		c.feed <- tone
 	}
 	for i := 0; i < 45; i++ {

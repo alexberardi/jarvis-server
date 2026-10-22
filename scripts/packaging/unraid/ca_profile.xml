@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Maintainer>
+  <Icon>https://raw.githubusercontent.com/alexberardi/jarvis-server/main/scripts/packaging/unraid/jarvis.png</Icon>
+  <Profile>Jarvis Automation: a private, self-hosted voice assistant for your home. One container (jarvisd) runs speech-to-text, the language model, text-to-speech and the server for Pi voice nodes, the mobile app and the recipes app.</Profile>
+  <WebPage>https://jarvisautomation.io</WebPage>
+</Maintainer>

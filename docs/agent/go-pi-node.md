@@ -74,7 +74,7 @@ Tags:
 | 3 | Capture 48 kHz S16_LE mono, 3840-sample (80 ms) chunks from `dsnoopmic`; 4 s ring buffer | `N:core/audio_bus.py:37-265`, `N:scripts/voice_listener.py:82-83,281` | – | MVS |
 | 4 | Wake: resample 48k→16k (`resample_poly(1,3)`), oww `predict` on 1280-sample chunks; fire at score > `wake_word_threshold` (0.4); 8 s debounce; reset oww after a fire | `N:core/wake_loop.py:107-108,379-385`, `N:core/wake_detector.py:50-190` | – | MVS |
 | 5 | Wake clip: the last ~2 s of consumed chunks (25 × 80 ms), 48 kHz WAV | `N:core/wake_loop.py:253-255,602-608` | – | MVS |
-| 6 | Wake ack: cached greeting WAV, else a bundled `sounds/wake/*.wav`, else TTS "Yes?"; wake paused while it plays | `N:core/wake_response.py:149-248` | – | MVS (a bundled WAV is enough) |
+| 6 | Wake ack: cached greeting WAV, else a bundled `sounds/wake/*.wav`, else TTS "Yes?"; wake paused while it plays | `N:core/wake_response.py:149-248` | – | MVS (a bundled WAV is enough); the Pi plays the prefetched greeting, else the chime (#427) |
 | 7 | `POST /api/v0/conversation/start` on a goroutine: `{conversation_id: uuid4, node_context:{timezone,…}, available_commands:[], client_tools:[]}`. The response only arrives after warmup (≤120 s server side); body ≤1 MiB. | `N:clients/jarvis_command_center_client.py:575-714`, `N:core/wake_loop.py:721-728` | `S:warmup.go:97-174` | MVS |
 | 8 | Record: RMS endpointing. Threshold = clamp(median pre-wake RMS × 2, 200, 1000), else 300. Stop after 0.8 s below threshold; min 2 s, max 7 s. Write a 48 kHz WAV. | `N:scripts/speech_to_text.py:260-404`, `N:core/vad_thresholds.py:99-134`, `N:core/wake_loop.py:761-776` | – | MVS |
 | 9 | STT: `POST /api/v0/media/whisper/transcribe`, multipart: `file` (command WAV), `speaker_audio` (wake clip + command, **must start with the wake audio**), `conversation_id`. Response `{text, segments, speaker{user_id,confidence}, affect}`. | `N:stt_providers/jarvis_whisper_client.py:106-144` | `S:media.go:193-281`, `internal/modules/stt/transcribe.go:22-34` | MVS |
@@ -88,7 +88,7 @@ Tags:
 | 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | **done in the Go agent (§3.13)** |
 | 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
 | 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
-| 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
+| 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | prefetch **done on the Pi** (#427); the acks later |
 | 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | **done in the Go agent (§3.16, 17c)** |
 | 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | tentative wake **done in the Go agent (§3.16, 17c)**; cool-down and auto threshold **built (§3.20, 17d)** |
 | 23 | Boot warmup that sends a real "hello" LLM turn | `N:scripts/main.py:390-424` | – | drop |
@@ -159,7 +159,9 @@ These are worth fixing upstream regardless of Go:
 - Button MQTT publishes are denied by the ACL.
 - `bluetooth-release` and `bluetooth-auto-connect` are documented as dead but are published.
 - `camera-credentials` has no route.
-- `N:core/echo_cancel.py:22-24` claims capture goes through Pulse; it goes through dsnoop.
+- `N:core/echo_cancel.py:22-24` claims capture goes through Pulse; it goes through dsnoop (so
+  N:'s echo cancel never engages on a Pi; the Go node's 17b gives Pulse a source on the same
+  dsnoop instead, §3.16).
 - Doc 01 §7.12 gives the TTS fallback rate as 16000/22050; jarvisd always sends 24000.
 - `is_busy` is dead.
 - A 202 `complete` with an empty message makes the node say "Task completed."
@@ -732,7 +734,11 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
 - **Alert pattern** (loop #175): the stable layer is `alert` (middle LED purple) while the queue
   holds an alert at priority 3 or above, `normal` otherwise (N:main.py's `on_change`, re-synced
   by the queue's 10 s sweep).
-- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`).
+- **ACT-LED fallback** (loop #441): with no HAT chain (`--hat auto` on a Pi without the HAT, or
+  the HAT's LEDs unusable) and `--hat` not `off`, `openHat` drives the Pi's green activity LED
+  instead (`hat.NewACTLEDs`, N:`led_service.py`): normal is lit, alert, error and
+  shutdown_warning blink, the command-flow overlays (listening, thinking, …) show the stable
+  pattern, as Python's. No button; `hardware.hat_detected` and `led_chain_available` stay false.
   (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
 
 **Reminders and alerts on the lab Pi 4** (loop #175; not run yet: no runner reaches the Pi). Lab
@@ -937,21 +943,24 @@ The Pi profile subscribes to the six `bluetooth-*` topics jarvisd publishes
 doesn't). BlueZ is reached over D-Bus (`bluez_linux.go`: `Adapter1`, `Device1`,
 `AgentManager1`, and the node's own `Agent1`), PulseAudio through `pactl`. Without BlueZ (no
 system bus, no adapter) the node runs without Bluetooth. Decisions:
-[decisions/2026-10-18-pi-node-bluetooth.md](../decisions/2026-10-18-pi-node-bluetooth.md).
+[decisions/2026-10-18-pi-node-bluetooth.md](../decisions/2026-10-18-pi-node-bluetooth.md), and
+#433's fixes after the first run on jarvis-pi4:
+[decisions/2026-10-21-pi-node-bluetooth-output-and-progress.md](../decisions/2026-10-21-pi-node-bluetooth-output-and-progress.md).
 
 | Topic (payload) | Does | Reply |
 |---|---|---|
-| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, BR/EDR then LE discovery 10 s each, list the named devices with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected` | `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
-| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | remove an existing bond, rescan ≤12 s if BlueZ doesn't know it, pair (30 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 15 s or it is disconnected; `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages) |
-| `bluetooth-disconnect` (`mac_address`) | unload its loopback, disconnect | – |
+| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, BR/EDR then LE discovery 10 s each, list the named devices with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected`; the list so far is posted each second it grew | `POST …/bluetooth-scan/{rid}/progress` `{"progress": "scanning", "devices"}`, then `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
+| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | remove an existing bond, rescan ≤12 s if BlueZ doesn't know it, pair (30 s; a Page Timeout back within 4 s is retried once after 2 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 20 s, or have BlueZ's media transport up (a warning), or it is disconnected; `role: source` makes its bluez sink the default sink, `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/progress` `{"progress": "finding"/"pairing"/"connecting"/"audio"}` as each step starts, then `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages) |
+| `bluetooth-disconnect` (`mac_address`) | give the output back to the sink it replaced, unload its loopback, disconnect | – |
 | `bluetooth-discoverable` (`timeout`, default 120) | Powered, Pairable, DiscoverableTimeout, Discoverable, in N:'s order | – |
-| `bluetooth-release` (`mac_address`, `forget`) | disconnect and turn its auto-connect off; `forget`: remove the pairing and the record | – |
+| `bluetooth-release` (`mac_address`, `forget`) | as disconnect, and turn its auto-connect off; `forget`: remove the pairing (one BlueZ no longer knows is fine) and the record | – |
 | `bluetooth-auto-connect` (`mac_address`, `enabled`) | set the saved device's auto-connect (a device never paired here is ignored) | – |
 
 At start the agent is registered as BlueZ's default and the adapter made pairable; a pairing a
 phone starts (the node discoverable) is trusted and connected, as N:'s agent does on
-`Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. TTS stays on
-`jarvis_output`; a paired speaker is for the music packages (SDK `BluetoothAudio`).
+`Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. A connected
+speaker or headphones (role `source`) are Pulse's default sink, so replies and music play on them;
+`jarvis_output` is the default again when they disconnect (#433).
 `install-pi.sh` installs `bluez`, `pulseaudio-module-bluetooth` and `rfkill`, unblocks the radio
 and sets BlueZ's Class of Device to audio (0x240404) in `/etc/bluetooth/main.conf`.
 
@@ -969,14 +978,15 @@ jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output out
 #   Scan: the speaker (in pairing mode) is listed as audio_sink; the log has "scan complete"
 #   Pair it: "Paired"; bluetoothctl info <MAC> shows Paired/Trusted/Connected: yes
 pactl list sinks short            # a bluez_sink.<MAC>.a2dp_sink, and jarvis_output
-pactl get-default-sink            # still jarvis_output: "What time is it?" is spoken on the HAT
+pactl get-default-sink            # the bluez sink: "What time is it?" is spoken on the speaker
 paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   # plays on the speaker
-#   Status after a new scan: the speaker under Connected
-#   Disconnect: bluetoothctl info shows Connected: no; the bluez sink is gone
+#   Status (no new scan needed): the speaker under Connected
+#   Disconnect: bluetoothctl info shows Connected: no; the bluez sink is gone; pactl get-default-sink is jarvis_output
 #   Restart the agent (Ctrl-C, run again): within ~30 s the speaker reconnects ("reconnected" in the log)
 #   Auto-reconnect off, restart: it stays disconnected
 #   Make discoverable: a phone sees the node and pairs; the log has "trust and connect after an incoming pair"
-#   Forget: bluetoothctl devices no longer lists it; ~/.config/jarvis-agent/bluetooth.json drops it
+#   Forget: bluetoothctl devices no longer lists it; ~/.config/jarvis-agent/bluetooth.json drops it; the app's status doesn't list it
+#   Forget again: no "remove failed" in the log; pair again from a new scan: it pairs on the first try
 sudo systemctl start jarvis-node
 ```
 
@@ -989,7 +999,7 @@ four slices, 17b–17e, still to build).
 | When | Does |
 |---|---|
 | Wake word fires; before each follow-up listen | `Duck`, in the background: SIGSTOP class (mpv, ffplay, cvlc, vlc, spotifyd, librespot) moved to the `jarvis_duck_null` sink and SIGSTOPped; mute-only class (shairport-sync, go-librespot, mpd) set to 20% of the stream (its volume saved once per turn), muted if the volume can't be read |
-| The turn is over (follow-ups included) | `Restore` (SIGCONT, moves back to `@DEFAULT_SINK@`, unmute, saved volumes back), then each `on_response_complete`; a deferred play that ran marks the node's own music as playing |
+| The turn is over (follow-ups included) | `Restore` (SIGCONT, moves back to `@DEFAULT_SINK@`, or to `jarvis_ec_sink` while echo cancel is engaged (17b), unmute, saved volumes back), then each `on_response_complete`; a deferred play that ran marks the node's own music as playing |
 | The node's own music starts / stops | The HAT's mic PGA drops to 49% / goes back to what it was (a no-op on the installer's 49% baseline); at start, a PGA left at the music level is put back |
 | A music command's call with `action: "play"` | `sdkhost.Host.BeforeCall` stops every other player that has an uncorked stream: mpd by `stop`+`clear` on :6600, go-librespot by `POST :3678/player/pause`, the rest by SIGINT; the command's own player (`takes_over_playback_binary`, else N:'s legacy map) is left alone |
 
@@ -1036,7 +1046,7 @@ Ports `N:core/wake_loop.py:143-261,403-530` (`voice/tentative.go`, `voice/endpoi
 | Every wake turn | `/voice/command/stream` carries `pre_wake_speech_seconds` (chunks of the 5 s pre-wake window above clamp(median × 3, 300, 2500), × 80 ms; the static 2500 with no floor or during the node's own music) and `self_playback` (+ `self_playback_kind: "music"`), snapshotted at the fire. "wake" logs the threshold and its source (`auto`, `static`, `static_self_playback`) |
 
 Not ported here: N:'s self-playback bypass of the adaptive *silence* threshold
-(`wake_loop.py:575`), which belongs with 17b's capture work. Note that command-center's wake
+(`wake_loop.py:575`); 17b left it open too (below). Note that command-center's wake
 verification transcribes the leading 2.2 s of `speaker_audio`; a tentative-completed clip
 (up to 3.6 s) puts the oldest audio there, as N:'s does.
 
@@ -1046,6 +1056,48 @@ the JSON). **Not yet on a Pi.** On the lab Pi 4, with music playing through a mu
 "Hey Jarvis" over it; the log has "tentative wake triggered", then "wake ...
 tentative_completed=true", the music ducking before the chime. A lyric that scores in the band
 logs "tentative wake expired ... reason=window" and the music comes back within ~2 s.
+
+#### 17b: echo cancellation during music (2026-10-22, loop #424)
+
+N:'s `core/echo_cancel.py` moves a Pulse capture stream onto `jarvis_ec_source`, but both nodes
+capture from the HAT through ALSA dsnoop and Pulse has no mic source, so on a Pi it never
+engages (§1.4). The Go node does real AEC instead
+([decision](../decisions/2026-10-22-pi-node-echo-cancel.md)): `music/echocancel.go`, the
+mic as a `device.Switch`, and asound.conf's `pcm.jarvis_ec` (type pulse, device
+`jarvis_ec_source`; libasound2-plugins). With the HAT only.
+
+| When | Does |
+|---|---|
+| The node's own music starts (a deferred play), or a restore finds it playing (also music a phone started) | `EchoCancel.Engage`: `module-alsa-source device=dsnoopmic source_name=jarvis_mic_raw rate=16000 channels=1`, `module-echo-cancel aec_method=webrtc` (its gain controls off; the PGA is the music profile's) with `source_master=jarvis_mic_raw sink_master=jarvis_output`, `set-default-sink jarvis_ec_sink`, the players' streams moved there, and the pipeline's mic switched to `jarvis_ec` before its next read ("music: echo cancel engaged") |
+| A wake fires during the music | Nothing: a duck never touches the canceller, so the command is recorded on the same device as the wake |
+| A wake fires while a restore's engage or disengage still runs (the background queue) | The pipeline holds its mic (`Switch.Hold`) from the wake to the end of the turn, and for a take; the switch asked for meanwhile applies at the release, so the command and its follow-ups stay on one device |
+| The restore after a turn whose duck saw no music | `Disengage`: the mic back on `dsnoopmic`, the default sink back to what it was, the streams on `jarvis_ec_sink` moved there, the two modules it loaded unloaded (last first) |
+| An engage step fails | What it loaded is unloaded, capture stays on `dsnoopmic`, one warning; no retry until the music stops and starts again |
+| `jarvis_ec` won't open, errors, or reads 3 s of pure digital silence (\|s\| ≤ 1) | The switch goes back to `dsnoopmic` by itself (no read error reaches the pipeline), then the canceller disengages; no retry until the next start ("voice: echo-cancelled capture failed") |
+| The agent starts | `jarvis_ec_*` modules a crash left loaded are unloaded |
+
+The canceller follows the cached "self playing" flag, which only a duck refreshes (as N:), so
+after "stop the music" it stays loaded until the next turn's restore. Still open: N:'s
+self-playback bypass of the adaptive silence threshold (`wake_loop.py:575`).
+
+**Verified** with unit tests over a fake Pulse (`music/echocancel_test.go`: the engage and
+disengage calls in order and exactly the modules loaded, each failing step leaving nothing,
+no retry before a rearm, the stale-module cleanup, the Ducker's edges) and fake captures
+(`device/switch_test.go`: switching only between reads, a Use held until the Release, the
+open/read/silence fallbacks), the pipeline holding the mic for a turn and releasing it before
+the restore (`voice/music_test.go`), and `voice.Serve` reading through the switch started on
+the input (`voice/serve_test.go`).
+**Not yet on a Pi**, and the webrtc canceller's CPU on a Zero 2 W is unmeasured. On the lab Pi:
+
+```bash
+# "Hey Jarvis, play some jazz on Spotify"; after the reply the log has "music: echo cancel engaged"
+pactl list short modules | grep -E 'jarvis_(mic_raw|ec)'   # the two modules
+pactl list short sink-inputs                              # the player on jarvis_ec_sink
+top -b -n 1 | grep pulseaudio                             # the canceller's CPU (Zero 2 W: QA)
+# "Hey Jarvis" over loud music: it fires (compare with 17a alone)
+# "Hey Jarvis, stop the music", then any turn: "music: echo cancel disengaged", modules gone
+# a wake right after a turn during music: the command still transcribes across the switch
+```
 
 ### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
 
@@ -1150,8 +1202,11 @@ error. It writes to one directory:
 
 - `samples.csv`: one row every `--interval` (60 s). The agent's CPU as % of one core (from
   `/proc/PID/stat` deltas, as §3.11 measured it), its RSS, PSS, anonymous and swap
-  (`smaps_rollup`), the same for its child processes (the command sidecar), MemAvailable, swap in
-  use, load, SoC temperature, `vcgencmd get_throttled`, and the unit's `NRestarts`.
+  (`smaps_rollup`, read with `sudo -n cat`: the agent is non-dumpable under its unit, so the file
+  is EACCES to the node's own user), the same for its child processes (the command sidecar),
+  MemAvailable, swap in use, load, SoC temperature, `vcgencmd get_throttled`, and the unit's
+  `NRestarts`. A smaps_rollup that still cannot be read leaves those columns empty (never 0), the
+  run warns once, and the summary counts those samples and says `unreadable` instead of 0 MB.
 - `turns.log`: one scripted turn per command family every `--turns-every` (4 h; the first round
   5 min in). `<family>.wav` from `--wavs DIR` plays out of the HAT's speaker (`aplay -D output`)
   to the running node. It passes when the node logs `msg="voice turn" outcome=spoken` within
@@ -1273,13 +1328,13 @@ checked on the lab Pi 4 since it was built.
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
 | 5.10 voice-profile takes | built | no |
-| 5.11 music ducking and takeover (17a); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; **open (a)**: 17b echo cancellation during music, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
+| 5.11 music ducking and takeover (17a); echo cancellation during music (17b, loop #424); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; 17b's CPU on a Zero 2 W unmeasured; **open (a)**: 17e (#427) built: the greeting prefetch and the maintenance restart, and the ACT-LED fallback (`hat.NewACTLEDs`, opened without a HAT since #441) ([decision](../decisions/2026-10-21-pi-node-17e.md)); pending the lab Pi |
 
 What each open gap blocks, if the Python node were retired today:
 
-- **(a)** music is louder in the mic than with the Python node (no AEC), so wakes over music fail
-  more often; the tentative wake (17c), the auto-calibration and the not_for_me cool-down (17d) are built, not yet on a Pi; and a
-  Pi without the HAT has no LED at all.
+- **(a)** echo cancellation (17b), the tentative wake (17c), the auto-calibration and the
+  not_for_me cool-down (17d) are built, not yet on a Pi; and the
+  ACT-LED fallback for a Pi without the HAT (#441) is built, not yet seen on one.
 - **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
   the node. The app's device control still works.
 - **(c)** the app's node settings (and their secrets' Sync) may not reach a Pi; not confirmed.
@@ -1694,12 +1749,12 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
        and each follow-up, restore before the deferred play, the mic gain profile, takeover on a
        music command's play. Unit tests; not yet on a Pi. 17c (tentative wake and
        `pre_wake_speech_seconds`, §1.1 rows 21–22) built 2026-10-21 (loop #425, §3.16), not yet
-       on a Pi. Still to build from #180, in order
-       ([decision](../decisions/2026-10-19-pi-node-music-ducking.md)): 17b echo cancellation
-       during music; 17e the wake greeting prefetch (row 20),
-       maintenance restart and the ACT-LED fallback without a HAT. 17c (tentative wake and
-       `pre_wake_speech_seconds`) and 17d (wake auto-calibration and the not_for_me cool-down)
-       **built (§3.16, §3.20)**; unit tests, not yet on a Pi.
+       on a Pi. 17b (echo cancellation during music) built 2026-10-22 (loop #424, §3.16), not
+       yet on a Pi. Still to build from #180, in order
+       ([decision](../decisions/2026-10-19-pi-node-music-ducking.md)): 17e the wake greeting
+       prefetch (row 20), maintenance restart and the ACT-LED fallback without a HAT. 17c
+       (tentative wake and `pre_wake_speech_seconds`) and 17d (wake auto-calibration and the
+       not_for_me cool-down) **built (§3.16, §3.20)**; unit tests, not yet on a Pi.
 
    Then retire the Python node. **Proposed 2026-10-19, BLOCKED** (loop #181, §3.19): the soak
    script (`scripts/pi-soak.sh`) and its commands, the parity checklist and the retirement path

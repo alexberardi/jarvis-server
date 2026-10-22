@@ -26,10 +26,17 @@ import (
 // so a desktop scenario offers the model what a real agent does: descriptions, examples and
 // keywords included. The keywords matter: command-center's must-call guard only fires on an
 // utterance that matches one (textfilter.ForceToolsGate).
-func RenderDesktopToolset() ([]byte, error) {
+func RenderDesktopToolset() ([]byte, error) { return renderDesktop(allCaps{}) }
+
+// RenderDesktopWindowsToolset is RenderDesktopToolset on a desktop that can also list, focus,
+// minimize and close windows (macOS with the Accessibility grant, X11): toolsets/desktop-windows.json
+// (`pipeline toolset desktop-windows`).
+func RenderDesktopWindowsToolset() ([]byte, error) { return renderDesktop(windowCaps{}) }
+
+func renderDesktop(caps host.Backend) ([]byte, error) {
 	ctx := context.Background()
 	ts := node.Multi{
-		desktop.New(host.New(allCaps{}), desktop.OpenPolicy{}, nil),
+		desktop.New(host.New(caps), desktop.OpenPolicy{}, nil),
 		&screen.Tools{C: allCaps{}},
 		&dictate.Tools{KB: allCaps{}},
 	}
@@ -60,6 +67,14 @@ func (allCaps) Platform() string { return "linux" }
 func (allCaps) Capabilities(context.Context) []string {
 	return []string{host.CapOpen, host.CapVolumeGet, host.CapVolumeSet}
 }
+
+// windowCaps is allCaps with window control.
+type windowCaps struct{ allCaps }
+
+func (windowCaps) Capabilities(ctx context.Context) []string {
+	return append(allCaps{}.Capabilities(ctx), host.AllWindowCaps...)
+}
+
 func (allCaps) GetVolume(context.Context) (int, error)             { return 0, errRenderOnly }
 func (allCaps) ApplyVolume(context.Context, int) error             { return errRenderOnly }
 func (allCaps) ListWindows(context.Context) ([]host.Window, error) { return nil, errRenderOnly }

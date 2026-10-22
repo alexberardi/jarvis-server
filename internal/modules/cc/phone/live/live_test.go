@@ -525,3 +525,52 @@ func TestEscalationWindow(t *testing.T) {
 		t.Fatal("ctx")
 	}
 }
+
+// While the agent's audio plays, only a barge-in onset (louder and longer than normal speech's)
+// starts an utterance, so our own echo and a click don't; the onset keeps its preroll and the
+// utterance endpoints as usual.
+func TestVADBargeIn(t *testing.T) {
+	cfg := vadCfg
+	cfg.BargeInThresholdRMS, cfg.BargeInFrames = 1000, 4
+	loud, echo, quiet := frame(3000), frame(600), frame(50)
+
+	v := NewVAD(cfg)
+	for range 200 {
+		if v.Feed(echo, true) != nil || v.InSpeech() {
+			t.Fatal("echo-level audio during playback started an utterance")
+		}
+	}
+	for range 3 { // a click: loud, but shorter than BargeInFrames
+		v.Feed(loud, true)
+	}
+	v.Feed(quiet, true)
+	if v.InSpeech() {
+		t.Fatal("a short click barged in")
+	}
+	for range 4 {
+		v.Feed(loud, true)
+	}
+	if !v.InSpeech() {
+		t.Fatal("sustained speech over playback did not barge in")
+	}
+	// Playback is flushed: the utterance goes on and endpoints at the normal threshold.
+	var utt []int16
+	for range 10 {
+		if u := v.Feed(quiet, false); u != nil {
+			utt = u
+			break
+		}
+	}
+	if utt == nil || utt[0] != 50 || len(utt) != (cfg.PrerollFrames+cfg.hangoverFrames())*160 {
+		t.Fatalf("utterance: %d samples, starts %v", len(utt), utt[:1])
+	}
+
+	// Without a barge-in config, playback suppresses the VAD (plain half-duplex).
+	v = NewVAD(vadCfg)
+	for range 20 {
+		v.Feed(loud, true)
+	}
+	if v.InSpeech() {
+		t.Fatal("no barge-in configured, yet speech over playback started an utterance")
+	}
+}

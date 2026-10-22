@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -25,6 +26,9 @@ type setupRadio struct {
 	provisioning.Simulated
 	mu    sync.Mutex
 	calls []string
+	home  string // the network wlan0 is already on ("": none)
+	// connectErr fails every join (a wrong password, a network out of range).
+	connectErr error
 }
 
 func (r *setupRadio) note(s string) { r.mu.Lock(); r.calls = append(r.calls, s); r.mu.Unlock() }
@@ -41,8 +45,17 @@ func (r *setupRadio) StartAPMode(_ context.Context, ssid string) error {
 	r.note("ap " + ssid)
 	return nil
 }
+func (r *setupRadio) CurrentSSID(ctx context.Context) (string, error) {
+	if r.home != "" {
+		return r.home, nil
+	}
+	return r.Simulated.CurrentSSID(ctx)
+}
 func (r *setupRadio) Connect(ctx context.Context, ssid, pw string) error {
 	r.note("connect " + ssid)
+	if r.connectErr != nil {
+		return r.connectErr
+	}
 	return r.Simulated.Connect(ctx, ssid, pw)
 }
 
@@ -155,6 +168,82 @@ func TestPiRunWithoutCredentialsEntersSetupMode(t *testing.T) {
 				t.Fatal("setup mode didn't stop")
 			}
 		})
+	}
+}
+
+// #423: an unenrolled Pi already on the home Wi-Fi (installed and activated over SSH on wlan0)
+// keeps that network: setup mode serves the provisioning API on its LAN address and starts no
+// hotspot, which used to drop the LAN and strand the node.
+func TestSetupModeKeepsAWorkingWiFi(t *testing.T) {
+	dir := agentHome(t)
+	r := newSetupRig(t, true)
+	r.radio.home = "Home"
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- run(ctx, []string{"--profile", "pi", "--creds", filepath.Join(dir, "node.json"),
+			"--config", filepath.Join(dir, "agent.json")})
+	}()
+	a := r.addr(t, errc)
+	if info := getJSON(t, "http://"+a+"/api/v1/info"); info["node_id"] == nil {
+		t.Errorf("info %v", info)
+	}
+	if got := r.radio.Calls(); strings.Contains(got, "ap ") || strings.Contains(got, "scan") {
+		t.Errorf("radio %q, want the hotspot left down on a connected wlan0", got)
+	}
+	if r.leds.Current() != hat.Setup {
+		t.Errorf("LEDs %q, want %q", r.leds.Current(), hat.Setup)
+	}
+	cancel()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Errorf("stopped in setup mode: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("setup mode didn't stop")
+	}
+}
+
+// #423: a failed provisioning attempt on a Pi that kept its Wi-Fi (no hotspot ran) must not start
+// one: restoring "the" hotspot would drop the LAN the app reaches the node on, and strand it.
+func TestSetupModeOnWiFiFailedAttemptStartsNoHotspot(t *testing.T) {
+	dir := agentHome(t)
+	path := filepath.Join(dir, "jarvis-agent", "node.json")
+	r := newSetupRig(t, false)
+	r.radio.home = "Home"
+	r.radio.connectErr = errors.New("secrets were required, but not provided")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() { errc <- piSetupMode(ctx, slog.New(slog.DiscardHandler), path, &hatFlags{}) }()
+	a := r.addr(t, errc)
+	body, _ := json.Marshal(map[string]any{
+		"wifi_ssid": "Elsewhere", "wifi_password": "wrong", "room": "kitchen",
+		"command_center_url": "http://192.0.2.1:7703", "household_id": "hh-1",
+		"node_id": "cc-node-1", "provisioning_token": "tok-1",
+	})
+	resp, err := http.Post("http://"+a+"/api/v1/provision", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	for getJSON(t, "http://"+a+"/api/v1/status")["state"] != string(provisioning.StateError) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the attempt didn't fail: %v", getJSON(t, "http://"+a+"/api/v1/status"))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.radio.Calls(); got != "connect Elsewhere" {
+		t.Errorf("radio %q, want only the join: no hotspot after a failed attempt on a connected wlan0", got)
+	}
+	cancel()
+	select {
+	case <-errc:
+	case <-time.After(10 * time.Second):
+		t.Fatal("setup mode didn't stop")
 	}
 }
 

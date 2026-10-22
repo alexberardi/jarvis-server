@@ -570,7 +570,14 @@ func TestPostBluetoothResultsHitTheNodesRequests(t *testing.T) {
 	if err := cc.PostBluetoothPairResult(ctx, "r2", map[string]any{"success": true, "device_name": "JBL"}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"POST /api/v0/nodes/n1/bluetooth-scan/r1/results n1:k", "POST /api/v0/nodes/n1/bluetooth/pair/r2/results n1:k"}
+	if err := cc.PostBluetoothScanProgress(ctx, "r1", map[string]any{"progress": "scanning"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cc.PostBluetoothPairProgress(ctx, "r2", map[string]any{"progress": "pairing"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"POST /api/v0/nodes/n1/bluetooth-scan/r1/results n1:k", "POST /api/v0/nodes/n1/bluetooth/pair/r2/results n1:k",
+		"POST /api/v0/nodes/n1/bluetooth-scan/r1/progress n1:k", "POST /api/v0/nodes/n1/bluetooth/pair/r2/progress n1:k"}
 	if fmt.Sprint(paths) != fmt.Sprint(want) {
 		t.Fatalf("got %v", paths)
 	}

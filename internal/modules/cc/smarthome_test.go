@@ -649,3 +649,50 @@ func TestSmartHomeRetentionAndPurge(t *testing.T) {
 		t.Fatal(count("cc_auth_sessions"), uid, count("cc_rooms"))
 	}
 }
+
+// #433: the node posts what it's doing on a running scan or pair, and the scan's devices so far;
+// the app's polls show them while the request is still pending.
+func TestBluetoothProgress(t *testing.T) {
+	e := newEnv(t)
+	tok := e.auth.addUser(1, "hh1", authn.RoleMember)
+	n := e.createNode("n1", "hh1")
+	other := e.createNode("n2", "hh1")
+	c := e.dialNode(n)
+	c.subscribe("jarvis/nodes/n1/#")
+	base := "/api/v0/nodes/n1"
+
+	rid := e.do("POST", base+"/bluetooth-scan/request", nil, bearer(tok)).want(201).json()["id"].(string)
+	c.next()
+	if p := e.do("GET", base+"/bluetooth-scan/"+rid, nil, bearer(tok)).want(200).json(); p["status"] != "pending" || p["progress"] != nil || p["devices"] != nil {
+		t.Fatalf("before any progress %v", p)
+	}
+	found := map[string]any{"progress": "scanning", "devices": []any{map[string]any{"name": "Arctis GameBuds", "mac_address": "20:AF:1B:26:BD:B3", "device_type": "audio_sink"}}}
+	e.do("POST", base+"/bluetooth-scan/"+rid+"/progress", found, other.h()).want(403)
+	e.do("POST", base+"/bluetooth-scan/nope/progress", found, n.h()).want(404)
+	e.do("POST", base+"/bluetooth-scan/"+rid+"/progress", map[string]any{"progress": "Scanning!"}, n.h()).want(400)
+	e.do("POST", base+"/bluetooth-scan/"+rid+"/progress", found, n.h()).want(200)
+	p := e.do("GET", base+"/bluetooth-scan/"+rid, nil, bearer(tok)).want(200).json()
+	if devs, _ := p["devices"].([]any); p["status"] != "pending" || p["progress"] != "scanning" || len(devs) != 1 || p["device_count"] != 1.0 ||
+		devs[0].(map[string]any)["name"] != "Arctis GameBuds" {
+		t.Fatalf("scan poll while scanning %v", p)
+	}
+	e.do("POST", base+"/bluetooth-scan/"+rid+"/results", map[string]any{"devices": []any{}}, n.h()).want(200)
+	if p := e.do("GET", base+"/bluetooth-scan/"+rid, nil, bearer(tok)).want(200).json(); p["status"] != "completed" || p["device_count"] != 0.0 {
+		t.Fatalf("the result replaces the devices so far: %v", p)
+	}
+	// Progress after the result changes nothing.
+	e.do("POST", base+"/bluetooth-scan/"+rid+"/progress", found, n.h()).want(200)
+	if p := e.do("GET", base+"/bluetooth-scan/"+rid, nil, bearer(tok)).want(200).json(); p["device_count"] != 0.0 {
+		t.Fatalf("a late progress post overwrote the result: %v", p)
+	}
+
+	prid := e.do("POST", base+"/bluetooth/pair", map[string]any{"mac_address": "20:AF:1B:26:BD:B3"}, bearer(tok)).want(201).json()["id"].(string)
+	c.next()
+	for _, step := range []string{"pairing", "connecting", "audio"} {
+		e.do("POST", base+"/bluetooth/pair/"+prid+"/progress", map[string]any{"progress": step}, n.h()).want(200)
+		if p := e.do("GET", base+"/bluetooth/pair/"+prid, nil, bearer(tok)).want(200).json(); p["status"] != "pending" || p["progress"] != step {
+			t.Fatalf("pair poll at %s: %v", step, p)
+		}
+	}
+	e.do("POST", base+"/bluetooth/pair/"+prid+"/progress", map[string]any{}, n.h()).want(400)
+}

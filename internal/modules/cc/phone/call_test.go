@@ -28,6 +28,7 @@ type twilioSim struct {
 	conn    *websocket.Conn
 	wssURL  string
 	session string
+	clears  int // clear messages seen by untilMark
 }
 
 // answer waits for the dial and connects the media stream.
@@ -92,6 +93,8 @@ func (sim *twilioSim) untilMark(name string) int {
 		switch msg["event"] {
 		case "media":
 			frames++
+		case "clear":
+			sim.clears++
 		case "mark":
 			if msg["mark"].(map[string]any)["name"] == name {
 				return frames

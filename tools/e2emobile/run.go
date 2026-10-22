@@ -34,6 +34,10 @@ type config struct {
 	reverse    []string
 	healthPort string
 	probePause time.Duration // between health probes (default 2 s)
+	// After a drop: the pause before a retry (default 5 s, then twice that), recoverDevice's
+	// poll (default 3 s) and how long it waits for the device (default 2 min).
+	retryPause, pollPause, recoverTimeout time.Duration
+	retries                               int // the retries after a drop this run (results.json)
 }
 
 // Record is one flow in results.json: the record shape of e2e/web/reporter.ts (merged into the
@@ -63,6 +67,9 @@ type Results struct {
 	Status     string   `json:"status"`
 	DurationMS int64    `json:"duration_ms"`
 	Tests      []Record `json:"tests"`
+	// DeviceRetries counts the retries after an adb transport drop (or a device not ready) in the
+	// run: a lane that measures drops rather than the app shows here.
+	DeviceRetries int `json:"device_retries,omitempty"`
 }
 
 // errNoFlows: nothing to run; scripts/e2e reports the suite as not run (an error), not as green.
@@ -151,6 +158,10 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 		res.Status = "interrupted"
 	}
 	res.DurationMS = time.Since(t0).Milliseconds()
+	res.DeviceRetries = c.retries
+	if c.retries > 0 {
+		fmt.Fprintf(os.Stderr, "e2emobile: %d retries after an adb transport drop this run\n", c.retries)
+	}
 	raw, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return nil, err
@@ -171,6 +182,15 @@ func (c *config) runFlow(ctx context.Context, f Flow) (Record, string) {
 		return r, ""
 	}
 	dir := filepath.Join(c.out, f.Slug)
+	// A retry keeps the earlier try's artifacts (<slug>.try1, ...): they show what the drop did.
+	if _, err := os.Stat(dir); err == nil {
+		for n := 1; ; n++ {
+			if old := fmt.Sprintf("%s.try%d", dir, n); !exists(old) {
+				_ = os.Rename(dir, old)
+				break
+			}
+		}
+	}
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return failed(r, err.Error()), ""
@@ -307,9 +327,14 @@ func (c *config) prepDevice(ctx context.Context) error {
 	}
 }
 
+// maxTries is how often a flow is played when the emulator's adb transport keeps dropping (the
+// first try and two retries): drops came about every 20 s on a bad run, so one retry is not enough.
+const maxTries = 3
+
 // retryOnDrop readies the device and plays a test (play returns its record and the output to
 // look for a drop in). When the device was not ready or the test failed on an adb transport
-// drop, it does both once more, keeps the second result and notes the drop on it.
+// drop, it brings the device back (recoverDevice), waits a little longer each time and plays it
+// again, up to maxTries in all; it keeps the last result and notes the drops on it.
 func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Record, string)) Record {
 	// once returns why the try deserves another ("" when it does not).
 	once := func() (Record, string) {
@@ -323,21 +348,132 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 		}
 		return r, ""
 	}
-	r, why := once()
-	if why == "" || ctx.Err() != nil {
-		return r
+	pause := c.retryPause
+	if pause == 0 {
+		pause = 5 * time.Second
 	}
-	first := ""
-	if r.Error != nil {
-		first, _, _ = strings.Cut(strings.TrimSpace(*r.Error), "\n")
-		if len(first) > 300 {
-			first = first[:300] + "…"
+	r, why := once()
+	var notes []string
+	for try := 2; why != "" && try <= maxTries && ctx.Err() == nil; try++ {
+		c.retries++
+		first := ""
+		if r.Error != nil {
+			first, _, _ = strings.Cut(strings.TrimSpace(*r.Error), "\n")
+			if len(first) > 300 {
+				first = first[:300] + "…"
+			}
+		}
+		notes = append(notes, fmt.Sprintf("%s on try %d%s (%s)", why, try-1, hostLoad(), first))
+		fmt.Fprintf(os.Stderr, "e2emobile: %s: %s%s (%s); bringing the emulator back and retrying (try %d of %d)\n",
+			r.Title, why, hostLoad(), first, try, maxTries)
+		select {
+		case <-ctx.Done():
+			return r
+		case <-time.After(time.Duration(try-1) * pause):
+		}
+		if err := c.recoverDevice(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "e2emobile: %s: the emulator did not come back: %v\n", r.Title, err)
+		}
+		r, why = once()
+	}
+	if len(notes) > 0 {
+		r.Note = fmt.Sprintf("retried %d× (tries %d of %d): %s", len(notes), len(notes)+1, maxTries, strings.Join(notes, "; "))
+	}
+	return r
+}
+
+// recoverDevice brings the harness emulator back after an adb transport drop, before a retry:
+//   - when adb does not see it as a device, `adb -s <serial> reconnect`, which kicks this one
+//     transport (host-serial:<serial>:reconnect). Not `reconnect offline`: that is a host-wide
+//     command and would reset every offline device, the user's included;
+//   - then it waits until the device is up and its shell answers (get-state is device and
+//     sys.boot_completed is 1) on two checks in a row, a poll apart: a transport that comes back
+//     for a second and drops again would only fail the retry;
+//   - then it stops Maestro's on-device driver (its two packages, by name), which a drop leaves
+//     dead or half-connected (DeviceServerDied on the next run); the next `maestro test`
+//     installs and starts it afresh.
+//
+// prepDevice then sets the tunnels again and probes the sandbox, as before every flow.
+func (c *config) recoverDevice(ctx context.Context) error {
+	poll := c.pollPause
+	if poll == 0 {
+		poll = 3 * time.Second
+	}
+	limit := c.recoverTimeout
+	if limit == 0 {
+		limit = 2 * time.Minute
+	}
+	deadline := time.Now().Add(limit)
+	stable, sinceKick := 0, -1
+	var last string
+	for stable < 2 {
+		state, err := c.adbCmd(ctx, "get-state")
+		up := err == nil && strings.TrimSpace(string(state)) == "device"
+		if up {
+			boot, err := c.adbCmd(ctx, "shell", "getprop sys.boot_completed")
+			up = err == nil && strings.TrimSpace(string(boot)) == "1"
+			if !up {
+				last = fmt.Sprintf("sys.boot_completed is %q (%v)", strings.TrimSpace(string(boot)), err)
+			}
+		} else {
+			last = fmt.Sprintf("get-state: %q (%v)", strings.TrimSpace(string(state)), err)
+		}
+		if up {
+			stable++
+		} else {
+			stable = 0
+			// Kick the transport at once, then again if it stays down for 5 polls.
+			if sinceKick < 0 || sinceKick >= 5 {
+				_, _ = c.adbCmd(ctx, "reconnect")
+				sinceKick = 0
+			}
+		}
+		if sinceKick >= 0 {
+			sinceKick++
+		}
+		if stable >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("not back in %s: %s", limit, last)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
 		}
 	}
-	fmt.Fprintf(os.Stderr, "e2emobile: %s: %s (%s); readying it again and retrying once\n", r.Title, why, first)
-	r, _ = once()
-	r.Note = fmt.Sprintf("retried once: %s on the first try (%s)", why, first)
-	return r
+	for _, pkg := range []string{"dev.mobile.maestro.test", "dev.mobile.maestro"} {
+		_, _ = c.adbCmd(ctx, "shell", "am force-stop "+pkg)
+	}
+	return nil
+}
+
+// hostLoad is ", host load L, M GB available" (the 1-minute load average and MemAvailable) on
+// Linux, "" elsewhere: the host a drop happened on was busy and deep in swap, so each retry
+// says how busy it was.
+func hostLoad() string {
+	out := ""
+	if f := strings.Fields(readFile("/proc/loadavg")); len(f) > 0 {
+		out = ", host load " + f[0]
+	}
+	for _, l := range strings.Split(readFile("/proc/meminfo"), "\n") {
+		var kb int64
+		if _, err := fmt.Sscanf(l, "MemAvailable: %d kB", &kb); err == nil {
+			out += fmt.Sprintf(", %.1f GB available", float64(kb)/(1<<20))
+		}
+	}
+	return out
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+func readFile(p string) string {
+	raw, _ := os.ReadFile(p)
+	return string(raw)
 }
 
 func failed(r Record, msg string) Record {

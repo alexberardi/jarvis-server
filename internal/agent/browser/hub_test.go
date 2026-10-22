@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,29 @@ func TestWaitConnected(t *testing.T) {
 // Website access (the extension's <all_urls> host permission, which Firefox lets the user turn
 // off) comes in hello and in "access" events; a change wakes Changed, so the heartbeat reports
 // it. An extension that never says (before 0.3.2) leaves it unknown (nil), not off.
+// slowHandler is a log handler that takes its time, as a loaded machine's might.
+type slowHandler struct{ slog.Handler }
+
+func (slowHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h slowHandler) Handle(ctx context.Context, r slog.Record) error {
+	time.Sleep(200 * time.Millisecond)
+	return h.Handler.Handle(ctx, r)
+}
+
+// A change that has been seen (a browser in Browsers) has already fired Changed: a Changed
+// taken after it waits for the next change, however slow the log line between them is. (It
+// didn't: TestHubWebsiteAccess saw the Chrome connect's Changed as Firefox's access event.)
+func TestHubChangedFiresWithTheChange(t *testing.T) {
+	h, path := startHubLog(t, slog.New(slowHandler{slog.DiscardHandler}))
+	connectExt(t, h, path, "Chrome", false, nil)
+	select {
+	case <-h.Changed():
+		t.Fatal("Changed fired after the connect was seen, with nothing changed since")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 func TestHubWebsiteAccess(t *testing.T) {
 	h, path := startHub(t)
 	off := false
@@ -230,7 +254,7 @@ func TestHubWebsiteAccess(t *testing.T) {
 		return nil
 	}
 	if a := access("Firefox"); a == nil || *a {
-		t.Fatalf("after hello: website access %v, want off", a)
+		t.Fatalf("after hello: website access %s, want off", accessText(a))
 	}
 	connectExt(t, h, path, "Chrome", false, nil)
 	if a := access("Chrome"); a != nil {
@@ -238,7 +262,7 @@ func TestHubWebsiteAccess(t *testing.T) {
 	}
 	// The agent's own (the heartbeat's): off while any browser that says has it off.
 	if a := h.WebsiteAccess(); a == nil || *a {
-		t.Fatalf("hub website access %v, want off", a)
+		t.Fatalf("hub website access %s, want off", accessText(a))
 	}
 
 	changed := h.Changed()
@@ -250,17 +274,17 @@ func TestHubWebsiteAccess(t *testing.T) {
 		t.Fatal("Changed didn't fire on an access event")
 	}
 	if a := access("Firefox"); a == nil || !*a {
-		t.Fatalf("after the access event: %v, want on", a)
+		t.Fatalf("after the access event: %s, want on", accessText(a))
 	}
 	if a := h.WebsiteAccess(); a == nil || !*a {
-		t.Fatalf("hub website access %v, want on", a)
+		t.Fatalf("hub website access %s, want on", accessText(a))
 	}
 
 	changed = h.Changed()
 	ff.send(Message{Type: "event", Event: "access", WebsiteAccess: &off})
 	<-changed
 	if a := access("Firefox"); a == nil || *a {
-		t.Fatalf("after turning it off: %v, want off", a)
+		t.Fatalf("after turning it off: %s, want off", accessText(a))
 	}
 
 	// The status connection (jarvis-agent browser status) carries it.

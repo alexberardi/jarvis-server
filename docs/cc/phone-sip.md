@@ -86,7 +86,7 @@ Risks and what we do about them:
 | `direct_media=yes` | Re-INVITE moves RTP to another address mid-call | Handle a media re-INVITE; guide says Direct Media = no |
 | SSRC changes across bridges/transfers | Dropped audio if we latch the first SSRC | Reset sequence/jitter state on a new SSRC |
 | Codecs: ulaw, alaw, g722, gsm, g726 | — | Offer PCMU + PCMA (+ telephone-event/8000) |
-| Half-duplex, no barge-in (`live/vad.go:49`) | Callers talk over the receptionist and are not heard; worse on inbound than on business calls | Not SIP-specific; barge-in (stop TTS on caller speech, flush pacer) is recommended before inbound ships |
+| Half-duplex, no barge-in | Callers talk over the receptionist and are not heard; worse on inbound than on business calls | **Done (2026-10-21, provider-neutral, `media.go`):** while our audio plays, speech louder and longer than our echo (`VADConfig.BargeIn*`) calls `Call.Flush` and gets the next turn; never during the disclosure or the goodbye ([decision](../decisions/2026-10-21-phone-barge-in.md)). The SIP Call's `Flush` must drop its pacer queue |
 
 ### 3.3 Outbound
 
