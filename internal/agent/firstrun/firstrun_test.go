@@ -773,6 +773,32 @@ func TestChooseServerChecksIt(t *testing.T) {
 	}
 }
 
+// A server on the network that gives no answer, on a Mac: the page names the Local Network
+// setting, which silently blocks an app it hasn't allowed (#480). Elsewhere it doesn't.
+func TestChooseServerOnAMacNamesLocalNetwork(t *testing.T) {
+	// Nothing on the network answers (as when macOS blocks the app): every dial fails at once.
+	blocked := &http.Client{Timeout: time.Second, Transport: &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("no route to host")
+		}}}
+	for goos, hint := range map[string]bool{"darwin": true, "linux": false, "windows": false} {
+		s := testServer(t, Deps{GOOS: goos, HTTP: blocked})
+		w := send(s, req(s, "POST", "api/server", map[string]string{"url": "10.0.0.122"}))
+		body := decode[struct{ Error string }](t, w).Error
+		if w.Code != http.StatusBadGateway || !strings.Contains(body, "No Jarvis Automation server answered at 10.0.0.122:7700") {
+			t.Fatalf("%s: %d %q", goos, w.Code, body)
+		}
+		if got := strings.Contains(body, "System Settings → Privacy & Security → Local Network"); got != hint {
+			t.Errorf("%s: %s", goos, body)
+		}
+	}
+	// This computer's own address on a Mac: no privacy setting in the way.
+	s := testServer(t, Deps{GOOS: "darwin", HTTP: blocked})
+	if w := send(s, req(s, "POST", "api/server", map[string]string{"url": "127.0.0.1"})); strings.Contains(w.Body.String(), "Local Network") {
+		t.Errorf("loopback: %s", w.Body)
+	}
+}
+
 func TestSearchFindsThisComputerFirstThenTheNetwork(t *testing.T) {
 	f := newFakeJarvisd(t)
 	other := newFakeJarvisd(t)

@@ -34,11 +34,45 @@ func (e *NotJarvisError) Error() string {
 		"Check the address: the computer that runs Jarvis Automation, like 192.168.1.10."
 }
 
-// NoAnswerError: nothing answered at the address.
-type NoAnswerError struct{ Host string }
+// NoAnswerError: nothing answered at the address. LocalNetwork: this is a Mac and the address
+// is on the network, where macOS's Local Network privacy may be what stopped the agent.
+type NoAnswerError struct {
+	Host         string
+	LocalNetwork bool
+}
 
 func (e *NoAnswerError) Error() string {
-	return "No Jarvis Automation server answered at " + e.Host + ". Check the address, and that the server is on."
+	msg := "No Jarvis Automation server answered at " + e.Host + ". Check the address, and that the server is on."
+	if e.LocalNetwork {
+		msg += " On a Mac, also check that Jarvis Automation Agent is turned on in " +
+			"System Settings → Privacy & Security → Local Network."
+	}
+	return msg
+}
+
+// WithLocalNetworkHint marks a NoAnswerError for an address on the network (not this computer)
+// when goos is darwin: macOS's Local Network privacy blocks an app it hasn't been allowed to
+// reach the LAN, silently, while Terminal still gets through. err is ResolveConfigURL's, as
+// returned; other errors come back as is.
+func WithLocalNetworkHint(goos string, err error) error {
+	na, ok := err.(*NoAnswerError)
+	if goos != "darwin" || !ok || isLoopbackHost(na.Host) {
+		return err
+	}
+	return &NoAnswerError{Host: na.Host, LocalNetwork: true}
+}
+
+// isLoopbackHost: host (with or without a port) is this computer.
+func isLoopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // NormalizeAddress turns what someone typed or pasted into a URL to try first: a bare host

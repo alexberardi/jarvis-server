@@ -90,6 +90,10 @@ done
 for k in NSMicrophoneUsageDescription NSAppleEventsUsageDescription NSAccessibilityUsageDescription; do
   plistval "$AGENT_IN_DMG" "$k" >/dev/null || fail "the agent has no $k"
 done
+for app in "$SERVER_IN_DMG" "$AGENT_IN_DMG"; do
+  plistval "$app" NSLocalNetworkUsageDescription >/dev/null || fail "$app has no NSLocalNetworkUsageDescription"
+  [ "$(plistval "$app" NSBonjourServices:0)" = _jarvis-config._tcp ] || fail "$app has no NSBonjourServices _jarvis-config._tcp"
+done
 [ -f "$AGENT_IN_DMG/Contents/Library/LaunchAgents/net.jarvisautomation.agent.plist" ] || fail "no in-bundle LaunchAgent"
 for app in "$SERVER_IN_DMG" "$AGENT_IN_DMG"; do
   [ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "no app icon in $app"

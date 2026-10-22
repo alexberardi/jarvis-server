@@ -385,7 +385,7 @@ func enroll(ctx context.Context, args []string) error {
 	// Whatever was pasted (a bare host, the web app's URL on 7710, any path): the config service.
 	typed := *server
 	if *server, err = node.ResolveConfigURL(ctx, hc, typed); err != nil {
-		return err
+		return node.WithLocalNetworkHint(runtime.GOOS, err)
 	}
 	if n, _ := node.NormalizeAddress(typed); n != *server {
 		// Not the address given: say where the server was found.
