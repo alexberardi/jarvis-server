@@ -11,7 +11,11 @@ IOS_CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/jarvis-harness/mobile/ios
 SIM_NAME=jarvis-harness-e2e # tools/e2emobile refuses any other device name
 SIM_RUNTIME=${E2E_IOS_RUNTIME:-com.apple.CoreSimulator.SimRuntime.iOS-18-0}
 SIM_TYPE=${E2E_IOS_DEVICE_TYPE:-com.apple.CoreSimulator.SimDeviceType.iPhone-16}
-IOS_RECIPE=1 # bump when the build recipe changes, to invalidate cached apps
+IOS_RECIPE=2 # bump when the build recipe changes, to invalidate cached apps
+# The loop runner fences the build in a Seatbelt sandbox, and macOS refuses a nested sandbox-exec:
+# swift-frontend runs each out-of-process macro plugin (expo-dev-menu's #Preview, PreviewsMacros)
+# under one unless told not to. scripts/ios-nested-sandbox-check.sh checks these flags.
+IOS_NESTED_SWIFT_FLAGS=-disable-sandbox
 UDID="" SIM_LOCKED=0
 
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
@@ -80,10 +84,12 @@ build_ios_app() { # SHA CONFIG_URL → prints the .app path
     [ -n "$ws" ] || { echo "expo prebuild made no ios/*.xcworkspace"; exit 1; }
     scheme=$(basename "$ws" .xcworkspace)
     # The simulator's arch only (arm64 on Apple silicon), no signing: nothing here needs the
-    # user's team or certificates.
+    # user's team or certificates. No Seatbelt of Xcode's own (macro plugins, script phases): it
+    # cannot nest inside the loop runner's.
     nodex xcodebuild -workspace "$ws" -scheme "$scheme" -configuration Release -sdk iphonesimulator \
       -destination 'generic/platform=iOS Simulator' -derivedDataPath "$src/ios/build" \
       ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+      OTHER_SWIFT_FLAGS="\$(inherited) $IOS_NESTED_SWIFT_FLAGS" ENABLE_USER_SCRIPT_SANDBOXING=NO \
       -quiet build
   ) >"$IOS_CACHE/build.log" 2>&1 || {
     unlock "$IOS_CACHE/build.lock"
