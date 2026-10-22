@@ -38,7 +38,7 @@ type Call struct {
 	id     string
 	d      *diago.DialogClientSession // an outbound call's dialog (nil inbound)
 	dlg    dialog                     // the call's dialog, either way
-	ctx    context.Context // the INVITE's: cancelling it before the answer sends CANCEL
+	ctx    context.Context            // the INVITE's: cancelling it before the answer sends CANCEL
 	cancel context.CancelFunc
 
 	started   chan struct{}
