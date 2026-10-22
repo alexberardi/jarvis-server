@@ -332,16 +332,28 @@ Two layers ([`../decisions/2026-10-18-e2e-push.md`](../decisions/2026-10-18-e2e-
 
 ## The iOS lane (`scripts/e2e ios`)
 
-The same flows on the iOS Simulator of a Mac with Xcode, against a sandbox on the dev box. Why,
+The same flows on the iOS Simulator of a Mac with Xcode, against a `--lan` sandbox. Why,
 and what the flows add for iOS (platform conditions, `PUSH_URL`):
 [`../decisions/2026-10-18-e2e-ios-lane.md`](../decisions/2026-10-18-e2e-ios-lane.md). `all`
 does not include it.
 
-1. On the dev box: `scripts/sandbox up --name e2e-ios --profile rich --llm scripted --lan`
+Run the sandbox on the Mac itself (the MacBook Pro): nothing has to cross a firewall.
+
+1. `scripts/sandbox up --name e2e-ios --profile rich --llm scripted --lan`
    (`JARVIS_LAN_HOST=<ip>` if it guesses the wrong address). It is open to the LAN until step 3.
-2. On the Mac, with `.sandbox/e2e-ios/sandbox-lan.env` copied over:
-   `scripts/e2e ios --sandbox-env sandbox-lan.env [--mobile-repo PATH] [--filter RE]`.
-3. On the dev box: `scripts/sandbox down --name e2e-ios --purge`.
+2. `scripts/e2e ios --sandbox-env .sandbox/e2e-ios/sandbox-lan.env [--mobile-repo PATH] [--filter RE]`.
+3. `scripts/sandbox down --name e2e-ios --purge`.
+
+The sandbox can also run on the dev box, with `sandbox-lan.env` copied to the Mac for step 2,
+but the dev box's ufw admits only the installed jarvisd's ports, not the sandbox's (its own
+port + the offset `up` prints: config, admin and the services on 7700-7712, the scripted model
+and the fake relay on 7797-7798, recipes and OCR on 7030-7031, MQTT on 1884). Open them to the
+Mac alone for the run, and close them after step 3 (offset 10000 here):
+
+```sh
+sudo ufw allow from <mac-ip> to any port 11884,17030:17031,17700:17798 proto tcp
+sudo ufw delete allow from <mac-ip> to any port 11884,17030:17031,17700:17798 proto tcp
+```
 
 - Needs Xcode (not just the command-line tools: the Mac mini has only those) with the iOS 18.0
   simulator runtime, CocoaPods, node 22 (or mise), Go and Java 17+. The first run creates the
@@ -352,6 +364,10 @@ does not include it.
   build takes a while; its log is `build.log` there).
 - On a failure, `.e2e/<run>/ios/<flow>/` keeps `screenshot.png`, `hierarchy.json`,
   `device.log`, `maestro.log` and `maestro/`.
+- After a failed flow the runner reboots the simulator before the next one (the flow's
+  `note` says so): a system alert the flow left up, such as iOS's 'Open in "Jarvis
+  Automation"?' after an `openLink`, survives `launchApp` with `clearState` and would fail every
+  later flow at `landing-login-button`. The flow itself still has to answer that alert.
 - Writing an iOS step: `xcrun simctl boot <udid of jarvis-harness-e2e>` and
   `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device <udid> test -e … flow.yaml`.
 

@@ -66,6 +66,24 @@ func (c *config) simctl(ctx context.Context, args ...string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// rebootSimulator restarts the harness simulator after a failed flow: whatever the flow left on
+// screen goes with it, the app's state does not. A system alert (iOS asks 'Open in "Jarvis
+// Automation"?' on an openLink to the app's scheme) is SpringBoard's, not the app's, so the next
+// flow's launchApp with clearState leaves it up and every later flow fails behind it. It returns
+// the failed flow's note.
+func (c *config) rebootSimulator(ctx context.Context) string {
+	_, _ = c.simctl(ctx, "shutdown", c.udid)
+	for _, args := range [][]string{{"boot", c.udid}, {"bootstatus", c.udid, "-b"}} {
+		if _, err := c.simctl(ctx, args...); err != nil {
+			return "rebooting the simulator after this flow failed: " + err.Error()
+		}
+	}
+	// As scripts/lib/ios.sh boots it: the status bar frozen for the screenshots.
+	_, _ = c.simctl(ctx, "status_bar", c.udid, "override", "--time", "9:41", "--dataNetwork", "wifi",
+		"--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100")
+	return "the simulator was rebooted after this flow, so nothing it left on screen fails the next ones"
+}
+
 // iosArtifacts keeps the screen as the flow left it: a picture, Maestro's view hierarchy (texts,
 // accessibility ids) and the app's part of the simulator's log since the flow started.
 func (c *config) iosArtifacts(ctx context.Context, dir string, started time.Time, r *Record, rel func(string) string) {

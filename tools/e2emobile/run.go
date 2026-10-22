@@ -58,6 +58,7 @@ type Record struct {
 	SkipReason    string   `json:"skip_reason,omitempty"`
 	Attachments   []string `json:"attachments,omitempty"`
 	// Note says the flow was run twice: the emulator's adb transport dropped, or it was not ready, on the first try.
+	// On iOS it says the simulator was rebooted after the flow failed (rebootSimulator).
 	Note string `json:"note,omitempty"`
 }
 
@@ -135,9 +136,15 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 		}
 		res.Tests = append(res.Tests, rec)
 	}
+	reboot := -1 // ios: the failed flow in res.Tests to reboot the simulator after, before the next one runs
 	for _, f := range flows {
 		if ctx.Err() != nil {
 			break
+		}
+		if reboot >= 0 && !f.Skipped() {
+			res.Tests[reboot].Note = c.rebootSimulator(ctx)
+			fmt.Fprintf(os.Stderr, "e2emobile:          %s\n", res.Tests[reboot].Note)
+			reboot = -1
 		}
 		var r Record
 		if f.Skipped() || c.ios() { // the simulator has no adb transport to drop
@@ -151,6 +158,9 @@ func run(ctx context.Context, c *config, flows []Flow) (*Results, error) {
 		}
 		if r.Status != "passed" && r.Status != "skipped" {
 			res.Status = "failed"
+			if c.ios() {
+				reboot = len(res.Tests)
+			}
 		}
 		res.Tests = append(res.Tests, r)
 	}
