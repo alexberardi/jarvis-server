@@ -11,7 +11,7 @@ import (
 )
 
 // Per-household telephony (AD6): phone.provider picks the household's provider (household →
-// system → default twilio; only twilio exists so far, SIP is docs/cc/phone-sip.md step 2), and
+// system → default twilio; or sip, an extension on the household's PBX: sipline.go), and
 // that provider's credentials resolve the same way. Each household may bring its own Twilio
 // account (multi-tenant installs), the install may set a system default, and the TWILIO_*
 // environment is the last fallback. The three values are one account, so they resolve as a
@@ -25,10 +25,12 @@ const SettingProvider = "phone.provider"
 // Providers (phone.provider values).
 const (
 	ProviderTwilio = "twilio"
+	// ProviderSIP registers to the household's PBX as an extension (sipline.go).
+	ProviderSIP = "sip"
 )
 
 // providers are phone.provider's options.
-var providers = []any{ProviderTwilio}
+var providers = []any{ProviderTwilio, ProviderSIP}
 
 // Setting keys (cc settings, household or system scope). The account SID and auth token are
 // secrets: the settings API masks them and nothing logs them.
@@ -52,7 +54,8 @@ func credentialDefinitions() []settings.Definition {
 		{Key: SettingProvider, Category: "phone_calls", Type: settings.String, Default: ProviderTwilio,
 			Options: providers, Validate: validProvider,
 			Description: "Which telephony provider places this household's calls (system scope: the install's " +
-				"default). twilio: a Twilio account (the phone.twilio_* settings) and a public URL for its media stream."},
+				"default). twilio: a Twilio account (the phone.twilio_* settings) and a public URL for its media stream. " +
+				"sip: an extension on the household's own PBX (the phone.sip.* settings), e.g. FreePBX."},
 		{Key: SettingTwilioAccountSID, Category: "phone_calls", Type: settings.String, Default: "", IsSecret: true,
 			EnvFallback: EnvTwilioAccountSID,
 			Description: "Twilio account SID for this household's calls (system scope: the install's default). " +
@@ -110,7 +113,7 @@ const (
 func validProvider(v any) error {
 	str, ok := v.(string)
 	if !ok || !slices.Contains(providers, any(normalizeProvider(str))) {
-		return fmt.Errorf("unknown phone provider %q (one of: %s)", str, ProviderTwilio)
+		return fmt.Errorf("unknown phone provider %q (one of: %s, %s)", str, ProviderTwilio, ProviderSIP)
 	}
 	return nil
 }
@@ -135,19 +138,25 @@ func (e *UnknownProviderError) Error() string {
 	return fmt.Sprintf("phone not configured: unknown phone provider %q", e.Provider)
 }
 
-// IncompleteError is a level with some but not all of the three values.
+// IncompleteError is a level with some but not all of an account's values.
 type IncompleteError struct {
-	Source  string   // household | system | env
-	Missing []string // setting keys
+	Source   string   // household | system | env
+	Missing  []string // setting keys
+	Provider string   // "" (Twilio) or ProviderSIP
 }
 
 func (e *IncompleteError) Error() string {
-	return "phone not configured: the " + e.Source + " Twilio credentials are incomplete (missing " +
+	what := "Twilio credentials are"
+	if e.Provider == ProviderSIP {
+		what = "SIP account is"
+	}
+	return "phone not configured: the " + e.Source + " " + what + " incomplete (missing " +
 		strings.Join(e.Missing, ", ") + ")"
 }
 
 // Telephony is what one household's calls use: the provider, and the key that verifies the
-// provider's signed requests to us (Twilio's auth token; empty for a provider that signs none).
+// provider's signed requests to us (Twilio's auth token; empty for a provider that signs none,
+// SIP).
 type Telephony struct {
 	Provider   Provider
 	SigningKey string
@@ -159,7 +168,7 @@ type Telephony struct {
 func isNotConfigured(err error) bool {
 	var inc *IncompleteError
 	var unk *UnknownProviderError
-	return errors.Is(err, ErrNotConfigured) || errors.As(err, &inc) || errors.As(err, &unk)
+	return errors.Is(err, ErrNotConfigured) || errors.Is(err, ErrSIPNotConfigured) || errors.As(err, &inc) || errors.As(err, &unk)
 }
 
 // NotConfiguredMessage is the user-facing sentence for a telephony resolution error.
@@ -170,9 +179,17 @@ func NotConfiguredMessage(err error) string {
 		return "Phone calls aren't set up for this household: its phone provider isn't one this " +
 			"version of Jarvis supports. A household admin can choose another in Household Settings."
 	}
+	if errors.As(err, &inc) && inc.Provider == ProviderSIP {
+		return "Phone calls aren't fully set up for this household: the phone system (SIP) details are " +
+			"incomplete. An admin can finish them in Jarvis's settings."
+	}
 	if errors.As(err, &inc) {
 		return "Phone calls aren't fully set up for this household: the Twilio account details are " +
 			"incomplete. A household admin can finish them in Household Settings."
+	}
+	if errors.Is(err, ErrSIPNotConfigured) {
+		return "Phone calls aren't set up for this household yet: there's no phone system (SIP) extension " +
+			"to call from. An admin can add one in Jarvis's settings."
 	}
 	return "Phone calls aren't set up for this household yet: there's no Twilio account to call from. " +
 		"A household admin can add one in Household Settings."
@@ -194,7 +211,11 @@ func (s *Service) Telephony(ctx context.Context, hh string) (Telephony, error) {
 	if err != nil {
 		return Telephony{}, err
 	}
-	if kind != ProviderTwilio {
+	switch kind {
+	case ProviderTwilio:
+	case ProviderSIP:
+		return s.sipTelephony(ctx, hh)
+	default:
 		return Telephony{}, &UnknownProviderError{Provider: kind}
 	}
 	creds, source, err := s.credentials(ctx, hh)

@@ -37,6 +37,29 @@ func IsNonSpeech(heard string) bool {
 	return s != "" && nonSpeechRE.MatchString(s)
 }
 
+// announcementPhrases are carrier and PBX intercept recordings (normalised): FreePBX answers
+// "all trunks busy" with 200 OK and plays one (docs/cc/phone-sip.md §3.3), and a dead or
+// misdialed number reaches one on any provider.
+var announcementPhrases = []string{
+	"all circuits are busy",
+	"the number you have dialed", "the number you dialed",
+	"is not in service", "is no longer in service", "has been disconnected",
+	"cannot be completed as dialed", "could not be completed as dialed", "your call cannot be completed",
+	"please try your call again", "try your call again later", "please hang up and try again",
+}
+
+// IsAnnouncement reports a transcript that is a recorded intercept, not a person: the
+// call's first utterance being one means the call never reached anyone.
+func IsAnnouncement(heard string) bool {
+	n := NormalizeLine(heard)
+	for _, p := range announcementPhrases {
+		if strings.Contains(n, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsAffirmation reports a sentence that opens with a bare affirmation.
 func IsAffirmation(s string) bool { return AffirmRE.MatchString(s) }
 

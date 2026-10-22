@@ -372,7 +372,7 @@ func TestProviderSetting(t *testing.T) {
 	e.setCreds(settings.Scope{}, "AC-sys", "token-sys", "+15550000009")
 
 	def, ok := e.s.Settings.Definition(SettingProvider)
-	if !ok || def.Default != ProviderTwilio || len(def.Options) != 1 || def.Options[0] != ProviderTwilio {
+	if !ok || def.Default != ProviderTwilio || len(def.Options) != 2 || def.Options[0] != ProviderTwilio || def.Options[1] != ProviderSIP {
 		t.Fatalf("definition: %+v", def)
 	}
 	// Default and explicit twilio resolve the Twilio account.
@@ -384,8 +384,8 @@ func TestProviderSetting(t *testing.T) {
 			t.Fatalf("provider %v: %+v %v", v, tel, err)
 		}
 	}
-	// Only known providers can be written.
-	for _, v := range []any{"sip", "carrier-pigeon", int64(3)} {
+	// Only known providers can be written (sip is TestProviderSettingAcceptsSIP's).
+	for _, v := range []any{"carrier-pigeon", int64(3)} {
 		err := e.s.Settings.Set(ctx, SettingProvider, v, settings.Scope{HouseholdID: hh})
 		if !errors.Is(err, settings.ErrInvalidValue) {
 			t.Fatalf("%v accepted: %v", v, err)
@@ -393,13 +393,13 @@ func TestProviderSetting(t *testing.T) {
 	}
 	// A value this build doesn't know (written before a downgrade) is "not configured", in
 	// words that don't blame Twilio.
-	if _, err := e.d.Write.Exec(`UPDATE cc_settings SET value = 'sip' WHERE key = ? AND household_id = ?`,
+	if _, err := e.d.Write.Exec(`UPDATE cc_settings SET value = 'carrier-pigeon' WHERE key = ? AND household_id = ?`,
 		SettingProvider, hh); err != nil {
 		t.Fatal(err)
 	}
 	_, err := e.s.Telephony(ctx, hh)
 	var unk *UnknownProviderError
-	if !errors.As(err, &unk) || unk.Provider != "sip" || !isNotConfigured(err) {
+	if !errors.As(err, &unk) || unk.Provider != "carrier-pigeon" || !isNotConfigured(err) {
 		t.Fatalf("unknown provider: %v", err)
 	}
 	if msg := NotConfiguredMessage(err); strings.Contains(msg, "Twilio") || !strings.Contains(msg, "phone provider") {
