@@ -22,6 +22,7 @@ const ADMIN_PAGES = [
   { label: 'Traces', path: '/admin/traces', heading: 'Traces', api: '/api/traces?limit=1' },
   { label: 'Nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
   { label: 'Users', path: '/admin/users', heading: 'Users', api: '/api/admin/users' },
+  { label: 'Phone', path: '/admin/phone', heading: 'Phone', api: '/api/phone/sip' },
   { label: 'Updates', path: '/admin/update', heading: 'Updates', api: '/api/update' },
 ]
 

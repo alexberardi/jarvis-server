@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -305,4 +306,25 @@ func TestAScannerCannotReachTheInboundHandler(t *testing.T) {
 		t.Fatal("a call from outside the PBX reached Config.Inbound")
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+// The inbound watch self-test shows what Jarvis answered: a refusal's code, or 200.
+func TestLastInboundRecordsWhatWeAnswered(t *testing.T) {
+	var answer atomic.Bool
+	p, u := inboundUA(t, func(Incoming) Admission {
+		if !answer.Load() {
+			return Admission{Refuse: 486}
+		}
+		return Admission{Answered: func(c *Call) { go c.Hangup(context.Background()) }}
+	})
+	pai := sip.NewHeader("P-Asserted-Identity", `"Bob" <sip:+12125550142@127.0.0.1>`)
+	p.callUA(t, u, pai).waitFinal(t, 3*time.Second)
+	if in := u.Status().LastInbound; in.Response != 486 || in.Caller != "+12125550142" || in.CallerName != "Bob" || in.At.IsZero() {
+		t.Fatalf("after a refusal: %+v, want 486 from +12125550142 (Bob)", in)
+	}
+	answer.Store(true)
+	if ok, code := p.callUA(t, u).waitFinal(t, 3*time.Second); !ok {
+		t.Fatalf("not answered: %d", code)
+	}
+	eventually(t, 2*time.Second, "LastInbound 200", func() bool { return u.Status().LastInbound.Response == 200 })
 }

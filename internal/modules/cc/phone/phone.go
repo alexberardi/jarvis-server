@@ -166,6 +166,7 @@ type Service struct {
 	base     context.Context
 	sip      *sipLines
 	inbound  inboundState
+	tests    sipTests // the SIP self-tests' runs (sipsupport.go)
 	mu       sync.Mutex
 	runtimes map[string]*callRuntime
 	twilio   *twilioMedia

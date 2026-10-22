@@ -65,9 +65,16 @@ var refusals = map[int]string{
 func (u *UA) handleInvite(d *diago.DialogServerSession) {
 	in := incoming(d.InviteRequest)
 	log := u.cfg.Log.With("call_id", in.CallID, "caller", in.Number, "caller_from", in.Source)
+	// What became of it is kept for the inbound watch self-test.
+	watch := inboundInvite(d.InviteRequest, in)
+	seen := func(code int) {
+		watch.Response = code
+		u.setStatus(func(s *Status) { s.LastInbound = watch })
+	}
+	refuse := func(code int) { u.refuse(d, code, seen) }
 	if u.cfg.Inbound == nil {
 		log.Info("sip: inbound call refused (inbound calls are off)")
-		u.refuse(d, sip.StatusTemporarilyUnavailable)
+		refuse(sip.StatusTemporarilyUnavailable)
 		return
 	}
 	adm := u.cfg.Inbound(d.Context(), in)
@@ -76,10 +83,13 @@ func (u *UA) handleInvite(d *diago.DialogServerSession) {
 	}
 	if adm.Refuse != 0 {
 		log.Info("sip: inbound call refused", "status", adm.Refuse)
-		u.refuse(d, adm.Refuse)
+		refuse(adm.Refuse)
 		return
 	}
 	abandon := func(reason string) {
+		if watch.Response == 0 {
+			seen(sip.StatusRequestTerminated)
+		}
 		log.Info("sip: inbound call not answered", "reason", reason)
 		if adm.Abandoned != nil {
 			adm.Abandoned(reason)
@@ -88,7 +98,7 @@ func (u *UA) handleInvite(d *diago.DialogServerSession) {
 	offer, err := canonicalSDP(d.InviteRequest.Body())
 	if err != nil {
 		log.Warn("sip: refused an inbound call's SDP", "err", err)
-		u.refuse(d, sip.StatusNotAcceptableHere)
+		refuse(sip.StatusNotAcceptableHere)
 		abandon("its SDP was unusable")
 		return
 	}
@@ -107,7 +117,7 @@ func (u *UA) handleInvite(d *diago.DialogServerSession) {
 			return
 		case <-u.done:
 			t.Stop()
-			u.refuse(d, sip.StatusTemporarilyUnavailable)
+			refuse(sip.StatusTemporarilyUnavailable)
 			abandon("shutting down")
 			return
 		}
@@ -130,6 +140,7 @@ func (u *UA) handleInvite(d *diago.DialogServerSession) {
 	c.mu.Unlock()
 	c.answer(med)
 	go c.deliver()
+	seen(sip.StatusOK)
 	log.Info("sip: inbound call answered", "after", adm.Delay)
 	adm.Answered(c)
 	defer func() {
@@ -141,11 +152,14 @@ func (u *UA) handleInvite(d *diago.DialogServerSession) {
 	c.serve(med)
 }
 
-func (u *UA) refuse(d *diago.DialogServerSession, code int) {
+// refuse answers an inbound INVITE with code (480 unless it is one of refusals), telling seen
+// the code first.
+func (u *UA) refuse(d *diago.DialogServerSession, code int, seen func(int)) {
 	reason, ok := refusals[code]
 	if !ok {
 		code, reason = sip.StatusTemporarilyUnavailable, refusals[sip.StatusTemporarilyUnavailable]
 	}
+	seen(code)
 	if err := d.Respond(code, reason, nil); err != nil {
 		u.cfg.Log.Warn("sip: refusing an inbound call failed", "status", code, "err", err)
 	}

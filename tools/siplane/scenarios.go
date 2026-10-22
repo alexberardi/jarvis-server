@@ -69,6 +69,12 @@ var scenarios = []scenario{
 	{"jarvis-inbound", "the carrier calls the Jarvis DID: jarvisd answers after the answer delay (caller from PAI), says the disclosure and hears the message", jarvisInbound},
 	{"jarvis-inbound-ring-group", "the ring-group DID: Alice picks up during jarvisd's answer delay; jarvisd's leg is cancelled, never answered", jarvisInboundRingGroup},
 	{"jarvis-inbound-busy", "a second call while jarvisd is on one: its concurrent cap refuses it 486 and the caller gets busy (voicemail)", jarvisInboundBusy},
+	// jarvisd's SIP self-tests (selftest.go; docs/cc/phone-sip.md §6), what the admin's Phone page runs.
+	{"jarvis-selftest-connection", "the connection self-test re-registers and pings the PBX, with both round-trip times", selftestConnection},
+	{"jarvis-selftest-echo", "the echo self-test dials *43, plays a phrase after the prompt and understands what comes back", selftestEcho},
+	{"jarvis-selftest-digits", "the *65 self-test hears the PBX say 100", selftestDigits},
+	{"jarvis-selftest-inbound", "the inbound watch sees Alice's call to 100 (refused 480) with her caller ID and audio offer", selftestInbound},
+	{"jarvis-selftest-trace", "the SIP trace holds the REGISTER and a *43 call, the digest answer redacted, the password nowhere", selftestTrace},
 }
 
 // within is ctx with a timeout, for one wait.

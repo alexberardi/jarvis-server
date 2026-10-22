@@ -212,6 +212,15 @@ func jarvisWrongPassword(ctx context.Context, l *lane, r *report) error {
 	if err := ua.Ready(); err == nil || !strings.Contains(err.Error(), "Firewall") {
 		r.failf("Ready: %v", err)
 	}
+	// The connection self-test on a stopped registration says why, and sends nothing.
+	run := phone.RunSIPSelfTest(ctx, ua, phone.SIPTestConnection, nil, nil)
+	r.notef("connection self-test after the stop: %s: %s (%s)", run.State, run.Summary, run.Hint)
+	if run.State != phone.SIPTestFailed || !strings.Contains(run.Hint, "Firewall") {
+		r.failf("connection self-test: %+v", run)
+	}
+	if n := ua.Status().Attempts; n != 3 {
+		r.failf("the self-test sent a REGISTER after the stop (%d attempts)", n)
+	}
 	return nil
 }
 

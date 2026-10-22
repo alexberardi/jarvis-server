@@ -23,7 +23,10 @@ func TestFreshServeListensOnThreePorts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("dialing a closed port on Windows retries instead of being refused")
 	}
-	const offset = 30000
+	// 20000 keeps every port (7700–9883 + offset) below 32768, outside Linux's
+	// ephemeral range (32768–60999) and macOS/Windows' (49152–65535), so a
+	// parallel test's outbound connection cannot grab one.
+	const offset = 20000
 	home := t.TempDir()
 	t.Setenv("JARVIS_HOME", home)
 	t.Setenv("JARVIS_PORT_OFFSET", fmt.Sprint(offset))
@@ -32,10 +35,23 @@ func TestFreshServeListensOnThreePorts(t *testing.T) {
 	t.Setenv("JARVIS_NO_BROWSER", "1")
 	t.Cleanup(func() { logging.SetShuttingDown(false) })
 
+	// Skip rather than flake if something else already holds a port.
+	for _, p := range []int{7700 + offset, 7710 + offset, 1884 + offset} {
+		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
+		if err != nil {
+			t.Skipf("port %d held: %v", p, err)
+		}
+		l.Close()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- serve(ctx, false, false) }()
+	var returned bool
 	t.Cleanup(func() {
+		if returned {
+			return
+		}
 		cancel()
 		select {
 		case err := <-done:
@@ -60,6 +76,7 @@ func TestFreshServeListensOnThreePorts(t *testing.T) {
 		}
 		select {
 		case err := <-done:
+			returned = true
 			t.Fatalf("serve returned before /health answered: %v", err)
 		default:
 		}

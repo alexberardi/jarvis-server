@@ -38,6 +38,9 @@ type UA struct {
 	allowed   []net.IP      // the registrar's addresses: the only peers we answer
 	calls     map[string]*Call
 	closeOnce sync.Once
+
+	refresh chan struct{} // Check: re-register now
+	trace   *traceAccount // this UA in the process-wide SIP trace
 }
 
 // Start opens cfg's socket and starts registering. It fails at once on a bad config or a
@@ -47,7 +50,8 @@ func Start(ctx context.Context, cfg Config) (*UA, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	u := &UA{cfg: cfg, calls: map[string]*Call{}, changed: make(chan struct{}), done: make(chan struct{})}
+	u := &UA{cfg: cfg, calls: map[string]*Call{}, changed: make(chan struct{}), done: make(chan struct{}),
+		refresh: make(chan struct{}, 1)}
 	u.status = Status{State: StateRegistering, Since: time.Now()}
 	if err := u.resolveRegistrar(ctx); err != nil {
 		return nil, err
@@ -100,6 +104,8 @@ func Start(ctx context.Context, cfg Config) (*UA, error) {
 		return nil, err
 	}
 	u.dg.HandleFunc(u.handleInvite)
+	u.trace = u.newTraceAccount()
+	processTracer.add(u.trace)
 	sctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	u.cancel = cancel
 	go u.supervise(sctx)
@@ -176,7 +182,9 @@ func (u *UA) Config() Config { return u.cfg }
 func (u *UA) Status() Status {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return u.status
+	st := u.status
+	st.ActiveCalls = len(u.calls)
+	return st
 }
 
 // Changed is closed at the next status change.
@@ -236,6 +244,7 @@ func (u *UA) Close(ctx context.Context) {
 		u.setStatus(func(s *Status) { s.State = StateClosed })
 		_ = u.sock.Close()
 		<-u.served
+		processTracer.remove(u.trace)
 		u.client.Close()
 		u.server.Close()
 		u.ua.Close()
@@ -310,6 +319,17 @@ func respond(req *sip.Request, tx sip.ServerTransaction, code int, reason string
 		return
 	}
 	_ = tx.Respond(sip.NewResponseFromRequest(req, code, reason, nil))
+}
+
+// inboundInvite is what the inbound watch self-test shows of an INVITE: the caller as
+// incoming read it (a hint, never authentication), the dialed user and the audio offer.
+func inboundInvite(req *sip.Request, caller Incoming) InboundInvite {
+	in := InboundInvite{At: time.Now(), Caller: caller.Number, CallerName: caller.Name}
+	if to := req.To(); to != nil {
+		in.To = to.Address.User
+	}
+	in.Media, in.Codecs = sdpAudio(req.Body())
+	return in
 }
 
 // handleUpdate answers UPDATE (a session-timer refresh, RFC 4028/3311) within a live call

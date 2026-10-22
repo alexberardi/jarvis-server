@@ -205,3 +205,64 @@ func clip(s string) string {
 	}
 	return s
 }
+
+// staticCodecs are the RTP/AVP static payload types an offer may list without an rtpmap.
+var staticCodecs = map[string]string{"0": "PCMU", "3": "GSM", "8": "PCMA", "9": "G722", "18": "G729"}
+
+// sdpAudio is an offer's audio address (ip:port, media-level c= over session-level) and its
+// codecs in the offer's order, for display only: it never fails, a line it cannot read is
+// left out.
+func sdpAudio(b []byte) (string, []string) {
+	var sessionIP, mediaIP net.IP
+	port := ""
+	var pts []string
+	names := map[string]string{}
+	inAudio := false
+	for _, l := range strings.Split(string(b), "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "m="):
+			f := strings.Fields(l[2:])
+			inAudio = len(f) >= 3 && f[0] == "audio" && port == ""
+			if inAudio {
+				port, pts = f[1], f[3:]
+			}
+		case strings.HasPrefix(l, "c="):
+			ip, _, err := parseConnection(l[2:])
+			if err != nil {
+				continue
+			}
+			if port == "" {
+				sessionIP = ip
+			} else if inAudio {
+				mediaIP = ip
+			}
+		case inAudio && strings.HasPrefix(l, "a=rtpmap:"):
+			if pt, name, _, ok := parseRtpmap(l[2:]); ok {
+				names[pt] = name
+			}
+		}
+	}
+	if port == "" {
+		return "", nil
+	}
+	ip := mediaIP
+	if ip == nil {
+		ip = sessionIP
+	}
+	addr := ""
+	if ip != nil {
+		addr = net.JoinHostPort(ip.String(), port)
+	}
+	var codecs []string
+	for _, pt := range pts {
+		if n := names[pt]; n != "" {
+			codecs = append(codecs, n)
+		} else if n := staticCodecs[pt]; n != "" {
+			codecs = append(codecs, n)
+		} else {
+			codecs = append(codecs, "pt "+pt)
+		}
+	}
+	return addr, codecs
+}

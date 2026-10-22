@@ -296,6 +296,7 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		{"GET", "/api/llm/v1/hardware"}, {"POST", "/api/llm/v1/models/install"},
 		{"GET", "/api/admin/users"}, {"POST", "/api/admin/users/1/temp-password"},
 		{"GET", "/api/config/services"}, {"GET", "/api/doctor"}, {"GET", "/api/nope"},
+		{"GET", "/api/phone/sip"}, {"POST", "/api/phone/sip/5062/tests/echo"}, {"GET", "/api/phone/sip/trace?format=text"},
 	} {
 		for email, tok := range users {
 			if code, out := call(t, c.method, base+c.path, map[string]any{"value": 1}, bearer(tok)...); code != 403 {

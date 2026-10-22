@@ -15,6 +15,7 @@ import {
   Inbox,
   Workflow,
   Video,
+  Phone,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useUnreadCount } from '@/hooks/useInbox'
@@ -50,6 +51,7 @@ const adminNav: NavItem[] = [
   { label: 'Traces', icon: Activity, path: '/admin/traces' },
   { label: 'Nodes', icon: Cpu, path: '/admin/nodes' },
   { label: 'Users', icon: Users, path: '/admin/users' },
+  { label: 'Phone', icon: Phone, path: '/admin/phone' },
   // /update used to be reachable ONLY via the dashboard's UpdateBanner, which
   // renders only when an update is available. With update checks off, the server
   // never contacts GitHub and always reports updateAvailable:false — so the
