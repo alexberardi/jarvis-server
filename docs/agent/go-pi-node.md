@@ -937,21 +937,24 @@ The Pi profile subscribes to the six `bluetooth-*` topics jarvisd publishes
 doesn't). BlueZ is reached over D-Bus (`bluez_linux.go`: `Adapter1`, `Device1`,
 `AgentManager1`, and the node's own `Agent1`), PulseAudio through `pactl`. Without BlueZ (no
 system bus, no adapter) the node runs without Bluetooth. Decisions:
-[decisions/2026-10-18-pi-node-bluetooth.md](../decisions/2026-10-18-pi-node-bluetooth.md).
+[decisions/2026-10-18-pi-node-bluetooth.md](../decisions/2026-10-18-pi-node-bluetooth.md), and
+#433's fixes after the first run on jarvis-pi4:
+[decisions/2026-10-21-pi-node-bluetooth-output-and-progress.md](../decisions/2026-10-21-pi-node-bluetooth-output-and-progress.md).
 
 | Topic (payload) | Does | Reply |
 |---|---|---|
-| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, BR/EDR then LE discovery 10 s each, list the named devices with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected` | `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
-| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | remove an existing bond, rescan ≤12 s if BlueZ doesn't know it, pair (30 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 15 s or it is disconnected; `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages) |
-| `bluetooth-disconnect` (`mac_address`) | unload its loopback, disconnect | – |
+| `bluetooth-scan` (`request_id`, `role`) | drop unpaired cache entries, BR/EDR then LE discovery 10 s each, list the named devices with `device_type` (audio icon or Audio Sink → `audio_sink`, phone icon → `phone`, Audio Source → `audio_source`) and their real `paired`/`connected`; the list so far is posted each second it grew | `POST …/bluetooth-scan/{rid}/progress` `{"progress": "scanning", "devices"}`, then `POST …/bluetooth-scan/{rid}/results` `{"devices": […]}` or `{"devices": [], "error"}` |
+| `bluetooth-pair` (`request_id`, `mac_address`, `role`) | remove an existing bond, rescan ≤12 s if BlueZ doesn't know it, pair (30 s; a Page Timeout back within 4 s is retried once after 2 s), trust, connect; an audio device must show a bluez sink/source for 2 s within 20 s, or have BlueZ's media transport up (a warning), or it is disconnected; `role: source` makes its bluez sink the default sink, `role: sink` loads the phone's loopback; saved for the reconnect loop | `POST …/bluetooth/pair/{rid}/progress` `{"progress": "finding"/"pairing"/"connecting"/"audio"}` as each step starts, then `POST …/bluetooth/pair/{rid}/results` `{"success", "device_name"}` or `{"success": false, "error"}` (N:'s messages) |
+| `bluetooth-disconnect` (`mac_address`) | give the output back to the sink it replaced, unload its loopback, disconnect | – |
 | `bluetooth-discoverable` (`timeout`, default 120) | Powered, Pairable, DiscoverableTimeout, Discoverable, in N:'s order | – |
-| `bluetooth-release` (`mac_address`, `forget`) | disconnect and turn its auto-connect off; `forget`: remove the pairing and the record | – |
+| `bluetooth-release` (`mac_address`, `forget`) | as disconnect, and turn its auto-connect off; `forget`: remove the pairing (one BlueZ no longer knows is fine) and the record | – |
 | `bluetooth-auto-connect` (`mac_address`, `enabled`) | set the saved device's auto-connect (a device never paired here is ignored) | – |
 
 At start the agent is registered as BlueZ's default and the adapter made pairable; a pairing a
 phone starts (the node discoverable) is trusted and connected, as N:'s agent does on
-`Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. TTS stays on
-`jarvis_output`; a paired speaker is for the music packages (SDK `BluetoothAudio`).
+`Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. A connected
+speaker or headphones (role `source`) are Pulse's default sink, so replies and music play on them;
+`jarvis_output` is the default again when they disconnect (#433).
 `install-pi.sh` installs `bluez`, `pulseaudio-module-bluetooth` and `rfkill`, unblocks the radio
 and sets BlueZ's Class of Device to audio (0x240404) in `/etc/bluetooth/main.conf`.
 
@@ -969,14 +972,15 @@ jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output out
 #   Scan: the speaker (in pairing mode) is listed as audio_sink; the log has "scan complete"
 #   Pair it: "Paired"; bluetoothctl info <MAC> shows Paired/Trusted/Connected: yes
 pactl list sinks short            # a bluez_sink.<MAC>.a2dp_sink, and jarvis_output
-pactl get-default-sink            # still jarvis_output: "What time is it?" is spoken on the HAT
+pactl get-default-sink            # the bluez sink: "What time is it?" is spoken on the speaker
 paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   # plays on the speaker
-#   Status after a new scan: the speaker under Connected
-#   Disconnect: bluetoothctl info shows Connected: no; the bluez sink is gone
+#   Status (no new scan needed): the speaker under Connected
+#   Disconnect: bluetoothctl info shows Connected: no; the bluez sink is gone; pactl get-default-sink is jarvis_output
 #   Restart the agent (Ctrl-C, run again): within ~30 s the speaker reconnects ("reconnected" in the log)
 #   Auto-reconnect off, restart: it stays disconnected
 #   Make discoverable: a phone sees the node and pairs; the log has "trust and connect after an incoming pair"
-#   Forget: bluetoothctl devices no longer lists it; ~/.config/jarvis-agent/bluetooth.json drops it
+#   Forget: bluetoothctl devices no longer lists it; ~/.config/jarvis-agent/bluetooth.json drops it; the app's status doesn't list it
+#   Forget again: no "remove failed" in the log; pair again from a new scan: it pairs on the first try
 sudo systemctl start jarvis-node
 ```
 
