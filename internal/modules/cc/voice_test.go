@@ -764,6 +764,14 @@ func TestNodePluginEndpoints(t *testing.T) {
 	if r["content"] != "ok" || ve.eng.last()["temperature"] != 0.0 {
 		t.Fatalf("%v", r)
 	}
+	// A node can't pick the cloud slot (only features set to it reach it): "cloud" is live,
+	// answered here with the cloud slot down.
+	ve.eng.setDown(llm.LabelCloud, true)
+	ve.eng.say("ok")
+	r = ve.do("POST", "/api/v0/node/llm/chat", map[string]any{"model": "cloud", "messages": []any{map[string]any{"role": "user", "content": "say ok"}}}, h).want(200).json()
+	if r["content"] != "ok" {
+		t.Fatalf("%v", r)
+	}
 	r = ve.do("POST", "/api/v0/node/llm/chat", map[string]any{"messages": []any{map[string]any{"role": "tool", "content": "x"}}}, h).want(400).json()
 	if d := r["details"].([]any)[0].(string); !strings.HasPrefix(d, "body -> messages -> 0 -> role: ") {
 		t.Fatalf("%v", r)

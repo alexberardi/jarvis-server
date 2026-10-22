@@ -728,6 +728,8 @@ func TestPickLabel(t *testing.T) {
 	small := llm.Endpoint{Model: "qwen3.5-9b", Vision: true}
 	remote := llm.Endpoint{Model: "claude-sonnet-5-5", Vision: true, Remote: true}
 	cloud := llm.Endpoint{Model: "claude-opus-5-5", Vision: true, Remote: true}
+	// A provider serving a large vision model: the one cloud endpoint auto would take if it looked.
+	cloudLarge := llm.Endpoint{Model: "qwen3.8-27b", Vision: true, Remote: true}
 	cases := []struct {
 		name    string
 		m       Models
@@ -755,6 +757,8 @@ func TestPickLabel(t *testing.T) {
 			ModelCloud, "", "", false, ErrNoCloud},
 		{"auto never picks cloud", Models{Endpoint: eps(map[string]llm.Endpoint{"background": {Model: "x"}, "live": small, "cloud": cloud}), VisionLabel: vision("")},
 			ModelAuto, "background", "pixels", false, nil},
+		{"auto never picks cloud, even a large vision one", Models{Endpoint: eps(map[string]llm.Endpoint{"background": small, "live": small, "cloud": cloudLarge}), VisionLabel: vision("live")},
+			ModelAuto, "live", "norm1000", true, nil},
 		{"an unknown mode is auto", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "cloud": cloud})},
 			"gpt", "background", "norm1000", true, nil},
 	}

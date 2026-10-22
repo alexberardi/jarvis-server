@@ -23,8 +23,10 @@ engine, no warm-up, no GPU placement, and nothing to assign from the model catal
 and Assign refuse it).
 
 **Only features that name it reach it.** The public API's model names still map to live or
-background (`NormalizeLabel`, `echoLabel`), so no HTTP caller can pick `cloud`. Inside jarvisd,
-`ChatRequest{Label: "cloud"}` goes to the cloud label (`chatLabel`). `/v1/models` and the health
+background (`NormalizeLabel`, `echoLabel`), and so does a node's `/node/llm/chat` `model`, so no
+HTTP caller can pick `cloud`. Every ChatRequest whose label comes from a request or a setting
+goes through `NormalizeLabel`; only code that names `llm.LabelCloud` (computer control's
+`pickLabel`) can set it. Inside jarvisd, `ChatRequest{Label: "cloud"}` goes to the cloud label (`chatLabel`). `/v1/models` and the health
 response's `slots` keep listing only live and background: they describe the public API, which
 cannot reach cloud. The Models page's label list (`GET /models/labels`, the resolver's Status)
 shows it, as `not_configured` until it is set up.
