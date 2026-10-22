@@ -448,3 +448,21 @@ func TestSIPAccountsFollowTheSettingsAndUnregisterOnShutdown(t *testing.T) {
 }
 
 func fmtV(a SIPAccount) string { return strings.TrimSpace(strings.Join([]string{a.GoString()}, "")) }
+
+// The admin's settings API hands a validator the JSON number (float64): a port set from the
+// Settings page must pass the same check as one set in Go.
+func TestSIPPortSettingsAcceptJSONNumbers(t *testing.T) {
+	e := newEnv(t)
+	for _, key := range []string{SettingSIPPort, SettingSIPLocalPort} {
+		for _, ok := range []any{int64(5060), float64(5062), 5070} {
+			if err := e.s.Settings.Validate(key, ok); err != nil {
+				t.Errorf("%s=%v (%T) refused: %v", key, ok, ok, err)
+			}
+		}
+		for _, bad := range []any{float64(5060.5), float64(70000), float64(0), "5060", true} {
+			if err := e.s.Settings.Validate(key, bad); !errors.Is(err, settings.ErrInvalidValue) {
+				t.Errorf("%s=%v (%T) accepted: %v", key, bad, bad, err)
+			}
+		}
+	}
+}

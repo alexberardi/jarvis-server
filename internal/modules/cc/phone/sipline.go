@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -48,7 +49,7 @@ const sipReconcileEvery = time.Minute
 
 func sipDefinitions() []settings.Definition {
 	port := func(v any) error {
-		n, ok := v.(int64)
+		n, ok := wholeNumber(v)
 		if !ok || n < 1 || n > 65535 {
 			return fmt.Errorf("a port is 1-65535")
 		}
@@ -77,6 +78,22 @@ func sipDefinitions() []settings.Definition {
 		{Key: SettingSIPDialPrefix, Category: "phone_calls", Type: settings.String, Default: "", Validate: validDialPrefix,
 			Description: "SIP: digits dialed before every number, for PBXs whose outbound route needs one (e.g. 9)."},
 	}
+}
+
+// wholeNumber reads an integer setting value as Go code sets it (int64, int) and as the admin's
+// settings API hands it over (a JSON number, float64).
+func wholeNumber(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case float64:
+		if n == math.Trunc(n) && math.Abs(n) < 1<<53 {
+			return int64(n), true
+		}
+	}
+	return 0, false
 }
 
 func oneOf(opts ...string) func(any) error {
