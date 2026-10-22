@@ -73,7 +73,7 @@ const (
 )
 
 var appParam = node.Param{Name: "app", Type: "string",
-	Description: "The app the user named ('in slack', 'into X'); always set when named"}
+	Description: "The app the user named ('in slack', 'into X'), as said, even one you don't know; never in text"}
 
 func typeSpec() node.Spec {
 	return node.Spec{Name: ToolType,
