@@ -20,6 +20,7 @@ const (
 	bluezName   = "org.bluez"
 	ifAdapter   = "org.bluez.Adapter1"
 	ifDevice    = "org.bluez.Device1"
+	ifTransport = "org.bluez.MediaTransport1"
 	ifAgent     = "org.bluez.Agent1"
 	ifAgentMgr  = "org.bluez.AgentManager1"
 	ifProps     = "org.freedesktop.DBus.Properties"
@@ -102,6 +103,24 @@ func macFromPath(p dbus.ObjectPath) string {
 }
 
 func (b *BlueZ) Paired() <-chan string { return b.paired }
+
+// AudioTransport looks for a MediaTransport1 under the device's path (…/dev_XX/sep1/fd0).
+func (b *BlueZ) AudioTransport(ctx context.Context, mac string) (bool, error) {
+	objs, err := b.objects(ctx)
+	if err != nil {
+		return false, err
+	}
+	dev, ok := objs.device(mac)
+	if !ok {
+		return false, ErrUnknownDevice
+	}
+	for p, ifs := range objs {
+		if _, ok := ifs[ifTransport]; ok && strings.HasPrefix(string(p), string(dev)+"/") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 type objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 

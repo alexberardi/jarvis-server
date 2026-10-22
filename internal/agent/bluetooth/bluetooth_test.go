@@ -3,6 +3,7 @@ package bluetooth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"reflect"
@@ -30,23 +31,32 @@ func phoneDev() Device {
 // when a device connects and goes when it disconnects, as PulseAudio's module-bluetooth does.
 func rig(t *testing.T) (*Node, *fakeBus, *fakePulse, *fakeAPI) {
 	t.Helper()
-	bus, pulse := newFakeBus(), &fakePulse{sinks: []string{"jarvis_output"}}
+	bus, pulse := newFakeBus(), &fakePulse{sinks: []string{"jarvis_output"}, def: "jarvis_output"}
+	bus.transport = map[string]bool{}
 	bus.onConnect = func(mac string) {
 		m := macUnderscored(mac)
+		bus.mu.Lock()
+		bus.transport[mac] = true
+		bus.mu.Unlock()
 		if mac == phone {
 			pulse.add("", "bluez_source."+m+".a2dp_source")
 		} else {
 			pulse.add("bluez_sink."+m+".a2dp_sink", "bluez_sink."+m+".a2dp_sink.monitor")
 		}
 	}
-	bus.onDisconnect = pulse.drop
+	bus.onDisconnect = func(mac string) {
+		bus.mu.Lock()
+		delete(bus.transport, mac)
+		bus.mu.Unlock()
+		pulse.drop(mac)
+	}
 	st, err := OpenStore(filepath.Join(t.TempDir(), StoreFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ms := time.Millisecond
 	n := &Node{Bus: bus, Pulse: pulse, Store: st, Log: slog.New(slog.DiscardHandler), ScanFor: ms, FindFor: 50 * ms, AudioFor: 200 * ms, AudioStable: 5 * ms,
-		BusyFor: 50 * ms, SourceFor: 50 * ms, PageRetryAfter: ms, Poll: ms, FirstReconnect: ms, ReconnectEvery: time.Hour}
+		BusyFor: 50 * ms, SourceFor: 50 * ms, PageRetryAfter: ms, SinkFor: 50 * ms, Poll: ms, FirstReconnect: ms, ReconnectEvery: time.Hour}
 	return n, bus, pulse, &fakeAPI{}
 }
 
@@ -302,16 +312,106 @@ func TestAPhoneAsSourceIsLoopedIntoTheNodesSpeaker(t *testing.T) {
 	}
 }
 
-func TestASpeakerLeavesTheDefaultSinkAlone(t *testing.T) {
+const speakerSink = "bluez_sink.AA_BB_CC_DD_EE_01.a2dp_sink"
+
+// A paired speaker or headphones take the node's output (#433: "route output to it"), and give
+// it back to the node's own sink when they go.
+func TestASpeakerBecomesTheDefaultSinkUntilItGoes(t *testing.T) {
+	for name, leave := range map[string]map[string]any{
+		"disconnect": nil,
+		"release":    {"forget": false},
+		"forget":     {"forget": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			n, bus, pulse, api := rig(t)
+			bus.inRange[speaker] = speakerDev()
+			send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker, "role": "source"})
+			if api.pairs["p1"]["success"] != true {
+				t.Fatalf("pair %v", api.pairs["p1"])
+			}
+			if len(pulse.modules) != 0 {
+				t.Fatalf("a speaker got modules: %v", pulse.modules)
+			}
+			if pulse.def != speakerSink {
+				t.Fatalf("default sink %q, want the speaker's", pulse.def)
+			}
+			topic, payload := TopicDisconnect, map[string]any{"mac_address": speaker}
+			if leave != nil {
+				topic, payload["forget"] = TopicRelease, leave["forget"]
+			}
+			bus.onDisconnect = nil // Pulse keeps the sink a moment: the node hands the output back itself
+			send(t, n, api, topic, payload)
+			if pulse.def != "jarvis_output" {
+				t.Fatalf("after %s the default sink is %q", name, pulse.def)
+			}
+		})
+	}
+}
+
+func TestAPhoneAsSourceLeavesTheDefaultSinkAlone(t *testing.T) {
 	n, bus, pulse, api := rig(t)
-	bus.inRange[speaker] = speakerDev()
-	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker, "role": "source"})
-	if len(pulse.modules) != 0 {
-		t.Fatalf("a speaker got modules: %v", pulse.modules)
+	bus.inRange[phone] = phoneDev()
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": phone, "role": "sink"})
+	if pulse.def != "jarvis_output" {
+		t.Fatalf("default sink %q", pulse.def)
 	}
-	if !slices.Contains(pulse.sinks, "bluez_sink.AA_BB_CC_DD_EE_01.a2dp_sink") {
-		t.Fatalf("sinks %v", pulse.sinks)
-	}
+}
+
+// #433: every pair ended "connected, but its audio profile did not come up" while bluetoothd
+// had the A2DP transport ready. BlueZ's transport now counts: a device whose profile is up is
+// never disconnected because Pulse is slow or out of reach, and why Pulse didn't answer is
+// logged.
+func TestTheAudioProfileUpInBlueZIsAConnect(t *testing.T) {
+	t.Run("pulse unreachable", func(t *testing.T) {
+		n, bus, pulse, api := rig(t)
+		logs := &logRecorder{}
+		n.Log = slog.New(logs)
+		bus.inRange[speaker] = speakerDev()
+		pulse.listErr = errors.New("pactl list sinks short: exit status 1: Connection failure: Connection refused")
+		send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+		if got := asJSON(t, api.pairs["p1"]); !reflect.DeepEqual(got, map[string]any{"success": true, "device_name": "JBL Flip 5"}) {
+			t.Fatalf("pair %v", got)
+		}
+		if slices.Contains(bus.Calls(), "Disconnect "+speaker) {
+			t.Errorf("a device with its audio profile up was disconnected: %v", bus.Calls())
+		}
+		var pactl int
+		for _, r := range logs.all() {
+			if r == "WARN bluetooth: pactl failed" {
+				pactl++
+			}
+		}
+		if pactl != 1 {
+			t.Errorf("pactl's error logged %d times, want once: %v", pactl, logs.all())
+		}
+		if !slices.Contains(logs.all(), "WARN bluetooth: audio profile up in BlueZ, but PulseAudio has no sink for it") {
+			t.Errorf("logs %v", logs.all())
+		}
+	})
+	t.Run("the card's profile is off", func(t *testing.T) {
+		n, bus, pulse, api := rig(t)
+		bus.inRange[speaker] = speakerDev()
+		bus.onConnect = func(mac string) { // the card, no sink until a profile is chosen
+			bus.mu.Lock()
+			bus.transport[mac] = true
+			bus.mu.Unlock()
+			pulse.mu.Lock()
+			pulse.cards = append(pulse.cards, "bluez_card.AA_BB_CC_DD_EE_01")
+			pulse.mu.Unlock()
+		}
+		pulse.onProfile = func(card, profile string) {
+			if card == "bluez_card.AA_BB_CC_DD_EE_01" && profile == "a2dp_sink" {
+				pulse.add(speakerSink, "")
+			}
+		}
+		send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+		if api.pairs["p1"]["success"] != true {
+			t.Fatalf("pair %v", api.pairs["p1"])
+		}
+		if pulse.def != speakerSink {
+			t.Fatalf("default sink %q (profiles %v)", pulse.def, pulse.profiles)
+		}
+	})
 }
 
 func TestRelease(t *testing.T) {

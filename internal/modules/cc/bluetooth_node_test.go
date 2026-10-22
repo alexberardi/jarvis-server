@@ -138,6 +138,8 @@ func (r *radio) tail(k int) []string {
 	return r.calls[len(r.calls)-k:]
 }
 
+func (r *radio) AudioTransport(context.Context, string) (bool, error) { return false, nil }
+
 func (r *radio) Adapter(context.Context) (bluetooth.Adapter, error) {
 	return bluetooth.Adapter{Powered: true}, nil
 }

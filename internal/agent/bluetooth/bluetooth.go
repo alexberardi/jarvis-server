@@ -6,10 +6,12 @@
 // node drives bluetoothctl; this talks to BlueZ over D-Bus (Bus, bluez_linux.go) and to
 // PulseAudio through pactl (Pulse), so both are fakes in the tests.
 //
-// Audio follows the Python node: TTS stays on the node's own sink (jarvis_output, the HAT) and
-// music packages pick a connected bluez sink themselves (the SDK's BluetoothAudio); a phone
-// paired as a source (role "sink": the Pi is its speaker) gets a module-loopback into the
-// default sink, unloaded again on disconnect and release.
+// Audio: a speaker or headphones the node plays to (role "source") become Pulse's default sink
+// while connected, so the node's replies and music go to them, and the node's own sink
+// (jarvis_output, the HAT) is the default again when they disconnect or are released (#433;
+// the Python node left TTS on the HAT). A phone paired as a source (role "sink": the Pi is its
+// speaker) gets a module-loopback into the default sink, unloaded again on disconnect and
+// release.
 package bluetooth
 
 import (
@@ -94,6 +96,9 @@ type Bus interface {
 	// Paired delivers the address of each device that became paired, the phone-initiated
 	// pairings (the node discoverable) included.
 	Paired() <-chan string
+	// AudioTransport reports whether BlueZ has a media transport (org.bluez.MediaTransport1)
+	// under the device: its A2DP or HFP audio profile is connected, whatever Pulse makes of it.
+	AudioTransport(ctx context.Context, mac string) (bool, error)
 }
 
 // API is the node's command-center client (*node.CC).
@@ -112,19 +117,21 @@ type Node struct {
 	// Timings (zero: the Python node's): ScanFor is each transport's discovery (10 s; N: runs
 	// BR/EDR then LE, max(12/2, 10) s each); FindFor is the rescan for a device BlueZ doesn't
 	// know before a pair (12 s); AudioFor and AudioStable are the wait for the audio profile
-	// after a connect (a bluez sink or source present for 2 s within 15 s); BusyFor is the poll
+	// after a connect (a bluez sink or source present for 2 s within 20 s; N: 15 s); BusyFor is the poll
 	// for a connect already in progress (10 s); SourceFor is the wait for a phone's a2dp_source
 	// before the loopback (5 s); FirstReconnect and ReconnectEvery pace the reconnect loop (30 s
 	// after start, then every 10 min).
-	// PageRetryAfter is the pause before the one retry of a pair that got a fast Page Timeout (2 s).
-	ScanFor, FindFor, AudioFor, AudioStable, BusyFor, SourceFor, PageRetryAfter time.Duration
-	FirstReconnect, ReconnectEvery                                              time.Duration
-	Poll                                                                        time.Duration // 500 ms
+	// PageRetryAfter is the pause before the one retry of a pair that got a fast Page Timeout (2 s);
+	// SinkFor is the wait for a speaker's bluez sink before the output moves to it (10 s).
+	ScanFor, FindFor, AudioFor, AudioStable, BusyFor, SourceFor, PageRetryAfter, SinkFor time.Duration
+	FirstReconnect, ReconnectEvery                                                       time.Duration
+	Poll                                                                                 time.Duration // 500 ms
 
-	op      sync.Mutex // one radio operation at a time
-	mu      sync.Mutex
-	pairing map[string]bool // addresses the pair handler is working on
-	seen    map[string]bool // request ids taken
+	op       sync.Mutex // one radio operation at a time
+	mu       sync.Mutex
+	pairing  map[string]bool // addresses the pair handler is working on
+	seen     map[string]bool // request ids taken
+	homeSink string          // the default sink before a speaker took the output
 }
 
 func or(d, def time.Duration) time.Duration {
@@ -558,8 +565,10 @@ func (n *Node) find(ctx context.Context, mac string) bool {
 }
 
 // connect is N:'s connect: Connect (a connect already in progress is waited for), then for an
-// audio device the wait for its audio profile; if that never comes up the device is
-// disconnected, which stops BlueZ retrying AVDTP (the "click loop", failure mode 2).
+// audio device the wait for its audio profile. A profile BlueZ has up (a media transport) is a
+// connect even when Pulse has no sink for it yet (#433: the check gave up while bluetoothd had
+// the A2DP stream ready). If neither comes up the device is disconnected, which stops BlueZ
+// retrying AVDTP (the "click loop", failure mode 2).
 func (n *Node) connect(ctx context.Context, mac string) error {
 	d, _ := n.device(ctx, mac)
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -571,7 +580,15 @@ func (n *Node) connect(ctx context.Context, mac string) error {
 	if err != nil {
 		return err
 	}
-	if isAudio(d) && n.Pulse != nil && !n.waitAudio(ctx, mac) {
+	if !isAudio(d) || n.Pulse == nil {
+		return nil
+	}
+	pulseUp, bluezUp := n.waitAudio(ctx, mac, deviceType(d) == "audio_sink")
+	switch {
+	case pulseUp:
+	case bluezUp:
+		n.log().Warn("bluetooth: audio profile up in BlueZ, but PulseAudio has no sink for it", "mac", mac)
+	default:
 		_ = n.Bus.Disconnect(ctx, mac)
 		return errors.New("connected, but its audio profile did not come up")
 	}
@@ -593,25 +610,56 @@ func (n *Node) waitConnected(ctx context.Context, mac string) error {
 
 // waitAudio is N:'s _wait_for_audio_sink: one of the device's bluez sinks or sources present
 // for AudioStable within AudioFor (BlueZ shows a card on the ACL link, before the profile, and
-// a sink can flap while AVDTP discovery times out).
-func (n *Node) waitAudio(ctx context.Context, mac string) bool {
-	deadline := time.Now().Add(or(n.AudioFor, 15*time.Second))
-	var since time.Time
+// a sink can flap while AVDTP discovery times out). pulseUp is that; bluezUp is BlueZ's media
+// transport for the device, checked when Pulse doesn't show it. Pulse's error is logged once (it
+// used to be swallowed, so an unreachable Pulse looked like a profile that never came up), and
+// the wait ends there. For a speaker whose card is there without a sink (its profile off), the
+// card is set to a2dp_sink once.
+func (n *Node) waitAudio(ctx context.Context, mac string, speaker bool) (pulseUp, bluezUp bool) {
+	transport := func() bool {
+		up, err := n.Bus.AudioTransport(ctx, mac)
+		if err != nil {
+			n.log().Debug("bluetooth: media transport not checked", "mac", mac, "err", err)
+		}
+		return up
+	}
+	deadline := time.Now().Add(or(n.AudioFor, 20*time.Second))
+	var since, cardSince time.Time
+	nudged := !speaker
 	for time.Now().Before(deadline) {
-		if hasEndpoint(ctx, n.Pulse, mac) {
+		up, err := hasEndpoint(ctx, n.Pulse, mac)
+		if err != nil {
+			n.log().Warn("bluetooth: pactl failed", "mac", mac, "err", err)
+			return false, transport()
+		}
+		if up {
 			if since.IsZero() {
 				since = time.Now()
 			} else if time.Since(since) >= or(n.AudioStable, 2*time.Second) {
-				return true
+				return true, true
 			}
 		} else {
 			since = time.Time{}
+			if !nudged {
+				if card, ok := btCard(ctx, n.Pulse, mac); !ok {
+					cardSince = time.Time{}
+				} else if cardSince.IsZero() {
+					cardSince = time.Now()
+				} else if time.Since(cardSince) >= or(n.AudioStable, 2*time.Second) {
+					nudged = true
+					if err := n.Pulse.SetCardProfile(ctx, card, "a2dp_sink"); err != nil {
+						n.log().Info("bluetooth: card profile not set", "card", card, "err", err)
+					} else {
+						n.log().Info("bluetooth: card had no sink; profile set to a2dp_sink", "card", card)
+					}
+				}
+			}
 		}
 		if sleep(ctx, or(n.Poll, 500*time.Millisecond)) != nil {
-			return false
+			return false, false
 		}
 	}
-	return false
+	return false, transport()
 }
 
 // --- disconnect, release, auto-connect, discoverable -------------------------------------------
