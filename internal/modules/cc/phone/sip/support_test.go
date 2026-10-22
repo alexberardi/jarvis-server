@@ -104,11 +104,7 @@ func TestStatusCountsActiveCalls(t *testing.T) {
 	p := newPBX(t, "secret")
 	u := startUA(t, p.config(t, "secret"))
 	waitState(t, u, StateRegistered, 3*time.Second)
-	// Ring until the caller cancels: diago refuses the call as soon as the handler returns.
-	p.setInvite(func(d *diago.DialogServerSession) {
-		d.Ringing()
-		<-d.Context().Done()
-	})
+	p.setInvite(func(d *diago.DialogServerSession) { d.Ringing() })
 	c, err := u.Dial(context.Background(), "2125550100")
 	if err != nil {
 		t.Fatal(err)
