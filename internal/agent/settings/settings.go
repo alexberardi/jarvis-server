@@ -41,6 +41,7 @@ type Settings struct {
 	VoiceInput       *string  `json:"voice_input,omitempty"`
 	VoiceOutput      *string  `json:"voice_output,omitempty"`
 	WakeThreshold    *float64 `json:"wake_threshold,omitempty"`
+	WakeAuto         *bool    `json:"wake_threshold_auto,omitempty"`
 	AutoUpdate       *bool    `json:"auto_update,omitempty"`
 	// A Pi node's settings, also written by the app's node settings (update_node_config).
 	FollowUp        *float64 `json:"follow_up,omitempty"`
@@ -52,6 +53,10 @@ type Settings struct {
 	ListenSilence         *float64 `json:"listen_silence,omitempty"`
 	FollowUpMinAfterOnset *float64 `json:"follow_up_min_after_onset,omitempty"`
 	FollowUpMinSpeech     *float64 `json:"follow_up_min_speech,omitempty"`
+	// The Pi's maintenance restart (internal/agent/maintenance).
+	MaintenanceRestart      *bool   `json:"maintenance_restart,omitempty"`
+	MaintenanceRestartAt    *string `json:"maintenance_restart_at,omitempty"`
+	MaintenanceRSSCeilingMB *int    `json:"maintenance_rss_ceiling_mb,omitempty"`
 	// ComputerControl: Jarvis may use this computer (COMPUTER-CONTROL.md C11). Unset is off:
 	// a new install and an upgrade both start off; the menu's toggle sets it.
 	ComputerControl *bool `json:"computer_control,omitempty"`
@@ -78,6 +83,8 @@ var Keys = []Key{
 	{"voice_input", "voice-input", false, `microphone: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceInput }},
 	{"voice_output", "voice-output", false, `speaker: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceOutput }},
 	{"wake_threshold", "wake-threshold", false, "wake word fires above this score (0 to 1)", func(s *Settings) any { return &s.WakeThreshold }},
+	{"wake_threshold_auto", "wake-threshold-auto", false, "calibrate the wake threshold from recent wakes (wake_threshold until there are 5)",
+		func(s *Settings) any { return &s.WakeAuto }},
 	{"auto_update", "no-auto-update", true, "update to the server's version by itself, and accept updates sent from Jarvis Automation", func(s *Settings) any { return &s.AutoUpdate }},
 	{"follow_up", "follow-up", false, "after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3)", func(s *Settings) any { return &s.FollowUp }},
 	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},
@@ -90,6 +97,12 @@ var Keys = []Key{
 		func(s *Settings) any { return &s.FollowUpMinAfterOnset }},
 	{"follow_up_min_speech", "follow-up-min-speech", false, "a follow-up answer shorter than this many seconds of speech is noise",
 		func(s *Settings) any { return &s.FollowUpMinSpeech }},
+	{"maintenance_restart", "no-maintenance-restart", true, "a Pi restarts itself once a day and when its memory passes the ceiling",
+		func(s *Settings) any { return &s.MaintenanceRestart }},
+	{"maintenance_restart_at", "maintenance-restart-at", false, `a Pi's daily restart, "HH:MM" local time`,
+		func(s *Settings) any { return &s.MaintenanceRestartAt }},
+	{"maintenance_rss_ceiling_mb", "maintenance-rss-ceiling-mb", false, "a Pi restarts when its resident memory reaches this many MB (0: never)",
+		func(s *Settings) any { return &s.MaintenanceRSSCeilingMB }},
 	{"computer_control", "computer-control", false, `let Jarvis use this computer (off by default; the menu's "Computer control" sets it)`,
 		func(s *Settings) any { return &s.ComputerControl }},
 }
@@ -190,12 +203,26 @@ func (s Settings) Validate() error {
 	if s.LEDBrightness != nil && (*s.LEDBrightness < 0 || *s.LEDBrightness > 100) {
 		return fmt.Errorf("led_brightness is %d; use 0 to 100", *s.LEDBrightness)
 	}
+	if s.MaintenanceRestartAt != nil && !validHHMM(*s.MaintenanceRestartAt) {
+		return fmt.Errorf("maintenance_restart_at is %q; use HH:MM, 00:00 to 23:59", *s.MaintenanceRestartAt)
+	}
+	if s.MaintenanceRSSCeilingMB != nil && *s.MaintenanceRSSCeilingMB < 0 {
+		return fmt.Errorf("maintenance_rss_ceiling_mb is %d; use 0 (never) or more MB", *s.MaintenanceRSSCeilingMB)
+	}
 	for _, p := range []*string{s.VoiceInput, s.VoiceOutput} {
 		if p != nil && strings.TrimSpace(*p) == "" {
 			return errors.New("voice_input and voice_output can't be empty (unset them for the default device)")
 		}
 	}
 	return nil
+}
+
+// validHHMM is maintenance.ParseHHMM's check (repeated here so this package stays a leaf).
+func validHHMM(v string) bool {
+	h, m, ok := strings.Cut(strings.TrimSpace(v), ":")
+	hh, err1 := strconv.Atoi(h)
+	mm, err2 := strconv.Atoi(m)
+	return ok && err1 == nil && err2 == nil && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59
 }
 
 // Save writes the settings atomically, 0600 in a 0700 directory (it sits next to node.json).

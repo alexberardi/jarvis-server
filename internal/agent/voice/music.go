@@ -13,6 +13,10 @@ type Music interface {
 	Restore(ctx context.Context)
 	// SetSelfPlaying records that the node's own music started (a deferred play ran).
 	SetSelfPlaying(ctx context.Context, on bool, trigger string)
+	// SelfPlaying is the cached "the node's own music is playing" (no pactl): it arms the
+	// tentative wake (tentative.go), goes to command-center with the wake, and keeps a wake
+	// over it out of the calibration (wakegate.go).
+	SelfPlaying() bool
 }
 
 // serial runs tasks off the pipeline goroutine, one at a time and in the order they were
@@ -55,6 +59,14 @@ func (p *Pipeline) duck(ctx context.Context) {
 		return
 	}
 	p.background(ctx, p.Music.Duck)
+}
+
+// restore puts the music back, in the background (a tentative wake that lapsed).
+func (p *Pipeline) restore(ctx context.Context) {
+	if p.Music == nil {
+		return
+	}
+	p.background(ctx, p.Music.Restore)
 }
 
 // afterTurn restores the music, then runs the turn's deferred steps (a media command starting

@@ -216,7 +216,9 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 			o["error_code"] = code(err)
 			return o, true
 		}
-		out["success"] = true
+		if _, ok := out["success"]; !ok { // a parked action says false itself
+			out["success"] = true
+		}
 		return out, true
 	}
 	return nil, false

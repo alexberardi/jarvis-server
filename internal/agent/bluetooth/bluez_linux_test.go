@@ -359,6 +359,36 @@ func TestBlueZOverDBus(t *testing.T) {
 	}
 }
 
+// AudioTransport is BlueZ's own word on the audio profile: a MediaTransport1 under the device
+// (/org/bluez/hci0/dev_…/sep1/fd0, the "sep1/fd0 ready" in bluetoothd's log).
+func TestAudioTransportOverDBus(t *testing.T) {
+	addr := privateBus(t)
+	f := startFakeBlueZ(t, addr)
+	b, err := newBlueZ(dial(t, addr), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if up, err := b.AudioTransport(ctx, speaker); err != nil || up {
+		t.Fatalf("before the profile: %v %v", up, err)
+	}
+	f.mu.Lock()
+	f.props["/org/bluez/hci0/dev_0C_0C_0C_0C_0C_0C/sep1/fd0"] = map[string]map[string]dbus.Variant{"org.bluez.MediaTransport1": {"State": dbus.MakeVariant("idle")}}
+	f.mu.Unlock()
+	if up, err := b.AudioTransport(ctx, speaker); err != nil || up {
+		t.Fatalf("another device's transport counted: %v %v", up, err)
+	}
+	f.mu.Lock()
+	f.props[devPath+"/sep1/fd0"] = map[string]map[string]dbus.Variant{"org.bluez.MediaTransport1": {"State": dbus.MakeVariant("idle")}}
+	f.mu.Unlock()
+	if up, err := b.AudioTransport(ctx, speaker); err != nil || !up {
+		t.Fatalf("with the transport: %v %v", up, err)
+	}
+	if _, err := b.AudioTransport(ctx, "DE:AD:00:00:00:09"); !errors.Is(err, ErrUnknownDevice) {
+		t.Fatalf("unknown device: %v", err)
+	}
+}
+
 func TestTheAgentAcceptsWhatBlueZAsks(t *testing.T) {
 	addr := privateBus(t)
 	f := startFakeBlueZ(t, addr)

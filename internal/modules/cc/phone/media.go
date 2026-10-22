@@ -2,182 +2,104 @@ package phone
 
 import (
 	"fmt"
-	"net/http"
-	"strings"
-	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
-
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
-	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
-// The provider's Media Streams WebSocket (gateway main.py /media/{token} and
-// services/media_stream.py). Three gates before the upgrade, in order (PRD security
-// requirement 2): the single-use path token (claim pops it, so a replay or a duplicate stream
-// dies before the handshake), a live call runtime for the token's session, the provider
-// signature (X-Twilio-Signature with the https↔wss scheme fix, checked with that session's
-// household's auth token, AD6; no signing key rejects everything), and the household still
-// having phone on. After the upgrade the stream-start event must bind to the
-// claimed session (session_id parameter + callSid) or the socket closes.
+// The call loop (gateway services/media_stream.py), transport-neutral: a Call's frames in →
+// VAD → turn pipeline → PCM out through Call.Play. Half-duplex: a turn runs on the loop's
+// goroutine, so inbound audio is not processed while the agent thinks and speaks; the
+// transport holds it back meanwhile (Call.Frames).
 
 const (
-	closeBadBinding       = 4403
 	finalPlaybackTimeout  = 10 * time.Second
 	idleHangupAfterDefers = 2500 * time.Millisecond
 )
 
-var upgrader = websocket.Upgrader{
-	// The provider is not a browser: there is no Origin to check. The token and signature
-	// are the authentication.
-	CheckOrigin:     func(*http.Request) bool { return true },
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
+// callLine is what a turn (turn.go, runEscalation) may do to the call it runs on.
+type callLine interface {
+	// speak plays one PCM buffer to the far end now (a hold line mid-turn).
+	speak(pcm []int16)
+	// requestHangup ends the call once the turn's reply has played.
+	requestHangup()
+	// armIdleHangup ends the call if the far end stays silent after a deferred hangup.
+	armIdleHangup()
 }
 
-func (s *Service) handleMediaWS(w http.ResponseWriter, r *http.Request) {
-	s.init()
-	token := r.PathValue("token")
-	pending, ok := s.tokens.Claim(token)
-	if !ok {
-		s.log().Warn("phone: rejected media stream with unknown/replayed token")
-		detail(w, http.StatusForbidden, "Forbidden")
-		return
-	}
-	// The token maps to the session, the session's runtime carries its household's signing
-	// key (AD6): a stream signed with another household's token fails here.
-	rt := s.runtime(pending.SessionID)
-	if rt == nil {
-		s.log().Warn("phone: rejected media stream: no live call", "session", pending.SessionID)
-		detail(w, http.StatusForbidden, "Forbidden")
-		return
-	}
-	key := rt.tel.SigningKey
-	if key == "" {
-		s.log().Error("phone: rejected media stream: no provider signing key configured", "session", pending.SessionID)
-		detail(w, http.StatusForbidden, "Forbidden")
-		return
-	}
-	if !live.ValidateWSSignature(key, s.signatureURL(r), r.Header.Get("X-Twilio-Signature")) {
-		s.log().Warn("phone: rejected media stream: bad signature", "session", pending.SessionID)
-		detail(w, http.StatusForbidden, "Forbidden")
-		return
-	}
-	if !s.Enabled(r.Context(), rt.householdID) {
-		s.log().Warn("phone: rejected media stream: no live call", "session", pending.SessionID)
-		detail(w, http.StatusForbidden, "Forbidden")
-		return
-	}
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-	ms := &mediaSession{s: s, conn: conn, rt: rt, pending: *pending, vad: live.NewVAD(live.DefaultVADConfig())}
+// runMedia runs one call's loop until its media ends or the call is cancelled, then releases
+// the media; rt.done says it is over.
+func (s *Service) runMedia(rt *callRuntime, call Call) {
 	defer rt.markDone()
-	defer conn.Close()
-	// A cancelled call closes the socket, which ends the read loop.
+	defer call.Close()
+	// A cancelled call closes the media, which ends the loop.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
 		select {
 		case <-rt.ctx.Done():
-			ms.closeWith(websocket.CloseNormalClosure, "call ended")
+			call.Close()
 		case <-stop:
 		}
 	}()
-	ms.run()
+	m := &callSession{s: s, call: call, rt: rt, vad: live.NewVAD(live.DefaultVADConfig())}
+	m.run()
 }
 
-// mediaSession is one stream: frames in → VAD → turn pipeline → frames out. Half-duplex: a
-// turn runs on the read goroutine, so inbound audio is not processed while the agent speaks.
-type mediaSession struct {
-	s       *Service
-	conn    *websocket.Conn
-	rt      *callRuntime
-	pending live.PendingSession
-	vad     *live.VAD
+// callSession is one call's loop state; only runMedia's goroutine touches it.
+type callSession struct {
+	s    *Service
+	call Call
+	rt   *callRuntime
+	vad  *live.VAD
 
-	wmu          sync.Mutex
-	streamSID    string
+	started      bool
 	speaking     bool
 	hangup       bool
 	turnNo       int
-	marks        map[string]bool
-	pendingMark  string
+	playEnd      int64 // where the last buffer played ends
 	idleDeadline time.Time
 }
 
-func (m *mediaSession) closeWith(code int, text string) {
-	m.wmu.Lock()
-	defer m.wmu.Unlock()
-	_ = m.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, text), time.Now().Add(time.Second))
-	_ = m.conn.Close()
-}
+var _ callLine = (*callSession)(nil)
 
-func (m *mediaSession) send(v any) error {
-	m.wmu.Lock()
-	defer m.wmu.Unlock()
-	_ = m.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return m.conn.WriteJSON(v)
-}
+func (m *callSession) requestHangup() { m.hangup = true }
 
-func (m *mediaSession) requestHangup() { m.hangup = true }
+func (m *callSession) armIdleHangup() { m.idleDeadline = time.Now().Add(idleHangupAfterDefers) }
 
-// armIdleHangup ends the call if the other party stays silent after a deferred hangup.
-func (m *mediaSession) armIdleHangup() { m.idleDeadline = time.Now().Add(idleHangupAfterDefers) }
-
-func (m *mediaSession) run() {
-	m.marks = map[string]bool{}
-	for {
-		_, raw, err := m.conn.ReadMessage()
-		if err != nil {
+func (m *callSession) run() {
+	select {
+	case <-m.call.Started():
+	case <-m.call.Done():
+		return
+	}
+	m.started = true
+	// Answered: speak the disclosure, then the call is in_call.
+	m.rt.markStarted()
+	m.speak(m.rt.disclosure)
+	if m.hangup {
+		m.awaitPlayback()
+		return
+	}
+	for pcm := range m.call.Frames() {
+		m.rt.recorder.AddInbound(pcm)
+		if !m.idleDeadline.IsZero() && time.Now().After(m.idleDeadline) && !m.speaking {
+			m.s.log().Warn("phone: idle after deferred hangup — ending the call", "session", m.rt.sessionID)
+			m.hangup = true
 			return
 		}
-		switch ev := live.ParseWSMessage(raw).(type) {
-		case live.StreamStart:
-			if !live.ValidateStreamStart(ev, m.pending) {
-				m.s.log().Warn("phone: stream-start binding failed — closing", "session", m.rt.sessionID)
-				m.closeWith(closeBadBinding, "bad binding")
-				return
-			}
-			m.streamSID = ev.StreamSID
-			m.s.log().Info("phone: media stream started", "session", m.rt.sessionID)
-			// Validated stream-start: speak the disclosure, then the call is in_call.
-			m.rt.markStarted()
-			m.speak(m.rt.disclosure)
+		if utt := m.vad.Feed(pcm, m.speaking); utt != nil {
+			m.idleDeadline = time.Time{}
+			m.runTurn(utt)
 			if m.hangup {
 				m.awaitPlayback()
 				return
 			}
-		case live.InboundAudio:
-			if m.streamSID == "" {
-				continue
-			}
-			m.rt.recorder.AddInbound(ev.PCM)
-			if !m.idleDeadline.IsZero() && time.Now().After(m.idleDeadline) && !m.speaking {
-				m.s.log().Warn("phone: idle after deferred hangup — ending the call", "session", m.rt.sessionID)
-				m.hangup = true
-				return
-			}
-			if utt := m.vad.Feed(ev.PCM, m.speaking); utt != nil {
-				m.idleDeadline = time.Time{}
-				m.runTurn(utt)
-				if m.hangup {
-					m.awaitPlayback()
-					return
-				}
-			}
-		case live.MarkReceived:
-			m.marks[ev.Name] = true
-		case live.StreamStop:
-			m.s.log().Info("phone: media stream stopped", "session", m.rt.sessionID)
-			return
 		}
 	}
 }
 
-func (m *mediaSession) runTurn(utt []int16) {
+func (m *callSession) runTurn(utt []int16) {
 	m.turnNo++
 	defer func() {
 		if p := recover(); p != nil {
@@ -190,59 +112,41 @@ func (m *mediaSession) runTurn(utt []int16) {
 	}
 }
 
-// speak sends one PCM buffer to the call, marked so the hang-up can wait for playback.
-func (m *mediaSession) speak(pcm []int16) {
-	if m.streamSID == "" || len(pcm) == 0 {
+// speak plays one PCM buffer, cued "t<turn>" so the hang-up can wait for its playback.
+func (m *callSession) speak(pcm []int16) {
+	if !m.started || len(pcm) == 0 {
 		return
 	}
 	m.speaking = true
 	defer func() { m.speaking = false }()
 	m.rt.recorder.AddOutbound(pcm)
-	for _, msg := range live.MediaMessages(m.streamSID, pcm) {
-		if err := m.send(msg); err != nil {
-			return
-		}
-	}
-	mark := fmt.Sprintf("t%d", m.turnNo)
-	m.pendingMark = mark
-	_ = m.send(live.MarkMessage(m.streamSID, mark))
-}
-
-// awaitPlayback drains events until the provider confirms the last buffer played (or 10 s),
-// so a goodbye is not cut off mid-sentence.
-func (m *mediaSession) awaitPlayback() {
-	mark := m.pendingMark
-	if mark == "" || m.marks[mark] {
+	end, err := m.call.Play(pcm, fmt.Sprintf("t%d", m.turnNo))
+	if err != nil {
 		return
 	}
-	deadline := time.Now().Add(finalPlaybackTimeout)
-	_ = m.conn.SetReadDeadline(deadline)
-	defer func() { _ = m.conn.SetReadDeadline(time.Time{}) }()
-	for {
-		_, raw, err := m.conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		switch ev := live.ParseWSMessage(raw).(type) {
-		case live.MarkReceived:
-			m.marks[ev.Name] = true
-			if ev.Name == mark {
-				return
-			}
-		case live.InboundAudio:
-			m.rt.recorder.AddInbound(ev.PCM)
-		case live.StreamStop:
-			return
-		}
-	}
+	m.playEnd = end
 }
 
-// signatureURL is the URL Twilio requested and signed: the public base the stream URL was
-// built from (on a single-port server it ends in /cc), else this host plus the mount prefix
-// the request came in under.
-func (s *Service) signatureURL(r *http.Request) string {
-	if s.Options.PublicURL != "" {
-		return strings.TrimRight(s.Options.PublicURL, "/") + r.URL.Path
+// awaitPlayback waits until the last buffer has played (or 10 s, or the media ends), still
+// recording the far end, so a goodbye is not cut off mid-sentence.
+func (m *callSession) awaitPlayback() {
+	deadline := time.NewTimer(finalPlaybackTimeout)
+	defer deadline.Stop()
+	frames := m.call.Frames()
+	for {
+		pos, changed := m.call.Played()
+		if pos >= m.playEnd {
+			return
+		}
+		select {
+		case <-changed:
+		case pcm, ok := <-frames:
+			if !ok {
+				return
+			}
+			m.rt.recorder.AddInbound(pcm)
+		case <-deadline.C:
+			return
+		}
 	}
-	return "https://" + r.Host + httpx.MountPrefix(r) + r.URL.Path
 }

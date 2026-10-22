@@ -11,10 +11,13 @@ five pieces, each its own PR, in this order:
 1. **17a: music takeover and ducking** (this decision; [go-pi-node.md §3.16](../agent/go-pi-node.md)).
 2. **17b: echo cancellation during music** (`N:core/echo_cancel.py`), needs 17a. It has to decide
    the capture path first: the Go node captures through dsnoop, not Pulse (go-pi-node.md §1.4).
+   **Built 2026-10-22** (loop #424, [decision](2026-10-22-pi-node-echo-cancel.md)).
 3. **17c: tentative wake and `pre_wake_speech_seconds`** (`N:core/wake_loop.py:129-261`), needs 17a,
-   and overlaps loop #229's listen pre-roll in `voice/pipeline.go`.
+   and overlaps loop #229's listen pre-roll in `voice/pipeline.go`. **Built 2026-10-21** (loop #425,
+   [decision](2026-10-21-pi-node-tentative-wake.md)).
 4. **17d: wake auto-calibration and the false-wake / not_for_me cool-down**
-   (`N:core/wake_calibration.py`, `N:core/false_wake.py`).
+   (`N:core/wake_calibration.py`, `N:core/false_wake.py`). Built 2026-10-21 (loop #426,
+   [decision](2026-10-21-pi-node-wake-calibration-and-cooldown.md); `false_wake.py` not ported).
 5. **17e: wake greeting prefetch, maintenance restart, ACT-LED fallback.**
 
 Choices made in 17a:
@@ -36,4 +39,4 @@ Choices made in 17a:
   pandora → mpv) and stops the other players when the call's `action` is `play`. N: does this in
   `command_execution_service.py`; the Go agent owns the speaker, so the Python child doesn't.
 - **Until 17b, a parked stream goes back to `@DEFAULT_SINK@`.** N: restores to `jarvis_ec_sink`
-  while echo cancellation is on; that comes with echo cancellation.
+  while echo cancellation is on; that comes with echo cancellation (since 17b it does).

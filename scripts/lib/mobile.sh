@@ -174,10 +174,20 @@ boot_emulator() {
     rm -f "$STATEF"
   fi
   PORT=
+  # 5580 first: the emulator's adb port is console + 1 (5581), inside the 5555-5585 range adb
+  # scans for emulators. From 5586 up the emulator still registers with the running adb server
+  # when it boots, but a restarted server would not find it again.
   for p in $(seq 5580 2 5680); do port_free "$p" && { PORT=$p; break; }; done
   [ -n "$PORT" ] || die "no free emulator port in 5580-5680"
   SERIAL=emulator-$PORT
   [ "$SERIAL" != "$USER_SERIAL" ] || die "refusing to use $USER_SERIAL"
+  # A swapped-out emulator stalls and drops its adb connection (docs/dev/e2e.md, adb transport
+  # drops): say so when the host is short of memory for its 3 GB guest.
+  local avail
+  avail=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo 2>/dev/null || true)
+  if [ -n "$avail" ] && [ "$avail" -lt 6 ]; then
+    say "warning: the host has ${avail} GB of memory available; the emulator may be swapped out and drop its adb connection"
+  fi
   say "booting $AVD on $SERIAL (log: $WORK/emulator.log)"
   local t0=$SECONDS
   # -read-only: several harness runs can share the AVD, and nothing is written back to it.

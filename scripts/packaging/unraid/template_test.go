@@ -170,4 +170,56 @@ func TestTemplate(t *testing.T) {
 	if !strings.HasSuffix(c.Icon, "/scripts/packaging/unraid/jarvis.png") {
 		t.Errorf("Icon = %q", c.Icon)
 	}
+
+	// Community Applications review: every link is https, and each category token ends in ':'.
+	for _, link := range []struct{ field, url string }{
+		{"Support", c.Support}, {"Project", c.Project}, {"Registry", c.Registry},
+		{"TemplateURL", c.TemplateURL}, {"Icon", c.Icon},
+	} {
+		if !strings.HasPrefix(link.url, "https://") {
+			t.Errorf("%s = %q, want an https URL", link.field, link.url)
+		}
+	}
+	cats := strings.Fields(c.Category)
+	if len(cats) == 0 {
+		t.Error("no Category")
+	}
+	// CA writes categories "Parent:" or "Parent:Child" (Tools:Utilities).
+	catRE := regexp.MustCompile(`^[A-Za-z]+:([A-Za-z]+)?$`)
+	for _, cat := range cats {
+		if !catRE.MatchString(cat) {
+			t.Errorf("Category token %q is not Parent: or Parent:Child", cat)
+		}
+	}
+	// The template's network is bridge; the Overview may say how to switch to Host, but must
+	// not talk about host networking as if the template had it.
+	if strings.Contains(strings.ToLower(c.Overview), "host network") {
+		t.Errorf("Overview reads as if the template used host networking: %q", c.Overview)
+	}
+}
+
+type maintainer struct {
+	XMLName xml.Name `xml:"Maintainer"`
+	Icon    string   `xml:"Icon"`
+	Profile string   `xml:"Profile"`
+	WebPage string   `xml:"WebPage"`
+}
+
+func TestCAProfile(t *testing.T) {
+	raw, err := os.ReadFile("ca_profile.xml")
+	if err != nil {
+		t.Fatalf("read ca_profile.xml: %v", err)
+	}
+	var m maintainer
+	if err := xml.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal ca_profile.xml: %v", err)
+	}
+	if strings.TrimSpace(m.Profile) == "" {
+		t.Error("empty Profile")
+	}
+	for _, link := range []struct{ field, url string }{{"Icon", m.Icon}, {"WebPage", m.WebPage}} {
+		if !strings.HasPrefix(link.url, "https://") {
+			t.Errorf("%s = %q, want an https URL", link.field, link.url)
+		}
+	}
 }

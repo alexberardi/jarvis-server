@@ -81,6 +81,47 @@ func (e Endpointing) Threshold(preWakeRMS []float64) float64 {
 	return max(e.AutoFloor, min(e.AutoCeiling, math.Trunc(median*e.AutoMultiplier)))
 }
 
+// PreWakeVAD classifies the pre-wake window's chunks as speech for pre_wake_speech_seconds
+// (N:core/vad_thresholds.py pre_wake_vad_threshold, auto_pre_wake_vad_threshold): command-center's
+// "room was quiet" direction hint.
+type PreWakeVAD struct {
+	Static         float64 // pre_wake_vad_rms_threshold, 2500
+	AutoMultiplier float64 // pre_wake_vad_auto_multiplier, 3 (0 disables auto)
+	AutoMin        float64 // pre_wake_vad_auto_min, 300
+	AutoMax        float64 // pre_wake_vad_auto_max, 2500
+}
+
+// DefaultPreWakeVAD is the Python node's configuration out of the box.
+func DefaultPreWakeVAD() PreWakeVAD {
+	return PreWakeVAD{Static: 2500, AutoMultiplier: 3, AutoMin: 300, AutoMax: 2500}
+}
+
+// SpeechSecs is pre_wake_speech_seconds: the window's chunks above the threshold × 80 ms,
+// rounded to 0.01 s, with the threshold used and its source. The threshold is clamp(median ×
+// multiplier, min, max) off the window's own floor ("auto"); the static one without a floor
+// ("static") or during the node's own music, whose bleed would be taken for the floor
+// ("static_self_playback").
+func (v PreWakeVAD) SpeechSecs(preWakeRMS []float64, selfPlaying bool) (secs, threshold float64, source string) {
+	threshold, source = v.Static, "static"
+	switch {
+	case selfPlaying:
+		source = "static_self_playback"
+	case v.AutoMultiplier > 0 && len(preWakeRMS) > 0:
+		s := slices.Clone(preWakeRMS)
+		slices.Sort(s)
+		if median := math.Round(s[len(s)/2]*10) / 10; median > 0 {
+			threshold, source = max(v.AutoMin, min(v.AutoMax, median*v.AutoMultiplier)), "auto"
+		}
+	}
+	n := 0
+	for _, r := range preWakeRMS {
+		if r > threshold {
+			n++
+		}
+	}
+	return math.Round(float64(n)*chunkSecs*100) / 100, threshold, source
+}
+
 // frames converts seconds to whole chunks the way listen() does: int(secs / chunk_secs).
 func frames(secs float64) int { return int(secs / chunkSecs) }
 

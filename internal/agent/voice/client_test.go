@@ -283,3 +283,19 @@ func TestFollowUpGateWire(t *testing.T) {
 		t.Fatalf("an unknown level is not sent: %v", bodies[1])
 	}
 }
+
+func TestWakeResponseWire(t *testing.T) {
+	var path string
+	s := cc(t, func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"text":"  Mhm? "}`))
+	})
+	got, err := s.WakeResponse(context.Background())
+	if err != nil || got != "Mhm?" || path != "/api/v0/wake-response" {
+		t.Fatalf("%q %v at %s", got, err, path)
+	}
+	empty := cc(t, func(w http.ResponseWriter, _ *http.Request, _ []byte) { _, _ = w.Write([]byte(`{"text":""}`)) })
+	if _, err := empty.WakeResponse(context.Background()); err == nil {
+		t.Fatal("an empty greeting is a miss")
+	}
+}

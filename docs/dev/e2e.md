@@ -226,14 +226,40 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
 - During the suite the scripted model answers from `e2e/llm/mobile.json`.
-- adb transport drops: the harness emulator's adb connection drops now and then (adb's log:
+- adb transport drops: the harness emulator's adb connection can drop (adb's log:
   `emulator-5580: connection terminated: read failed`), and every drop wipes all the adb reverse
-  tunnels. So before every flow (and the real push lane) `e2emobile` waits for the device, sets
-  the tunnels again (`--reverse`, from `reverse_pairs` in `scripts/lib/mobile.sh`) and probes the
-  sandbox's `/health` from inside the emulator (`--health-port`). A flow that fails on a drop
-  (`device offline`, `not found`, `DeviceServerDied`), or finds the device not ready, is run once
-  more; the report says so on it (`note`). Every adb call carries `-s <serial>`: never
-  `adb kill-server`, nor `reverse --remove-all` without `-s`, as other emulators may be attached.
+  tunnels and kills Maestro's on-device driver. So before every flow (and the real push lane)
+  `e2emobile` waits for the device, sets the tunnels again (`--reverse`, from `reverse_pairs` in
+  `scripts/lib/mobile.sh`) and probes the sandbox's `/health` from inside the emulator
+  (`--health-port`). A flow that fails on a drop (`device offline`, `not found`,
+  `DeviceServerDied`), or finds the device not ready, is played again, up to 3 tries with a
+  growing pause (5 s, then 10 s), and before each retry the device is brought back:
+  `adb -s <serial> reconnect` when adb does not list it as a `device` (that kicks this one
+  transport; `reconnect offline` is host-wide and is never used), then two good `get-state` +
+  `sys.boot_completed` checks in a row (3 s apart, at most 2 min), then
+  `am force-stop dev.mobile.maestro.test` and `dev.mobile.maestro` so the next `maestro test`
+  starts a fresh driver. The report says so on the flow (`note`, with the host's load average
+  and available memory at each drop; the earlier tries' artifacts stay in `<flow>.try1`, ...)
+  and `results.json` counts the retries (`device_retries`). Every adb call carries
+  `-s <serial>`: never `adb kill-server`, nor `reverse --remove-all` without `-s`, as other
+  emulators may be attached.
+  What we know of the cause (#428, 2026-10-21): the host's one adb server (1.0.41,
+  platform-tools 37.0.1) ran from 10-18 to 10-21 without a restart, and the only connection to
+  the emulator's adb port (5581) was that server's, so a second server or Maestro's direct dadb
+  fallback (it connects to ports 5555-5683 itself only when no adb server answers) is not the
+  cause. Port 5580 is inside adb's scan range. Each emulator shutdown logs one `connection
+  terminated` as well, so count drops between boot and kill. `adb -s <serial> reconnect`
+  reproduces a drop exactly (`connection terminated: read failed`, then `DeviceServerDied` in
+  the flow), but it also logs `resetting transport`, which the bad run's log lacked: nothing
+  on the host kicked it. What the drops did line up with is memory: the dev box (31 GB) had
+  23 GB in swap, during a 4-minute run it swapped about 9 GB out with up to 750 MB of the
+  emulator's own memory in swap, and the one drop in a 19-minute run came after the emulator
+  got no CPU for about 20 s while the host's load doubled (a stall, not a busy guest). The AVD
+  already has 4 cores, so `-cores`/`-memory` flags would not help. To keep it from stalling,
+  run the emulator outside swap (for example under
+  `systemd-run --user --scope -p MemorySwapMax=0`, untried: the loop's agents may not run it)
+  or keep the box from swapping while the lane runs. `boot_emulator` warns when the host has
+  less than 6 GB available.
 - Pushes: the superuser has a fake device token (`PUSH_TOKEN`); a flow checks
   `${FAKE_RELAY}/control/pushes?token=${PUSH_TOKEN}` from a `runScript` and can make a node
   event happen through `${CC_URL}` with `${NODE_API_KEY}` for `${USER_ID}`
@@ -271,9 +297,25 @@ Two layers ([`../decisions/2026-10-18-e2e-push.md`](../decisions/2026-10-18-e2e-
   | the app's push config | `E2E_PUSH_GOOGLE_SERVICES`: the `google-services.json` of the Firebase project behind the Expo app's FCM credentials. It goes into the build as `./google-services.json` and `$GOOGLE_SERVICES_JSON`; the app config must name it in `android.googleServicesFile`, or the build stops saying so. The APK is cached apart from the default one |
   | a Google Play image | `sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'` (FCM needs Play services; no Google account needed) |
 
-  The two variables come from the environment or from `~/.config/jarvis-harness/push.env`
-  (`$JARVIS_HARNESS_PUSH_ENV` names another file). Keep the file out of the repo; a real push
-  goes to the emulator only, since only its token is registered in the throwaway sandbox.
+  The two variables come from the environment or from the push.env file, which scripts/e2e
+  reads from `~/.config/jarvis-harness/push.env` by default (or from `$JARVIS_HARNESS_PUSH_ENV`):
+  copy [`push.env.example`](../../push.env.example) to `~/.config/jarvis-harness/push.env` and
+  fill it in, or point `$JARVIS_HARNESS_PUSH_ENV` at your copy. Keep it out of the repo; a real
+  push goes to the emulator only, since only its token is registered in the throwaway sandbox.
+
+  What the user must provide before the lane can run — it is **skipped**, with the reason in
+  the report, until they exist, and so will an overnight `--real-push` lane once jarvis-loop
+  schedules one:
+
+  - the relay URL, reachable from the dev box (it holds the Expo push credentials);
+  - the `google-services.json` of the Firebase project behind the Expo app's FCM credentials
+    (the FCM V1 service-account key uploaded in EAS credentials must be from the same project);
+  - jarvis-node-mobile's app config naming `android.googleServicesFile` (the build stops
+    otherwise);
+  - the Google Play image: `sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'`
+    (the harness creates the AVD `jarvis-harness-play`);
+  - the push.env file itself: `~/.config/jarvis-harness/push.env`, copied from
+    [`push.env.example`](../../push.env.example).
 
 ## The iOS lane (`scripts/e2e ios`)
 

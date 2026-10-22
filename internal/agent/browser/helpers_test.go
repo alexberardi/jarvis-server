@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,12 +27,18 @@ func shortSocket(t *testing.T) string {
 // startHub serves a hub on a fresh socket until the test ends.
 func startHub(t *testing.T) (*Hub, string) {
 	t.Helper()
+	return startHubLog(t, nil)
+}
+
+// startHubLog is startHub with the hub's logger given.
+func startHubLog(t *testing.T, log *slog.Logger) (*Hub, string) {
+	t.Helper()
 	path := shortSocket(t)
 	ln, err := Listen(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewHub(nil)
+	h := NewHub(log)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); _ = h.Serve(ctx, ln) }()

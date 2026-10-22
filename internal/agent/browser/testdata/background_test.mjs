@@ -14,7 +14,7 @@ const listener = () => {
 
 // load runs background.js with a fake api: tabs are the open tabs, granted whether it has
 // access to websites, and blocked the urls whose injection the browser refuses.
-function load({ tabs = [], granted = true, blocked = [], firefox = true } = {}) {
+function load({ tabs = [], granted = true, blocked = [], firefox = true, timers = false } = {}) {
   const sent = [];
   const injected = []; // tab ids recInstall ran in
   const port = { onMessage: listener(), onDisconnect: listener(), postMessage: (m) => sent.push(m) };
@@ -44,20 +44,21 @@ function load({ tabs = [], granted = true, blocked = [], firefox = true } = {}) 
       },
     },
   };
-  const ctx = vm.createContext({ chrome: api, setTimeout: () => 0, clearTimeout() {}, console });
+  // timers: waits run at once (the page-load waits count tries, not the clock).
+  const ctx = vm.createContext({ chrome: api, setTimeout: timers ? (f) => setImmediate(f) : () => 0, clearTimeout() {}, console });
   vm.runInContext(SRC, ctx);
   let next = 0;
   const call = async (cmd, args) => {
     const id = ++next;
     port.onMessage.fns.forEach((f) => f({ type: "command", id, cmd, args }));
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 1000; i++) {
       const r = sent.find((m) => m.type === "result" && m.id === id);
       if (r) return r;
       await new Promise((ok) => setImmediate(ok));
     }
     throw new Error(`no result for ${cmd}`);
   };
-  return { call, sent, injected, ctx, events: () => sent.filter((m) => m.event === "record") };
+  return { call, sent, injected, ctx, api, events: () => sent.filter((m) => m.event === "record") };
 }
 
 const TABS = [
@@ -135,4 +136,48 @@ test("set_value fills a date field (the native setter, with input and change eve
   }
   fakeInput(ctx, "checkbox");
   assert.equal(ctx.actDo(1, 1, "set_value", "x", []).code, "invalid_argument");
+});
+
+// #420: "go to google.com and search for X" filled 1.4 s after open, while the new tab was still
+// loading. fill waits for the tab to load and for the field to appear, and says field_not_found
+// (never a success) when it doesn't.
+function loadingPage(b, { loadingFor, fieldAfter }) {
+  const tab = { id: 9, url: "", pendingUrl: "https://www.google.com/", status: "loading", active: true };
+  let gets = 0;
+  let probes = 0;
+  const filled = [];
+  b.api.tabs.query = async () => [tab];
+  b.api.tabs.get = async () => {
+    if (++gets > loadingFor) Object.assign(tab, { status: "complete", url: "https://www.google.com/", pendingUrl: undefined });
+    return { ...tab };
+  };
+  b.api.scripting.executeScript = async ({ target, args }) => {
+    if (tab.status === "loading") throw new Error("Cannot access contents of url \"about:blank\"");
+    if (target.allFrames) {
+      const there = ++probes > fieldAfter;
+      return [{ frameId: 0, result: { tier: there ? 3 : 0, count: there ? 1 : 0, labels: ["Search"], available: [] } }];
+    }
+    filled.push(args[1]);
+    return [{ frameId: 0, result: { filled: "Search", submitted: args[2] } }];
+  };
+  return filled;
+}
+
+test("fill waits for a loading tab and a field the page adds late", async () => {
+  const b = load({ timers: true });
+  const filled = loadingPage(b, { loadingFor: 5, fieldAfter: 2 });
+  const r = await b.call("fill", { field: "search", text: "best dog grooming", submit: true });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.result.submitted, true);
+  assert.equal(r.result.tab.url, "https://www.google.com/");
+  assert.deepEqual(filled, ["best dog grooming"]);
+});
+
+test("fill on a page that never shows the field fails with field_not_found", async () => {
+  const b = load({ timers: true });
+  const filled = loadingPage(b, { loadingFor: 1, fieldAfter: Infinity });
+  const r = await b.call("fill", { field: "search", text: "x" });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "field_not_found");
+  assert.deepEqual(filled, []);
 });

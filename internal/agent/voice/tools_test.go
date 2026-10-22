@@ -246,6 +246,26 @@ func TestFailingToolIsReportedAndSpokenNotTrusted(t *testing.T) {
 	}
 }
 
+// A parked action (dictate.Confirmer.Ask) is success:false because nothing was done yet, but
+// it's a question for the user, not a failure (#420): the model's question is spoken, even when
+// the call carries the failure_message text mode asks for on every call.
+func TestParkedActionIsAskedNotReportedAsAFailure(t *testing.T) {
+	tools := funcTools{"browser_fill": func(context.Context, map[string]any) map[string]any {
+		return map[string]any{"success": false, "done": false, "status": "awaiting_confirmation",
+			"confirmation_id": "confirm-1", "question": "Fill the search field and submit?"}
+	}}
+	fm := "I couldn't fill the search field."
+	c := call("c1", "browser_fill", `{}`)
+	c.FailureMessage = &fm
+	r, tr := toolRig(t, tools, toolCalls(c), steps(t, complete("Fill the search field and submit?")))
+	if tr.Outcome != OutcomeSpoken || r.srv.spoken != "Fill the search field and submit?" {
+		t.Fatalf("turn %+v, spoke %q", tr, r.srv.spoken)
+	}
+	if tr.Tools[0].Success { // the trace stays honest: nothing was done
+		t.Fatalf("tools %+v", tr.Tools)
+	}
+}
+
 func TestUnknownToolIsAFailureResult(t *testing.T) {
 	os := &fakeOS{}
 	r, tr := toolRig(t, desktopTools(os), toolCalls(call("c1", "rm_rf", `{"path":"/"}`)),

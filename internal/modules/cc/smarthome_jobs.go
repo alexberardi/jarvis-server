@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -268,11 +269,124 @@ func (m *Module) handleUploadBTPair(w http.ResponseWriter, r *http.Request, n *n
 	if success {
 		sets, args = []string{"status = 'completed'", "device_name = ?"}, []any{opt(name, hasName)}
 	}
-	if err := m.uploadJob(r.Context(), btPairJob, r.PathValue("request_id"), nodeID, sets, args); err != nil {
+	rid := r.PathValue("request_id")
+	if err := m.uploadJob(r.Context(), btPairJob, rid, nodeID, sets, args); err != nil {
 		m.writeErr(w, err)
 		return
 	}
+	if success {
+		// The node pairs, connects and only then reports success: the status page lists it
+		// connected now, not after the next scan.
+		var mac string
+		err := m.deps.DB.Read.QueryRowContext(r.Context(), `SELECT mac_address FROM cc_bluetooth_pair_requests WHERE id = ?`, rid).Scan(&mac)
+		if err == nil {
+			err = m.patchBTStatus(r.Context(), nodeID, mac, func(d map[string]any) map[string]any {
+				if d == nil {
+					d = map[string]any{"mac_address": normBTMAC(mac), "device_type": "unknown"}
+				}
+				if hasName && name != "" {
+					d["name"] = name
+				}
+				d["paired"], d["connected"] = true, true
+				return d
+			})
+		}
+		if err != nil {
+			m.internalError(w, err)
+			return
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func normBTMAC(mac string) string { return strings.ToUpper(strings.ReplaceAll(mac, "-", ":")) }
+
+// patchBTStatus applies one device's change to the node's latest completed scan, which is what
+// GET …/bluetooth/status reads: f gets the device's entry (nil when the scan doesn't have it)
+// and returns it changed, or nil to drop it. Without a completed scan there is nothing to patch.
+func (m *Module) patchBTStatus(ctx context.Context, nodeID, mac string, f func(map[string]any) map[string]any) error {
+	var id string
+	var results sql.NullString
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT id, results_json FROM cc_bluetooth_scan_requests
+		WHERE node_id = ? AND status = 'completed' ORDER BY completed_at DESC, rowid DESC LIMIT 1`, nodeID).Scan(&id, &results)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	want, found := normBTMAC(mac), false
+	out := []map[string]any{}
+	for _, d := range decodeResults(results) {
+		if normBTMAC(getStr(d, "mac_address", "")) == want {
+			found = true
+			d = f(d)
+		}
+		if d != nil {
+			out = append(out, d)
+		}
+	}
+	if !found {
+		if d := f(nil); d != nil {
+			out = append(out, d)
+		}
+	}
+	raw, _ := json.Marshal(out)
+	_, err = m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_bluetooth_scan_requests SET results_json = ?, device_count = ? WHERE id = ?`,
+		string(raw), len(out), id)
+	return err
+}
+
+var progressRe = regexp.MustCompile(`^[a-z_]{1,32}$`)
+
+// handleBTProgress is the node's word on a scan or pair it is still working on (#433): what it is
+// doing ("scanning", "pairing", "connecting", "audio") and, for a scan, the devices found so
+// far. The request stays pending until the result upload; a post after it changes nothing.
+func (m *Module) handleBTProgress(k jobKind) nodeHandler {
+	return func(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+		nodeID, ok := uploadNode(w, r, n)
+		if !ok {
+			return
+		}
+		b, _, ok := readBody(w, r, false)
+		if !ok {
+			return
+		}
+		progress, _ := b.str("progress", true)
+		if progress != "" && !progressRe.MatchString(progress) {
+			b.fail("progress", "String should match pattern '^[a-z_]{1,32}$'")
+		}
+		var devices []any
+		hasDevices := k == btScanJob && b.has("devices")
+		if hasDevices {
+			devices = resultDevices(b, false)
+		}
+		if !b.done(w) {
+			return
+		}
+		ctx, rid := r.Context(), r.PathValue("request_id")
+		var exists int
+		err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT 1 FROM `+k.table+` WHERE id = ? AND node_id = ?`, rid, nodeID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			m.writeErr(w, fail(http.StatusNotFound, k.noun+" not found"))
+			return
+		}
+		if err != nil {
+			m.internalError(w, err)
+			return
+		}
+		sets, args := "progress = ?", []any{progress}
+		if hasDevices {
+			raw, _ := json.Marshal(devices)
+			sets, args = sets+", results_json = ?, device_count = ?", append(args, string(raw), len(devices))
+		}
+		args = append(args, rid, dbTime(m.now()))
+		if _, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE `+k.table+` SET `+sets+` WHERE id = ? AND status = 'pending' AND expires_at > ?`, args...); err != nil {
+			m.internalError(w, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	}
 }
 
 // jobState is the shared poll prelude: 404, household check (D4/D5), lazy expiry → 410.
@@ -499,15 +613,22 @@ func (m *Module) handlePollBTScan(w http.ResponseWriter, r *http.Request, a prov
 		m.writeErr(w, err)
 		return
 	}
-	var results, errMsg sql.NullString
-	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT results_json, error_message FROM cc_bluetooth_scan_requests WHERE id = ?`, rid).
-		Scan(&results, &errMsg); err != nil {
+	var results, errMsg, progress sql.NullString
+	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT results_json, error_message, progress FROM cc_bluetooth_scan_requests WHERE id = ?`, rid).
+		Scan(&results, &errMsg, &progress); err != nil {
 		m.internalError(w, err)
 		return
 	}
-	out := map[string]any{"status": status, "request_id": rid, "devices": nil, "device_count": nil, "error_message": nil}
+	out := map[string]any{"status": status, "request_id": rid, "devices": nil, "device_count": nil, "error_message": nil, "progress": nullable(progress)}
 	switch status {
 	case "pending":
+		if results.Valid { // the devices found so far (#433)
+			devices := []map[string]any{}
+			for _, d := range decodeResults(results) {
+				devices = append(devices, btDevice(d, getBool(d, "paired", false), getBool(d, "connected", false)))
+			}
+			out["devices"], out["device_count"] = devices, len(devices)
+		}
 	case "failed":
 		out["error_message"] = nullable(errMsg)
 	default:
@@ -528,13 +649,13 @@ func (m *Module) handlePollBTPair(w http.ResponseWriter, r *http.Request, a prov
 		m.writeErr(w, err)
 		return
 	}
-	var name, errMsg sql.NullString
-	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT device_name, error_message FROM cc_bluetooth_pair_requests WHERE id = ?`, rid).
-		Scan(&name, &errMsg); err != nil {
+	var name, errMsg, progress sql.NullString
+	if err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT device_name, error_message, progress FROM cc_bluetooth_pair_requests WHERE id = ?`, rid).
+		Scan(&name, &errMsg, &progress); err != nil {
 		m.internalError(w, err)
 		return
 	}
-	out := map[string]any{"status": status, "request_id": rid, "device_name": nil, "error_message": nil}
+	out := map[string]any{"status": status, "request_id": rid, "device_name": nil, "error_message": nil, "progress": nullable(progress)}
 	switch status {
 	case "pending":
 	case "failed":
@@ -583,6 +704,22 @@ func (m *Module) handleBTFire(topic string) provHandler {
 			return
 		}
 		m.publishNode(nodeID, topic, payload)
+		// What the node is now doing is what the status page shows (#433: a forgotten device
+		// stayed listed, and the app kept sending its auto-connect, until the next scan).
+		if mac, _ := payload["mac_address"].(string); topic == "bluetooth-disconnect" || topic == "bluetooth-release" {
+			forget, _ := payload["forget"].(bool)
+			err := m.patchBTStatus(r.Context(), nodeID, mac, func(d map[string]any) map[string]any {
+				if d == nil || forget {
+					return nil
+				}
+				d["connected"] = false
+				return d
+			})
+			if err != nil {
+				m.internalError(w, err)
+				return
+			}
+		}
 		httpx.WriteJSON(w, http.StatusAccepted, resp)
 	}
 }

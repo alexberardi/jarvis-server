@@ -174,6 +174,9 @@ type conversation struct {
 	computer *computerActivity
 
 	pendingTranscript *pendingTranscript
+	// pendingConfirm is a client action parked behind the user's yes in the last results, for
+	// the next turn's hint (confirm_hint.go).
+	pendingConfirm *pendingConfirm
 
 	// nextMsgID numbers committed messages (chatMsg.id).
 	nextMsgID uint64

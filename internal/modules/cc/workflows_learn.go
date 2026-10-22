@@ -693,6 +693,7 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 			pages[i] = pages[i-1]
 		}
 	}
+	var start string // the page the first step was on
 	for _, s := range out.Steps {
 		n := primaryEvent(evs, stepEvents(s.EventSeqs, len(evs)))
 		if n == 0 {
@@ -713,9 +714,33 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 			continue
 		}
 		step.Risk = risk
+		if len(w.Steps) == 0 {
+			start = pages[n-1]
+		}
 		addStep(&w, step, subs[n])
 	}
+	if s, ok := startStep(w.Steps, start); ok {
+		w.Steps = append([]WStep{s}, w.Steps...)
+	}
 	return finishDraft(w, successCheck(out.Success, evs))
+}
+
+// startStep is the step that opens start, the page a recording's first step was on, when the
+// recording began on the site rather than with a navigation: without it a replay opens
+// https://<site> and not that page (#418). The page's query and fragment are dropped (they may
+// hold what was typed into it); false when the first step already navigates, or there's no room.
+func startStep(steps []WStep, start string) (WStep, bool) {
+	if len(steps) == 0 || steps[0].Action.Kind == "navigate" || len(steps) >= maxWorkflowSteps {
+		return WStep{}, false
+	}
+	u, err := url.Parse(start)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Host != steps[0].Site {
+		return WStep{}, false
+	}
+	u.RawQuery, u.Fragment, u.User = "", "", nil
+	intent := "Open " + u.Host
+	return WStep{Intent: intent, Target: "browser", Site: u.Host,
+		Action: computeruse.Action{Kind: "navigate", URL: u.String(), Intent: intent}}, true
 }
 
 // buildDesktopWorkflow is buildWorkflow for a desktop trace: each step targets the recorded

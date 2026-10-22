@@ -91,6 +91,13 @@ type StreamRequest struct {
 	// SpeechLevel is a wake turn's speech level in dBFS: with WakeConfidence, how
 	// command-center picks the node that answers when several heard one wake.
 	SpeechLevel *float64 `json:"speech_level_db,omitempty"`
+	// PreWakeSpeechSecs is a wake turn's speech in the 5 s before the wake word (PreWakeVAD):
+	// command-center's "room was quiet" direction hint.
+	PreWakeSpeechSecs *float64 `json:"pre_wake_speech_seconds,omitempty"`
+	// SelfPlayback is the node's own music playing at the wake ("music" kind): command-center
+	// then takes PreWakeSpeechSecs as unreliable (the window is the music's bleed).
+	SelfPlayback     *bool  `json:"self_playback,omitempty"`
+	SelfPlaybackKind string `json:"self_playback_kind,omitempty"`
 }
 
 // Reply is either streamed speech (200) or a control response (202).

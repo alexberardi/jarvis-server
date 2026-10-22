@@ -174,7 +174,7 @@ func TestLiveCallEndToEnd(t *testing.T) {
 		t.Fatalf("disclosure: %q", got)
 	}
 	s := e.waitState(t, id, StateInCall)
-	if s.CallSID != "CA1" || s.InCallAt.IsZero() {
+	if s.CallID != "CA1" || s.InCallAt.IsZero() {
 		t.Fatalf("in_call: %+v", s)
 	}
 
@@ -472,7 +472,7 @@ func waitCallSID(t *testing.T, s *Service, id string) {
 	for time.Now().Before(deadline) {
 		if rt := s.runtime(id); rt != nil {
 			rt.mu.Lock()
-			bound := rt.callSID != ""
+			bound := rt.callID != ""
 			rt.mu.Unlock()
 			if bound {
 				return

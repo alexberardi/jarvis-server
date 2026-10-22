@@ -6,6 +6,7 @@
 package hat
 
 import (
+	"cmp"
 	"log/slog"
 	"math"
 	"sync"
@@ -116,13 +117,37 @@ type Strip interface {
 	Close() error
 }
 
+// output is what LEDs draws on: the HAT's APA102 chain, or the Pi's own ACT LED (act.go).
+type output interface {
+	// pick is the pattern shown for the stable pattern and the overlay ("" = none).
+	pick(stable, transient string) string
+	// encode is what to write for pattern name at t seconds, at scale percent.
+	encode(name string, t float64, scale int) []byte
+	// animated reports whether name changes with time (the others are drawn once).
+	animated(name string) bool
+	write(b []byte) error
+	// close releases the output, after encode(Off) was written.
+	close() error
+}
+
+// chain is the HAT's three APA102 LEDs.
+type chain struct{ Strip }
+
+func (chain) pick(stable, transient string) string { return cmp.Or(transient, stable) }
+func (chain) encode(name string, t float64, scale int) []byte {
+	return Frame(Render(name, t, scale))
+}
+func (chain) animated(name string) bool { return animated[name] }
+func (c chain) write(b []byte) error    { _, err := c.Write(b); return err }
+func (c chain) close() error            { return c.Close() }
+
 // LEDs is the Python service's two-layer model: a stable pattern (idle / alert) with a
 // transient command-flow overlay on top, rendered at RenderFPS on its own goroutine. Every method
 // is safe to call from any goroutine and returns at once.
 type LEDs struct {
-	strip Strip
-	log   *slog.Logger
-	now   func() time.Time
+	out output
+	log *slog.Logger
+	now func() time.Time
 	// afterFunc schedules Preview's auto-clear (time.AfterFunc; tests fire it themselves).
 	afterFunc func(time.Duration, func()) *time.Timer
 
@@ -144,8 +169,10 @@ type LEDs struct {
 var animated = map[string]bool{Thinking: true, ShutdownWarning: true, Setup: true}
 
 // NewLEDs starts rendering to strip: "normal" (dim white) until told otherwise.
-func NewLEDs(strip Strip, log *slog.Logger) *LEDs {
-	l := &LEDs{strip: strip, log: log, now: time.Now, afterFunc: time.AfterFunc, stable: Normal, enabled: true, scale: 100,
+func NewLEDs(strip Strip, log *slog.Logger) *LEDs { return newLEDs(chain{strip}, log) }
+
+func newLEDs(out output, log *slog.Logger) *LEDs {
+	l := &LEDs{out: out, log: log, now: time.Now, afterFunc: time.AfterFunc, stable: Normal, enabled: true, scale: 100,
 		stop: make(chan struct{}), done: make(chan struct{}), changed: make(chan struct{}, 1)}
 	go l.loop()
 	return l
@@ -239,19 +266,16 @@ func (l *LEDs) loop() {
 	var last []byte
 	for {
 		l.mu.Lock()
-		name, on, scale := l.stable, l.enabled, l.scale
-		if l.transient != "" {
-			name = l.transient
-		}
+		name, on, scale := l.out.pick(l.stable, l.transient), l.enabled, l.scale
 		l.mu.Unlock()
 		if !on {
 			name, scale = Off, 0
 		}
-		f := Frame(Render(name, l.now().Sub(t0).Seconds(), scale))
+		f := l.out.encode(name, l.now().Sub(t0).Seconds(), scale)
 		// Python rewrites every frame; skipping unchanged ones saves the SPI write and its CPU
 		// on a Zero, and steady patterns are most of the time.
 		if string(f) != string(last) {
-			if _, err := l.strip.Write(f); err != nil {
+			if err := l.out.write(f); err != nil {
 				if msg := err.Error(); msg != l.lastErr {
 					l.lastErr = msg
 					l.log.Warn("hat: LED write failed", "pattern", name, "err", err)
@@ -262,7 +286,7 @@ func (l *LEDs) loop() {
 			}
 		}
 		var next <-chan time.Time // nil: a static pattern waits for a change
-		if animated[name] {
+		if l.out.animated(name) {
 			next = tick.C
 		}
 		select {
@@ -274,7 +298,8 @@ func (l *LEDs) loop() {
 	}
 }
 
-// Close stops rendering, turns the LEDs off and closes the strip.
+// Close stops rendering, turns the LEDs off and closes the strip (the ACT LED gets its kernel
+// trigger back).
 func (l *LEDs) Close() error {
 	select {
 	case <-l.stop:
@@ -286,6 +311,6 @@ func (l *LEDs) Close() error {
 	l.mu.Lock()
 	l.cancelLocked()
 	l.mu.Unlock()
-	_, _ = l.strip.Write(Frame(Render(Off, 0, 0)))
-	return l.strip.Close()
+	_ = l.out.write(l.out.encode(Off, 0, 0))
+	return l.out.close()
 }

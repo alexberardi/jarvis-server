@@ -359,6 +359,18 @@ func (c *CC) PostBluetoothPairResult(ctx context.Context, rid string, body map[s
 	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/bluetooth/pair/"+url.PathEscape(rid)+"/results", body, nil)
 }
 
+// PostBluetoothScanProgress tells jarvisd a bluetooth-scan request is still running:
+// {"progress": "scanning", "devices": [... found so far]}. A jarvisd older than the route 404s.
+func (c *CC) PostBluetoothScanProgress(ctx context.Context, rid string, body map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/bluetooth-scan/"+url.PathEscape(rid)+"/progress", body, nil)
+}
+
+// PostBluetoothPairProgress tells jarvisd what a bluetooth-pair request is doing:
+// {"progress": "pairing" | "connecting" | "audio" ...}.
+func (c *CC) PostBluetoothPairProgress(ctx context.Context, rid string, body map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/api/v0/nodes/"+url.PathEscape(c.Creds.NodeID)+"/bluetooth/pair/"+url.PathEscape(rid)+"/progress", body, nil)
+}
+
 // Revoked reports whether err is jarvisd refusing this node's key: 401 (an unknown, deactivated
 // or deleted node) or 403. Not a network error and not a 5xx: those are retried, never a reason
 // to drop credentials.
