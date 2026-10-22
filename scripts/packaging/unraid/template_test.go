@@ -184,13 +184,16 @@ func TestTemplate(t *testing.T) {
 	if len(cats) == 0 {
 		t.Error("no Category")
 	}
+	// CA writes categories "Parent:" or "Parent:Child" (Tools:Utilities).
+	catRE := regexp.MustCompile(`^[A-Za-z]+:([A-Za-z]+)?$`)
 	for _, cat := range cats {
-		if !strings.HasSuffix(cat, ":") {
-			t.Errorf("Category token %q does not end in ':'", cat)
+		if !catRE.MatchString(cat) {
+			t.Errorf("Category token %q is not Parent: or Parent:Child", cat)
 		}
 	}
-	// The template's network is bridge; the Overview must not read as if it were host.
-	if strings.Contains(c.Overview, "Host networking also lets") {
+	// The template's network is bridge; the Overview may say how to switch to Host, but must
+	// not talk about host networking as if the template had it.
+	if strings.Contains(strings.ToLower(c.Overview), "host network") {
 		t.Errorf("Overview reads as if the template used host networking: %q", c.Overview)
 	}
 }
