@@ -118,6 +118,23 @@ func TestTentativeWakeDucksThenExpires(t *testing.T) {
 	}
 }
 
+// The band's top is the calibrated threshold (17d): with it raised to 0.50, a 0.45 over the
+// node's own music neither fires nor falls out of the band.
+func TestTentativeBandEndsAtTheCalibratedThreshold(t *testing.T) {
+	mic := script(rep(noise, 60))
+	r, m := tentativeRig(t, mic, true, map[int]float32{10: 0.45})
+	r.p.Cfg.WakeThresholdAuto, r.p.WakeScores = true, &WakeScores{}
+	for range 5 {
+		r.p.WakeScores.Record(0.95) // p20 × 0.85, clamped to 0.50
+	}
+	stop := r.run(t)
+	r.noTurnBy(t, mic, 50)
+	_ = stop()
+	if got, want := m.list(), []string{"duck", "restore"}; !slices.Equal(got, want) {
+		t.Fatalf("music steps %v, want %v", got, want)
+	}
+}
+
 // The fire completes the tentative: one turn, the music ducked once more (Ducker.Duck keeps the
 // first saved volume) and restored after it; the clip reaches back past the tentative duck.
 func TestTentativeWakeCompletedByAFire(t *testing.T) {

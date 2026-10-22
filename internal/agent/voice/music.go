@@ -14,7 +14,8 @@ type Music interface {
 	// SetSelfPlaying records that the node's own music started (a deferred play ran).
 	SetSelfPlaying(ctx context.Context, on bool, trigger string)
 	// SelfPlaying is the cached "the node's own music is playing" (no pactl): it arms the
-	// tentative wake (tentative.go) and goes to command-center with the wake.
+	// tentative wake (tentative.go), goes to command-center with the wake, and keeps a wake
+	// over it out of the calibration (wakegate.go).
 	SelfPlaying() bool
 }
 

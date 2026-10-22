@@ -90,7 +90,7 @@ Tags:
 | 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
 | 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
 | 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | **done in the Go agent (§3.16, 17c)** |
-| 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | tentative wake **done in the Go agent (§3.16, 17c)**; cool-down and auto threshold later (17d) |
+| 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | tentative wake **done in the Go agent (§3.16, 17c)**; cool-down and auto threshold **built (§3.20, 17d)** |
 | 23 | Boot warmup that sends a real "hello" LLM turn | `N:scripts/main.py:390-424` | – | drop |
 
 **Wake verification is server-side only.** There is no `wake_unverified` logic on the node.
@@ -531,7 +531,7 @@ handles) or guesses. Covered by the pipeline tests and the server test above. Al
 **Deferred:** `act_on_items` (a node-side dispatcher over items earlier commands returned, a
 separate mechanism: it needs the sidecar to keep `ref_id → command` and call commands'
 callbacks), a listening cue on desktops (**done 2026-10-11: the island, DESIGN.md §11**), barge-in during follow-up replies (**done 2026-10-17, §3.13**), the not_for_me
-wake cool-down, an `end_of_exchange` header on the stream route (server).
+wake cool-down (**done 2026-10-21, §3.20**), an `end_of_exchange` header on the stream route (server).
 
 ### 3.10 The follow-up gate: "is this speech for me?" (2026-10-10)
 
@@ -1273,12 +1273,12 @@ checked on the lab Pi 4 since it was built.
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
 | 5.10 voice-profile takes | built | no |
-| 5.11 music ducking and takeover (17a); tentative wake and `pre_wake_speech_seconds` (17c, loop #425) | built | no; **open (a)**: 17b echo cancellation during music, 17d wake auto-calibration and the false-wake cool-down, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
+| 5.11 music ducking and takeover (17a); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; **open (a)**: 17b echo cancellation during music, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
 
 What each open gap blocks, if the Python node were retired today:
 
 - **(a)** music is louder in the mic than with the Python node (no AEC), so wakes over music fail
-  more often; there is no auto-calibration and no false-wake cool-down (the tentative wake is built, 17c, not yet on a Pi); and a
+  more often; the tentative wake (17c), the auto-calibration and the not_for_me cool-down (17d) are built, not yet on a Pi; and a
   Pi without the HAT has no LED at all.
 - **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
   the node. The app's device control still works.
@@ -1320,6 +1320,33 @@ is checked on the lab Pi 4 and the soak meets the pass bar:
    An archived repository still serves the pinned tarball, but no fix can land in it.
 5. **Last:** jarvisd's Python-node-only paths (the jarvis-node-setup release as "latest" for
    nodes with no runtime, §7 4.2) stay until no heartbeat in the field reports a Python node.
+
+### 3.20 Parity 5.11: wake auto-calibration and the not_for_me cool-down (2026-10-21, loop #426 17d)
+
+`voice/wakegate.go` ports N:'s wake gate (`N:core/wake_detector.py` `decide_wake_fire`,
+`N:core/voice_filters.py`) and its calibrator (`N:core/wake_calibration.py`)
+([decision](../decisions/2026-10-21-pi-node-wake-calibration-and-cooldown.md)).
+
+| When | Does |
+|---|---|
+| A score is above the threshold | It fires unless the gate is shut. A fire shuts it for the 8 s debounce and drops any override. A held score leaves the gate as it was (log `wake-suppressed-gate` above 0.3) |
+| A turn ends `not_for_me` (the woken command or a follow-up answer) | The gate shuts for 20 s, or 60 s with 2 or more verdicts in 120 s, never earlier than it already was, with a 0.6 override: a score of 0.6 or more fires anyway (`wake-override-cooldown`) and leaves only the debounce |
+| The woken command ends spoken, silent or interrupted, without an error, not over the node's own music | Its wake score joins the last 20 in `<cache>/jarvis-agent/wake_scores.json`, even when a follow-up answer then ends `not_for_me` (that also arms the cool-down) |
+| `wake_word_threshold_auto` is on | The threshold is the 20th percentile of those scores less 15%, in [0.10, 0.50]; `wake_word_threshold` until there are 5 |
+
+The app's `update_node_config` sets `wake_word_threshold_auto` (agent.json
+`wake_threshold_auto`, `--wake-threshold-auto`) and the snapshot reports it; the cool-down's
+tunables are N:'s defaults, fixed. Not ported: `N:core/false_wake.py` (it needs the node's own
+transcript, which the Go node doesn't have before CC; see the decision).
+
+**Verified** with unit tests: N:'s `tests/test_wake_calibration.py` cases and the gate with a
+fake clock (`voice/wakegate_test.go`), and through the pipeline with the fake detector: a 0.5
+wake held after a `not_for_me` turn, or after a spoken turn whose follow-up answer was `not_for_me`,
+and a 0.95 one let through; a spoken turn recorded (with a `not_for_me` follow-up too), a wake
+that heard no words and a wake over the node's own music not, and the calibrated threshold letting a 0.5 wake through a static
+0.6. **Not yet on a Pi**: the scores a room gives, and the cool-down against a TV. On the lab
+Pi 4 (`--wake-threshold-auto`, or the setting from the app), the log has `not-for-me-cooldown-armed`
+after a side conversation, then `wake-suppressed-gate` or `wake-override-cooldown`.
 
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
@@ -1669,9 +1696,10 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
        `pre_wake_speech_seconds`, §1.1 rows 21–22) built 2026-10-21 (loop #425, §3.16), not yet
        on a Pi. Still to build from #180, in order
        ([decision](../decisions/2026-10-19-pi-node-music-ducking.md)): 17b echo cancellation
-       during music; 17d wake
-       auto-calibration and the false-wake cool-down; 17e the wake greeting prefetch (row 20),
-       maintenance restart and the ACT-LED fallback without a HAT.
+       during music; 17e the wake greeting prefetch (row 20),
+       maintenance restart and the ACT-LED fallback without a HAT. 17c (tentative wake and
+       `pre_wake_speech_seconds`) and 17d (wake auto-calibration and the not_for_me cool-down)
+       **built (§3.16, §3.20)**; unit tests, not yet on a Pi.
 
    Then retire the Python node. **Proposed 2026-10-19, BLOCKED** (loop #181, §3.19): the soak
    script (`scripts/pi-soak.sh`) and its commands, the parity checklist and the retirement path

@@ -112,14 +112,14 @@ func TestPiToolset(t *testing.T) {
 // The Pi's node_config: the HAT as opened, and the voice and LED settings, under the Python
 // node's keys.
 func TestPiNodeConfig(t *testing.T) {
-	vf := &voiceFlags{threshold: 0.6, noChimes: true, followUp: 4, followSilence: 0.5, bargeIn: true,
+	vf := &voiceFlags{threshold: 0.6, wakeAuto: true, noChimes: true, followUp: 4, followSilence: 0.5, bargeIn: true,
 		silenceThreshold: 1000, listenSilence: 0.5, followMinAfterOnset: 0.9, followMinSpeech: 0.45}
 	hf := &hatFlags{mode: "auto", brightness: 40}
 	st := piState(vf, hf)
 	state := func() pinode.State { return st }
 	got := piNodeConfig(state, true, nil, nil, false)()
 	want := map[string]any{
-		"wake_word_threshold": 0.6, "wake_ack_audio_enabled": false,
+		"wake_word_threshold": 0.6, "wake_word_threshold_auto": true, "wake_ack_audio_enabled": false,
 		"follow_up_listen_seconds": 4.0, "follow_up_silence_duration": 0.5, "barge_in_enabled": true,
 		"silence_threshold": 1000, "silence_duration": 0.5,
 		"follow_up_min_record_after_onset_secs": 0.9, "follow_up_min_speech_secs": 0.45,
@@ -194,7 +194,7 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 		t.Fatalf("verbs %v", r.Verbs)
 	}
 	b, _ := json.Marshal([]map[string]any{{"command": "update_node_config", "details": map[string]any{
-		"settings": map[string]any{"led_brightness_percent": 30, "wake_word_threshold": 0.7,
+		"settings": map[string]any{"led_brightness_percent": 30, "wake_word_threshold": 0.7, "wake_word_threshold_auto": true,
 			"silence_threshold": 1000, "silence_duration": 0.5, "volume_percent": 65}}}})
 	d := &node.Dispatcher{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Verbs: map[string]func(context.Context, map[string]any){}}
 	for name, v := range r.Verbs {
@@ -202,12 +202,12 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 	}
 	d.Handle(context.Background(), b)
 	got := cfg()
-	if got["led_brightness_percent"] != 30 || got["wake_word_threshold"] != 0.7 || got["silence_threshold"] != 1000 ||
+	if got["led_brightness_percent"] != 30 || got["wake_word_threshold"] != 0.7 || got["wake_word_threshold_auto"] != true || got["silence_threshold"] != 1000 ||
 		got["silence_duration"] != 0.5 || got["volume_percent"] != 65 || got["is_muted"] != false {
 		t.Fatalf("node_config %v", got)
 	}
 	s, _, err := settings.Load(path)
-	if err != nil || *s.LEDBrightness != 30 || *s.WakeThreshold != 0.7 || *s.SilenceThreshold != 1000 || *s.ListenSilence != 0.5 {
+	if err != nil || *s.LEDBrightness != 30 || *s.WakeThreshold != 0.7 || s.WakeAuto == nil || !*s.WakeAuto || *s.SilenceThreshold != 1000 || *s.ListenSilence != 0.5 {
 		t.Fatalf("saved %+v %v", s, err)
 	}
 	// The volume reached the speaker and volume.json (applied again at start), not agent.json.

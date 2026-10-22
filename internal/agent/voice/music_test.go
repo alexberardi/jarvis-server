@@ -15,7 +15,7 @@ type fakeMusic struct {
 	mu    sync.Mutex
 	steps []string
 	done  chan struct{} // closed at SetSelfPlaying
-	self  bool          // SelfPlaying
+	self  bool          // SelfPlaying's answer
 }
 
 func (m *fakeMusic) add(s string) {
@@ -35,7 +35,11 @@ func (m *fakeMusic) Duck(context.Context) {
 	m.add("duck")
 }
 func (m *fakeMusic) Restore(context.Context) { m.add("restore") }
-func (m *fakeMusic) SelfPlaying() bool       { return m.self }
+func (m *fakeMusic) SelfPlaying() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.self
+}
 func (m *fakeMusic) SetSelfPlaying(_ context.Context, on bool, trigger string) {
 	m.add("self_playing:" + trigger)
 	close(m.done)

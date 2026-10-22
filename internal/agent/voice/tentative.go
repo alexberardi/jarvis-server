@@ -8,7 +8,7 @@ import (
 )
 
 // TentativeConfig is the two-stage wake during the node's own music (N:core/wake_loop.py:200-236,
-// 403-466): a score in [Threshold, WakeThreshold] ducks the music without a turn, so the rest of
+// 403-466): a score in [Threshold, the wake threshold (wakeThreshold)] ducks the music without a turn, so the rest of
 // "hey Jarvis" arrives over quieter music and can complete a fire the loud music held below the
 // wake threshold. It is not a fire: no debounce, chime, indicator or turn.
 type TentativeConfig struct {
@@ -59,7 +59,7 @@ func (p *Pipeline) tentativeExpire(ctx context.Context, tw *tentative, now time.
 // during the node's own music and outside the cool-down: the music is ducked now.
 func (p *Pipeline) tentativeTrigger(ctx context.Context, tw *tentative, now time.Time, score float32, selfPlaying bool) {
 	c := p.Cfg.Tentative
-	if tw.open || c.Threshold <= 0 || !selfPlaying || float64(score) < c.Threshold || float64(score) > p.Cfg.WakeThreshold {
+	if tw.open || c.Threshold <= 0 || !selfPlaying || float64(score) < c.Threshold || float64(score) > p.wakeThreshold() {
 		return
 	}
 	if !p.tentativeAt.IsZero() && now.Sub(p.tentativeAt) < c.Cooldown {
@@ -69,7 +69,7 @@ func (p *Pipeline) tentativeTrigger(ctx context.Context, tw *tentative, now time
 	p.tentativeAt = now
 	p.duck(ctx)
 	p.Log.Info("tentative wake triggered", "score", fmt.Sprintf("%.3f", score), "tentative_threshold", c.Threshold,
-		"threshold_used", p.Cfg.WakeThreshold, "window", c.Window)
+		"threshold_used", p.wakeThreshold(), "window", c.Window)
 }
 
 // tentativeEnd closes an open tentative without a fire and puts the music back.
@@ -80,5 +80,5 @@ func (p *Pipeline) tentativeEnd(ctx context.Context, tw *tentative, reason strin
 	tw.open = false
 	p.restore(ctx)
 	p.Log.Info("tentative wake expired", "score_peak", fmt.Sprintf("%.3f", tw.peak), "window", p.Cfg.Tentative.Window,
-		"threshold_used", p.Cfg.WakeThreshold, "tentative_threshold", p.Cfg.Tentative.Threshold, "reason", reason)
+		"threshold_used", p.wakeThreshold(), "tentative_threshold", p.Cfg.Tentative.Threshold, "reason", reason)
 }
