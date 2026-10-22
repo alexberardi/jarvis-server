@@ -133,6 +133,22 @@ Risks and what we do about them:
    carry-over, not done here).
 3. **Inbound receptionist**: answer, prompt, `take_message`, notification, `phone_inbound_calls`,
    caps, barge-in. New caller class: held for the user's review.
+   **Done** (loop #446; choices in
+   [decision](../decisions/2026-10-22-phone-inbound-receptionist.md)): `phone/sip` offers each
+   INVITE from the registrar to `Config.Inbound` with its caller (P-Asserted-Identity, then From),
+   refuses it (480, or 486 above a cap) or rings it for `phone.inbound.answer_delay_seconds` and
+   answers (a CANCEL meanwhile leaves it unanswered); `phone/inbound.go` admits a call for the one
+   household that turned `phone.inbound.enabled` on for that SIP account (with `phone_calls.enabled`),
+   under `phone.inbound.max_concurrent_calls` (1) and `phone.inbound.calls_per_day` (20, UTC day),
+   and only once the disclosure is synthesized; the receptionist (`live/inbound.go`,
+   `phone/inbound_agent.go`) runs on the shared call loop (barge-in included) with only the
+   household's name, `[TAKE_MESSAGE]` and `[HANGUP]` (any other bracketed command is dropped
+   unspoken), and says goodbye at `phone.inbound.max_call_seconds` (180); cc migration 00300
+   `cc_phone_inbound_calls`; one notification per call (caller marked unverified, reason, message,
+   summary; no transcript) and the recording under `phone-calls/` like an outbound call's. Verified
+   on L1 (`jarvis-inbound*`) and, for the conversation, on the installed model
+   (`inbound_model_test.go`, prompt injection included). Left: transfer to a person (step 4), the
+   inbound settings in the mobile household settings, a list of inbound calls in the apps.
 4. **Transfer** (REFER) to configured targets.
 
 ## 5. Testing without a VoIP setup
@@ -165,7 +181,7 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   RTP 20000–20199 plus the sandbox's offset.
 - `test/sip/farend/`: baresip (WAV in, WAV out, driven over `ctrl_tcp`), SIPp, sox.
   `test/sip/sipp/`: the signalling-only scenarios.
-- `tools/siplane`: 20 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
+- `tools/siplane`: 23 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
   an internal call, the inbound route (DID 5551230000 → 100), the outbound route (→ carrier),
   ring group 600 (DID 5551230600), call waiting, busy with call waiting off (486), trunk busy
   (486, SIPp), no answer (183 + 503, SIPp), all trunks busy (200 + recording), a second contact
@@ -173,12 +189,15 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   (`phone/sip`, run in the runner's process as 100): it registers, unregisters on shutdown and
   registers again on the same port; a wrong password stops it after exactly 3 attempts; it
   dials a 10-digit number through the outbound route with audio both ways; busy, no answer and
-  all trunks busy come out as their outcomes. Audio is checked both ways: each far end's
+  all trunks busy come out as their outcomes; and jarvisd answering inbound calls: the carrier's
+  call to the DID is answered after the answer delay with the caller from PAI, the disclosure is
+  heard and the message transcribed; a ring group's other phone picking up during the delay
+  cancels jarvisd's leg unanswered; a second call above the cap gets 486 (busy). Audio is checked both ways: each far end's
   recording, and jarvisd's, is transcribed by the sandbox's CPU whisper, max WER 0.25.
 - CI: `.github/workflows/sip-lane.yml` on changes to `phone/**` or the lane, nightly, and by hand.
-- A baresip stand-in holds 100 for the scenarios that play a desk phone or the inbound route
-  (jarvisd answers no calls until step 3); each `jarvis-*` scenario has it delete its account
-  (unregistering) and create it again afterwards, since `max_contacts=1` lets one of them in.
+- A baresip stand-in holds 100 for the scenarios that play a desk phone or the inbound route;
+  each `jarvis-*` scenario has it delete its account (unregistering) and create it again
+  afterwards, since `max_contacts=1` lets one of them in.
 
 No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio account could front
 the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depends on it.

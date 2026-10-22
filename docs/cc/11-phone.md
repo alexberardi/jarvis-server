@@ -52,7 +52,7 @@ When the call ends you get an **outcome card**: a summary, `goal_achieved`, and 
 | jarvis-phone-gateway | `/internal/phone/sessions/*` (app-to-app auth). It is also called *by* CC: line-type lookup, escalation answer, cancel |
 | Background loop | Phone reaper, every 30 s |
 
-**Scope:** US-only (NANP) and outbound to businesses only. There are no inbound calls. Off by default: `phone_calls.enabled=false`, and the check fails closed.
+**Scope:** US-only (NANP) and outbound to businesses only. Inbound calls exist only on a SIP extension, as a receptionist that takes messages (phone.inbound.enabled, docs/cc/phone-sip.md §4 step 3). Off by default: `phone_calls.enabled=false`, and the check fails closed.
 
 ---
 
