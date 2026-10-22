@@ -52,7 +52,10 @@ type Call interface {
 	// Played is how far playback has got, in samples since Started, and a channel closed
 	// at its next change.
 	Played() (pos int64, changed <-chan struct{})
-	// Flush drops queued playback that has not been heard yet (barge-in).
+	// Flush drops queued playback that has not been heard yet (barge-in). Played then
+	// reaches the end of everything queued so far (Twilio: its marks are echoed at once), so a
+	// later Play's end stays on the same scale; a SIP pacer drops its queue and advances its
+	// position to the queue's end.
 	Flush() error
 	// SendDTMF sends digits in band or out of band; ErrUnsupported when the transport can't.
 	SendDTMF(digits string) error
