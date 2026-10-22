@@ -1,0 +1,10 @@
+{
+  "name": "zz_toast_live",
+  "about": "scratch repro of #485, never committed",
+  "phase": "browser",
+  "status": "pending",
+  "say": "Open the browser to the toast tab at https://toasttab.com and add a pulled pork sandwich to the cart",
+  "target": "browser",
+  "checks": [{"kind": "no_order"}],
+  "max_minutes": 4
+}
