@@ -101,7 +101,7 @@ func realPush(ctx context.Context, pc *pushConfig) (*Results, error) {
 		})
 	}
 	r.DurationMS = time.Since(t0).Milliseconds()
-	res := &Results{Suite: "mobile-push", Status: "passed", DurationMS: r.DurationMS, Tests: []Record{r}}
+	res := &Results{Suite: "mobile-push", Status: "passed", DurationMS: r.DurationMS, Tests: []Record{r}, DeviceRetries: pc.retries}
 	if r.Status != "passed" && r.Status != "skipped" {
 		res.Status = "failed"
 	}

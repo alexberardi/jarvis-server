@@ -32,7 +32,8 @@
 // also sets the adb reverse tunnels, and passes them as --reverse so that before every flow (and
 // the push lane) the runner waits for the device, sets them again and probes --health-port's
 // /health from inside the emulator: an adb transport drop wipes every tunnel. A flow that fails
-// on such a drop is run once more (run.go retryOnDrop), and its record says so (note).
+// on such a drop is played again once the device is back, up to 3 tries (run.go retryOnDrop,
+// recoverDevice), and its record says so (note).
 // Exit status: 0 all passed (or skipped), 1 a flow failed, 3 no flows to run, 2 bad usage.
 // Contract with the flows: docs/decisions/2026-10-18-e2e-mobile-runner.md.
 package main
