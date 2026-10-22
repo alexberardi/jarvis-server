@@ -190,6 +190,11 @@ def read_setup_token(home: str, flag: str) -> str:
     if os.environ.get("JARVIS_SETUP_TOKEN"):
         return os.environ["JARVIS_SETUP_TOKEN"]
     path = os.path.join(home, "setup-token")
+    # The file is jarvisd's readiness signal for setup (internal/modules/auth/setuptoken.go):
+    # /health can answer before the auth module has written it, so give it a moment.
+    deadline = time.monotonic() + 15
+    while not os.path.exists(path) and time.monotonic() < deadline:
+        time.sleep(0.2)
     try:
         with open(path, encoding="utf-8") as f:
             return f.read().strip()
