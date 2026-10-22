@@ -242,4 +242,3 @@ func TestUploadRecordingRoute(t *testing.T) {
 		ve.do("POST", uploadPath, bad, ve.node.h()).want(400)
 	}
 }
-
