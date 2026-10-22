@@ -264,7 +264,7 @@ func TestConfirmWithoutProviderFailsHonestly(t *testing.T) {
 	e := newEnv(t)
 	e.enable()
 	id := e.draft()
-	e.s.Provider = nil // no provider and no credentials anywhere (AD6)
+	e.s.Twilio = nil // no provider and no credentials anywhere (AD6)
 	r := e.s.ConfirmCall(context.Background(), CallbackContext{HouseholdID: hh, UserID: 2, Data: confirmData(id, "732-592-4183")})
 	if !strings.HasPrefix(r.Error, "Phone calls aren't set up for this household yet") {
 		t.Fatalf("result: %+v", r)

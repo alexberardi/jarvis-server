@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+// restCall is a Twilio call that has been placed (sid) but whose stream never connected.
+func restCall(api TwilioAPI, sid string) *twilioCall {
+	c := newTwilioCall(&twilioProvider{api: api}, DialRequest{SessionID: "s"})
+	c.sid = sid
+	return c
+}
+
 // A cancelled call is hung up at the provider even when the media stream has already closed.
 // Cancelling closes the socket, which ends the stream, so supervise often sees both rt.done
 // and ctx.Done ready, and select picks one at random: on the rt.done branch it used to return
@@ -16,7 +23,7 @@ func TestSuperviseHangsUpCancelledCallAfterStreamEnded(t *testing.T) {
 		p := newFakeProvider()
 		ctx, cancel := context.WithCancel(context.Background())
 		rt := &callRuntime{sessionID: "s", maxSeconds: 3600, ctx: ctx, cancel: cancel,
-			tel: Telephony{Provider: p}, started: make(chan struct{}), done: make(chan struct{}), callSID: "CA1"}
+			call: restCall(p, "CA1"), started: make(chan struct{}), done: make(chan struct{})}
 		cancel()
 		rt.markDone()
 		e.s.supervise(ctx, rt)
@@ -27,7 +34,7 @@ func TestSuperviseHangsUpCancelledCallAfterStreamEnded(t *testing.T) {
 	// A stream that ended by itself (the callee hung up) needs no hang-up.
 	p := newFakeProvider()
 	rt := &callRuntime{sessionID: "s", maxSeconds: 3600, ctx: context.Background(), cancel: func() {},
-		tel: Telephony{Provider: p}, started: make(chan struct{}), done: make(chan struct{}), callSID: "CA2"}
+		call: restCall(p, "CA2"), started: make(chan struct{}), done: make(chan struct{})}
 	rt.markDone()
 	e.s.supervise(context.Background(), rt)
 	if got := p.endedCalls(); len(got) != 0 {

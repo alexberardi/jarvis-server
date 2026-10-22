@@ -2,129 +2,85 @@ package phone
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
-	"time"
+	"errors"
 )
 
-// Provider is the telephony vendor seam (gateway telephony/provider.py, PRD decision 7): place
-// a call whose media is streamed to our WebSocket, end it, and look up a number's line type.
-// The Media Streams wire format (TwiML, frames, signatures) lives in package live. Tests use
-// a fake; only Twilio below talks to a real vendor.
+// Provider is the telephony seam (gateway telephony/provider.py, PRD decision 7,
+// docs/cc/phone-sip.md §1): place a call and hand the live loop a Call that carries its audio
+// both ways, and look up a number's line type. The live loop (VAD, STT, model, TTS,
+// escalation, recorder) only ever talks to a Call, so Twilio (Media Streams over our
+// WebSocket, twilio.go and twilio_media.go) and a SIP/RTP adapter sit behind the same
+// interface. Tests use fakes; only Twilio talks to a real vendor today.
 type Provider interface {
-	// StartCall places the outbound call with the given stream instructions (TwiML); it
-	// returns the provider's call id.
-	StartCall(ctx context.Context, to, instructions string) (string, error)
-	// EndCall terminates the call server-side.
-	EndCall(ctx context.Context, callSID string) error
+	// Ready reports whether a call can be placed now, checked before anything is spent on the
+	// call (the disclosure prewarm). Twilio: a public URL for the media stream is configured.
+	// The error's text is the session's failure reason.
+	Ready() error
+	// Dial places the outbound call. It returns once the provider has accepted it, not when
+	// it is answered (Call.Started); the error's text is the session's failure reason.
+	Dial(ctx context.Context, req DialRequest) (Call, error)
 	// LineType is "mobile" | "landline" | "voip" | "unknown"; any failure is "unknown".
 	LineType(ctx context.Context, e164 string) string
 }
 
-// Twilio is the Twilio REST provider (telephony/twilio_provider.py, services/line_lookup.py).
-// Credentials come from the environment, never the settings DB.
-type Twilio struct {
-	AccountSID string
-	AuthToken  string
-	FromNumber string
-	// APIBase / LookupBase default to Twilio's endpoints (overridable for a local fake).
-	APIBase    string
-	LookupBase string
-	Client     *http.Client
+// DialRequest is one outbound call.
+type DialRequest struct {
+	SessionID   string
+	HouseholdID string
+	To          string // E.164
 }
 
-func (t *Twilio) client() *http.Client {
-	if t.Client != nil {
-		return t.Client
-	}
-	return &http.Client{Timeout: 10 * time.Second}
+// Call is one placed call: its audio, its playback and its end. Audio is 8 kHz mono PCM16
+// both ways. A Call is used by one goroutine at a time (the call loop), except Close, Done
+// and Hangup, which the dialer's supervisor may call from its own.
+type Call interface {
+	// ID is the provider's call id (Twilio's call SID), stored on the session.
+	ID() string
+	// Started is closed once the call is answered and its media flows (Twilio: a validated
+	// stream-start).
+	Started() <-chan struct{}
+	// Frames yields the far end's audio in 20 ms frames (160 samples) from Started on,
+	// silence included, so the inbound stream is the call's clock. It is closed when the
+	// media ends. A transport that cannot deliver blocks rather than drops: a turn that runs
+	// long holds the far end's audio back, it does not lose it.
+	Frames() <-chan []int16
+	// Play queues pcm behind anything already queued; the transport paces it out in real
+	// time. It returns the playback position, in samples since Started, at which pcm ends.
+	// cue names that end in the transport's own playback reports (Twilio's mark name);
+	// a transport that tracks playback itself ignores it.
+	Play(pcm []int16, cue string) (end int64, err error)
+	// Played is how far playback has got, in samples since Started, and a channel closed
+	// at its next change.
+	Played() (pos int64, changed <-chan struct{})
+	// Flush drops queued playback that has not been heard yet (barge-in).
+	Flush() error
+	// SendDTMF sends digits in band or out of band; ErrUnsupported when the transport can't.
+	SendDTMF(digits string) error
+	// Done is closed when the call's media has ended; EndReason says why.
+	Done() <-chan struct{}
+	EndReason() EndReason
+	// Hangup ends the call at the provider (Twilio: the REST call's status → completed).
+	Hangup(ctx context.Context) error
+	// Close releases the media and anything the call holds (Twilio: the stream token and
+	// the WebSocket, which ends a <Connect><Stream> call). Safe to call more than once.
+	Close()
 }
 
-func (t *Twilio) apiBase() string {
-	if t.APIBase != "" {
-		return strings.TrimRight(t.APIBase, "/")
-	}
-	return "https://api.twilio.com/2010-04-01"
-}
+// EndReason is why a call's media ended.
+type EndReason string
 
-func (t *Twilio) post(ctx context.Context, path string, form url.Values) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.apiBase()+path, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(t.AccountSID, t.AuthToken)
-	resp, err := t.client().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("twilio %s: HTTP %d", path, resp.StatusCode)
-	}
-	return body, nil
-}
+const (
+	// EndNone: the media has not ended.
+	EndNone EndReason = ""
+	// EndRemote: the far end or the provider ended it (Twilio: the stream stop event).
+	EndRemote EndReason = "remote"
+	// EndClosed: we closed it (Close).
+	EndClosed EndReason = "closed"
+	// EndRejected: the media failed validation (Twilio: stream-start bound to another call).
+	EndRejected EndReason = "rejected"
+	// EndTransport: the media connection was lost.
+	EndTransport EndReason = "transport"
+)
 
-// StartCall is calls.create with inline TwiML (bidirectional streams need <Connect><Stream>).
-func (t *Twilio) StartCall(ctx context.Context, to, instructions string) (string, error) {
-	body, err := t.post(ctx, "/Accounts/"+url.PathEscape(t.AccountSID)+"/Calls.json",
-		url.Values{"To": {to}, "From": {t.FromNumber}, "Twiml": {instructions}})
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		SID string `json:"sid"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil || out.SID == "" {
-		return "", fmt.Errorf("twilio calls.create: no sid in response")
-	}
-	return out.SID, nil
-}
-
-// EndCall sets the call's status to completed.
-func (t *Twilio) EndCall(ctx context.Context, callSID string) error {
-	_, err := t.post(ctx, "/Accounts/"+url.PathEscape(t.AccountSID)+"/Calls/"+url.PathEscape(callSID)+".json",
-		url.Values{"Status": {"completed"}})
-	return err
-}
-
-// LineType is Lookup v2 line_type_intelligence; errors and missing credentials are "unknown".
-func (t *Twilio) LineType(ctx context.Context, e164 string) string {
-	if t.AccountSID == "" || t.AuthToken == "" {
-		return "unknown"
-	}
-	base := t.LookupBase
-	if base == "" {
-		base = "https://lookups.twilio.com/v2/PhoneNumbers"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(base, "/")+"/"+url.PathEscape(e164)+"?Fields=line_type_intelligence", nil)
-	if err != nil {
-		return "unknown"
-	}
-	req.SetBasicAuth(t.AccountSID, t.AuthToken)
-	resp, err := t.client().Do(req)
-	if err != nil {
-		return "unknown"
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "unknown"
-	}
-	var out struct {
-		LTI struct {
-			Type string `json:"type"`
-		} `json:"line_type_intelligence"`
-	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out) != nil || out.LTI.Type == "" {
-		return "unknown"
-	}
-	// Raw Twilio vocabulary ("nonFixedVoip" etc.); the plan keeps only mobile/landline/voip and
-	// maps the rest to "unknown", as legacy CC did.
-	return out.LTI.Type
-}
+// ErrUnsupported is a Call operation its transport does not offer.
+var ErrUnsupported = errors.New("phone: not supported by this provider")

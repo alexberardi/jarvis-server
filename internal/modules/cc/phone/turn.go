@@ -353,7 +353,7 @@ func (p *turnPipeline) jarvisLooping(said string) bool {
 }
 
 // turn runs one caller utterance and returns the reply PCM (nil = say nothing).
-func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms *mediaSession) []int16 {
+func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int16 {
 	s := p.s
 	turnNo := len(p.records) + 1
 	t0 := time.Now()
@@ -479,7 +479,7 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms *mediaSession) 
 
 // runEscalation opens the bounded window, pushes the question, holds the line and either
 // feeds the answer back to the model or falls back to "I'll call you back" and ends.
-func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms *mediaSession, modelSpoke bool) ([]int16, string) {
+func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms callLine, modelSpoke bool) ([]int16, string) {
 	s := p.s
 	if !p.rt.escalation.Open() {
 		pcm, _ := s.synthesize(ctx, live.EscalationFallbackLine)
