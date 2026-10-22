@@ -1,0 +1,9 @@
+#!/bin/bash
+# Starts the lane's firewall stand-in beside Asterisk, then hands over to the image's own
+# entrypoint (uid/gid mapping) and Asterisk.
+set -e
+touch /var/log/asterisk/security
+[ -f /var/lib/asterisk/lane/pjsip_ban.conf ] || printf '[lane-ban]\ntype=acl\ndeny=0.0.0.0/32\n' >/var/lib/asterisk/lane/pjsip_ban.conf
+chown -R asterisk:asterisk /var/log/asterisk /var/lib/asterisk/lane
+/usr/local/bin/lane-firewall &
+exec /usr/local/bin/entrypoint.sh "$@"

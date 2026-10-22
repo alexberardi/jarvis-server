@@ -4,7 +4,7 @@
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
 #   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich|empty] [--llm shared|none|scripted] [--ui]
-#                      [--voice [--stt-model ID]] [--relay fake|none|URL] [--lan] [--single-port]
+#                      [--voice [--stt-model ID]] [--sip] [--relay fake|none|URL] [--lan] [--single-port]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
 #   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
@@ -47,6 +47,10 @@
 #                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
 #   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
 #                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
+#   --sip            the L1 SIP lane beside it (scripts/sip-lane, docs/cc/phone-sip.md §5): Asterisk 22
+#                    in Docker configured like FreePBX 17, baresip far ends, ports offset like the
+#                    sandbox's; sandbox.env gets SBX_SIP_LANE (its lane.env). Its scenarios:
+#                    go run ./tools/siplane --sandbox N (needs --voice too). down removes it
 #   --relay fake     (default) push notifications go to tools/fakerelay (port 7797 + offset), which
 #                    records every push instead of sending it: $SBX_FAKERELAY/control/pushes
 #                    (docs/decisions/2026-10-18-e2e-push.md); pushes also land in .sandbox/<name>/pushes.jsonl
@@ -93,9 +97,9 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,85p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,89p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
-NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en
+NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0
 while [ $# -gt 0 ]; do
   case $1 in
@@ -105,6 +109,7 @@ while [ $# -gt 0 ]; do
     --llm) LLM=$2; shift 2 ;;
     --ui) UI=1; shift ;;
     --voice) VOICE=1; shift ;;
+    --sip) SIP=1; shift ;;
     --stt-model) STT_MODEL=$2; shift 2 ;;
     --version) VERSION=$2; shift 2 ;;
     --trust-key) TRUST_KEY=$2; shift 2 ;;
@@ -114,7 +119,7 @@ while [ $# -gt 0 ]; do
     --purge) PURGE=1; shift ;;
     --node-name) NODE_NAME=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,85p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,89p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -433,6 +438,7 @@ write_env() {
     echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
     echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
     if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
+    if [ "$SIP" = 1 ]; then echo "export SBX_SIP_LANE=$DIR/sip/lane.env"; fi
     if [ "$PROFILE" = empty ]; then
       # Nobody to sign in as: first-run setup is still to do, with this one-time token
       # (the wizard's link is $SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN).
@@ -534,6 +540,7 @@ cmd_up() {
     point_llm
     setup_voice
   fi
+  if [ "$SIP" = 1 ]; then "$ROOT/scripts/sip-lane" up --name "$NAME" --offset "$(cat "$OFFSETF")"; fi
   write_env
   rm -f "$LANENVF"
   if [ "$LAN" = 1 ]; then
@@ -611,6 +618,7 @@ cmd_stop() {
   rm -f "$SCRIPTPID"
   if relay_running; then kill "$(cat "$RELAYPID")"; fi
   rm -f "$RELAYPID"
+  if [ -f "$DIR/sip/lane.env" ]; then "$ROOT/scripts/sip-lane" down --name "$NAME" || true; fi
 }
 
 cmd_down() {
@@ -639,6 +647,7 @@ cmd_status() {
   fi
   if load_creds; then c="app client $INSTALLED_APP_ID"; else c="no app client in $CREDS"; fi
   if m=$(installed_model); then echo "installed jarvisd LLM: $INSTALLED_LLM_URL, $INSTALLED_LLM_LABEL = ${m%% *} ($c)"; else echo "installed jarvisd LLM: $INSTALLED_LLM_URL not answering ($c)"; fi
+  if [ -f "$DIR/sip/lane.env" ]; then "$ROOT/scripts/sip-lane" status --name "$NAME"; fi
   gpu_report
 }
 
