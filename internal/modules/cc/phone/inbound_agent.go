@@ -111,6 +111,10 @@ func (a *inboundAgent) turn(ctx context.Context, utt []int16, ms callLine) []int
 	for _, ev := range events {
 		switch e := ev.(type) {
 		case live.TakeMessage:
+			if e == (live.TakeMessage{}) {
+				names = append(names, "take_message_empty")
+				continue
+			}
 			m := e
 			a.message = &m
 			names = append(names, "take_message")
@@ -123,6 +127,11 @@ func (a *inboundAgent) turn(ctx context.Context, utt []int16, ms callLine) []int
 			a.refused = append(a.refused, e.Name)
 			names = append(names, "refused:"+e.Name)
 		}
+	}
+	if hangup && strings.HasSuffix(strings.TrimSpace(said), "?") {
+		// It asked the caller something: hanging up now would cut the answer off.
+		hangup = false
+		names = append(names, "hang_up_after_question_ignored")
 	}
 	if !hangup && a.message != nil && live.SoundsLikeFarewell(heard) {
 		hangup = true

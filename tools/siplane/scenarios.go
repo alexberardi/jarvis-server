@@ -66,6 +66,9 @@ var scenarios = []scenario{
 	{"jarvis-busy", "jarvisd's call the trunk refuses busy ends busy (486), never answered", jarvisOutcome("2125550486", sip.EndBusy)},
 	{"jarvis-no-answer", "jarvisd's call nobody answers (183 + 503) ends no answer, never answered", jarvisOutcome("2125550480", sip.EndNoAnswer)},
 	{"jarvis-all-trunks-busy", "all trunks busy: jarvisd's call is answered and what it hears is taken for a recording", jarvisAllTrunksBusy},
+	{"jarvis-inbound", "the carrier calls the Jarvis DID: jarvisd answers after the answer delay (caller from PAI), says the disclosure and hears the message", jarvisInbound},
+	{"jarvis-inbound-ring-group", "the ring-group DID: Alice picks up during jarvisd's answer delay; jarvisd's leg is cancelled, never answered", jarvisInboundRingGroup},
+	{"jarvis-inbound-busy", "a second call while jarvisd is on one: its concurrent cap refuses it 486 and the caller gets busy (voicemail)", jarvisInboundBusy},
 }
 
 // within is ctx with a timeout, for one wait.
