@@ -226,14 +226,40 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
 - During the suite the scripted model answers from `e2e/llm/mobile.json`.
-- adb transport drops: the harness emulator's adb connection drops now and then (adb's log:
+- adb transport drops: the harness emulator's adb connection can drop (adb's log:
   `emulator-5580: connection terminated: read failed`), and every drop wipes all the adb reverse
-  tunnels. So before every flow (and the real push lane) `e2emobile` waits for the device, sets
-  the tunnels again (`--reverse`, from `reverse_pairs` in `scripts/lib/mobile.sh`) and probes the
-  sandbox's `/health` from inside the emulator (`--health-port`). A flow that fails on a drop
-  (`device offline`, `not found`, `DeviceServerDied`), or finds the device not ready, is run once
-  more; the report says so on it (`note`). Every adb call carries `-s <serial>`: never
-  `adb kill-server`, nor `reverse --remove-all` without `-s`, as other emulators may be attached.
+  tunnels and kills Maestro's on-device driver. So before every flow (and the real push lane)
+  `e2emobile` waits for the device, sets the tunnels again (`--reverse`, from `reverse_pairs` in
+  `scripts/lib/mobile.sh`) and probes the sandbox's `/health` from inside the emulator
+  (`--health-port`). A flow that fails on a drop (`device offline`, `not found`,
+  `DeviceServerDied`), or finds the device not ready, is played again, up to 3 tries with a
+  growing pause (5 s, then 10 s), and before each retry the device is brought back:
+  `adb -s <serial> reconnect` when adb does not list it as a `device` (that kicks this one
+  transport; `reconnect offline` is host-wide and is never used), then two good `get-state` +
+  `sys.boot_completed` checks in a row (3 s apart, at most 2 min), then
+  `am force-stop dev.mobile.maestro.test` and `dev.mobile.maestro` so the next `maestro test`
+  starts a fresh driver. The report says so on the flow (`note`, with the host's load average
+  and available memory at each drop; the earlier tries' artifacts stay in `<flow>.try1`, ...)
+  and `results.json` counts the retries (`device_retries`). Every adb call carries
+  `-s <serial>`: never `adb kill-server`, nor `reverse --remove-all` without `-s`, as other
+  emulators may be attached.
+  What we know of the cause (#428, 2026-10-21): the host's one adb server (1.0.41,
+  platform-tools 37.0.1) ran from 10-18 to 10-21 without a restart, and the only connection to
+  the emulator's adb port (5581) was that server's, so a second server or Maestro's direct dadb
+  fallback (it connects to ports 5555-5683 itself only when no adb server answers) is not the
+  cause. Port 5580 is inside adb's scan range. Each emulator shutdown logs one `connection
+  terminated` as well, so count drops between boot and kill. `adb -s <serial> reconnect`
+  reproduces a drop exactly (`connection terminated: read failed`, then `DeviceServerDied` in
+  the flow), but it also logs `resetting transport`, which the bad run's log lacked: nothing
+  on the host kicked it. What the drops did line up with is memory: the dev box (31 GB) had
+  23 GB in swap, during a 4-minute run it swapped about 9 GB out with up to 750 MB of the
+  emulator's own memory in swap, and the one drop in a 19-minute run came after the emulator
+  got no CPU for about 20 s while the host's load doubled (a stall, not a busy guest). The AVD
+  already has 4 cores, so `-cores`/`-memory` flags would not help. To keep it from stalling,
+  run the emulator outside swap (for example under
+  `systemd-run --user --scope -p MemorySwapMax=0`, untried: the loop's agents may not run it)
+  or keep the box from swapping while the lane runs. `boot_emulator` warns when the host has
+  less than 6 GB available.
 - Pushes: the superuser has a fake device token (`PUSH_TOKEN`); a flow checks
   `${FAKE_RELAY}/control/pushes?token=${PUSH_TOKEN}` from a `runScript` and can make a node
   event happen through `${CC_URL}` with `${NODE_API_KEY}` for `${USER_ID}`
