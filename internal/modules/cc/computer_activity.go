@@ -87,8 +87,14 @@ func computerActivityHint(a *computerActivity, utterance string) string {
 }
 
 const (
-	nagStopRecording = "[STOP_RECORDING]"
-	nagNotStopped    = "[NOT_STOPPED]"
+	nagStopRecording   = "[STOP_RECORDING]"
+	nagNotStopped      = "[NOT_STOPPED]"
+	nagRecordingNotRun = "[RECORDING_NOT_RUN]"
+
+	startNotRunRetry = nagRecordingNotRun + " Nothing is recording: start_recording has not run this turn, so your " +
+		"reply is not true yet. Call start_recording now."
+	stopNotRunRetry = nagRecordingNotRun + " Nothing was stopped: stop_recording has not run this turn, so your reply " +
+		"is not true yet. Call stop_recording now."
 
 	stopRecordingRetry = nagStopRecording + " A recording is running on this computer and the user said they're done: " +
 		"that is meant for you. stop_recording has not run this turn. Call it now."
@@ -119,6 +125,31 @@ func recordingClaimNag(conv *conversation, reply string, msgs []chatMsg) string 
 		return ""
 	}
 	return notStoppedRetry
+}
+
+// recordStartRE is a request to record a macro ("record a macro called X", "watch me do this",
+// "learn how I do this"); not "record a reminder". recordStopRE is "stop recording".
+var (
+	recordStartRE = regexp.MustCompile(`(?i)\brecord (this |a |the |my |that )?(new )?(macro|workflow)\b|` +
+		`\bwatch (me|how i)\b|\blearn how i\b|\blet me show you how\b`)
+	recordStopRE = regexp.MustCompile(`(?i)\bstop recording\b`)
+)
+
+// recordingNotRunNag is the follow-through nudge, with nothing recording, for a request to
+// start or stop recording answered in prose without the tool (#435: "I'm recording a macro
+// called test2.", "Alright, recording's stopped."), or "". A running recording has its own
+// (mustStopRecording, recordingClaimNag).
+func recordingNotRunNag(conv *conversation, utterance string, msgs []chatMsg) string {
+	if conv.computer.recording() || countNags(msgs, nagRecordingNotRun) >= 1 {
+		return ""
+	}
+	switch {
+	case conv.serverNames[toolStopRecording] && recordStopRE.MatchString(utterance) && !calledThisTurn(msgs, toolStopRecording):
+		return stopNotRunRetry
+	case conv.serverNames[toolStartRecording] && recordStartRE.MatchString(utterance) && !calledThisTurn(msgs, toolStartRecording):
+		return startNotRunRetry
+	}
+	return ""
 }
 
 // mustStopRecording is the tool a turn has to call: stop_recording on a stop phrase while the

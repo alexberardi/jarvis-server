@@ -264,6 +264,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		// result); next to real calls it is dropped and they run.
 		if native {
 			rest, only := splitNotForMe(calls)
+			if only && toolRanThisTurn(msgs[:len(msgs)-1]) && countNags(msgs, nagAnswerAfterTool) < 1 && iter+1 < in.maxIter {
+				msgs = msgs[:len(msgs)-1]
+				msgs = append(msgs, sysMsg(answerAfterToolRetry))
+				continue
+			}
 			if only {
 				raw, message, calls, finish = parse.NotForMeLiteral, parse.NotForMeLiteral, nil, parse.FinishStop
 				msgs[len(msgs)-1] = chatMsg{Role: "assistant", Content: raw}
@@ -330,7 +335,9 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			// The request was left half done: a memory request answered "noted" with no tool to
 			// store it, "not in my memory" without a search, "open X and type Y" without the
 			// typing (followthrough.go).
-			if !terminal && !doubleChecked {
+			// Each follow-through nudge needs its request and its claim, so <exchange_complete/>
+			// doesn't skip them (#435: "Got it, your locker code is 4471. <exchange_complete/>").
+			if !parse.SentinelNotForMe(raw, message) && !doubleChecked {
 				if nag := followThroughNag(conv, in.utterance, parse.OutsideThink(message), msgs); nag != "" {
 					msgs = msgs[:len(msgs)-1]
 					msgs = append(msgs, sysMsg(nag))
@@ -551,8 +558,17 @@ func acceptedAck(results []chatMsg) (string, bool) {
 // B12." again (#435). The must-call retry and the other nudges allow an answer, so stay auto.
 func callNowNag(m chatMsg) bool {
 	return isNag(m, nagUnsaved) || isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNotCancelled) ||
-		isNag(m, nagStopRecording)
+		isNag(m, nagStopRecording) || isNag(m, nagRecordingNotRun)
 }
+
+// nagAnswerAfterTool asks for the answer when the model called not_for_me after a tool ran in
+// the turn: the turn was for Jarvis (#435: stop_recording ran, then not_for_me, and the user
+// heard nothing).
+const (
+	nagAnswerAfterTool   = "[ANSWER]"
+	answerAfterToolRetry = nagAnswerAfterTool + " You already acted on this request, so it was meant for you. Tell the " +
+		"user the result in one short sentence."
+)
 
 // speakerRefusedThisTurn reports whether a tool result since the turn's user message is the
 // no_speaker refusal.

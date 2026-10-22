@@ -353,3 +353,20 @@ func TestFollowThroughNotCancelledEngine(t *testing.T) {
 		t.Fatalf("nagged %v, result %s, state %s, reply %v", nagged, result, got.State, b["assistant_message"])
 	}
 }
+
+// #435: "Got it, Jordan — your locker code is 4471. <exchange_complete/>" with no remember call
+// skipped every follow-through nudge (the exchange-complete marker counted as terminal).
+func TestFollowThroughUnsavedWithExchangeComplete(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.stt.recognition = true
+	ve.start("m6", desktopTools)
+	ve.eng.say("Got it, Jordan. Your locker code is 4471. <exchange_complete/>")
+	ve.eng.push(nativeCall("call_m6", "remember", `{"content": "locker code is 4471"}`))
+	ve.eng.say("I couldn't save that, because I'm not sure who's speaking.")
+	ve.turn("/api/v0/voice/command", "m6", "Remember that my locker code is 4471.", nil).want(200)
+	reqs := ve.eng.requests()
+	msgs := messagesOf(reqs[len(reqs)-2])
+	if last := msgs[len(msgs)-1]; last["role"] != "system" || !strings.HasPrefix(last["content"].(string), nagUnsaved) {
+		t.Fatalf("no not-saved nudge: %v", last)
+	}
+}
