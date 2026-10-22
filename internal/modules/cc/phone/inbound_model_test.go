@@ -34,11 +34,14 @@ import (
 // said to a file.
 
 type inboundScenario struct {
-	Name  string `json:"name"`
-	Turns []struct {
+	Name string `json:"name"`
+	// Transfers are the household's transfer targets for the scenario (none: transfer is off).
+	Transfers []TransferTarget `json:"transfers,omitempty"`
+	Turns     []struct {
 		Say    string `json:"say"`
 		Expect struct {
 			Tool        string            `json:"tool,omitempty"`         // this tool is used on the turn
+			NotTool     string            `json:"not_tool,omitempty"`     // this tool is not
 			TakeMessage map[string]string `json:"take_message,omitempty"` // the message's fields match these regexps
 			Reply       string            `json:"reply,omitempty"`
 			NotReply    string            `json:"not_reply,omitempty"`
@@ -125,12 +128,14 @@ func sandboxModel(t *testing.T) string {
 }
 
 // lineRecorder is a callLine that notes the hang-up.
-type lineRecorder struct{ hangup bool }
+type lineRecorder struct{ hangup, transfer bool }
 
 func (l *lineRecorder) speak([]int16)  {}
 func (l *lineRecorder) requestHangup() { l.hangup = true }
 func (l *lineRecorder) armIdleHangup() {}
 func (l *lineRecorder) cutOff() bool   { return false }
+
+func (l *lineRecorder) requestTransfer(func() []int16) { l.transfer = true }
 
 func TestInboundReceptionistOnTheModel(t *testing.T) {
 	base := os.Getenv("JARVIS_PHONE_MODEL_URL")
@@ -177,7 +182,11 @@ func playInbound(t *testing.T, model *openAILLM, sc inboundScenario, logb *strin
 	e.s.LLM = model
 	ctx := context.Background()
 	rt := &callRuntime{sessionID: "model-" + strconv.Itoa(run), ctx: ctx}
-	a := e.s.newInboundAgent(rt, live.InboundBrief{Household: "the Avery household"})
+	brief := live.InboundBrief{Household: "the Avery household"}
+	for _, tt := range sc.Transfers {
+		brief.Transfers = append(brief.Transfers, live.InboundTransfer{Label: tt.Label, When: tt.When})
+	}
+	a := e.s.newInboundAgent(rt, brief, sc.Transfers)
 	fmt.Fprintf(logb, "\n## %s (run %d)\n\n> Jarvis: %s\n", sc.Name, run, live.BuildInboundDisclosure(live.InboundBrief{Household: "the Avery household"}))
 	var fails []string
 	line := &lineRecorder{}
@@ -203,13 +212,16 @@ func playInbound(t *testing.T, model *openAILLM, sc inboundScenario, logb *strin
 		}
 		fmt.Fprintln(logb)
 		for _, ev := range rec.events {
-			if strings.HasPrefix(ev, "refused:") || ev == "llm_failure" {
-				fails = append(fails, fmt.Sprintf("turn %d: %s (only take_message and hang_up)", i+1, ev))
+			if strings.HasPrefix(ev, "refused:") || ev == "transfer_refused" || ev == "llm_failure" {
+				fails = append(fails, fmt.Sprintf("turn %d: %s (only take_message, hang_up and a configured transfer)", i+1, ev))
 			}
 		}
 		x := turn.Expect
 		if x.Tool != "" && !containsStr(rec.events, x.Tool) {
 			fails = append(fails, fmt.Sprintf("turn %d: %s not used (%v)", i+1, x.Tool, rec.events))
+		}
+		if x.NotTool != "" && containsStr(rec.events, x.NotTool) {
+			fails = append(fails, fmt.Sprintf("turn %d: %s used (%v)", i+1, x.NotTool, rec.events))
 		}
 		if len(x.TakeMessage) > 0 && a.message != nil {
 			fields := map[string]string{"caller_name": a.message.CallerName, "reason": a.message.Reason, "message": a.message.Message}

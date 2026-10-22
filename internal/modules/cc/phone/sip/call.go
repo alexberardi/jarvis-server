@@ -38,6 +38,7 @@ type Call struct {
 	ua     *UA
 	id     string
 	d      *diago.DialogClientSession // an outbound call's dialog (nil inbound)
+	srv    *diago.DialogServerSession // an inbound call's dialog (nil outbound), for Transfer
 	dlg    dialog                     // the call's dialog, either way
 	ctx    context.Context            // the INVITE's: cancelling it before the answer sends CANCEL
 	cancel context.CancelFunc
@@ -69,6 +70,7 @@ type Call struct {
 	// that follows is recorded as ours, not the far end's.
 	ending       End
 	endingDetail string
+	xfer         chan struct{} // the transfer, closed when it is over (nil: none tried)
 
 	lastRTP atomic.Int64 // unix nanos of the last RTP packet (or of the answer)
 }
@@ -293,6 +295,13 @@ func (c *Call) serve(med *diago.DialogMedia) {
 	go c.watch()
 	select {
 	case <-c.dlg.Context().Done():
+		if x := c.transferring(); x != nil {
+			// The PBX may end our leg around a transfer's final NOTIFY: Transfer says which end it was.
+			select {
+			case <-x:
+			case <-time.After(2 * time.Second):
+			}
+		}
 		c.mu.Lock()
 		end, detail := c.ending, c.endingDetail
 		c.mu.Unlock()

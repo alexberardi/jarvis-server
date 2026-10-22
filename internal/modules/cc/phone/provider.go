@@ -94,7 +94,27 @@ const (
 	EndFailed EndReason = "failed"
 	// EndNoMedia: the far end's audio stopped (SIP's no-RTP watchdog).
 	EndNoMedia EndReason = "no_media"
+	// EndTransferred: the call was put through to someone else (SIP: a blind REFER the PBX
+	// reported done) and our leg hung up.
+	EndTransferred EndReason = "transferred"
 )
+
+// transferer is a Call that can be handed to another extension or number at the provider: an
+// answered inbound SIP call (a blind REFER). Twilio calls are not. Transfer returns nil once
+// the provider reports the target taking the call, our leg hung up; otherwise a
+// *TransferError, or ErrUnsupported.
+type transferer interface {
+	Transfer(ctx context.Context, target string) error
+}
+
+// TransferError is a transfer that did not go through. Gone: the caller is no longer on the
+// call (the PBX had already taken them), so it is over; otherwise it goes on.
+type TransferError struct {
+	Gone   bool
+	Detail string
+}
+
+func (e *TransferError) Error() string { return "phone: transfer failed: " + e.Detail }
 
 // endDetailer is a Call that can say more about its end than its EndReason (SIP: the response,
 // "486 Busy Here").

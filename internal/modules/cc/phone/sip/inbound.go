@@ -123,7 +123,7 @@ func (u *UA) handleInvite(d *diago.DialogServerSession) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Call{ua: u, dlg: d, ctx: ctx, cancel: cancel, id: in.CallID,
+	c := &Call{ua: u, dlg: d, srv: d, ctx: ctx, cancel: cancel, id: in.CallID,
 		started: make(chan struct{}), done: make(chan struct{}), frames: make(chan []int16),
 		inReady: make(chan struct{}, 1), playedCh: make(chan struct{}), dtmfPT: offer.dtmfPT}
 	// Known by its Call-ID before the 200 goes out: an UPDATE may follow the ACK at once.

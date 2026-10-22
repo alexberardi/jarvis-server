@@ -106,6 +106,36 @@ calling and why, and sends you a message):
 Today Jarvis refuses these calls (480), and the PBX moves on to the next destination, voicemail
 usually.
 
+### Letting Jarvis put callers through (transfer)
+
+Jarvis can hand a call it answered to one of a few people you choose, with a blind transfer
+(SIP REFER). It only ever transfers to the targets you list, and the caller never picks the
+number. In Jarvis, set the household's `phone.inbound.transfer_targets` to a list of up to 5:
+
+```json
+[{"label": "Alex", "number": "101", "when": "the caller is from Alex's school"},
+ {"label": "Sam's mobile", "number": "2125550123", "when": "the caller says it is an emergency about the children"}]
+```
+
+- **label** is the name Jarvis uses; **when** is, in your words, when to put a caller through.
+  Jarvis judges it from what the caller says, and a caller can say anything: pick conditions
+  that do no harm if someone lies. Jarvis never tells callers who it can put through, or when.
+- **number** is an extension (`101`) or a number as your outbound routes dial it, digits only.
+- **On the PBX:** Asterisk lets an extension transfer by default. If Jarvis's extension refuses
+  (the REFER answered 403 or 603 in the SIP trace), Jarvis says it could not put the caller
+  through and takes a message instead.
+- **Nobody answers:** the PBX reports the transfer done once the target rings, and from then on
+  the call is the PBX's: the target's own no-answer destination (its voicemail) applies, not
+  Jarvis's. If the target is busy or unreachable, the PBX gives the caller busy itself; Jarvis
+  cannot take the call back, and its notification says the transfer failed.
+- **External numbers** go out through Jarvis's extension's outbound routes, so they need a route
+  that allows them. **Caller ID gotcha:** the transferred call carries the original caller's
+  number as its caller ID, and many carriers refuse (or mark as spam) an outgoing call whose
+  caller ID is not one of your own numbers. Make the trunk send your own number: on the trunk,
+  **Outbound CallerID** your main number and **CID Options: Force Trunk CID**, or on the
+  outbound route a **Route CID** with **Override Extension: Yes**. Test it with a call to your
+  own mobile before you rely on it.
+
 ## 6. Check it from the admin
 
 **Admin → Phone** shows each SIP account:

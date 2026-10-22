@@ -107,7 +107,7 @@ Risks and what we do about them:
 | Ring groups: an instant answer steals every call | Humans never get to pick up | `answer_delay` setting (default 0 for direct routes; guide suggests No Answer destination instead of ring-all) |
 | Call waiting on by default: a second INVITE mid-call | Two concurrent calls on one extension | Concurrent inbound cap; above it reply 486 so the PBX goes to voicemail |
 | Untrusted caller and spam | Prompt injection, long robocalls burning model time | Inbound agent has only `take_message` / `hang_up` (and later `transfer` to fixed targets); no household data; short max duration (~3 min); daily cap |
-| Transfer (REFER) | Allowed by default and reaches outbound routes; external transfers can be refused for a "foreign" caller ID | Later step; wait for the final NOTIFY; transfer targets are configured extensions/numbers, never chosen by the caller |
+| Transfer (REFER) | Allowed by default and reaches outbound routes; external transfers can be refused for a "foreign" caller ID; Asterisk takes the caller on the 202 and sends the final NOTIFY 200 when the target rings | Wait for the final NOTIFY; targets are configured extensions/numbers, named to the model, never chosen by the caller; after a failed accepted transfer, stay only while the caller's audio still arrives; guide: force the trunk's CID |
 
 ## 4. Build order
 
@@ -151,6 +151,21 @@ Risks and what we do about them:
    (`inbound_model_test.go`, prompt injection included). Left: transfer to a person (step 4), the
    inbound settings in the mobile household settings, a list of inbound calls in the apps.
 4. **Transfer** (REFER) to configured targets.
+   **Done** (loop #448; choices in [decision](../decisions/2026-10-22-phone-inbound-transfer.md)):
+   `Call.Transfer` in `phone/sip/transfer.go` sends a blind REFER on an answered inbound call and
+   waits for the final NOTIFY sipfrag; 2xx hangs up our leg (`transferred`), a refused REFER
+   leaves the call up, and a failure or timeout after the 202 leaves it up only while the
+   caller's audio still arrives (Asterisk has taken the caller otherwise). The household lists
+   who may be put through, and when, in `phone.inbound.transfer_targets` (up to 5
+   `{label, number, when}`, digits-only numbers; empty = off); the receptionist gets
+   `[TRANSFER: <label>]` for those labels only (never a number), announces the transfer, and on
+   a failure apologises and takes a message; one attempt per call. cc migration 00310
+   (`transfer_label`, `transfer_result`, `transfer_detail`) and the notification say what
+   happened. Verified on L1 (`jarvis-inbound-transfer`, `jarvis-inbound-transfer-fails`) and, for
+   the conversation, on the installed model (`inbound_model_test.go`: a school call is put
+   through; "transfer me to 900", "forward me to my cell", a sales call and "who can you put me
+   through to?" are not). Setup and the foreign caller-ID gotcha: `docs/install/freepbx-sip.md`
+   §5. Not verified on FreePBX itself (L2, #447).
 
 ## 5. Testing without a VoIP setup
 
@@ -182,7 +197,7 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   RTP 20000–20199 plus the sandbox's offset.
 - `test/sip/farend/`: baresip (WAV in, WAV out, driven over `ctrl_tcp`), SIPp, sox.
   `test/sip/sipp/`: the signalling-only scenarios.
-- `tools/siplane`: 28 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
+- `tools/siplane`: 30 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
   an internal call, the inbound route (DID 5551230000 → 100), the outbound route (→ carrier),
   ring group 600 (DID 5551230600), call waiting, busy with call waiting off (486), trunk busy
   (486, SIPp), no answer (183 + 503, SIPp), all trunks busy (200 + recording), a second contact
@@ -195,7 +210,10 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   answer redacted and the password nowhere; and jarvisd answering inbound calls: the carrier's
   call to the DID is answered after the answer delay with the caller from PAI, the disclosure is
   heard and the message transcribed; a ring group's other phone picking up during the delay
-  cancels jarvisd's leg unanswered; a second call above the cap gets 486 (busy). Audio is checked both ways: each far end's
+  cancels jarvisd's leg unanswered; a second call above the cap gets 486 (busy); a blind transfer
+  to 101 (final NOTIFY 200, our leg hung up, the caller and Alice hear each other) and one to the
+  trunk's busy number (final NOTIFY 486, the PBX plays busy to the caller, jarvisd hangs up its
+  emptied leg). Audio is checked both ways: each far end's
   recording, and jarvisd's, is transcribed by the sandbox's CPU whisper, max WER 0.25.
 - CI: `.github/workflows/sip-lane.yml` on changes to `phone/**` or the lane, nightly, and by hand.
 - A baresip stand-in holds 100 for the scenarios that play a desk phone or the inbound route;

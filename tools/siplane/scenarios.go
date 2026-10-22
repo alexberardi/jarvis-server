@@ -68,6 +68,8 @@ var scenarios = []scenario{
 	{"jarvis-all-trunks-busy", "all trunks busy: jarvisd's call is answered and what it hears is taken for a recording", jarvisAllTrunksBusy},
 	{"jarvis-inbound", "the carrier calls the Jarvis DID: jarvisd answers after the answer delay (caller from PAI), says the disclosure and hears the message", jarvisInbound},
 	{"jarvis-inbound-ring-group", "the ring-group DID: Alice picks up during jarvisd's answer delay; jarvisd's leg is cancelled, never answered", jarvisInboundRingGroup},
+	{"jarvis-inbound-transfer", "jarvisd transfers the caller to Alice (101) with REFER: it waits for the final NOTIFY (200 once 101 rings), hangs up its leg, and the caller and Alice hear each other", jarvisInboundTransfer},
+	{"jarvis-inbound-transfer-fails", "a transfer to a busy number (the outbound route, trunk busy): the final NOTIFY says 486, the PBX gives the caller busy, and jarvisd hangs up its emptied leg", jarvisInboundTransferFails},
 	{"jarvis-inbound-busy", "a second call while jarvisd is on one: its concurrent cap refuses it 486 and the caller gets busy (voicemail)", jarvisInboundBusy},
 	// jarvisd's SIP self-tests (selftest.go; docs/cc/phone-sip.md §6), what the admin's Phone page runs.
 	{"jarvis-selftest-connection", "the connection self-test re-registers and pings the PBX, with both round-trip times", selftestConnection},

@@ -62,6 +62,7 @@ type Config struct {
 	BackoffMin      time.Duration // first retry after a failure (2 s), doubling
 	BackoffMax      time.Duration // (5 min)
 	NoRTPTimeout    time.Duration // a call with no RTP this long is over (30 s)
+	TransferWait    time.Duration // a transfer's wait for the PBX's final NOTIFY (30 s)
 	MaxAuthFailures int           // authentication failures before registration stops (3)
 }
 
@@ -75,6 +76,7 @@ const (
 	defaultBackoff   = 2 * time.Second
 	defaultMaxWait   = 5 * time.Minute
 	defaultNoRTP     = 30 * time.Second
+	defaultTransfer  = 30 * time.Second
 	defaultAuthFails = 3
 )
 
@@ -106,6 +108,7 @@ func (c *Config) defaults() {
 	def(&c.BackoffMin, defaultBackoff)
 	def(&c.BackoffMax, defaultMaxWait)
 	def(&c.NoRTPTimeout, defaultNoRTP)
+	def(&c.TransferWait, defaultTransfer)
 	if c.MaxAuthFailures <= 0 {
 		c.MaxAuthFailures = defaultAuthFails
 	}
@@ -220,6 +223,9 @@ const (
 	EndFailed End = "failed"
 	// EndNoMedia: no RTP from the far end for NoRTPTimeout.
 	EndNoMedia End = "no_media"
+	// EndTransferred: the PBX put the call through to a transfer target (Call.Transfer) and
+	// we hung up our leg.
+	EndTransferred End = "transferred"
 	// EndTransport: the PBX did not answer the INVITE at all, or the media socket failed.
 	EndTransport End = "transport"
 )
