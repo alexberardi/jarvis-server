@@ -151,6 +151,7 @@ func TestNeedsComputer(t *testing.T) {
 		"write order the cake on friday in slack":          false,
 		"Hey Jarvis, type check out the new deck in notes": false,
 		"buy a type-c cable":                               true,
+		"find the right type of phone case and order it":   true,
 	} {
 		if got := needsComputer(s); got != want {
 			t.Errorf("needsComputer(%q) = %v, want %v", s, got, want)

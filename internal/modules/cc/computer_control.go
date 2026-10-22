@@ -153,7 +153,7 @@ const computerOnHint = "[computer control: on. Do this with run_errand, with the
 // website or app: buy, order, check out, fill in a form (or a web page), download (a statement).
 // A phone call ("call Joe's and order …"), a reminder ("remind me to buy milk"), a list item and
 // research don't, nor do the words after "type" or "write" ("type buy more coffee filters into
-// omawrite"): they are the text to type.
+// omawrite"): they are the text to type. "Type of" is the noun ("the right type of phone case").
 func needsComputer(s string) bool {
 	web := strings.Contains(s, "://")
 	ws := strings.Fields(strings.ToLower(s))
@@ -178,7 +178,9 @@ func needsComputer(s string) bool {
 		}
 		switch w {
 		case "type", "write", "dictate":
-			return false // what follows is the text, typed by the desktop tools
+			if next != "of" { // the noun: "the right type of phone case"
+				return false // what follows is the text, typed by the desktop tools
+			}
 		case "buy", "purchase", "checkout", "reorder", "cart", "download":
 			return true
 		case "order":

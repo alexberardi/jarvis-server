@@ -157,7 +157,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	native := conv.mode.Native()
 	var nativeTools []llm.Tool
 	if native {
-		nativeTools = nativePayload(conv.tools)
+		nativeTools = nativePayload(conv.tools, in.utterance)
 	}
 	smallMode := m.settings.Bool(ctx, settingSmallModelMode, settings.Scope{})
 	budget := m.thinkingBudget(ctx, hh)

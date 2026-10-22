@@ -17,8 +17,17 @@ the tool loop (`engine.go`, `followthrough.go`, `computer_activity.go`):
 - After a nudge that names the one call still missing (not saved, recall first, the typing, not
   cancelled, stop recording, recording not run), a native request sends `tool_choice: "required"`.
   The must-call retry and the other nudges stay `auto`, so the model can still answer in prose there.
-- The follow-through nudges also fire when the reply ends in `<exchange_complete/>`. Each nudge
-  needs both a matching request and a matching claim, so the marker no longer exempts a false claim.
+- The follow-through nudges also fire when the reply ends in `<exchange_complete/>`. Not every
+  nudge needs both. The memory, recall and stop-watching nudges fire only on a matching request
+  **and** a matching claim, and the recording-claim nudge on the claim (a stop claimed while the node
+  still records), so the marker no longer exempts a false claim. Two fire on the request alone, when the call it needs is missing: the recording-not-run
+  nudge (`recordingNotRunNag`: "record a macro …" or "stop recording" with no recording call) and
+  the typing nudge ("open X and type Y" with no typing). So a clarifying question after "record a
+  macro" is nudged too, and its retry must call a tool (`tool_choice: "required"`).
+- `enable_computer_control` is sent to the model only on a turn whose words say "control"
+  (`askedForControl`; the warmup leaves it out, like most turns). Offered on every turn, the 9B
+  called it for "turn on the computer" in 10 of 10 runs, and the tool's own refusal comes after
+  the call.
 - `not_for_me` on its own, after a tool already ran this turn, gets one nudge to answer instead.
 - A second `no_speaker` refusal in one turn ends the turn with that refusal, word for word.
 
