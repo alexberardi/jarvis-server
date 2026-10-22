@@ -18,7 +18,7 @@
 #
 # Who is on the PBX (pjsip.conf):
 #   100      the Jarvis extension; a baresip stand-in holds it (siplane's jarvis-* scenarios swap
-#            in jarvisd's SIP provider; jarvisd answers no inbound calls yet)
+#            in jarvisd's SIP provider, which answers the jarvis-inbound* calls itself)
 #   101      Alice, a desk phone (baresip; rings, never answers by itself)
 #   carrier  the fake carrier's trunk (baresip; answers every call, places inbound calls)
 # Ports, from the offset O (default: the sandbox's, else 10000): Asterisk SIP 5060+O (UDP) and

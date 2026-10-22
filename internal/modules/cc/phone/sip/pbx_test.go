@@ -37,6 +37,7 @@ type fakePBX struct {
 	regMode  []string // per REGISTER, in order; "" answers normally, "forbid" 403, "drop" nothing; the last repeats
 	onInvite func(d *diago.DialogServerSession)
 	invites  []*sip.Request
+	requests []*sip.Request // every request the PBX got, of any method
 }
 
 const pbxRealm, pbxNonce = "lane", "0123456789abcdef"
@@ -80,7 +81,15 @@ func newPBX(t *testing.T, password string) *fakePBX {
 		t.Fatal(err)
 	}
 	dg := diago.NewDiago(p.ua, diago.WithServer(srv), diago.WithClient(p.client), diago.WithLogger(slog.New(slog.DiscardHandler)),
-		diago.WithTransport(diago.Transport{Transport: "udp", BindHost: p.host, BindPort: p.port}))
+		diago.WithTransport(diago.Transport{Transport: "udp", BindHost: p.host, BindPort: p.port}),
+		diago.WithServerRequestMiddleware(func(next sipgo.RequestHandler) sipgo.RequestHandler {
+			return func(req *sip.Request, tx sip.ServerTransaction) {
+				p.mu.Lock()
+				p.requests = append(p.requests, req.Clone())
+				p.mu.Unlock()
+				next(req, tx)
+			}
+		}))
 	srv.OnRegister(p.handleRegister)
 	srv.OnOptions(func(req *sip.Request, tx sip.ServerTransaction) {
 		p.mu.Lock()
@@ -176,6 +185,18 @@ func (p *fakePBX) registers() []*sip.Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]*sip.Request(nil), p.regs...)
+}
+
+// got reports whether the PBX received a method request within the call callID.
+func (p *fakePBX) got(method sip.RequestMethod, callID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, r := range p.requests {
+		if r.Method == method && r.CallID() != nil && r.CallID().Value() == callID {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *fakePBX) optionsSeen() int {

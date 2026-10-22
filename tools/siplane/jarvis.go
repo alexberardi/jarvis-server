@@ -21,12 +21,14 @@ import (
 // UA a phone.provider=sip household gets) in this process as extension 100, in place of the
 // baresip stand-in: it registers, is refused and stops, and places calls through the outbound
 // route to the carrier. max_contacts=1 lets only one of them hold 100, so each scenario has the
-// stand-in unregister first and register again after (jarvisd.go's release).
+// stand-in unregister first and register again after (jarvisd.go's release). The
+// jarvis-inbound* scenarios (inbound.go) have it answer the calls routed to 100.
 
 const jarvisPassword = "lane-jarvis-100"
 
-// jarvisUA starts the provider's UA as 100 from addr (a loopback address) with password.
-func (l *lane) jarvisUA(ctx context.Context, addr, password string, r *report) (*sip.UA, error) {
+// jarvisUA starts the provider's UA as 100 from addr (a loopback address) with password; opts
+// change its config (an inbound handler).
+func (l *lane) jarvisUA(ctx context.Context, addr, password string, r *report, opts ...func(*sip.Config)) (*sip.UA, error) {
 	host, port, err := splitHostPort(l.env["SIP_LANE_SIP"])
 	if err != nil {
 		return nil, err
@@ -38,6 +40,9 @@ func (l *lane) jarvisUA(ctx context.Context, addr, password string, r *report) (
 		// so the scenario does not wait minutes.
 		BackoffMin: 500 * time.Millisecond, BackoffMax: 2 * time.Second,
 		Log: slog.New(slog.NewTextHandler(&noteWriter{r: r}, &slog.HandlerOptions{Level: slog.LevelInfo}))}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return sip.Start(ctx, cfg)
 }
 

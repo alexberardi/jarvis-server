@@ -53,6 +53,15 @@ type callRuntime struct {
 	callID      string
 	cancelled   bool
 	cancelCause string
+
+	// inbound is an inbound call's receptionist (inbound_agent.go); nil on an outbound call,
+	// whose turns run through pipeline.
+	inbound *inboundAgent
+	// timeLimit, when set, is when the call loop says timeUpLine and hangs up (an inbound
+	// call's phone.inbound.max_call_seconds); timeUpSaid records that it did.
+	timeLimit  time.Time
+	timeUpLine string
+	timeUpSaid bool
 }
 
 func (rt *callRuntime) markStarted() { rt.startOnce.Do(func() { close(rt.started) }) }

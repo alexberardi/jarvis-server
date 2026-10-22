@@ -160,9 +160,12 @@ type Service struct {
 	// SIPReconcileEvery is how often the UAs are matched to the settings (1 min).
 	StartSIP          func(ctx context.Context, a SIPAccount) (sipUA, error)
 	SIPReconcileEvery time.Duration
+	// InboundTimeLimit overrides phone.inbound.max_call_seconds (tests).
+	InboundTimeLimit time.Duration
 
 	base     context.Context
 	sip      *sipLines
+	inbound  inboundState
 	tests    sipTests // the SIP self-tests' runs (sipsupport.go)
 	mu       sync.Mutex
 	runtimes map[string]*callRuntime
@@ -211,6 +214,7 @@ func (s *Service) Start(ctx context.Context) {
 	s.mu.Lock()
 	s.base = ctx
 	s.mu.Unlock()
+	s.closeInterruptedInbound(ctx)
 	if s.Provider != nil || s.Twilio != nil {
 		return // one fixed provider (tests): no SIP accounts
 	}

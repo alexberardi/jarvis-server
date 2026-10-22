@@ -394,3 +394,12 @@ func eventually(t *testing.T, what string, ok func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// The inbound watch says what Jarvis did with the call now that it can answer.
+func TestInboundOutcomeSaysWhatJarvisDid(t *testing.T) {
+	for code, want := range map[int]string{200: "answered", 486: "busy", 487: "before Jarvis did", 480: "turns them on"} {
+		if got := inboundOutcome(code); !strings.Contains(got, want) {
+			t.Errorf("inboundOutcome(%d) = %q, want it to say %q", code, got, want)
+		}
+	}
+}

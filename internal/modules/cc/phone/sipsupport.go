@@ -680,8 +680,8 @@ func (s *Service) inboundTest(ctx context.Context, t *testRun, line *sipLine) {
 			if in.Media != "" {
 				media = fmt.Sprintf("audio from %s (%s)", in.Media, strings.Join(in.Codecs, ", "))
 			}
-			t.pass(fmt.Sprintf("The PBX sent a call from %s to %s, %s. Jarvis does not answer calls yet, so it "+
-				"refused it and the PBX moved on to its next destination.", orNone(who), in.To, media))
+			t.pass(fmt.Sprintf("The PBX sent a call from %s to %s, %s. %s", orNone(who), in.To, media,
+				inboundOutcome(in.Response)))
 			return
 		case <-deadline:
 			t.fail(fmt.Sprintf("No call reached Jarvis in %s.", sipInboundWindow),
@@ -693,6 +693,22 @@ func (s *Service) inboundTest(ctx context.Context, t *testRun, line *sipLine) {
 			return
 		}
 	}
+}
+
+// inboundOutcome says what Jarvis did with the call the inbound watch saw.
+func inboundOutcome(code int) string {
+	switch code {
+	case 200:
+		return "Jarvis answered it."
+	case 486:
+		return "Jarvis was busy (its call caps), so it refused it and the PBX moved on to its next destination."
+	case 487:
+		return "The caller hung up, or another phone answered, before Jarvis did."
+	case 0:
+		return ""
+	}
+	return fmt.Sprintf("Jarvis refused it (%d) and the PBX moved on to its next destination. Inbound calls are "+
+		"off unless the household turns them on in the phone settings.", code)
 }
 
 // --- word error rate ---

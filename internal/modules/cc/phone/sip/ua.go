@@ -321,35 +321,12 @@ func respond(req *sip.Request, tx sip.ServerTransaction, code int, reason string
 	_ = tx.Respond(sip.NewResponseFromRequest(req, code, reason, nil))
 }
 
-// handleInvite answers a new inbound call. Inbound calls are a later step
-// (docs/cc/phone-sip.md §4 step 3): 480 sends the caller on to the PBX's next destination.
-// What the INVITE said is kept for the inbound watch self-test.
-func (u *UA) handleInvite(d *diago.DialogServerSession) {
-	in := inboundInvite(d.InviteRequest)
-	in.Response = sip.StatusTemporarilyUnavailable
-	u.setStatus(func(s *Status) { s.LastInbound = in })
-	u.cfg.Log.Info("sip: inbound call refused (not supported yet)", "from", in.Caller)
-	if err := d.Respond(sip.StatusTemporarilyUnavailable, "Temporarily Unavailable", nil); err != nil {
-		u.cfg.Log.Warn("sip: refusing an inbound call failed", "err", err)
-	}
-}
-
-// inboundInvite reads an INVITE's caller (P-Asserted-Identity, then From: a hint, never
-// authentication) and its audio offer.
-func inboundInvite(req *sip.Request) InboundInvite {
-	in := InboundInvite{At: time.Now()}
+// inboundInvite is what the inbound watch self-test shows of an INVITE: the caller as
+// incoming read it (a hint, never authentication), the dialed user and the audio offer.
+func inboundInvite(req *sip.Request, caller Incoming) InboundInvite {
+	in := InboundInvite{At: time.Now(), Caller: caller.Number, CallerName: caller.Name}
 	if to := req.To(); to != nil {
 		in.To = to.Address.User
-	}
-	if h := req.GetHeader("P-Asserted-Identity"); h != nil {
-		var uri sip.Uri
-		params := sip.NewParams()
-		if name, err := sip.ParseAddressValue(h.Value(), &uri, &params); err == nil {
-			in.Caller, in.CallerName = uri.User, name
-		}
-	}
-	if from := req.From(); in.Caller == "" && from != nil {
-		in.Caller, in.CallerName = from.Address.User, from.DisplayName
 	}
 	in.Media, in.Codecs = sdpAudio(req.Body())
 	return in
