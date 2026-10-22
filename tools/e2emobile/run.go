@@ -354,9 +354,9 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 				first = first[:300] + "…"
 			}
 		}
-		notes = append(notes, fmt.Sprintf("%s on try %d (%s)", why, try-1, first))
-		fmt.Fprintf(os.Stderr, "e2emobile: %s: %s (%s); bringing the emulator back and retrying (try %d of %d)\n",
-			r.Title, why, first, try, maxTries)
+		notes = append(notes, fmt.Sprintf("%s on try %d%s (%s)", why, try-1, hostLoad(), first))
+		fmt.Fprintf(os.Stderr, "e2emobile: %s: %s%s (%s); bringing the emulator back and retrying (try %d of %d)\n",
+			r.Title, why, hostLoad(), first, try, maxTries)
 		select {
 		case <-ctx.Done():
 			return r
@@ -438,6 +438,16 @@ func (c *config) recoverDevice(ctx context.Context) error {
 		_, _ = c.adbCmd(ctx, "shell", "am force-stop "+pkg)
 	}
 	return nil
+}
+
+// hostLoad is ", host load L" (the 1-minute load average) on Linux, "" elsewhere: drops have
+// come with a busy host, so each retry says how busy it was.
+func hostLoad() string {
+	raw, err := os.ReadFile("/proc/loadavg")
+	if f := strings.Fields(string(raw)); err == nil && len(f) > 0 {
+		return ", host load " + f[0]
+	}
+	return ""
 }
 
 func failed(r Record, msg string) Record {
