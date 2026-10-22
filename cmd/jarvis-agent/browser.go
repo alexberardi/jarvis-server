@@ -85,8 +85,9 @@ func startBrowser(ctx context.Context, log *slog.Logger) (*browser.Hub, func()) 
 // to /Applications) doesn't leave browsers starting the old copy. Browsers the user didn't
 // register stay unregistered. A bare binary (a dev build, `go run`, a Linux or Windows
 // install) changes nothing: its registrations are `browser install`'s and the installer's.
+// The bundle is found by slashes, like Translocated, so the check reads the same on every OS.
 func refreshBrowserHosts(env browser.Env, exe string, log *slog.Logger) {
-	if install.BundleOf(exe) == "" {
+	if install.BundleOf(filepath.ToSlash(exe)) == "" {
 		return
 	}
 	if log == nil {
