@@ -78,6 +78,9 @@ func (u *UA) supervise(ctx context.Context) {
 			s.LastError = r.err.Error()
 			s.Hint = hintFor(r)
 			s.LastRegister, s.RegisterRTT = time.Now(), r.rtt
+			if r.code == 0 {
+				s.RegisterRTT = 0 // no answer: a timeout is not a round trip
+			}
 			if counts {
 				s.AuthFailures++
 			}

@@ -212,7 +212,6 @@ function AccountCard({ account }: { account: SipAccount }) {
         title={`Extension ${account.extension} on ${account.server}:${account.port}`}
         description={`${owner} · ${account.transport.toUpperCase()} · local port ${account.local_port} · dials ${account.dial_prefix}${account.dial_format}`}
         actions={<Badge tone={b.tone}>{b.label}</Badge>}
-        className="mb-0"
       />
       {problem && (
         <Alert tone={account.state === 'stopped' || account.state === 'not_started' ? 'danger' : 'warning'} title={account.last_error || undefined}>

@@ -149,3 +149,14 @@ func TestInboundInviteIsRecorded(t *testing.T) {
 		t.Fatalf("media %q codecs %v", in.Media, in.Codecs)
 	}
 }
+
+// A REGISTER nobody answered has no round trip to show.
+func TestATimedOutRegisterHasNoRoundTrip(t *testing.T) {
+	p := newPBX(t, "secret")
+	p.setRegMode("drop")
+	u := startUA(t, p.config(t, "secret"))
+	eventually(t, 3*time.Second, "a failed attempt", func() bool { return !u.Status().LastRegister.IsZero() })
+	if st := u.Status(); st.RegisterRTT != 0 || st.LastError == "" {
+		t.Fatalf("status %+v", st)
+	}
+}
