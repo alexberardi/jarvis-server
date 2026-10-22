@@ -63,3 +63,10 @@ a recording. If the call's first utterance is a carrier or PBX intercept ("all c
 busy", "the number you have dialed…", `live.IsAnnouncement`), the call hangs up at once and the
 session fails with what was heard; the model is never asked to talk to it. Provider-neutral, so
 Twilio gets it too. Voicemail is not detected (as before).
+
+**The L1 lane's 100.** The lane's decision left open how jarvisd takes 100 from the baresip
+stand-in. `tools/siplane` runs the provider's UA in its own process (the same package a
+`sip` household gets, not a whole jarvisd: placing a call through jarvisd needs the model, a
+confirm card and its self-tests, piece 3). Each `jarvis-*` scenario has the stand-in delete its
+account over `ctrl_tcp` (`uadel`, which unregisters; baresip 1.1.0 has no `uareg`) and create
+it again from the lane's accounts file afterwards (`uanew`).

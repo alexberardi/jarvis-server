@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/sip"
 )
 
 // maxWER is how far a transcript may be from what was said, word error rate within the
@@ -57,6 +59,13 @@ var scenarios = []scenario{
 	{"all-trunks-busy", "all trunks busy: 200 OK, then the \"all circuits are busy\" recording", allTrunksBusy},
 	{"contact-taken", "a second device registering 101 with the right password is refused 403 (max_contacts=1, remove_existing=no)", contactTaken},
 	{"wrong-password-ban", "3 wrong passwords from one address: banned, the right password gets 403 (Responsive Firewall stand-in)", wrongPasswordBan},
+	// jarvisd's own SIP provider as 100 (jarvis.go): the stand-in steps aside for each.
+	{"jarvis-registers", "jarvisd's SIP provider registers as 100, unregisters on shutdown, registers again on the same port", jarvisRegisters},
+	{"jarvis-wrong-password", "jarvisd with a wrong password stops after exactly 3 attempts, with the firewall hint", jarvisWrongPassword},
+	{"jarvis-outbound", "jarvisd dials a 10-digit number through the outbound route: audio both ways, transcribed", jarvisOutbound},
+	{"jarvis-busy", "jarvisd's call the trunk refuses busy ends busy (486), never answered", jarvisOutcome("2125550486", sip.EndBusy)},
+	{"jarvis-no-answer", "jarvisd's call nobody answers (183 + 503) ends no answer, never answered", jarvisOutcome("2125550480", sip.EndNoAnswer)},
+	{"jarvis-all-trunks-busy", "all trunks busy: jarvisd's call is answered and what it hears is taken for a recording", jarvisAllTrunksBusy},
 }
 
 // within is ctx with a timeout, for one wait.
