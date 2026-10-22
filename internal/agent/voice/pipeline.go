@@ -55,11 +55,14 @@ type Config struct {
 	StreamIdle    time.Duration // give up on a reply stream silent this long (8 s)
 	Timezone      string        // node_context.timezone (IANA name)
 	Chimes        bool          // wake and error chimes
-	ToolTimeout   time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
-	FollowUp      FollowUpConfig
-	BargeIn       BargeInConfig
-	Tentative     TentativeConfig
-	PreWakeVAD    PreWakeVAD
+	// Greeting plays command-center's wake greeting instead of the wake chime when one is
+	// cached (greeting.go; the Pi's). Off with the chimes.
+	Greeting    bool
+	ToolTimeout time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
+	FollowUp    FollowUpConfig
+	BargeIn     BargeInConfig
+	Tentative   TentativeConfig
+	PreWakeVAD  PreWakeVAD
 }
 
 // DefaultConfig is the Python node's behaviour (go-pi-node.md §1.1).
@@ -170,6 +173,7 @@ type Pipeline struct {
 	// tentativeAt is the last tentative wake (tentative.go): its cool-down outlives a turn, so
 	// a lyric dip can't strobe the music across wakes either.
 	tentativeAt time.Time
+	greet       greeter // the next wake greeting (greeting.go)
 }
 
 // Dropped counts captured chunks discarded because the pipeline was busy.
@@ -200,6 +204,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		defer p.Mic.attached.Add(-1)
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	p.prefetchGreeting(ctx)
 	queue := chunkQueue
 	if p.lockstep {
 		queue = 0
@@ -506,15 +511,21 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 		// The music back, then a command's deferred step (music.go). Off the pipeline
 		// goroutine: listening must not wait for it.
 		p.afterTurn(ctx, s)
+		p.prefetchGreeting(ctx) // the next wake's, now the model is idle
 		if p.OnTurn != nil {
 			p.OnTurn(t)
 		}
 	}()
 
 	// Row 6: acknowledge, then record from after the chime, keeping up to PreRollSecs of what
-	// was heard while it played (0: history_secs=0, all of it dropped).
-	p.chime(ctx, wakeChime)
-	pre := takePreRoll(chunks, frames(p.Cfg.Endpointing.PreRollSecs))
+	// was heard while it played (0: history_secs=0, all of it dropped). Under a spoken
+	// greeting the mic heard a voice, which whisper would write down: none of it is kept.
+	greeted := p.acknowledge(ctx)
+	preRoll := frames(p.Cfg.Endpointing.PreRollSecs)
+	if greeted {
+		preRoll = 0
+	}
+	pre := takePreRoll(chunks, preRoll)
 
 	// Row 8: record with RMS endpointing.
 	t.Threshold = p.Cfg.Endpointing.Threshold(preRMS)
@@ -527,8 +538,10 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 	if len(pcm) > 0 {
 		pcm = slices.Concat(pre, pcm)
 		t.PreRollSecs = float64(len(pre)) / CaptureRate
-		if p.Cfg.Chimes { // the chime the mic heard, in the pre-roll or the first chunks after it (#358)
-			muteChime(pcm[:min(len(pcm), len(pre)+chimeTailChunks*ChunkSamples)])
+		if tail := pcm[:min(len(pcm), len(pre)+chimeTailChunks*ChunkSamples)]; greeted {
+			clear(tail) // the greeting's last words, still in the mic's buffers
+		} else if p.Cfg.Chimes { // the chime the mic heard, in the pre-roll or the first chunks after it (#358)
+			muteChime(tail)
 		}
 	}
 	t.RecordedSecs, t.HitMax = float64(len(pcm))/CaptureRate, hitMax
@@ -753,17 +766,7 @@ func (p *Pipeline) chime(ctx context.Context, pcm []int16) {
 	if !p.Cfg.Chimes || ctx.Err() != nil {
 		return
 	}
-	pb, err := p.Playback(chimeRate, 1)
-	if err != nil {
-		p.Log.Warn("chime: speaker unavailable", "err", err)
-		return
-	}
-	defer pb.Close()
-	err = pb.Write(pcm)
-	if err == nil {
-		err = pb.Drain()
-	}
-	if err != nil {
+	if err := p.play(chimeRate, 1, pcm); err != nil {
 		p.Log.Warn("chime failed", "err", err)
 	}
 }

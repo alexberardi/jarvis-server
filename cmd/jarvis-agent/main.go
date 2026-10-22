@@ -820,6 +820,7 @@ func runAgent(ctx context.Context, args []string) error {
 		vs, err := loadVoice(ctx, vf, log)
 		if vs != nil {
 			vs.live = live
+			vs.cfg.Greeting = !p.desktop // a Pi greets the wake word in words (row 6)
 		}
 		return vs, err
 	}

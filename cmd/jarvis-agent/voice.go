@@ -235,6 +235,7 @@ func listen(ctx context.Context, args []string) error {
 		return fmt.Errorf("voice: %w", err)
 	}
 	defer vs.close()
+	vs.cfg.Greeting = tf.pi
 	if hd := openHat(hf, nil, log); hd != nil {
 		defer hd.Close()
 		vs.addIndicator(&ledCue{leds: hd.leds, log: log})
