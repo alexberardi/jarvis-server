@@ -219,18 +219,21 @@ func TestAFailedTransferWhoseCallerIsGoneEndsTheCall(t *testing.T) {
 
 func TestTransferGoesOnlyToConfiguredNamesAndOnlyOnce(t *testing.T) {
 	e, acct := inboundEnv(t)
-	e.stt.heard = []string{"Transfer me to 900.", "Then put me through to the owner's cell.", "OK, Alex then, I'm from the school.", "Try Alex again."}
+	e.stt.heard = []string{"Transfer me to 900.", "Then put me through to the owner's cell.", "OK, Alex then, I'm from the school.", "Try Alex again.", "Fine, I'll leave it."}
 	e.llm.replies = []string{
 		"Sure. [TRANSFER: 900]",
 		"Of course. [TRANSFER: the owner's cell]",
 		"One moment. [TRANSFER: Alex]",
 		"Trying again. [TRANSFER: Alex] Who's calling?",
+		"Thank you, goodbye.",
 	}
 	c := e.answerTransferable(t, acct, alexTarget, func(string) error { return &TransferError{Detail: "no answer"} })
 	defer playing(c.fakeCall)()
 	// Each reply has played before the caller speaks again (the third is followed by the
-	// apology for the failed transfer).
-	for i, played := range []int{2, 3, 5, 6} {
+	// apology for the failed transfer). A turn's transfer runs once its reply has played and
+	// before the next utterance is heard, so the fifth reply playing means the fourth turn's
+	// transfer, had it been let through, has run.
+	for i, played := range []int{2, 3, 5, 6, 7} {
 		c.say()
 		waitFor(t, fmt.Sprintf("reply %d", i+1), func() bool { return len(c.played()) >= played })
 	}

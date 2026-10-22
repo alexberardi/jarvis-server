@@ -51,11 +51,15 @@ func TestInboundPromptOffersOnlyTheConfiguredTransfers(t *testing.T) {
 			t.Errorf("the prompt lacks %q", want)
 		}
 	}
-	if strings.Contains(prompt, "You cannot transfer the call") {
-		t.Error("the prompt still says it cannot transfer")
+	// The edits are exact-substring replacements: a reworded section would silently skip one.
+	for _, e := range inboundTransferEdits {
+		if strings.Contains(prompt, e[0]) || !strings.Contains(prompt, e[1]) {
+			t.Errorf("the edit to %q did not apply", e[0])
+		}
 	}
-	if strings.Contains(prompt, "ONLY two") {
-		t.Error("the prompt still says it has only two tools")
+	if strings.Contains(prompt, "You cannot transfer the call") || strings.Contains(prompt, "ONLY two") ||
+		!strings.Contains(prompt, "take a message or a transfer allowed below") {
+		t.Error("the prompt still says it can only take a message")
 	}
 }
 

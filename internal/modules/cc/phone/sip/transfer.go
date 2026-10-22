@@ -114,6 +114,7 @@ func (c *Call) Transfer(ctx context.Context, target string) error {
 	case <-ctx.Done():
 		return c.transferFailed(log, &TransferError{Accepted: true, Detail: "the transfer was abandoned: " + ctx.Err().Error()})
 	}
+	afterFinalNotify(c)
 	if code < 200 || code >= 300 {
 		return c.transferFailed(log, &TransferError{Code: code, Accepted: true,
 			Detail: fmt.Sprintf("the transfer target did not take the call (%d)", code)})
@@ -129,6 +130,10 @@ func (c *Call) Transfer(ctx context.Context, target string) error {
 	log.Info("sip: call transferred")
 	return nil
 }
+
+// afterFinalNotify runs once Transfer has the PBX's final NOTIFY; tests hold it to let the PBX's
+// BYE reach serve first.
+var afterFinalNotify = func(*Call) {}
 
 // callerAudioWait is how long a failed transfer waits for the caller's audio before it decides
 // the PBX has taken them off our leg. RTP flows every 20 ms while a PBX bridges the caller to us.

@@ -109,6 +109,32 @@ func TestTransferWaitsForTheFinalNotifyThenHangsUp(t *testing.T) {
 	eventually(t, 3*time.Second, "our BYE at the PBX", func() bool { return p.got(sip.BYE, c.ID()) })
 }
 
+// Asterisk BYEs our leg as soon as it has sent the final NOTIFY: that end is the transfer's,
+// not the far end hanging up, even when the BYE is seen before Transfer has acted on the NOTIFY.
+func TestAByeRightAfterTheFinalNotifyIsATransfer(t *testing.T) {
+	afterFinalNotify = func(c *Call) {
+		select {
+		case <-c.dlg.Context().Done():
+			time.Sleep(200 * time.Millisecond) // serve has seen the BYE
+		case <-time.After(2 * time.Second):
+			t.Error("the PBX's BYE never ended the dialog")
+		}
+	}
+	t.Cleanup(func() { afterFinalNotify = func(*Call) {} })
+	_, _, c := referPBX(t, nil, func(*sip.Request) int { return sip.StatusAccepted }, func(pc *pbxCall) {
+		pc.notify(t, 200, true)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = pc.d.Bye(ctx)
+	})
+	if err := transfer(t, c, "101"); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+	if end, detail := waitDone(t, c, 3*time.Second); end != EndTransferred {
+		t.Fatalf("end %q (%s), want transferred", end, detail)
+	}
+}
+
 func TestARefusedTransferLeavesTheCallUp(t *testing.T) {
 	_, pc, c := referPBX(t, nil, func(*sip.Request) int { return 603 }, nil)
 	err := transfer(t, c, "101")
