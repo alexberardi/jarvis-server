@@ -242,3 +242,30 @@ func TestUploadRecordingRoute(t *testing.T) {
 		ve.do("POST", uploadPath, bad, ve.node.h()).want(400)
 	}
 }
+
+// The prompt diet cut these descriptions to one line and the 9B stopped calling them: "learn how
+// I do this" and "stop recording" got a prose reply, "turn on the computer" called
+// enable_computer_control (pipeline, #435: 10/10 before the diet, 0-1/10 after). The phrases
+// that carried those boundaries stay.
+func TestRecordingToolDescriptionsKeepTheirBoundaries(t *testing.T) {
+	m := &Module{}
+	desc := func(d *pyjson.Object) string {
+		fn, _ := d.Get("function")
+		s, _ := fn.(*pyjson.Object).Get("description")
+		return s.(string)
+	}
+	for name, c := range map[string]struct {
+		def   *pyjson.Object
+		wants []string
+	}{
+		toolStartRecording:        {(&startRecordingTool{m}).Definition(), []string{"never just reply", "learn how I do this", "watch me", "Not for reminders"}},
+		toolStopRecording:         {(&stopRecordingTool{m}).Definition(), []string{"never just reply", "I'm done", "stop recording", "that's it"}},
+		toolEnableComputerControl: {(&enableComputerControlTool{m}).Definition(), []string{"'computer control'", "Never for 'turn on the computer'"}},
+	} {
+		for _, w := range c.wants {
+			if d := desc(c.def); !strings.Contains(d, w) {
+				t.Errorf("%s: description %q lacks %q", name, d, w)
+			}
+		}
+	}
+}

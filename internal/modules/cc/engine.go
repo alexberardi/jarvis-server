@@ -497,10 +497,10 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				msgs = append(msgs, chatMsg{Role: "assistant", Content: ack})
 				return withReasoning(engineResult{Stop: stopComplete, Message: ack}), msgs
 			}
-			if refusal, ok := speakerRefusal(serverResults); ok {
-				// A tool that acts for the speaker refused an unidentified voice: no rewording or
-				// retry changes that, and the 9B called remember again until the loop gave up, or
-				// said "Got it" (#435). Say the refusal as is.
+			if refusal, ok := speakerRefusal(serverResults); ok && speakerRefusedThisTurn(msgs[:len(msgs)-len(serverResults)]) {
+				// Refused an unidentified voice again: no retry changes that, and the 9B called
+				// remember over and over until the loop gave up (#435). The first refusal is the
+				// model's to word; a repeat is said as is.
 				msgs = append(msgs, chatMsg{Role: "assistant", Content: refusal})
 				return withReasoning(engineResult{Stop: stopComplete, Message: refusal}), msgs
 			}
@@ -540,6 +540,22 @@ func acceptedAck(results []chatMsg) (string, bool) {
 		parts = append(parts, parse.PyStrip(ms))
 	}
 	return strings.Join(parts, " "), true
+}
+
+// speakerRefusedThisTurn reports whether a tool result since the turn's user message is the
+// no_speaker refusal.
+func speakerRefusedThisTurn(msgs []chatMsg) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		switch {
+		case msgs[i].Role == "tool":
+			if _, ok := speakerRefusal(msgs[i : i+1]); ok {
+				return true
+			}
+		case msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck):
+			return false
+		}
+	}
+	return false
 }
 
 // speakerRefusal reports whether every server result is the no_speaker refusal (the memory

@@ -89,7 +89,9 @@ func (*startRecordingTool) Name() string { return toolStartRecording }
 
 func (*startRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStartRecording,
-		"Start recording a macro ('record a macro called X', 'watch me do this'). Call it; don't just reply. Stop with stop_recording.",
+		"Call this (never just reply) for 'record this macro', 'record a macro called X', 'watch me (do this)', "+
+			"'learn how I do this', 'let me show you how to ...': it records what the user does in their browser so "+
+			"Jarvis can learn it. Not for reminders, notes or audio. Stop with stop_recording.",
 		servertools.Obj("task", strProp("The macro's name, if given"),
 			"computer", computerProp()))
 }
@@ -126,7 +128,9 @@ func (*stopRecordingTool) Name() string { return toolStopRecording }
 
 func (*stopRecordingTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolStopRecording,
-		"Stop recording the macro ('I'm done', 'stop recording'). If it asks for a name, call it again with the user's answer.",
+		"Call this (never just reply: saying it stopped stops nothing) for 'I'm done', 'that's it', 'stop recording', "+
+			"'stop watching': it stops recording the macro and keeps what the user showed. If it asks for a name, "+
+			"call it again with the user's answer.",
 		servertools.Obj("name", strProp("The macro's name, if given"),
 			"computer", computerProp()))
 }

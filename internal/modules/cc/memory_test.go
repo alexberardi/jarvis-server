@@ -403,22 +403,26 @@ func TestParseExtractionResponse(t *testing.T) {
 }
 
 // #435: an unidentified voice asked to remember something; the native 9B called remember, got
-// the no_speaker refusal and called it again nine times ("Sorry, I got stuck on that."), or
-// said "Got it". The refusal is the reply, as said, with no second LLM call.
-func TestNativeSpeakerRefusalIsTheReply(t *testing.T) {
+// the no_speaker refusal and called it again until the loop gave up ("Sorry, I got stuck on
+// that."). The first refusal is the model's to word (TestVoiceFailedToolClaimNudge); a second
+// one is the reply, as said.
+func TestNativeRepeatedSpeakerRefusalIsTheReply(t *testing.T) {
 	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
 	refusal := "I'm not sure who's speaking."
 	ve.m.tools.Register(ackTool{servertools.Obj("error", "no_speaker", "message", refusal)})
 	ve.start("who1", "[]")
-	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_r1", "type": "function",
-		"function": map[string]any{"name": "run_errand", "arguments": `{"goal": "x"}`}}}})
+	for _, id := range []string{"call_r1", "call_r2"} {
+		ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": id, "type": "function",
+			"function": map[string]any{"name": "run_errand", "arguments": `{"goal": "x"}`}}}})
+	}
+	ve.eng.say("should not be asked")
 	before := len(ve.eng.requests())
 	b := ve.turn("/api/v0/voice/command", "who1", "remember that my favorite color is green", nil).want(200).json()
 	if b["assistant_message"] != refusal {
 		t.Fatalf("reply = %v", b["assistant_message"])
 	}
-	if got := len(ve.eng.requests()) - before; got != 1 {
-		t.Fatalf("LLM calls = %d, want 1", got)
+	if got := len(ve.eng.requests()) - before; got != 2 {
+		t.Fatalf("LLM calls = %d, want 2", got)
 	}
 }
 
