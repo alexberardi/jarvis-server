@@ -74,7 +74,7 @@ func parsePJSIPConf(path string) (map[string]map[string]string, error) {
 	return out, sc.Err()
 }
 
-var shownLine = regexp.MustCompile(`^\s+([a-z_]+)\s+:\s+(.*?)\s*$`)
+var shownLine = regexp.MustCompile(`^\s+([a-z0-9_]+)\s+:\s*(.*?)\s*$`)
 
 // shownSettings reads `pjsip show endpoint|aor X` into setting → value.
 func shownSettings(out string) map[string]string {
