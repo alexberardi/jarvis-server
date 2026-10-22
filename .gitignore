@@ -9,7 +9,6 @@
 /internal/voice/sherpa/libs/
 /.models/
 /.contract.env
-/.push.env
 /.helper-e2e/
 __pycache__/
 *.pyc

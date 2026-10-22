@@ -30,15 +30,18 @@ while IFS= read -r line; do
   esac
 done <"$EXAMPLE"
 
-# The docs name the example and the default file it is copied to (the harness config dir's
-# push.env, the path scripts/e2e:179 reads), and the lane's skip behaviour.
+# The docs and the example's header name the default file it is copied to: the PUSH_ENV= default
+# in scripts/e2e (with $HOME shown as ~), so following them is what load_push_env sources.
 DOCS=$ROOT/docs/dev/e2e.md
+default=$(sed -n 's/^PUSH_ENV=\${JARVIS_HARNESS_PUSH_ENV:-\(.*\)}$/\1/p' "$ROOT/scripts/e2e")
+[ -n "$default" ] || { err "no PUSH_ENV=\${JARVIS_HARNESS_PUSH_ENV:-...} default in scripts/e2e"; exit 1; }
+shown=${default/#\$HOME/\~}
 grep -q 'push\.env\.example' "$DOCS" || err "docs/dev/e2e.md does not name push.env.example"
-grep -q 'push\.env' "$DOCS" || err "docs/dev/e2e.md does not name the push.env file"
+grep -qF "copy [\`push.env.example\`](../../push.env.example) to \`$shown\`" "$DOCS" ||
+  err "docs/dev/e2e.md does not say to copy push.env.example to $shown (the default scripts/e2e reads)"
+grep -qF "Copy to $shown" "$EXAMPLE" || err "$EXAMPLE does not say to copy it to $shown"
+grep -q 'JARVIS_HARNESS_PUSH_ENV' "$DOCS" || err "docs/dev/e2e.md does not name \$JARVIS_HARNESS_PUSH_ENV"
 grep -q 'skipped' "$DOCS" || err "docs/dev/e2e.md does not say the lane is skipped until the needs exist"
-
-# The default push.env (copied next to the example) must stay out of the repo.
-git -C "$ROOT" check-ignore -q "$ROOT/.push.env" || err ".push.env (the default copy of push.env.example) is not gitignored"
 
 [ "$fail" = 0 ] || exit 1
 echo "push-env-example: ok"

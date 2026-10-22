@@ -271,23 +271,25 @@ Two layers ([`../decisions/2026-10-18-e2e-push.md`](../decisions/2026-10-18-e2e-
   | the app's push config | `E2E_PUSH_GOOGLE_SERVICES`: the `google-services.json` of the Firebase project behind the Expo app's FCM credentials. It goes into the build as `./google-services.json` and `$GOOGLE_SERVICES_JSON`; the app config must name it in `android.googleServicesFile`, or the build stops saying so. The APK is cached apart from the default one |
   | a Google Play image | `sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'` (FCM needs Play services; no Google account needed) |
 
-   The two variables come from the environment or from the push.env file: copy
-   [`push.env.example`](../../push.env.example) to `.push.env` next to it (or point
-   `$JARVIS_HARNESS_PUSH_ENV` at the file). Keep the copy out of the repo; a real push goes to
-   the emulator only, since only its token is registered in the throwaway sandbox.
+  The two variables come from the environment or from the push.env file, which scripts/e2e
+  reads from `~/.config/jarvis-harness/push.env` by default (or from `$JARVIS_HARNESS_PUSH_ENV`):
+  copy [`push.env.example`](../../push.env.example) to `~/.config/jarvis-harness/push.env` and
+  fill it in, or point `$JARVIS_HARNESS_PUSH_ENV` at your copy. Keep it out of the repo; a real
+  push goes to the emulator only, since only its token is registered in the throwaway sandbox.
 
-   What the user must provide before the lane can run — it is **skipped**, with the reason in
-   the report, until they exist, and the overnight run (the `--real-push` lane, scheduled in
-   jarvis-loop) stays skipped too:
+  What the user must provide before the lane can run — it is **skipped**, with the reason in
+  the report, until they exist, and so will an overnight `--real-push` lane once jarvis-loop
+  schedules one:
 
-   - the relay URL, reachable from the dev box (it holds the Expo push credentials);
-   - the `google-services.json` of the Firebase project behind the Expo app's FCM credentials
-     (the FCM V1 service-account key uploaded in EAS credentials must be from the same project);
-   - jarvis-node-mobile's app config naming `android.googleServicesFile` (the build stops
-     otherwise);
-   - the Google Play image: `sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'`
-     (the harness creates the AVD `jarvis-harness-play`);
-   - the push.env file itself, copied from [`push.env.example`](../../push.env.example).
+  - the relay URL, reachable from the dev box (it holds the Expo push credentials);
+  - the `google-services.json` of the Firebase project behind the Expo app's FCM credentials
+    (the FCM V1 service-account key uploaded in EAS credentials must be from the same project);
+  - jarvis-node-mobile's app config naming `android.googleServicesFile` (the build stops
+    otherwise);
+  - the Google Play image: `sdkmanager 'system-images;android-36;google_apis_playstore;x86_64'`
+    (the harness creates the AVD `jarvis-harness-play`);
+  - the push.env file itself: `~/.config/jarvis-harness/push.env`, copied from
+    [`push.env.example`](../../push.env.example).
 
 ## The iOS lane (`scripts/e2e ios`)
 
