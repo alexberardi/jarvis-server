@@ -302,6 +302,8 @@ type round struct {
 	actedSinceLook bool
 	// checkoutPointed are the pages where a closed checkout dialog was sent back once.
 	checkoutPointed map[string]bool
+	// unaskedSent are the items an add the task didn't ask for was sent back for, once each.
+	unaskedSent map[string]bool
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -403,6 +405,68 @@ func skippedCheckout(goal string, obs Observation, actions []computeruse.Action)
 		}
 	}
 	return nil
+}
+
+var (
+	// removeIntent is an action meant to take something away; addName an element that adds
+	// ("Add Mutiny Thick Burger to Cart", "+ Potato Salad $10.00", "Increase quantity").
+	removeIntent = regexp.MustCompile(`(?i)\b(remove|delete|decrease|reduce|clear|empty|take out|get rid)\b`)
+	addName      = regexp.MustCompile(`(?i)^\s*(\+|add\b|increase\b)`)
+	// addedItem is what an add button adds: "Add <item> to Cart", "+ <item> $10.00".
+	addedItem = regexp.MustCompile(`(?i)^\s*(?:\+\s*|add\s+)(.+?)(?:\s+to\s+(?:the\s+)?(?:cart|bag|basket|order))?(?:\s+\$[\d.,]+)?\s*$`)
+	wordRe    = regexp.MustCompile(`[\pL\pN]+`)
+)
+
+// stopWords don't make an item match the task.
+var stopWords = map[string]bool{"a": true, "an": true, "the": true, "to": true, "of": true, "and": true, "with": true,
+	"for": true, "me": true, "my": true, "from": true, "on": true, "in": true, "cart": true, "add": true, "order": true}
+
+// misstep is why a batch is sent back before it runs, when it contradicts itself or the task
+// (#485: the house model pressed "Add Mutiny Thick Burger to Cart" to remove the burger, and added
+// three upsells while cleaning the cart): an action meant to remove that presses an add button,
+// and, in a buying task, an add button for an item the task never names (once per item, as a
+// vague task may want it). key is "" for the first kind (always sent back).
+func misstep(goal string, obs Observation, actions []computeruse.Action) (feedback, key string) {
+	byRef := map[string]Element{}
+	for _, e := range obs.Elements {
+		byRef[e.Ref] = e
+	}
+	goalWords := map[string]bool{}
+	for _, w := range wordRe.FindAllString(strings.ToLower(goal), -1) {
+		goalWords[w] = true
+	}
+	for _, a := range actions {
+		e, ok := byRef[a.Ref]
+		if !ok || (a.Kind != "press" && a.Kind != "click") || !addName.MatchString(e.Name) {
+			continue
+		}
+		if removeIntent.MatchString(a.Intent) {
+			return fmt.Sprintf("%q (%s) adds, it doesn't remove: to take an item out, use its remove button or set its quantity lower (often inside the cart). Nothing ran.",
+				e.Name, e.Ref), ""
+		}
+		m := addedItem.FindStringSubmatch(e.Name)
+		if m == nil || !buyGoal.MatchString(goal) {
+			continue
+		}
+		// Most of the item's words must be in the task: the shop's own name is in it too
+		// ("Mutiny Thick Burger" for "a pulled pork sandwich from Mutiny BBQ").
+		matched, words := 0, 0
+		for _, w := range wordRe.FindAllString(strings.ToLower(m[1]), -1) {
+			if stopWords[w] {
+				continue
+			}
+			words++
+			if goalWords[w] {
+				matched++
+			}
+		}
+		// "Add to Cart $14.00" names no item: it's the open item's own button.
+		if words > 0 && matched*2 <= words {
+			return fmt.Sprintf("the task doesn't ask for %q: don't add it (%s). Nothing ran.", m[1], e.Ref),
+				strings.ToLower(m[1])
+		}
+	}
+	return "", ""
 }
 
 // Run drives the task until it is done, needs the user, fails, is stopped or runs out of budget.
@@ -555,6 +619,16 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		actions = append(actions, l.toImage(r, a))
 	}
 	if len(actions) == 0 {
+		return Outcome{}, false
+	}
+	if fb, key := misstep(r.task.Goal, obs, actions); fb != "" && (key == "" || !r.unaskedSent[key]) {
+		if key != "" {
+			if r.unaskedSent == nil {
+				r.unaskedSent = map[string]bool{}
+			}
+			r.unaskedSent[key] = true
+		}
+		r.feedback = fb
 		return Outcome{}, false
 	}
 	if btn := skippedCheckout(r.task.Goal, obs, actions); btn != nil && !r.checkoutPointed[pageKey(obs)] {

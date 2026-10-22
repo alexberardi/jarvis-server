@@ -1107,3 +1107,49 @@ func TestNotesCarryOver(t *testing.T) {
 		t.Fatalf("%d notes entries, want 1", notes)
 	}
 }
+
+// A batch that contradicts itself or the task is sent back before it runs (#485).
+func TestMisstep(t *testing.T) {
+	page := Observation{URL: "https://order.example/menu", Elements: []Element{
+		{Ref: "e1", Role: "button", Name: "Add Pulled Pork Sandwich to Cart"},
+		{Ref: "e2", Role: "button", Name: "Add Mutiny Thick Burger to Cart"},
+		{Ref: "e3", Role: "button", Name: "+ Texas Carolina Potato Salad - Pt. $10.00"},
+		{Ref: "e4", Role: "button", Name: "Add to Cart $14.00", State: []string{"in dialog"}},
+		{Ref: "e5", Role: "button", Name: "Increase quantity"},
+		{Ref: "e6", Role: "button", Name: "Remove item"},
+	}}
+	goal := "Order me a pulled pork sandwich from Mutiny BBQ"
+	for _, c := range []struct {
+		ref, intent string
+		sent, once  bool
+	}{
+		{"e1", "Add the sandwich", false, false},
+		{"e4", "Add it to the cart", false, false},
+		{"e2", "Remove the burger from the cart", true, false},
+		{"e5", "Decrease the quantity to 1", true, false},
+		{"e2", "Add a burger", true, true},
+		{"e3", "Add potato salad", true, true},
+		{"e6", "Remove the burger", false, false},
+	} {
+		fb, key := misstep(goal, page, []computeruse.Action{{Kind: "press", Ref: c.ref, Intent: c.intent}})
+		if (fb != "") != c.sent || (key != "") != c.once {
+			t.Errorf("%s %q: feedback %q key %q", c.ref, c.intent, fb, key)
+		}
+	}
+	// Not a purchase: adding anything is the user's business.
+	if fb, _ := misstep("Add a burger to my wishlist", page, []computeruse.Action{{Kind: "press", Ref: "e2", Intent: "Add it"}}); fb != "" {
+		t.Errorf("non-buying task sent back: %q", fb)
+	}
+	// In the loop: the unasked add is sent back once, then runs if the model insists.
+	e := newEnv(t, page, func() Observation { p := page; p.URL += "?burger"; return p }())
+	e.script(actions(press("e2", "Add a burger")), actions(press("e2", "Add a burger")))
+	tk := task()
+	tk.Goal = goal
+	e.loop.Run(context.Background(), tk) // ends when the script runs out
+	if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Ref != "e2" {
+		t.Fatalf("batches %+v, want the burger once (after the send-back)", e.exec.batches)
+	}
+	if p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "doesn't ask for") {
+		t.Fatalf("no send-back feedback:\n%s", p)
+	}
+}
