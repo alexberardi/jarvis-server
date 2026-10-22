@@ -192,6 +192,9 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		if native {
 			req.Tools = nativeTools
 			req.ToolChoice = json.RawMessage(`"auto"`)
+			if len(msgs) > 0 && callNowNag(msgs[len(msgs)-1]) {
+				req.ToolChoice = json.RawMessage(`"required"`)
+			}
 		} else if rf := conv.mode.ResponseFormat(); rf != nil {
 			t, _ := rf.Get("type")
 			ts, _ := t.(string)
@@ -540,6 +543,15 @@ func acceptedAck(results []chatMsg) (string, bool) {
 		parts = append(parts, parse.PyStrip(ms))
 	}
 	return strings.Join(parts, " "), true
+}
+
+// callNowNag reports a nudge that names the one call the request still needs (remember, recall,
+// the typing, cancel_watch, stop_recording while recording): the retry after it requires a tool
+// call. The 9B answered "[NOT_SAVED] … Call remember now" with "Got it, your parking spot is
+// B12." again (#435). The must-call retry and the other nudges allow an answer, so stay auto.
+func callNowNag(m chatMsg) bool {
+	return isNag(m, nagUnsaved) || isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNotCancelled) ||
+		isNag(m, nagStopRecording)
 }
 
 // speakerRefusedThisTurn reports whether a tool result since the turn's user message is the

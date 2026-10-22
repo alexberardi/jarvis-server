@@ -70,6 +70,13 @@ func TestFollowThroughUnsavedAfterMustCall(t *testing.T) {
 	if last := msgs[len(msgs)-1]; last["role"] != "system" || !strings.HasPrefix(last["content"].(string), nagUnsaved) {
 		t.Fatalf("remember not called after the not-saved nudge: %v", last)
 	}
+	// #435: the 9B answered the not-saved nudge in prose again; the retry after it requires a
+	// tool call. The first call and the must-call retry stay auto.
+	for i, want := range map[int]string{len(reqs) - 4: "auto", len(reqs) - 3: "auto", len(reqs) - 2: "required"} {
+		if got := reqs[i]["tool_choice"]; got != want {
+			t.Errorf("request %d: tool_choice %v, want %s", i, got, want)
+		}
+	}
 	for _, r := range reqs {
 		for _, m := range messagesOf(r) {
 			if s, _ := m["content"].(string); m["role"] == "system" && strings.HasPrefix(s, nagNoMemoryTool) {
