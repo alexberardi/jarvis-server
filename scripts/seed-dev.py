@@ -17,8 +17,8 @@ Two layers, deliberately different:
     flow (/api/v0/provisioning/token, then /api/v0/nodes/register). Passwords get properly
     hashed and node keys are minted and registered by jarvisd, so a seeded login is a real
     login and a seeded node really authenticates. No ADMIN_API_KEY or admin token is needed.
-  * CONTENT (rooms, devices, phone contacts, routines, memories, transcripts, signals) is
-    written straight into <home>/jarvis.db in ONE transaction. The APIs mint their own ids
+  * CONTENT (rooms, devices, phone contacts, routines, memories, transcripts, signals, inbox
+    items) is written straight into <home>/jarvis.db in ONE transaction. The APIs mint their own ids
     and stamp everything "now"; the seeder needs fixed ids and seed markers (so reruns and
     --reset are exact) and back-dated timestamps (so history looks real). jarvisd runs the
     database in WAL mode, so this is safe while the server is up.
@@ -119,6 +119,9 @@ STATE_FILE = "seed-dev-state.json"
 # household must not leave invisible duplicates behind).
 SEED_MARKERS = (
     ("cc_signals", "source_agent = 'seed'"),
+    # The seeded suggestion card's "Never suggest this" records one of these when a test taps it.
+    ("cc_proposal_suppressions", "source_key LIKE 'seed:%'"),
+    ("notifications_inbox_items", "id LIKE '5eed0004-%'"),
     ("cc_conversation_transcripts", "conversation_id LIKE 'seed-%'"),
     ("cc_user_memories", "source = 'seed'"),
     ("cc_routines", "id LIKE '5eed0003-%'"),
@@ -587,7 +590,7 @@ def seed_content(db_path: str, household_id: str, node_id: str, user_ids: dict[s
         cx.close()
 
     if not rich:
-        log("minimal profile: no memories, transcripts or signals", 1)
+        log("minimal profile: no memories, transcripts, signals or inbox items", 1)
     for k, v in counts.items():
         log(f"{k}: {v}", 2)
     return counts
@@ -734,6 +737,63 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
                         (rid, household_id, primary, node_id, mode, json.dumps(trace), narration, keyframes,
                          ts(made), ts(made + timedelta(days=30)))).rowcount
     counts["recordings"] = n
+
+    # Inbox: one item per screen the mobile app opens one with (jarvis-node-mobile
+    # InboxListScreen routeForCategory), the primary's, for its Inbox flows. scripts/e2e passes
+    # the titles to the flows (flow_env, INBOX_*): change them together. adapter_proposal is
+    # left out: its screen loads /api/v0/adapters/proposals/{id}, which jarvisd does not serve
+    # (the LoRA pipeline is cut, docs/cc/13 §3.4). Newest first: the list's order is this one.
+    inbox = [
+        # InboxDetail: a markdown body with its sources, as deep research posts it.
+        ("deep_research", "Research: heat pumps in cold climates",
+         "Modern heat pumps keep working well below freezing.",
+         "## Findings\n\nCold-climate heat pumps hold **most of their capacity** down to -15 °C, "
+         "and a backup strip heater covers the coldest nights.\n\n- Look for an HSPF2 of 8 or more\n"
+         "- Size for the coldest week, not the average one",
+         {"sources": [{"title": "Cold-climate heat pump guide", "url": "https://energy.example.com/heat-pumps"},
+                      {"title": "Heat pumps below freezing", "url": "https://research.example.org/cold"}],
+          "elapsed_seconds": 42, "pages_scraped": 6, "pages_attempted": 8}),
+        # InboxDetail with tappable elements: a suggestion card (cc emitProposalCard's shape)
+        # whose buttons run on the server, so no node needs to be online, and open the result
+        # screen (navigation_type "stack": InboxCallbackResult). "Never suggest this" answers
+        # "Won't suggest that again" and records a suppression (SuppressedSuggestions lists it).
+        ("proposal", "Turn off the office fan at night?",
+         "The office fan has been left on overnight three times this week.",
+         "The office fan was still on at midnight on Monday, Wednesday and Thursday.",
+         {"interactive_elements": [
+             {"id": "dismiss-seed-office-fan", "label": "Not now", "kind": "dismiss",
+              "command": "jarvis.proposable_action", "callback": "dismiss", "target": "server",
+              "data": {"_action": {"idempotency_key": "seed:office-fan"}}, "navigation_type": "stack"},
+             {"id": "suppress-seed-office-fan", "label": "Never suggest this", "kind": "suppress",
+              "command": "jarvis.proposable_action", "callback": "suppress", "target": "server",
+              "data": {"_action": {"target_command": "control_device", "idempotency_key": "seed:office-fan"},
+                       "source": "seed:office-fan", "descriptor": "turning off the office fan at night"},
+              "navigation_type": "stack"}]}),
+        # InteractiveList: the SDK's interactive_list v1 payload, its actions on the kitchen node.
+        ("interactive_list", "Restock the pantry", "Three things are running low.", "",
+         {"type": "interactive_list", "version": 1, "command_name": "shopping_list", "node_id": node_id,
+          "sections": [{"title": "Running low", "rows": [
+              {"key": "milk", "label": "Milk", "control": "checkbox", "default": {"selected": True}},
+              {"key": "eggs", "label": "Eggs", "control": "checkbox_stepper",
+               "default": {"selected": True, "quantity": 12}},
+              {"key": "coffee", "label": "Coffee beans", "caption": "Last bought three weeks ago",
+               "control": "checkbox"}]}],
+          "actions": [{"label": "Add {n} to the list", "callback": "add_selected", "style": "primary"},
+                      {"label": "Not now", "callback": "dismiss", "style": "secondary"}]}),
+        # AdapterDeployed: renders from the item alone (its Revert calls the cut adapters API).
+        ("adapter_deployed", "Voice assistant updated", "A new voice adapter is live.",
+         "The new adapter passed 47 of 50 checks.",
+         {"adapter_hash": "5eedadab" * 8, "previous_adapter_hash": "5eedbeef" * 8, "pass_rate": 0.94,
+          "latency_s": 0.82, "provider_name": "mlx"}),
+    ]
+    n = 0
+    for i, (category, title, summary, body, meta) in enumerate(inbox):
+        n += cx.execute("""INSERT INTO notifications_inbox_items (id, user_id, household_id, title, summary,
+            body, category, source_service, metadata_json, is_read, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'seed', ?, 0, ?) ON CONFLICT DO NOTHING""",
+                        (f"5eed0004-0000-4000-8000-{i:012d}", primary, household_id, title, summary, body,
+                         category, json.dumps(meta), ts(now - timedelta(hours=i + 1)))).rowcount
+    counts["inbox_items"] = n
 
     # A deactivated account, in no household (so no role login picks it), for the admin's
     # Users page (e2e/web/tests/admin/users.spec.ts). No API deactivates a user; its password
