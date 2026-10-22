@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -398,5 +399,46 @@ func TestParseExtractionResponse(t *testing.T) {
 	}
 	if parseExtractionResponse(`[{"content": "x"}]`)[0].expiresAt(now) != nil {
 		t.Error("absent ttl must be permanent")
+	}
+}
+
+// #435: an unidentified voice asked to remember something; the native 9B called remember, got
+// the no_speaker refusal and called it again nine times ("Sorry, I got stuck on that."), or
+// said "Got it". The refusal is the reply, as said, with no second LLM call.
+func TestNativeSpeakerRefusalIsTheReply(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	refusal := "I'm not sure who's speaking."
+	ve.m.tools.Register(ackTool{servertools.Obj("error", "no_speaker", "message", refusal)})
+	ve.start("who1", "[]")
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_r1", "type": "function",
+		"function": map[string]any{"name": "run_errand", "arguments": `{"goal": "x"}`}}}})
+	before := len(ve.eng.requests())
+	b := ve.turn("/api/v0/voice/command", "who1", "remember that my favorite color is green", nil).want(200).json()
+	if b["assistant_message"] != refusal {
+		t.Fatalf("reply = %v", b["assistant_message"])
+	}
+	if got := len(ve.eng.requests()) - before; got != 1 {
+		t.Fatalf("LLM calls = %d, want 1", got)
+	}
+}
+
+func TestSpeakerRefusal(t *testing.T) {
+	tool := func(s string) chatMsg { return chatMsg{Role: "tool", Content: s} }
+	for _, c := range []struct {
+		in   []chatMsg
+		want string
+		ok   bool
+	}{
+		{nil, "", false},
+		{[]chatMsg{tool(`{"error": "no_speaker", "message": " Who? "}`)}, "Who?", true},
+		{[]chatMsg{tool(`{"error": "no_speaker", "message": "Who?"}`), tool(`{"error": "no_speaker", "message": "Who?"}`)}, "Who?", true},
+		{[]chatMsg{tool(`{"error": "no_speaker", "message": "Who?"}`), tool(`{"temp": 70}`)}, "", false},
+		{[]chatMsg{tool(`{"error": "no_speaker", "message": ""}`)}, "", false},
+		{[]chatMsg{tool(`{"error": "save_failed", "message": "Failed"}`)}, "", false},
+		{[]chatMsg{tool(`not json`)}, "", false},
+	} {
+		if got, ok := speakerRefusal(c.in); got != c.want || ok != c.ok {
+			t.Errorf("%v: got %q %v", c.in, got, ok)
+		}
 	}
 }

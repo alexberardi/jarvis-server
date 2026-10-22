@@ -497,6 +497,13 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				msgs = append(msgs, chatMsg{Role: "assistant", Content: ack})
 				return withReasoning(engineResult{Stop: stopComplete, Message: ack}), msgs
 			}
+			if refusal, ok := speakerRefusal(serverResults); ok {
+				// A tool that acts for the speaker refused an unidentified voice: no rewording or
+				// retry changes that, and the 9B called remember again until the loop gave up, or
+				// said "Got it" (#435). Say the refusal as is.
+				msgs = append(msgs, chatMsg{Role: "assistant", Content: refusal})
+				return withReasoning(engineResult{Stop: stopComplete, Message: refusal}), msgs
+			}
 			// Native server-only results (or nothing callable): loop again.
 		default:
 			return withReasoning(engineResult{Stop: stopComplete, Message: message}), msgs
@@ -533,6 +540,30 @@ func acceptedAck(results []chatMsg) (string, bool) {
 		parts = append(parts, parse.PyStrip(ms))
 	}
 	return strings.Join(parts, " "), true
+}
+
+// speakerRefusal reports whether every server result is the no_speaker refusal (the memory
+// tools' toolSpeakerError) and returns its message.
+func speakerRefusal(results []chatMsg) (string, bool) {
+	msg := ""
+	for _, r := range results {
+		v, err := pyjson.Loads(r.Content)
+		if err != nil {
+			return "", false
+		}
+		o, _ := v.(*pyjson.Object)
+		if o == nil {
+			return "", false
+		}
+		e, _ := o.Get("error")
+		m, _ := o.Get("message")
+		ms, _ := m.(string)
+		if e != "no_speaker" || parse.PyStrip(ms) == "" {
+			return "", false
+		}
+		msg = parse.PyStrip(ms)
+	}
+	return msg, msg != ""
 }
 
 // closeDanglingCalls answers client calls the loop dropped with a not-executed tool reply, so

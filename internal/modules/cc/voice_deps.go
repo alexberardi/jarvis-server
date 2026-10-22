@@ -151,6 +151,7 @@ const (
 	settingPromptProvider    = "llm.prompt_provider"
 	settingToolCalling       = "llm.tool_calling"
 	settingThinkingSwitch    = "llm.thinking_switch"
+	settingForceTools        = "llm.force_tools"
 	settingMaxTurns          = "conversation.max_turns"
 	settingIncludeThinking   = "model.include_thinking"
 	settingSmallModelMode    = "model.small_model_mode"
@@ -188,6 +189,12 @@ func voiceDefinitions(defaultPersona string) []settings.Definition {
 			Validate: oneOf(modeAuto, thinkingSuffix, thinkingNone),
 			Description: "How thinking on/off reaches the model: suffix appends /think or /no_think to the user turn. " +
 				"auto uses the household prompt's value, else the chat template."},
+		{Key: settingForceTools, Category: "llm", Type: settings.String, Default: modeAuto,
+			Options:  []any{modeAuto, forceOn, forceOff},
+			Validate: oneOf(modeAuto, forceOn, forceOff),
+			Description: "The force-tools guard: a reply that claims an action with no tool call gets one retry asking for " +
+				"the call. auto: on for a model this install serves itself, off for a remote one. on/off choose it " +
+				"(the harness's sandbox turns it on: its remote label is the installed jarvisd's local model)."},
 		{Key: settingMaxTurns, Category: "conversation", Type: settings.Int, Default: int64(10),
 			Description: "Maximum user/assistant exchanges kept in conversation history (sliding window — oldest " +
 				"turns are dropped first, atomically with their tool calls/results; keeps prompts bounded for the LLM)"},
