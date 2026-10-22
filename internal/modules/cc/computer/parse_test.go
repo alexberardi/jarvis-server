@@ -44,6 +44,8 @@ func TestParseReply(t *testing.T) {
 		{`{"ask": "Which size?", "reason": "unclear"}`, "ask"},
 		{`{"ask": "Log in?", "reason": "whatever"}`, "ask"},
 		{`{"checkout": {"product": "Soap", "price": "4.99"}, "actions": [{"kind": "press", "ref": "e5", "intent": "Pay"}]}`, "actions"},
+		// The question sent as an action (#485).
+		{`{"thought": "which?", "actions": [{"kind": "ask", "intent": "Which Mutiny BBQ location?"}]}`, "ask"},
 	}
 	for _, c := range ok {
 		r, err := parseReply(c.in)

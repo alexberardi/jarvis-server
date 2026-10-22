@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"regexp"
 	"slices"
@@ -115,7 +116,8 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			t.Target.Kind = "desktop"
 		} else {
 			t.StartURL = startURL(truthyStr(args, "site"), truthyStr(args, "goal"), rc.goal)
-			if t.Target.Site == "" {
+			if t.Target.Site == "" || t.StartURL != "" && !isWebURL(truthyStr(args, "site")) {
+				// The address the user gave names the site, over the model's guess at it.
 				t.Target.Site = siteOf(t.StartURL)
 			}
 		}
@@ -349,12 +351,53 @@ func startURL(site string, goals ...string) string {
 	for _, g := range goals {
 		for _, w := range strings.Fields(g) {
 			w = strings.TrimLeft(strings.TrimRight(w, `.,;:!?)"'`), `("'`)
-			if isWebURL(w) && (host == "" || siteOf(w) == host) {
+			if !isWebURL(w) && saidAddress(w) {
+				// A spoken address has no scheme ("order.toasttab.com/online/mutiny-bbq").
+				w = "https://" + w
+			}
+			if isWebURL(w) && (host == "" || sameSite(siteOf(w), host)) {
 				return w
 			}
 		}
 	}
 	return ""
+}
+
+// saidAddress is a web address without its scheme: a host with a dot and a path
+// ("shop.example/watches"). A bare host ("amazon.com") isn't one: the site already says that.
+func saidAddress(w string) bool {
+	host, path, ok := strings.Cut(w, "/")
+	if !ok || path == "" || strings.ContainsAny(host, "@:") || !strings.Contains(host, ".") {
+		return false
+	}
+	tld := host[strings.LastIndex(host, ".")+1:]
+	if len(tld) < 2 {
+		return false
+	}
+	for _, r := range tld {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// sameSite reports a and b are one site: equal, or one a subdomain of the other's domain
+// (the model's pos.toasttab.com for the user's order.toasttab.com).
+func sameSite(a, b string) bool {
+	return a == b || baseDomain(a) == baseDomain(b) && baseDomain(a) != ""
+}
+
+// baseDomain is a host's last two labels ("" for an IP address or a one-label host).
+func baseDomain(h string) string {
+	if net.ParseIP(h) != nil {
+		return ""
+	}
+	labels := strings.Split(h, ".")
+	if len(labels) < 2 {
+		return ""
+	}
+	return strings.Join(labels[len(labels)-2:], ".")
 }
 
 func isWebURL(s string) bool {

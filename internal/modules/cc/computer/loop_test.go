@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,10 +258,16 @@ func TestLoopDone(t *testing.T) {
 
 func TestLoopStopsAtBudget(t *testing.T) {
 	t.Run("rounds", func(t *testing.T) {
-		e := newEnv(t)
-		e.setts[SettingMaxRounds] = 3
+		var pages []Observation
 		for i := range 5 {
-			e.script(actions(press([]string{"e1", "e6"}[i%2], "Go somewhere")))
+			p := shopPage()
+			p.URL += fmt.Sprintf("?page=%d", i) // somewhere new each round
+			pages = append(pages, p)
+		}
+		e := newEnv(t, pages...)
+		e.setts[SettingMaxRounds] = 3
+		for range 5 {
+			e.script(actions(press("e1", "Next page")))
 		}
 		out := e.run()
 		if out.State != StateFailed || out.Rounds != 3 || !strings.Contains(out.Summary, "3 rounds") {
@@ -928,7 +935,7 @@ func TestRepeatedNoChangeBatch(t *testing.T) {
 		if len(e.llm.reqs) != 3 {
 			t.Fatalf("%d model calls, want 3", len(e.llm.reqs))
 		}
-		if p := e.llm.reqs[2].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "that did nothing") {
+		if p := e.llm.reqs[2].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "that got nowhere") {
 			t.Fatalf("no feedback in the repeat's prompt:\n%s", p)
 		}
 	})
@@ -946,6 +953,18 @@ func TestRepeatedNoChangeBatch(t *testing.T) {
 		e := newEnv(t, shopPage(), changed)
 		e.script(actions(press("e1", "Next")), actions(press("e1", "Next")), doneAnswer)
 		if out := e.run(); out.State != StateDone || len(e.exec.batches) != 2 {
+			t.Fatalf("outcome %+v batches %d", out, len(e.exec.batches))
+		}
+	})
+	t.Run("toggle", func(t *testing.T) {
+		open := shopPage()
+		open.Elements = append(open.Elements, Element{Ref: "e7", Role: "menuitem", Name: "Restaurants"})
+		// Menu opens, shuts, opens: the third press is on the page the first ran on.
+		e := newEnv(t, shopPage(), open, shopPage(), open)
+		e.script(actions(press("e1", "Menu")), actions(press("e1", "Menu")), actions(press("e1", "Menu")),
+			actions(press("e1", "Menu")))
+		out := e.run()
+		if out.State != StateFailed || !strings.Contains(out.Summary, "got stuck") || len(e.exec.batches) != 2 {
 			t.Fatalf("outcome %+v batches %d", out, len(e.exec.batches))
 		}
 	})

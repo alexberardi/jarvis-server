@@ -54,6 +54,16 @@ func parseReply(s string) (Reply, error) {
 	if err := json.Unmarshal([]byte(s[i:j+1]), &r); err != nil {
 		return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
 	}
+	// The house model sometimes sends its question as an action ({"kind": "ask", ...}): it's
+	// the question (#485).
+	for _, a := range r.Actions {
+		if a.Kind == "ask" && strings.TrimSpace(r.Ask) == "" && !r.Done {
+			r.Ask = strings.TrimSpace(a.Text)
+			if r.Ask == "" {
+				r.Ask = strings.TrimSpace(a.Intent)
+			}
+		}
+	}
 	switch {
 	case r.Done:
 		if strings.TrimSpace(r.Summary) == "" {

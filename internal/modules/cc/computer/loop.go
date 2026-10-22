@@ -270,12 +270,12 @@ type round struct {
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
 	sendAsked int
-	// lastKey and lastPage are the last batch acted on and the page it was acted on; repeats
-	// counts the times the model then asked for that batch again on the same page (#485's
-	// 30 presses of a ref that did nothing).
-	lastKey, lastPage string
-	repeats           int
-	page              string // pageKey of this round's observation
+	// acted are the batches run so far, each with the page it ran on; repeats counts the
+	// times in a row the model asked for one of them again on that same page (#485: 30 presses
+	// of a ref that did nothing, and a menu button pressed open and shut).
+	acted   map[string]bool
+	repeats int
+	page    string // pageKey of this round's observation
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -524,8 +524,8 @@ func (l *Loop) logRound(r *round, obs Observation, reply Reply) {
 // before the task fails as stuck: each repeat is sent back unacted, with feedback.
 const maxRepeats = 2
 
-// noChange catches a batch asked for again on the very page it already ran on and changed
-// nothing: it isn't run again; the model hears it did nothing, and after maxRepeats the task ends
+// noChange catches a batch asked for again on a page it already ran on (it changed nothing, or
+// toggled something back): it isn't run again; the model hears it did nothing, and after maxRepeats the task ends
 // (stuck) instead of spending the rest of its rounds. Scrolls and waits don't count: the snapshot
 // lists the whole page, so a scroll never changes it.
 func (r *round) noChange(obs Observation, actions []computeruse.Action) (Outcome, bool, bool) {
@@ -535,7 +535,7 @@ func (r *round) noChange(obs Observation, actions []computeruse.Action) (Outcome
 	}
 	page := pageKey(obs)
 	r.page = page
-	if key == r.lastKey && page == r.lastPage {
+	if r.acted[key+"\x00"+page] {
 		r.repeats++
 		what := strings.TrimSpace(actions[0].Intent)
 		if what == "" {
@@ -545,9 +545,10 @@ func (r *round) noChange(obs Observation, actions []computeruse.Action) (Outcome
 			return Outcome{State: StateFailed,
 				Summary: fmt.Sprintf("I got stuck: %q didn't change anything on the page, so I stopped.", what)}, true, false
 		}
-		r.feedback = fmt.Sprintf("that did nothing: the page is the same as before %q. Don't repeat it: pick a different element (look for the right one by its name; one marked [in dialog] if a dialog is open), or ask.", what)
+		r.feedback = fmt.Sprintf("that got nowhere: you already did %q on this very page. Don't repeat it: pick a different element (look for the right one by its name; one marked [in dialog] if a dialog is open), or ask.", what)
 		return Outcome{}, false, true
 	}
+	r.repeats = 0
 	return Outcome{}, false, false
 }
 
@@ -871,10 +872,12 @@ func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []d
 	if err == nil {
 		r.resume = false
 		// Only a batch that ran counts for noChange (not one sent back for a checkout or held).
-		if key := batchKey(b.Actions); key != r.lastKey || r.page != r.lastPage {
-			r.repeats = 0
+		if key := batchKey(b.Actions); key != "" {
+			if r.acted == nil {
+				r.acted = map[string]bool{}
+			}
+			r.acted[key+"\x00"+r.page] = true
 		}
-		r.lastKey, r.lastPage = batchKey(b.Actions), r.page
 	}
 	if err != nil {
 		for _, d := range ds {

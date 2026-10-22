@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -550,13 +551,16 @@ func TestProgressCardUpdates(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		intent := "Look at item " + string(rune('0'+i))
 		intents = append(intents, intent)
-		// e3 and e4 by turns: the same press again on an unchanged page is sent back (noChange).
-		ref := []string{"e3", "e4"}[i%2]
-		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "`+ref+`", "intent": "`+intent+`"}]}`)
+		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "e3", "intent": "`+intent+`"}]}`)
 	}
 	c.llm.say("computer", append(replies, doneReply)...)
 	var seen []Card
+	base := c.comp.url
 	c.comp.onAct = func(n int) {
+		// Each look is at a new item (the same press on an unchanged page is sent back).
+		c.comp.mu.Lock()
+		c.comp.url = fmt.Sprintf("%s?item=%d", base, n)
+		c.comp.mu.Unlock()
 		if n == 2 {
 			if up, ok := c.cards.update("item-1"); ok {
 				seen = append(seen, up)
@@ -874,6 +878,13 @@ func TestStartURL(t *testing.T) {
 		{"shop.example", "order it", "", ""},
 		{"", "fill in https://forms.example/a?b=1", "", "https://forms.example/a?b=1"},
 		{"ftp://x.example/", "", "", ""},
+		// Said, so without a scheme; on a subdomain of the model's site (#485).
+		{"pos.toasttab.com", "Order me a sandwich from order.toasttab.com/online/mutiny-bbq, in Firefox", "",
+			"https://order.toasttab.com/online/mutiny-bbq"},
+		{"toasttab.com", "order it", "go to order.toasttab.com/online/mutiny-bbq", "https://order.toasttab.com/online/mutiny-bbq"},
+		{"shop.example", "order it from other.example/x", "", ""},
+		{"", "order amazon.com stuff", "", ""},
+		{"", "the ratio is 1.5/2", "", ""},
 	} {
 		if got := startURL(c.site, c.goal, c.errand); got != c.want {
 			t.Errorf("startURL(%q, %q, %q) = %q, want %q", c.site, c.goal, c.errand, got, c.want)
