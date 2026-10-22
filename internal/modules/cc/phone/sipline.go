@@ -468,7 +468,13 @@ func (s *Service) reconcileSIP(ctx context.Context) {
 	start := s.StartSIP
 	if start == nil {
 		start = func(ctx context.Context, a SIPAccount) (sipUA, error) {
-			return startRealUA(ctx, a, func(c sip.Config) sip.Config { c.Log = s.log(); return c })
+			return startRealUA(ctx, a, func(c sip.Config) sip.Config {
+				c.Log = s.log()
+				// Calls the PBX routes in: answered for the household that turned inbound on
+				// for this account, refused otherwise (inbound.go).
+				c.Inbound = func(ctx context.Context, in sip.Incoming) sip.Admission { return s.offerInbound(ctx, a, in) }
+				return c
+			})
 		}
 	}
 	base := s.baseCtx()

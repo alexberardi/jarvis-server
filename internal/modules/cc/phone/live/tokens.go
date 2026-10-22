@@ -37,6 +37,15 @@ var tokenRE = regexp.MustCompile(`(?s)^\[(?:(HANGUP)|(ESCALATE|OUTCOME|DTMF):\s*
 
 var tokenPrefixes = []string{"HANGUP]", "ESCALATE:", "OUTCOME:", "DTMF:"}
 
+// grammar is a parser's token set: which candidates to hold and what a complete one means.
+type grammar struct {
+	couldBecome func(candidate string) bool
+	parse       func(body string) ToolEvent
+}
+
+// outbound is the call brain's tokens.
+var outbound = grammar{couldBecome: couldBecomeToken, parse: parseComplete}
+
 // couldBecomeToken: candidate starts after '[' and has no ']' yet; is it worth holding?
 func couldBecomeToken(candidate string) bool {
 	if utf8.RuneCountInString(candidate) > maxTokenLen {
@@ -75,8 +84,19 @@ func parseComplete(body string) ToolEvent {
 
 // TokenParser is stream-safe: feed deltas, receive speakable text and events. A '[' that could
 // still grow into a token is held until ']' arrives or the prefix stops matching; anything
-// that is not a token is released verbatim.
-type TokenParser struct{ buf string }
+// that is not a token is released verbatim. The zero value parses the outbound call's tokens;
+// NewInboundParser the receptionist's (inbound.go).
+type TokenParser struct {
+	buf string
+	g   *grammar
+}
+
+func (p *TokenParser) grammar() *grammar {
+	if p.g == nil {
+		return &outbound
+	}
+	return p.g
+}
 
 // Feed consumes one delta.
 func (p *TokenParser) Feed(delta string) (string, []ToolEvent) {
@@ -94,7 +114,7 @@ func (p *TokenParser) Feed(delta string) (string, []ToolEvent) {
 		rest := p.buf[i+1:]
 		j := strings.IndexByte(rest, ']')
 		if j == -1 {
-			if couldBecomeToken(rest) {
+			if p.grammar().couldBecome(rest) {
 				p.buf = p.buf[i:]
 				break
 			}
@@ -103,7 +123,7 @@ func (p *TokenParser) Feed(delta string) (string, []ToolEvent) {
 			continue
 		}
 		body := rest[:j]
-		if ev := parseComplete(body); ev != nil {
+		if ev := p.grammar().parse(body); ev != nil {
 			events = append(events, ev)
 		} else {
 			text.WriteString("[" + body + "]")

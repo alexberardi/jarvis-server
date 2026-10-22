@@ -43,6 +43,14 @@ type Admission struct {
 	Abandoned func(reason string)
 }
 
+// Refusals an Admission may give.
+const (
+	// RefuseUnavailable (480) sends the caller on to the PBX's next destination.
+	RefuseUnavailable = sip.StatusTemporarilyUnavailable
+	// RefuseBusy (486): FreePBX sends the caller to voicemail.
+	RefuseBusy = sip.StatusBusyHere
+)
+
 // Inbound reasons for refusals, as sent.
 var refusals = map[int]string{
 	sip.StatusForbidden:              "Forbidden",
