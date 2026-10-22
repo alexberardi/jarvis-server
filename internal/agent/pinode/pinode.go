@@ -47,6 +47,7 @@ type Audio interface {
 // config.json: what the settings snapshot's node_config reports.
 type State struct {
 	WakeThreshold   float64 // wake_word_threshold
+	WakeAuto        bool    // wake_word_threshold_auto
 	WakeAck         bool    // wake_ack_audio_enabled (the Go node's chimes)
 	FollowUpListen  float64 // follow_up_listen_seconds
 	FollowUpSilence float64 // follow_up_silence_duration
@@ -144,6 +145,10 @@ func parse(key string, v any) (change, string) {
 		}
 		return change{state: func(s *State) { s.WakeThreshold = f }, save: func(s *settings.Settings) { s.WakeThreshold = &f },
 			tune: func(c *voice.Config) { c.WakeThreshold = f }}, ""
+	case "wake_word_threshold_auto":
+		b := truthy(v)
+		return change{state: func(s *State) { s.WakeAuto = b }, save: func(s *settings.Settings) { s.WakeAuto = &b },
+			tune: func(c *voice.Config) { c.WakeThresholdAuto = b }}, ""
 	case "wake_ack_audio_enabled":
 		b := truthy(v)
 		return change{state: func(s *State) { s.WakeAck = b }, save: func(s *settings.Settings) { s.Chimes = &b },

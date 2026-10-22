@@ -41,6 +41,7 @@ type Settings struct {
 	VoiceInput       *string  `json:"voice_input,omitempty"`
 	VoiceOutput      *string  `json:"voice_output,omitempty"`
 	WakeThreshold    *float64 `json:"wake_threshold,omitempty"`
+	WakeAuto         *bool    `json:"wake_threshold_auto,omitempty"`
 	AutoUpdate       *bool    `json:"auto_update,omitempty"`
 	// A Pi node's settings, also written by the app's node settings (update_node_config).
 	FollowUp        *float64 `json:"follow_up,omitempty"`
@@ -82,6 +83,8 @@ var Keys = []Key{
 	{"voice_input", "voice-input", false, `microphone: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceInput }},
 	{"voice_output", "voice-output", false, `speaker: "default", an ALSA PCM name (Linux), or wav:FILE`, func(s *Settings) any { return &s.VoiceOutput }},
 	{"wake_threshold", "wake-threshold", false, "wake word fires above this score (0 to 1)", func(s *Settings) any { return &s.WakeThreshold }},
+	{"wake_threshold_auto", "wake-threshold-auto", false, "calibrate the wake threshold from recent wakes (wake_threshold until there are 5)",
+		func(s *Settings) any { return &s.WakeAuto }},
 	{"auto_update", "no-auto-update", true, "update to the server's version by itself, and accept updates sent from Jarvis Automation", func(s *Settings) any { return &s.AutoUpdate }},
 	{"follow_up", "follow-up", false, "after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3)", func(s *Settings) any { return &s.FollowUp }},
 	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},

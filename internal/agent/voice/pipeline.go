@@ -63,6 +63,10 @@ type Config struct {
 	BargeIn     BargeInConfig
 	Tentative   TentativeConfig
 	PreWakeVAD  PreWakeVAD
+	// WakeThresholdAuto calibrates the wake threshold from Pipeline.WakeScores
+	// (wake_word_threshold_auto; off: WakeThreshold as set).
+	WakeThresholdAuto bool
+	NotForMe          NotForMeConfig // the wake gate's cool-down after not_for_me
 }
 
 // DefaultConfig is the Python node's behaviour (go-pi-node.md §1.1).
@@ -70,7 +74,7 @@ func DefaultConfig() Config {
 	return Config{WakeThreshold: 0.4, Debounce: 8 * time.Second, Endpointing: DefaultEndpointing(),
 		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true,
 		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp(), BargeIn: DefaultBargeIn(),
-		Tentative: DefaultTentative(), PreWakeVAD: DefaultPreWakeVAD()}
+		Tentative: DefaultTentative(), PreWakeVAD: DefaultPreWakeVAD(), NotForMe: DefaultNotForMe()}
 }
 
 // Outcome is how one exchange (an utterance and its reply) ended.
@@ -152,6 +156,9 @@ type Pipeline struct {
 	// Computer, when set, is paused by the wake word while Jarvis controls the computer or
 	// records, stopped by a "stop" turn and resumed after any other (computer.go).
 	Computer Computer
+	// WakeScores, when set, records the score of each legitimate wake, for the calibrated
+	// threshold (Config.WakeThresholdAuto).
+	WakeScores *WakeScores
 
 	Now   func() time.Time // defaults to time.Now
 	NewID func() string    // conversation ids; defaults to a random UUID
@@ -170,6 +177,7 @@ type Pipeline struct {
 	ends    sync.WaitGroup // pending /conversation/end calls and background music steps
 	bg      serial         // the music steps, in order (music.go)
 	tuned   int            // Live.tunes applied so far
+	gate    wakeGate       // the debounce and the not_for_me cool-down (wakegate.go)
 	// tentativeAt is the last tentative wake (tentative.go): its cool-down outlives a turn, so
 	// a lyric dip can't strobe the music across wakes either.
 	tentativeAt time.Time
@@ -340,7 +348,6 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	var pend []int16
 	pre := &ring[float64]{n: preWakeChunks}
 	clip := &ring[[]int16]{n: wakeClipChunks}
-	var lastFire time.Time
 	var tw tentative
 	defer func() { p.tentativeEnd(ctx, &tw, "stopped") }() // the music back if we stop mid-window
 	var measure chan measureReq
@@ -399,11 +406,10 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 			pend = append(pend[:0], pend[wakeChunk:]...)
 			now := p.Now()
 			p.tentativeExpire(ctx, &tw, now, score)
-			if float64(score) <= p.Cfg.WakeThreshold || (!lastFire.IsZero() && now.Sub(lastFire) < p.Cfg.Debounce) {
+			if float64(score) <= p.wakeThreshold() || !p.fire(score) {
 				p.tentativeTrigger(ctx, &tw, now, score, self)
 				continue
 			}
-			lastFire = now
 			p.Detector.Reset() // oww is reset after a fire
 			// A fire inside a tentative's window completes it: the music is already ducked (the
 			// turn's own duck keeps the first saved volume), and the clip reaches back past the
@@ -508,6 +514,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "pre_roll_s", fmt.Sprintf("%.2f", t.PreRollSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
+		p.afterWake(log, &t, w.selfPlaying)
 		// The music back, then a command's deferred step (music.go). Off the pipeline
 		// goroutine: listening must not wait for it.
 		p.afterTurn(ctx, s)

@@ -28,6 +28,7 @@ type voiceFlags struct {
 	input, output string
 	models        string
 	threshold     float64
+	wakeAuto      bool
 	noChimes      bool
 	followUp      float64
 	followSilence float64
@@ -56,6 +57,8 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	fs.StringVar(&v.output, "voice-output", "default", `speaker: "default", an ALSA PCM name (Linux), or wav:FILE (replies appended)`)
 	fs.StringVar(&v.models, "wake-models", "", "openWakeWord models directory (default: <user cache>/jarvis-agent/openwakeword, downloaded on first use)")
 	fs.Float64Var(&v.threshold, "wake-threshold", 0.4, "wake word fires above this score (the Python node's wake_word_threshold)")
+	fs.BoolVar(&v.wakeAuto, "wake-threshold-auto", false,
+		"calibrate the wake threshold from recent wakes, --wake-threshold until there are 5 (the Python node's wake_word_threshold_auto)")
 	fs.BoolVar(&v.noChimes, "no-chimes", false, "don't play the wake and error chimes")
 	fs.Float64Var(&v.followUp, "follow-up", voice.DefaultFollowUp().ListenSecs,
 		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3; the Python node's follow_up_listen_seconds)")
@@ -104,6 +107,8 @@ type voiceStack struct {
 	indicator voice.Indicator
 	// live, when set, retunes and measures the running pipeline (the Pi's node settings).
 	live *voice.Live
+	// scores is the wake threshold's calibration history (cache/wake_scores.json).
+	scores *voice.WakeScores
 }
 
 // loadVoice resolves the wake models (fetching them into the cache on first use unless
@@ -133,13 +138,14 @@ func loadVoice(ctx context.Context, f *voiceFlags, log *slog.Logger) (*voiceStac
 	if err != nil {
 		return nil, fmt.Errorf("wake word: %w", err)
 	}
-	return &voiceStack{flags: f, cfg: voiceConfig(f), det: det, close: closeDet}, nil
+	return &voiceStack{flags: f, cfg: voiceConfig(f), det: det, close: closeDet,
+		scores: &voice.WakeScores{Path: voice.WakeScoresPath(cache), Log: log}}, nil
 }
 
 // voiceConfig is the pipeline's configuration from the flags (agent.json applied to them).
 func voiceConfig(f *voiceFlags) voice.Config {
 	cfg := voice.DefaultConfig()
-	cfg.WakeThreshold = f.threshold
+	cfg.WakeThreshold, cfg.WakeThresholdAuto = f.threshold, f.wakeAuto
 	cfg.Chimes = !f.noChimes
 	cfg.Debounce = wakeDebounce(f.debounce)
 	cfg.Endpointing.OnsetWaitSecs = max(0, f.onsetWait.Seconds())
@@ -167,7 +173,7 @@ func voiceConfig(f *voiceFlags) voice.Config {
 func (v *voiceStack) options(cc *node.CC, tools node.Toolset, log *slog.Logger, onTurn func(voice.Turn)) voice.Options {
 	return voice.Options{Input: v.flags.input, Output: v.flags.output, Config: v.cfg, Detector: v.det,
 		Server: voice.NewHTTPServer(cc.BaseURL, cc.Creds), Tools: tools, Log: log, OnTurn: onTurn,
-		Indicator: v.indicator, Vocabulary: vocabularyOf(tools), Live: v.live}
+		Indicator: v.indicator, Vocabulary: vocabularyOf(tools), Live: v.live, WakeScores: v.scores}
 }
 
 // vocabularyOf is the app names for speech-to-text from the toolset's dictation tools (their
