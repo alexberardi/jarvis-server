@@ -168,6 +168,14 @@ func ms(d time.Duration) *int64 {
 	return &v
 }
 
+// fmtMs is a round trip for people: "0.4 ms" on a LAN, "38 ms" further away.
+func fmtMs(d time.Duration) string {
+	if d < 10*time.Millisecond {
+		return fmt.Sprintf("%.1f ms", float64(d)/float64(time.Millisecond))
+	}
+	return fmt.Sprintf("%d ms", d.Milliseconds())
+}
+
 func tptr(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
@@ -363,14 +371,14 @@ func (s *Service) connectionTest(ctx context.Context, t *testRun, line *sipLine)
 		t.fail("The PBX did not accept the registration: "+orNone(res.Error), res.Hint)
 		return
 	}
-	t.step("Registered in %d ms", res.RegisterRTT.Milliseconds())
+	t.step("Registered in %s", fmtMs(res.RegisterRTT))
 	if res.Error != "" {
 		t.fail("Registered, but the PBX did not answer OPTIONS: "+res.Error, res.Hint)
 		return
 	}
-	t.step("OPTIONS answered in %d ms", res.OptionsRTT.Milliseconds())
-	t.pass(fmt.Sprintf("Registered (%d ms) and the PBX answers OPTIONS (%d ms round trip).",
-		res.RegisterRTT.Milliseconds(), res.OptionsRTT.Milliseconds()))
+	t.step("OPTIONS answered in %s", fmtMs(res.OptionsRTT))
+	t.pass(fmt.Sprintf("Registered (%s) and the PBX answers OPTIONS (%s round trip).",
+		fmtMs(res.RegisterRTT), fmtMs(res.OptionsRTT)))
 }
 
 func orNone(s string) string {
@@ -534,7 +542,7 @@ func (s *Service) echoTest(ctx context.Context, t *testRun, line *sipLine) {
 	}
 	latency := time.Duration(max(heardAt-spokeAt, 0)) * time.Second / 8000
 	t.update(func(r *SIPTestRun) { r.LatencyMs = ms(max(latency, time.Millisecond)) })
-	t.step("Sound came back after %d ms; transcribing", latency.Milliseconds())
+	t.step("Sound came back after %s; transcribing", fmtMs(latency))
 	text, err := s.transcribe(ctx, back)
 	if err != nil {
 		t.fail("Speech to text failed: "+err.Error(), "")
@@ -547,8 +555,8 @@ func (s *Service) echoTest(ctx context.Context, t *testRun, line *sipLine) {
 			"Audio is getting through but is garbled: check the extension's codecs (ulaw and alaw) and the network for packet loss.")
 		return
 	}
-	t.pass(fmt.Sprintf("Both audio directions work: the phrase came back after %d ms and was understood (%.0f%% of words wrong).",
-		latency.Milliseconds(), w*100))
+	t.pass(fmt.Sprintf("Both audio directions work: the phrase came back after %s and was understood (%.0f%% of words wrong).",
+		fmtMs(latency), w*100))
 }
 
 // --- digits (*65) ---
