@@ -3,11 +3,13 @@ package bluetooth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -29,23 +31,32 @@ func phoneDev() Device {
 // when a device connects and goes when it disconnects, as PulseAudio's module-bluetooth does.
 func rig(t *testing.T) (*Node, *fakeBus, *fakePulse, *fakeAPI) {
 	t.Helper()
-	bus, pulse := newFakeBus(), &fakePulse{sinks: []string{"jarvis_output"}}
+	bus, pulse := newFakeBus(), &fakePulse{sinks: []string{"jarvis_output"}, def: "jarvis_output"}
+	bus.transport = map[string]bool{}
 	bus.onConnect = func(mac string) {
 		m := macUnderscored(mac)
+		bus.mu.Lock()
+		bus.transport[mac] = true
+		bus.mu.Unlock()
 		if mac == phone {
 			pulse.add("", "bluez_source."+m+".a2dp_source")
 		} else {
 			pulse.add("bluez_sink."+m+".a2dp_sink", "bluez_sink."+m+".a2dp_sink.monitor")
 		}
 	}
-	bus.onDisconnect = pulse.drop
+	bus.onDisconnect = func(mac string) {
+		bus.mu.Lock()
+		delete(bus.transport, mac)
+		bus.mu.Unlock()
+		pulse.drop(mac)
+	}
 	st, err := OpenStore(filepath.Join(t.TempDir(), StoreFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ms := time.Millisecond
 	n := &Node{Bus: bus, Pulse: pulse, Store: st, Log: slog.New(slog.DiscardHandler), ScanFor: ms, FindFor: 50 * ms, AudioFor: 200 * ms, AudioStable: 5 * ms,
-		BusyFor: 50 * ms, SourceFor: 50 * ms, Poll: ms, FirstReconnect: ms, ReconnectEvery: time.Hour}
+		BusyFor: 50 * ms, SourceFor: 50 * ms, PageRetryAfter: ms, SinkFor: 50 * ms, Poll: ms, FirstReconnect: ms, ReconnectEvery: time.Hour}
 	return n, bus, pulse, &fakeAPI{}
 }
 
@@ -92,6 +103,29 @@ func TestScanReportsWhatIsInRangeInJarvisdsShape(t *testing.T) {
 	}
 	if !slices.Contains(bus.Calls(), "Remove DE:AD:00:00:00:01") || slices.Contains(bus.Calls(), "Remove "+speaker) {
 		t.Errorf("only the unpaired cache entries are pruned: %v", bus.Calls())
+	}
+}
+
+// #433: the devices are posted as they are found, and the pair's steps as they start, so the app
+// shows progress instead of 20 s of nothing.
+func TestScanAndPairPostTheirProgress(t *testing.T) {
+	n, bus, _, api := rig(t)
+	n.ScanFor, n.ProgressEvery = 20*time.Millisecond, 5*time.Millisecond
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
+	if len(api.progress) != 1 || api.progress[0] != "scan r1 scanning 1 devices" {
+		t.Fatalf("scan progress %v (one post: the list grew once)", api.progress)
+	}
+	if devs := api.scans["r1"]["devices"].([]ScanDevice); len(devs) != 1 {
+		t.Fatalf("scan result %v", api.scans["r1"])
+	}
+
+	api.progress = nil
+	delete(bus.devices, speaker) // BlueZ forgot it: the pair finds it first
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+	want := []string{"pair p1 finding", "pair p1 pairing", "pair p1 connecting", "pair p1 audio"}
+	if !reflect.DeepEqual(api.progress, want) || api.pairs["p1"]["success"] != true {
+		t.Fatalf("pair progress %v, result %v", api.progress, api.pairs["p1"])
 	}
 }
 
@@ -224,10 +258,37 @@ func TestPairFailures(t *testing.T) {
 			if _, ok := n.Store.Get(speaker); ok {
 				t.Error("a failed pair was saved for the reconnect loop")
 			}
+			if name == "page timeout" && strings.Count(strings.Join(bus.Calls(), ","), "Pair "+speaker) != 2 {
+				t.Errorf("a Page Timeout was not retried before telling the user: %v", bus.Calls())
+			}
 			if name == "audio profile never comes up" && !slices.Contains(bus.Calls(), "Disconnect "+speaker) {
 				t.Errorf("the half-connected device wasn't disconnected (BlueZ keeps retrying AVDTP): %v", bus.Calls())
 			}
 		})
+	}
+}
+
+// The first pair right after a scan often gets a Page Timeout in a second or two although the
+// device is in pairing mode (#433, jarvis-pi4 with Arctis GameBuds): the node retries once.
+func TestAFastPageTimeoutAfterAScanIsRetriedOnce(t *testing.T) {
+	n, bus, _, api := rig(t)
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
+	bus.pairErrOnce = map[string][]error{speaker: {BlueZError{Name: "org.bluez.Error.ConnectionAttemptFailed", Message: "Page Timeout"}}}
+
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+
+	if got := asJSON(t, api.pairs["p1"]); !reflect.DeepEqual(got, map[string]any{"success": true, "device_name": "JBL Flip 5"}) {
+		t.Fatalf("pair result %v", got)
+	}
+	var pairs int
+	for _, c := range bus.Calls() {
+		if c == "Pair "+speaker {
+			pairs++
+		}
+	}
+	if pairs != 2 {
+		t.Errorf("Pair called %d times: %v", pairs, bus.Calls())
 	}
 }
 
@@ -274,16 +335,106 @@ func TestAPhoneAsSourceIsLoopedIntoTheNodesSpeaker(t *testing.T) {
 	}
 }
 
-func TestASpeakerLeavesTheDefaultSinkAlone(t *testing.T) {
+const speakerSink = "bluez_sink.AA_BB_CC_DD_EE_01.a2dp_sink"
+
+// A paired speaker or headphones take the node's output (#433: "route output to it"), and give
+// it back to the node's own sink when they go.
+func TestASpeakerBecomesTheDefaultSinkUntilItGoes(t *testing.T) {
+	for name, leave := range map[string]map[string]any{
+		"disconnect": nil,
+		"release":    {"forget": false},
+		"forget":     {"forget": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			n, bus, pulse, api := rig(t)
+			bus.inRange[speaker] = speakerDev()
+			send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker, "role": "source"})
+			if api.pairs["p1"]["success"] != true {
+				t.Fatalf("pair %v", api.pairs["p1"])
+			}
+			if len(pulse.modules) != 0 {
+				t.Fatalf("a speaker got modules: %v", pulse.modules)
+			}
+			if pulse.def != speakerSink {
+				t.Fatalf("default sink %q, want the speaker's", pulse.def)
+			}
+			topic, payload := TopicDisconnect, map[string]any{"mac_address": speaker}
+			if leave != nil {
+				topic, payload["forget"] = TopicRelease, leave["forget"]
+			}
+			bus.onDisconnect = nil // Pulse keeps the sink a moment: the node hands the output back itself
+			send(t, n, api, topic, payload)
+			if pulse.def != "jarvis_output" {
+				t.Fatalf("after %s the default sink is %q", name, pulse.def)
+			}
+		})
+	}
+}
+
+func TestAPhoneAsSourceLeavesTheDefaultSinkAlone(t *testing.T) {
 	n, bus, pulse, api := rig(t)
-	bus.inRange[speaker] = speakerDev()
-	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker, "role": "source"})
-	if len(pulse.modules) != 0 {
-		t.Fatalf("a speaker got modules: %v", pulse.modules)
+	bus.inRange[phone] = phoneDev()
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": phone, "role": "sink"})
+	if pulse.def != "jarvis_output" {
+		t.Fatalf("default sink %q", pulse.def)
 	}
-	if !slices.Contains(pulse.sinks, "bluez_sink.AA_BB_CC_DD_EE_01.a2dp_sink") {
-		t.Fatalf("sinks %v", pulse.sinks)
-	}
+}
+
+// #433: every pair ended "connected, but its audio profile did not come up" while bluetoothd
+// had the A2DP transport ready. BlueZ's transport now counts: a device whose profile is up is
+// never disconnected because Pulse is slow or out of reach, and why Pulse didn't answer is
+// logged.
+func TestTheAudioProfileUpInBlueZIsAConnect(t *testing.T) {
+	t.Run("pulse unreachable", func(t *testing.T) {
+		n, bus, pulse, api := rig(t)
+		logs := &logRecorder{}
+		n.Log = slog.New(logs)
+		bus.inRange[speaker] = speakerDev()
+		pulse.listErr = errors.New("pactl list sinks short: exit status 1: Connection failure: Connection refused")
+		send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+		if got := asJSON(t, api.pairs["p1"]); !reflect.DeepEqual(got, map[string]any{"success": true, "device_name": "JBL Flip 5"}) {
+			t.Fatalf("pair %v", got)
+		}
+		if slices.Contains(bus.Calls(), "Disconnect "+speaker) {
+			t.Errorf("a device with its audio profile up was disconnected: %v", bus.Calls())
+		}
+		var pactl int
+		for _, r := range logs.all() {
+			if r == "WARN bluetooth: pactl failed" {
+				pactl++
+			}
+		}
+		if pactl != 1 {
+			t.Errorf("pactl's error logged %d times, want once: %v", pactl, logs.all())
+		}
+		if !slices.Contains(logs.all(), "WARN bluetooth: audio profile up in BlueZ, but PulseAudio has no sink for it") {
+			t.Errorf("logs %v", logs.all())
+		}
+	})
+	t.Run("the card's profile is off", func(t *testing.T) {
+		n, bus, pulse, api := rig(t)
+		bus.inRange[speaker] = speakerDev()
+		bus.onConnect = func(mac string) { // the card, no sink until a profile is chosen
+			bus.mu.Lock()
+			bus.transport[mac] = true
+			bus.mu.Unlock()
+			pulse.mu.Lock()
+			pulse.cards = append(pulse.cards, "bluez_card.AA_BB_CC_DD_EE_01")
+			pulse.mu.Unlock()
+		}
+		pulse.onProfile = func(card, profile string) {
+			if card == "bluez_card.AA_BB_CC_DD_EE_01" && profile == "a2dp_sink" {
+				pulse.add(speakerSink, "")
+			}
+		}
+		send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+		if api.pairs["p1"]["success"] != true {
+			t.Fatalf("pair %v", api.pairs["p1"])
+		}
+		if pulse.def != speakerSink {
+			t.Fatalf("default sink %q (profiles %v)", pulse.def, pulse.profiles)
+		}
+	})
 }
 
 func TestRelease(t *testing.T) {
@@ -318,6 +469,72 @@ func TestRelease(t *testing.T) {
 			t.Errorf("disconnect before remove: %v", calls)
 		}
 	})
+}
+
+// logRecorder keeps the records a Node logs at Info and above, as "LEVEL msg".
+type logRecorder struct {
+	mu   sync.Mutex
+	recs []string
+}
+
+func (l *logRecorder) Enabled(_ context.Context, lv slog.Level) bool { return lv >= slog.LevelInfo }
+func (l *logRecorder) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.recs = append(l.recs, r.Level.String()+" "+r.Message)
+	return nil
+}
+func (l *logRecorder) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *logRecorder) WithGroup(string) slog.Handler      { return l }
+func (l *logRecorder) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.recs)
+}
+
+func TestForgetIsIdempotent(t *testing.T) {
+	n, bus, _, api := rig(t)
+	logs := &logRecorder{}
+	n.Log = slog.New(logs)
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+	send(t, n, api, TopicRelease, map[string]any{"mac_address": speaker, "forget": true})
+	send(t, n, api, TopicRelease, map[string]any{"mac_address": speaker, "forget": true}) // BlueZ no longer knows it
+	// The app may still send its auto-connect switch for it.
+	send(t, n, api, TopicAutoConnect, map[string]any{"mac_address": speaker, "enabled": true})
+
+	if bus.devices[speaker] != nil {
+		t.Fatal("still known to BlueZ")
+	}
+	if _, ok := n.Store.Get(speaker); ok {
+		t.Fatal("record kept")
+	}
+	var forgotten int
+	for _, r := range logs.all() {
+		if strings.HasPrefix(r, "WARN") || strings.HasPrefix(r, "ERROR") {
+			t.Errorf("a repeated forget logged %q", r)
+		}
+		if r == "INFO bluetooth: device forgotten" {
+			forgotten++
+		}
+	}
+	if forgotten != 2 {
+		t.Errorf("forgotten logged %d times: %v", forgotten, logs.all())
+	}
+}
+
+func TestAFailedRemoveIsNotForgotten(t *testing.T) {
+	n, bus, _, api := rig(t)
+	logs := &logRecorder{}
+	n.Log = slog.New(logs)
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+	bus.removeErr = BlueZError{Name: "org.bluez.Error.Failed", Message: "Operation failed"}
+	send(t, n, api, TopicRelease, map[string]any{"mac_address": speaker, "forget": true})
+	got := logs.all()
+	if slices.Contains(got, "INFO bluetooth: device forgotten") || !slices.Contains(got, "WARN bluetooth: remove failed") {
+		t.Fatalf("logs %v", got)
+	}
 }
 
 func TestAutoConnectSwitch(t *testing.T) {

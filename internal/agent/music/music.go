@@ -13,9 +13,15 @@
 //   - The capture gain profile: while the node's own music plays, the HAT's mic PGA drops to
 //     MusicPGA (at 60% the ADC clips under music and the wake word goes deaf); it is restored when
 //     the music stops. Changes happen only at duck and restore time, never mid-recording.
+//   - Echo cancellation (17b, echocancel.go): while the node's own music plays, the music goes
+//     through Pulse's webrtc canceller and the voice pipeline hears the cancelled mic. It follows
+//     the cached "self playing" flag at restore time and when a deferred play starts, never at a
+//     duck: switching capture at the wake fire would lose the command. A wake that fires while
+//     those run is safe too: the voice pipeline holds its mic (device.Switch.Hold) for the turn,
+//     and the switch applies once the turn is over.
 //
 // Everything is best-effort and never fatal: pactl, pkill or amixer failing (no PulseAudio, no
-// HAT, a desktop) leaves the music as it was. Not ported here: the echo-cancel edge (17b).
+// HAT, a desktop) leaves the music as it was.
 package music
 
 import (
@@ -68,9 +74,14 @@ func isPlayer(b string) bool {
 // NullSink parks the SIGSTOP class's streams during a duck.
 const NullSink = "jarvis_duck_null"
 
-// restoreSink is where parked streams go back to (N: uses jarvis_ec_sink while echo cancel is
-// engaged; that is 17b).
-const restoreSink = "@DEFAULT_SINK@"
+// restoreSink is where parked streams go back to: the canceller's sink while it is engaged (N:),
+// else the default sink.
+func (d *Ducker) restoreSink() string {
+	if d.EC.Engaged() {
+		return ECSink
+	}
+	return "@DEFAULT_SINK@"
+}
 
 // Defaults are N:'s config defaults (music_duck_percent, music_pga_percent,
 // capture_pga_normal_percent; the last is install-pi.sh's baseline).
@@ -92,6 +103,8 @@ type Ducker struct {
 	MusicPGA, NormalPGA int
 	// Gain is the HAT's mic gain; nil (no HAT) leaves the gain alone.
 	Gain Gain
+	// EC is the echo canceller engaged while the node's own music plays; nil: none.
+	EC *EchoCancel
 	// MPDAddr and LibrespotURL are the takeover's control endpoints (defaults: N:'s).
 	MPDAddr      string
 	LibrespotURL string
@@ -110,17 +123,20 @@ func New(gain Gain, log *slog.Logger) *Ducker {
 		NormalPGA: DefaultNormalPGA, Gain: gain}
 }
 
-func (d *Ducker) log() *slog.Logger {
-	if d.Log == nil {
+func (d *Ducker) log() *slog.Logger { return logger(d.Log) }
+
+func logger(l *slog.Logger) *slog.Logger {
+	if l == nil {
 		return slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return d.Log
+	return l
 }
 
 // sinkInput is one entry of pactl -f json list sink-inputs.
 type sinkInput struct {
 	Index      *int                       `json:"index"`
 	Corked     *bool                      `json:"corked"`
+	Sink       *int                       `json:"sink"`
 	Volume     map[string]json.RawMessage `json:"volume"`
 	Properties map[string]any             `json:"properties"`
 }
@@ -156,7 +172,11 @@ func (s sinkInput) volume() (int, bool) {
 
 // sinkInputs lists Pulse's streams; failed is why the empty list is not "no players".
 func (d *Ducker) sinkInputs(ctx context.Context) (items []sinkInput, failed string) {
-	out, err := d.Run(ctx, "pactl", "-f", "json", "list", "sink-inputs")
+	return listSinkInputs(ctx, d.Run)
+}
+
+func listSinkInputs(ctx context.Context, run Run) (items []sinkInput, failed string) {
+	out, err := run(ctx, "pactl", "-f", "json", "list", "sink-inputs")
 	if err != nil {
 		return nil, err.Error()
 	}
@@ -203,8 +223,15 @@ func (d *Ducker) SelfPlaying() bool {
 }
 
 // SetSelfPlaying sets that flag; its false→true edge engages the music gain profile and its
-// true→false edge restores the normal gain. Never call it while a recording runs.
+// true→false edge restores the normal gain. The echo canceller follows it. Never call it while a
+// recording runs.
 func (d *Ducker) SetSelfPlaying(ctx context.Context, on bool, trigger string) {
+	d.setSelfPlaying(ctx, on, trigger)
+	d.syncEC(ctx, trigger)
+}
+
+// setSelfPlaying is SetSelfPlaying without the echo canceller (a duck: the wake just fired).
+func (d *Ducker) setSelfPlaying(ctx context.Context, on bool, trigger string) {
 	d.mu.Lock()
 	old := d.selfPlaying
 	d.selfPlaying = on
@@ -241,7 +268,7 @@ func (d *Ducker) Duck(ctx context.Context) {
 		d.log().Warn("music: duck: listing Pulse's streams failed; music may stay loud", "err", failed)
 	}
 	uncorked := anyUncorked(items)
-	d.SetSelfPlaying(ctx, uncorked, "duck_enumeration")
+	d.setSelfPlaying(ctx, uncorked, "duck_enumeration")
 	if uncorked {
 		// Retry a profile whose earlier engage failed, and cover a session started from a phone.
 		d.engagePGA(ctx, "duck_active_players")
@@ -302,6 +329,7 @@ func (d *Ducker) Restore(ctx context.Context) {
 		}
 	}
 	items, _ := d.sinkInputs(ctx)
+	restoreSink := d.restoreSink()
 	for _, it := range of(items, sigstopPlayers) {
 		if d.ok(ctx, "pactl", "move-sink-input", it.id(), restoreSink) {
 			moved = append(moved, it.id())
@@ -329,6 +357,22 @@ func (d *Ducker) Restore(ctx context.Context) {
 	}
 	d.log().Info("music: restore", "sigcont", resumed, "restore_sink", restoreSink, "moved", moved,
 		"unmuted", unmuted, "unducked", unducked)
+	// The turn is over: the canceller catches up with what the duck saw.
+	d.syncEC(ctx, "restore")
+}
+
+// syncEC engages the echo canceller while the node's own music plays and disengages it once it
+// stopped, which also lets the next start retry an engage that failed.
+func (d *Ducker) syncEC(ctx context.Context, trigger string) {
+	if d.EC == nil {
+		return
+	}
+	if d.SelfPlaying() {
+		d.EC.Engage(ctx, trigger)
+		return
+	}
+	d.EC.Disengage(ctx, trigger)
+	d.EC.Rearm()
 }
 
 // engagePGA drops the mic gain to the music profile, once (engage_music_pga).

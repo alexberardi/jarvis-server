@@ -208,6 +208,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		sameDeviceHint(conv, in),
 		m.computerControlHint(ctx, conv, in.VoiceCommand),
 		computerActivityHint(in.Computer, in.VoiceCommand),
+		m.pendingConfirmHint(conv),
 	}
 	if in.photoOnly() {
 		hints = append(hints, prompts.PhotoOnlyHint)

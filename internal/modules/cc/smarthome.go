@@ -98,12 +98,14 @@ func (m *Module) registerSmartHome(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+n+"/device-list/{request_id}/results", m.node(m.handleUploadDeviceJob(listJob)))
 	mux.HandleFunc("GET "+n+"/device-list/{request_id}", m.prov(m.handlePollDeviceList))
 
-	// Bluetooth (bluetooth.py; release and auto-connect are new, D8).
+	// Bluetooth (bluetooth.py; release, auto-connect (D8) and the progress posts (#433) are new).
 	mux.HandleFunc("POST "+n+"/bluetooth-scan/request", m.prov(m.handleRequestJob(btScanJob)))
 	mux.HandleFunc("POST "+n+"/bluetooth-scan/{request_id}/results", m.node(m.handleUploadBTScan))
+	mux.HandleFunc("POST "+n+"/bluetooth-scan/{request_id}/progress", m.node(m.handleBTProgress(btScanJob)))
 	mux.HandleFunc("GET "+n+"/bluetooth-scan/{request_id}", m.prov(m.handlePollBTScan))
 	mux.HandleFunc("POST "+n+"/bluetooth/pair", m.prov(m.handleRequestJob(btPairJob)))
 	mux.HandleFunc("POST "+n+"/bluetooth/pair/{request_id}/results", m.node(m.handleUploadBTPair))
+	mux.HandleFunc("POST "+n+"/bluetooth/pair/{request_id}/progress", m.node(m.handleBTProgress(btPairJob)))
 	mux.HandleFunc("GET "+n+"/bluetooth/pair/{request_id}", m.prov(m.handlePollBTPair))
 	mux.HandleFunc("POST "+n+"/bluetooth/disconnect", m.prov(m.handleBTFire("bluetooth-disconnect")))
 	mux.HandleFunc("POST "+n+"/bluetooth/discoverable", m.prov(m.handleBTFire("bluetooth-discoverable")))

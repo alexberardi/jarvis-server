@@ -239,6 +239,26 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	return err
 }
 
+// holder is a Capture that can move to another device (device.Switch, the Pi's echo canceller):
+// Hold keeps it where it is until Release.
+type holder interface {
+	Hold()
+	Release()
+}
+
+// holdCapture keeps the microphone on its device while a recording runs: the echo canceller
+// engages and disengages off the pipeline goroutine (afterTurn), and a command recorded half
+// on the plain mic and half on the cancelled one would lose its words at the switch. The
+// returned func releases it.
+func (p *Pipeline) holdCapture() func() {
+	h, ok := p.Capture.(holder)
+	if !ok {
+		return func() {}
+	}
+	h.Hold()
+	return h.Release
+}
+
 func (p *Pipeline) capture(ctx context.Context, chunks chan []int16) error {
 	for ctx.Err() == nil {
 		buf := make([]int16, ChunkSamples)
@@ -472,8 +492,9 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 		"vad_threshold", fmt.Sprintf("%.1f", vadThreshold), "vad_threshold_source", vadSource,
 		"buffered_frames", len(preRMS), "self_playback", w.selfPlaying,
 		"tentative_triggered", w.tentativeTriggered, "tentative_completed", w.tentativeCompleted)
-	h := p.holdComputer(log) // first: the user is about to speak to Jarvis
-	p.duck(ctx)              // the music down while the user speaks (music.go)
+	h := p.holdComputer(log)   // first: the user is about to speak to Jarvis
+	release := p.holdCapture() // the command and its follow-ups on one device (holdCapture)
+	p.duck(ctx)                // the music down while the user speaks (music.go)
 
 	// Row 7: warm the conversation up while the user is still talking.
 	st := &pendingStart{done: make(chan struct{})}
@@ -515,6 +536,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
 		p.afterWake(log, &t, w.selfPlaying)
+		release() // before the restore: what it switches applies from the next listen on
 		// The music back, then a command's deferred step (music.go). Off the pipeline
 		// goroutine: listening must not wait for it.
 		p.afterTurn(ctx, s)

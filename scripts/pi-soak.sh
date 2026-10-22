@@ -14,7 +14,7 @@
 #
 # OUT (default ~/pi-soak-<date>) gets:
 #   samples.csv   one row per INTERVAL: the agent's CPU (% of one core, from /proc/PID/stat),
-#                 RSS/PSS/anonymous/swap (smaps_rollup), the same for its child processes (the
+#                 RSS/PSS/anonymous/swap (smaps_rollup, read with sudo; empty when unreadable), the same for its child processes (the
 #                 command sidecar), MemAvailable, swap in use, load, SoC temperature, throttling,
 #                 the unit's NRestarts
 #   turns.log     one TSV row per scripted turn: time, family, pass/FAIL, outcome, transcript, reply
@@ -81,10 +81,21 @@ children() {
       print out}' | xargs -n1 | sort -n | xargs
 }
 
-# mem PID → "rss pss anon swap" in kB from smaps_rollup.
+# mem PID → "rss pss anon swap" in kB from smaps_rollup, read with sudo: the agent is non-dumpable
+# under its unit, so the file is EACCES to the node's own user. Fails (no output) when unreadable.
 mem() {
-  awk '/^Rss:/{r=$2} /^Pss:/{p=$2} /^Anonymous:/{a=$2} /^Swap:/{s=$2}
-       END{printf "%d %d %d %d\n", r, p, a, s}' "$PROC/$1/smaps_rollup" 2>/dev/null || echo "0 0 0 0"
+  local s
+  s=$(sudo -n cat "$PROC/$1/smaps_rollup" 2>/dev/null) || return 1
+  awk '/^Rss:/{r=$2; seen=1} /^Pss:/{p=$2} /^Anonymous:/{a=$2} /^Swap:/{s=$2}
+       END{if (!seen) exit 1; printf "%d %d %d %d\n", r, p, a, s}' <<<"$s"
+}
+
+# warn_mem PID → says once per run that PID's memory could not be read.
+MEM_WARNED=0
+warn_mem() {
+  [ "$MEM_WARNED" = 1 ] && return
+  MEM_WARNED=1
+  say "cannot read $PROC/$1/smaps_rollup with sudo -n: memory columns are left empty while it fails"
 }
 
 HEADER=ts,pid,agent_cpu_pct,agent_rss_kb,agent_pss_kb,agent_anon_kb,agent_swap_kb,side_procs,side_cpu_pct,side_rss_kb,side_pss_kb,mem_avail_kb,swap_used_kb,load1,temp_c,throttled,nrestarts
@@ -101,13 +112,20 @@ sample() {
   nr=$(systemctl show -p NRestarts --value "$AGENT" 2>/dev/null)
   read -r r p an sw <<<"0 0 0 0"
   if [ -n "$pid" ] && [ "$pid" != 0 ] && a=$(ticks "$pid"); then
-    read -r r p an sw <<<"$(mem "$pid")"
+    # An unreadable smaps_rollup leaves the columns empty: never zeros that look like data.
+    m=$(mem "$pid") || warn_mem "$pid"
+    read -r r p an sw <<<"$m"
     kids=$(children "$pid")
     for c in $kids; do
+      if ! m=$(mem "$c"); then
+        [ -e "$PROC/$c" ] || continue # it exited since children listed it
+        warn_mem "$c"
+        sr='' sp=''
+      fi
       n=$((n + 1))
       k=$((k + $(ticks "$c" || echo 0)))
-      read -r m mp _ <<<"$(mem "$c")"
-      sr=$((sr + m)) sp=$((sp + mp))
+      read -r m mp _ <<<"$m"
+      [ -z "$sr" ] || sr=$((sr + m)) sp=$((sp + mp))
     done
     if [ "$pid" = "$LAST_PID" ] && [ "$now" -gt "$LAST_T" ]; then
       acpu=$(awk -v d=$((a - LAST_A)) -v t="$TCK" -v s=$((now - LAST_T)) 'BEGIN{printf "%.1f", 100*d/t/s}')
@@ -197,6 +215,7 @@ summarize() {
     awk -F, -v p95="$p95" 'NR==1{next}
       {n++; if (first=="") first=$1; last=$1}
       $2==0{down++}
+      $2!=0 && ($4=="" || ($8>0 && $10=="")){unread++}
       $3!=""{nc++; cs+=$3; if ($3>cmax) cmax=$3}
       $9!=""{ks+=$9; nk++}
       $4>0{rs+=$4; nr++; if ($4>rmax) rmax=$4; if (rmin==""||$4<rmin) rmin=$4; if (rfirst=="") rfirst=$4; rlast=$4}
@@ -207,8 +226,11 @@ summarize() {
       END{
         printf "| Duration | %.1f h (%d samples, %d with the agent down) |\n", (last-first)/3600, n, down
         printf "| Agent CPU, %% of one core: mean / p95 / max | %.1f / %.1f / %.1f |\n", nc?cs/nc:0, p95, cmax
-        printf "| Agent RSS MB: min / mean / max (first → last) | %.1f / %.1f / %.1f (%.1f → %.1f) |\n", rmin/1024, nr?rs/nr/1024:0, rmax/1024, rfirst/1024, rlast/1024
-        printf "| Agent anonymous MB: mean / max (first → last) | %.1f / %.1f (%.1f → %.1f) |\n", na?as/na/1024:0, amax/1024, afirst/1024, alast/1024
+        if (nr || !unread) printf "| Agent RSS MB: min / mean / max (first → last) | %.1f / %.1f / %.1f (%.1f → %.1f) |\n", rmin/1024, nr?rs/nr/1024:0, rmax/1024, rfirst/1024, rlast/1024
+        else print "| Agent RSS MB: min / mean / max (first → last) | unreadable |"
+        if (na || !unread) printf "| Agent anonymous MB: mean / max (first → last) | %.1f / %.1f (%.1f → %.1f) |\n", na?as/na/1024:0, amax/1024, afirst/1024, alast/1024
+        else print "| Agent anonymous MB: mean / max (first → last) | unreadable |"
+        printf "| Samples with the agent up but its memory unreadable | %d |\n", unread
         printf "| Sidecar CPU %% mean; RSS MB mean / max | %.1f; %.1f / %.1f |\n", nk?ks/nk:0, ns?ss/ns/1024:0, smax/1024
         printf "| Swap in use, max MB | %.1f |\n", swmax/1024
         printf "| SoC temperature, max °C; throttling | %.1f; %s |\n", tmax, thr==""?"none":thr

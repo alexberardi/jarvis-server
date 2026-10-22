@@ -150,6 +150,13 @@ Mobile **also** calls two routes that do not exist in CC, so they return 404 tod
 
 The node already handles the `bluetooth-release` and `bluetooth-auto-connect` topics (`NS mqtt_tts_listener.py:2439,2443`).
 
+Go also has (#433, [decision](../decisions/2026-10-21-pi-node-bluetooth-output-and-progress.md)):
+`POST /nodes/{node}/bluetooth-scan/{rid}/progress` `{progress, devices}` and
+`POST /nodes/{node}/bluetooth/pair/{rid}/progress` `{progress}` (N, only while pending), and
+the polls return `progress` (a pending scan also its `devices` so far). The status page's latest
+scan is patched by a successful pair (paired, connected), a disconnect or release (not
+connected) and a forget (dropped).
+
 ### 2.4 Routes: `oauth.py`
 
 | Method and path | Auth | Caller | Line |

@@ -16,8 +16,11 @@ type Module struct {
 
 // Pulse is the node's PulseAudio (§8 Q2 keeps it: it carries the Bluetooth audio).
 type Pulse interface {
-	// List is the names of the sinks or sources (kind "sinks" or "sources").
+	// List is the names of the sinks, sources or cards (kind "sinks", "sources" or "cards").
 	List(ctx context.Context, kind string) ([]string, error)
+	DefaultSink(ctx context.Context) (string, error)
+	SetDefaultSink(ctx context.Context, name string) error
+	SetCardProfile(ctx context.Context, card, profile string) error
 	Modules(ctx context.Context) ([]Module, error)
 	LoadModule(ctx context.Context, name, args string) (id string, err error)
 	UnloadModule(ctx context.Context, id string) error
@@ -27,23 +30,69 @@ type Pulse interface {
 func macUnderscored(mac string) string { return strings.ReplaceAll(strings.ToUpper(mac), ":", "_") }
 
 // hasEndpoint reports whether Pulse has a sink or source for mac: bluez_sink/bluez_source
-// (PulseAudio) or bluez_output/bluez_input (PipeWire's pulse), as N: checks both.
-func hasEndpoint(ctx context.Context, p Pulse, mac string) bool {
+// (PulseAudio) or bluez_output/bluez_input (PipeWire's pulse), as N: checks both. An error is
+// pactl's: Pulse didn't answer.
+func hasEndpoint(ctx context.Context, p Pulse, mac string) (bool, error) {
 	m := macUnderscored(mac)
 	for _, kind := range []string{"sinks", "sources"} {
 		names, err := p.List(ctx, kind)
 		if err != nil {
-			continue
+			return false, err
 		}
 		for _, name := range names {
 			for _, prefix := range []string{"bluez_sink.", "bluez_output.", "bluez_source.", "bluez_input."} {
 				if strings.HasPrefix(name, prefix+m) {
-					return true
+					return true, nil
 				}
 			}
 		}
 	}
-	return false
+	return false, nil
+}
+
+// isSinkOf reports whether name is one of mac's bluez sinks.
+func isSinkOf(name, mac string) bool {
+	m := macUnderscored(mac)
+	return strings.HasPrefix(name, "bluez_sink."+m) || strings.HasPrefix(name, "bluez_output."+m)
+}
+
+func isBluezSink(name string) bool {
+	return strings.HasPrefix(name, "bluez_sink.") || strings.HasPrefix(name, "bluez_output.")
+}
+
+// btSink is mac's bluez sink, the A2DP one first.
+func btSink(ctx context.Context, p Pulse, mac string) (string, bool, error) {
+	names, err := p.List(ctx, "sinks")
+	if err != nil {
+		return "", false, err
+	}
+	found := ""
+	for _, name := range names {
+		if !isSinkOf(name, mac) || name == found {
+			continue
+		}
+		if strings.Contains(name, "a2dp") {
+			return name, true, nil
+		}
+		if found == "" {
+			found = name
+		}
+	}
+	return found, found != "", nil
+}
+
+// btCard is mac's bluez card (bluez_card.AA_BB_…), there from the ACL link on.
+func btCard(ctx context.Context, p Pulse, mac string) (string, bool) {
+	names, err := p.List(ctx, "cards")
+	if err != nil {
+		return "", false
+	}
+	for _, name := range names {
+		if strings.HasPrefix(name, "bluez_card."+macUnderscored(mac)) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // phoneSource is the source Pulse makes for a phone streaming to the node over A2DP.
@@ -63,11 +112,16 @@ func loopbackFor(ctx context.Context, p Pulse, source string) (string, bool) {
 }
 
 // routeAudio is N:'s _configure_audio. role "source" (the node plays to a speaker or
-// headphones): nothing to do; the sink is there for the music packages, and TTS stays on the
-// node's own sink. role "sink" (a phone plays through the node): bridge the phone's a2dp_source
-// into the default sink with a module-loopback, once (it appears a little after the link).
+// headphones): the device's bluez sink becomes the default sink, so the node's replies and
+// music play on it (#433). role "sink" (a phone plays through the node): bridge the phone's
+// a2dp_source into the default sink with a module-loopback, once (it appears a little after the
+// link).
 func (n *Node) routeAudio(ctx context.Context, mac, role string) {
-	if n.Pulse == nil || role != "sink" {
+	if n.Pulse == nil {
+		return
+	}
+	if role != "sink" {
+		n.routeOutput(ctx, mac)
 		return
 	}
 	src := phoneSource(mac)
@@ -98,11 +152,74 @@ func (n *Node) routeAudio(ctx context.Context, mac, role string) {
 	n.log().Info("bluetooth: loopback loaded (phone to the node's speaker)", "source", src, "module", id)
 }
 
-// unrouteAudio unloads the phone's loopback, if there is one (N:'s _unload_loopback_for_mac).
+// routeOutput makes mac's bluez sink (once Pulse has it) the default sink, keeping the one it
+// replaces to give the output back to.
+func (n *Node) routeOutput(ctx context.Context, mac string) {
+	deadline := time.Now().Add(or(n.SinkFor, 10*time.Second))
+	var sink string
+	for {
+		s, ok, err := btSink(ctx, n.Pulse, mac)
+		if err != nil {
+			n.log().Debug("bluetooth: output not routed", "mac", mac, "err", err) // waitAudio logged it
+			return
+		}
+		if ok {
+			sink = s
+			break
+		}
+		if time.Now().After(deadline) || sleep(ctx, or(n.Poll, 300*time.Millisecond)) != nil {
+			n.log().Warn("bluetooth: PulseAudio has no sink for the device; the node's output stays where it is", "mac", mac)
+			return
+		}
+	}
+	if cur, err := n.Pulse.DefaultSink(ctx); err == nil && cur != "" && !isBluezSink(cur) {
+		n.mu.Lock()
+		n.homeSink = cur
+		n.mu.Unlock()
+	}
+	if err := n.Pulse.SetDefaultSink(ctx, sink); err != nil {
+		n.log().Error("bluetooth: default sink not set", "sink", sink, "err", err)
+		return
+	}
+	n.log().Info("bluetooth: output routed to the device", "mac", mac, "sink", sink)
+}
+
+// unrouteOutput gives the output back when mac's sink has it: to the sink it replaced, or the
+// first one that isn't Bluetooth (a node restarted since).
+func (n *Node) unrouteOutput(ctx context.Context, mac string) {
+	cur, err := n.Pulse.DefaultSink(ctx)
+	if err != nil || !isSinkOf(cur, mac) {
+		return
+	}
+	n.mu.Lock()
+	home := n.homeSink
+	n.mu.Unlock()
+	if home == "" {
+		names, _ := n.Pulse.List(ctx, "sinks")
+		for _, name := range names {
+			if !isBluezSink(name) {
+				home = name
+				break
+			}
+		}
+	}
+	if home == "" {
+		return
+	}
+	if err := n.Pulse.SetDefaultSink(ctx, home); err != nil {
+		n.log().Error("bluetooth: default sink not restored", "sink", home, "err", err)
+		return
+	}
+	n.log().Info("bluetooth: output back on the node's sink", "sink", home)
+}
+
+// unrouteAudio gives the output back (routeOutput) and unloads the phone's loopback, if there is
+// one (N:'s _unload_loopback_for_mac).
 func (n *Node) unrouteAudio(ctx context.Context, mac string) {
 	if n.Pulse == nil {
 		return
 	}
+	n.unrouteOutput(ctx, mac)
 	src := phoneSource(mac)
 	id, ok := loopbackFor(ctx, n.Pulse, src)
 	if !ok {
@@ -191,5 +308,29 @@ func (p Pactl) LoadModule(ctx context.Context, name, args string) (string, error
 
 func (p Pactl) UnloadModule(ctx context.Context, id string) error {
 	_, err := p.run(ctx, "unload-module", id)
+	return err
+}
+
+// DefaultSink reads pactl info's "Default Sink:" (get-default-sink is PulseAudio 15+ only).
+func (p Pactl) DefaultSink(ctx context.Context) (string, error) {
+	out, err := p.run(ctx, "info")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "Default Sink:"); ok {
+			return strings.TrimSpace(v), nil
+		}
+	}
+	return "", nil
+}
+
+func (p Pactl) SetDefaultSink(ctx context.Context, name string) error {
+	_, err := p.run(ctx, "set-default-sink", name)
+	return err
+}
+
+func (p Pactl) SetCardProfile(ctx context.Context, card, profile string) error {
+	_, err := p.run(ctx, "set-card-profile", card, profile)
 	return err
 }

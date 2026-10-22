@@ -759,6 +759,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	if duck != nil {
 		duck.NormalizePGA(ctx) // a crash mid-music must not leave the mic at the music gain
+		duck.EC.Cleanup(ctx)   // nor the echo canceller loaded
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
 	if tf.host != nil {
@@ -831,9 +832,7 @@ func runAgent(ctx context.Context, args []string) error {
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
 		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
-		if duck != nil {
-			o.Music = duck
-		}
+		withPiMusic(&o, duck)
 		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }

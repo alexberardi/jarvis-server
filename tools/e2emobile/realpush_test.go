@@ -69,6 +69,8 @@ func newPushFakes(t *testing.T, opened bool) *pushFakes {
 	write(t, f.adb, `#!/bin/sh
 printf 'adb %s\n' "$*" >>`+f.calls+`
 case "$*" in
+  *" get-state") echo device ;;
+  *"getprop sys.boot_completed"*) echo 1 ;;
   *"input tap"*) touch `+f.dir+`/tapped ;;
   *"screencap -p"*) printf '\211PNG\r\n\032\nfake' ;;
   *"cat /data/local/tmp/e2emobile.xml"*)
@@ -120,7 +122,7 @@ func (f *pushFakes) config(t *testing.T) *pushConfig {
 	login := filepath.Join(f.dir, "login.yaml")
 	write(t, login, "appId: com.jarvis.nodemobile\n---\n- tapOn: Sign in\n")
 	return &pushConfig{
-		config:    config{out: filepath.Join(f.dir, "out", "mobile-push"), maestro: f.maestro, adb: f.adb, serial: "emulator-5590", adbTimeout: 5 * time.Second, env: []string{"EMAIL=a@b"}},
+		config:    config{out: filepath.Join(f.dir, "out", "mobile-push"), maestro: f.maestro, adb: f.adb, serial: "emulator-5590", adbTimeout: 5 * time.Second, retryPause: time.Millisecond, pollPause: time.Millisecond, env: []string{"EMAIL=a@b"}},
 		loginFlow: login, notifications: f.srv.URL, cc: f.srv.URL, userToken: "user-jwt", nodeKey: "node:key", userID: 7,
 		tokenWait: 2 * time.Second, shadeWait: 2 * time.Second, openWait: 2 * time.Second, poll: 10 * time.Millisecond,
 	}
@@ -251,7 +253,7 @@ func TestRealPushRefusesTheUsersEmulator(t *testing.T) {
 }
 
 // The lane readies the device first (tunnels, /health) and, when the sign-in dies on an adb
-// transport drop, does it all once more.
+// transport drop, brings the device back (the driver stopped) and does it all once more.
 func TestRealPushRetriesOnceWhenTheDeviceDrops(t *testing.T) {
 	f := newPushFakes(t, true)
 	write(t, f.maestro, "#!/bin/sh\necho \"maestro $*\" >>"+f.calls+"\nif [ ! -f "+f.dir+"/dropped ]; then touch "+f.dir+
@@ -263,8 +265,8 @@ func TestRealPushRetriesOnceWhenTheDeviceDrops(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := res.Tests[0]
-	if r.Status != "passed" || !strings.Contains(r.Note, "retried once") {
-		t.Fatalf("record = %+v", r)
+	if r.Status != "passed" || !strings.HasPrefix(r.Note, "retried 1×") || res.DeviceRetries != 1 {
+		t.Fatalf("record = %+v, device_retries %d", r, res.DeviceRetries)
 	}
 	calls, _ := os.ReadFile(f.calls)
 	log := string(calls)
@@ -273,6 +275,9 @@ func TestRealPushRetriesOnceWhenTheDeviceDrops(t *testing.T) {
 	}
 	if n := strings.Count(log, "maestro "); n != 2 {
 		t.Errorf("%d sign-ins, want 2", n)
+	}
+	if !strings.Contains(log, "adb -s emulator-5590 shell am force-stop dev.mobile.maestro") {
+		t.Errorf("the retry did not stop Maestro's driver:\n%s", log)
 	}
 }
 

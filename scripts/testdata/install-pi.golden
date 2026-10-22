@@ -68,7 +68,7 @@ d 755 var/log
 d 755 var/log/journal
 ## commands
 apt-get update -q
-env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils python3
+env DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio pulseaudio-module-bluetooth bluez rfkill iw hostapd dnsmasq device-tree-compiler alsa-utils libasound2-plugins python3
 chown pi: /opt/jarvis-agent
 dtc -q -W no-unit_address_vs_reg -I dts -O dtb -o /boot/firmware/overlays/respeaker-2mic-v2_0-overlay.dtbo /usr/local/share/jarvis-agent/respeaker-2mic-v2_0-overlay.dts
 udevadm control --reload
@@ -149,6 +149,13 @@ pcm.dsnoopmic_hw {
 pcm.dsnoopmic {
     type plug
     slave.pcm "dsnoopmic_hw"
+}
+
+# The mic with the node's music echo-cancelled out: Pulse's webrtc canceller over dsnoopmic,
+# loaded by the node only while its music plays (internal/agent/music/echocancel.go).
+pcm.jarvis_ec {
+    type pulse
+    device jarvis_ec_source
 }
 
 # --- Default split: playback via PA, capture direct --------------------

@@ -86,6 +86,7 @@ func (p *Pipeline) take(ctx context.Context, chunks <-chan []int16, t Take) ([]i
 		p.Log.Info("voice: recording a take", "secs", t.Secs)
 	}
 	defer p.cue(CueIdle, 0)
+	defer p.holdCapture()()
 	if t.sayOnly {
 		p.cue(CueSpeaking, 0)
 		_, err := p.speak(ctx, t.Cue, nil)
