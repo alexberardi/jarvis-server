@@ -50,12 +50,14 @@ type labelRef struct {
 	Prefix    string // settings prefix; the model key is Prefix + ".model"
 	ModelKind string
 	Voice     bool
+	// RemoteOnly: an engine label that runs no local model (cloud); nothing is assigned to it.
+	RemoteOnly bool
 }
 
 func allLabels() []labelRef {
 	var out []labelRef
 	for _, d := range engine.LabelDefs {
-		out = append(out, labelRef{Name: d.Name, Prefix: d.Prefix, ModelKind: d.ModelKind})
+		out = append(out, labelRef{Name: d.Name, Prefix: d.Prefix, ModelKind: d.ModelKind, RemoteOnly: d.RemoteOnly})
 	}
 	for _, v := range VoiceLabels {
 		out = append(out, labelRef{Name: v.Name, Prefix: strings.TrimSuffix(v.Key, ".model"), ModelKind: v.ModelKind, Voice: true})

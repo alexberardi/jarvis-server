@@ -316,3 +316,37 @@ describe('LabelsEditor model folders', () => {
     await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ background: { model: 'qwen3.5-9b-4bit' } }))
   })
 })
+
+describe('LabelsEditor cloud slot', () => {
+  it('runs remote or off only, with the remote fields and no local model', async () => {
+    const cloud: llm.LabelStatus = {
+      label: 'cloud',
+      config: { ...config('cloud', ''), engine: 'remote', model: '', model_path: '' },
+      state: 'not_configured',
+    }
+    const labels = { labels: [cloud], engines: [], voice: [], proposal: {}, recommend: {}, warnings: [] } as unknown as llm.LabelsResponse
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <LabelsEditor labels={['cloud']} />
+      </QueryClientProvider>,
+    )
+    const card = await screen.findByTestId('label-cloud')
+    expect(within(card).getByText('Cloud (optional)')).toBeInTheDocument()
+    expect(within(card).getByText(/Nothing uses it until you pick it for a feature/)).toBeInTheDocument()
+    const runs = within(card).getByLabelText('Runs') as HTMLSelectElement
+    expect([...runs.options].map((o) => o.value)).toEqual(['remote', 'off'])
+    expect(within(card).queryByLabelText('Model')).not.toBeInTheDocument()
+    fireEvent.change(within(card).getByLabelText('Base URL'), { target: { value: 'https://api.anthropic.com' } })
+    fireEvent.change(within(card).getByLabelText('Model name'), { target: { value: 'claude-sonnet-5-5' } })
+    fireEvent.change(within(card).getByLabelText('API key'), { target: { value: 'sk-ant' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() =>
+      expect(api.putLabels).toHaveBeenCalledWith({
+        cloud: { remote_url: 'https://api.anthropic.com', remote_model: 'claude-sonnet-5-5', remote_api_key: 'sk-ant' },
+      }),
+    )
+  })
+})

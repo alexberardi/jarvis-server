@@ -14,3 +14,7 @@ numbers** (piece 16 of plan P3), which scores the required cases per label and m
 
 Re-decided on 2026-10-20 from the suite's numbers, with the same outcome (`auto` stays):
 [2026-10-20-computer-task-default-model.md](2026-10-20-computer-task-default-model.md).
+
+The cloud part is superseded on 2026-10-22: a third, remote-only `cloud` slot exists (it takes
+no VRAM), and a computer task reaches it only through `computer.model = cloud`, not a per-task
+opt-in: [2026-10-22-cloud-model-slot.md](2026-10-22-cloud-model-slot.md).

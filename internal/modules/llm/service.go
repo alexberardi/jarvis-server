@@ -583,7 +583,7 @@ func schemaOf(req *ChatRequest) any {
 // and image capability (400, LD4: no fallback to another label). It returns the messages to
 // send: JSON mode's instruction added, folded for a strict chat template.
 func (s *Service) prepare(ctx context.Context, req *ChatRequest) (string, Endpoint, []Message, error) {
-	label := NormalizeLabel(req.Label)
+	label := chatLabel(req.Label)
 	ep, err := s.endpoint(ctx, label)
 	if err != nil {
 		return label, ep, nil, err

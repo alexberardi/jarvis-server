@@ -7,11 +7,12 @@ import { apiClient } from './client'
 
 // --- labels and kinds ---
 
-export type EngineLabel = 'live' | 'background' | 'embeddings' | 'stt'
+export type EngineLabel = 'live' | 'background' | 'embeddings' | 'stt' | 'cloud'
 export type VoiceLabel = 'tts' | 'speaker'
 export type Label = EngineLabel | VoiceLabel
 export type ModelKind = 'llm' | 'mmproj' | 'embedding' | 'stt' | 'tts' | 'speaker'
 
+/** The labels models are installed for; cloud (remote only) takes none. */
 export const ENGINE_LABELS: EngineLabel[] = ['live', 'background', 'embeddings', 'stt']
 export const VOICE_LABELS: VoiceLabel[] = ['tts', 'speaker']
 export const ALL_LABELS: Label[] = [...ENGINE_LABELS, ...VOICE_LABELS]
@@ -22,6 +23,7 @@ export const LABEL_KIND: Record<Label, ModelKind> = {
   background: 'llm',
   embeddings: 'embedding',
   stt: 'stt',
+  cloud: 'llm',
   tts: 'tts',
   speaker: 'speaker',
 }
@@ -31,6 +33,7 @@ export const LABEL_TITLE: Record<Label, string> = {
   background: 'Background (memory, planning)',
   embeddings: 'Embeddings',
   stt: 'Speech to text',
+  cloud: 'Cloud (optional)',
   tts: 'Text to speech',
   speaker: 'Speaker ID',
 }

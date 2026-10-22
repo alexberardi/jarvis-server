@@ -7,6 +7,7 @@ import HfBrowser from '@/components/models/HfBrowser'
 import HfTokenPrompt from '@/components/models/HfTokenPrompt'
 import InstalledList from '@/components/models/InstalledList'
 import InstallsList from '@/components/models/InstallsList'
+import FeatureModelsCard from '@/components/models/FeatureModelsCard'
 import LabelsEditor from '@/components/models/LabelsEditor'
 import PromptProviderCard from '@/components/models/PromptProviderCard'
 import PromptEditorCard from '@/components/models/PromptEditorCard'
@@ -86,6 +87,7 @@ export default function ModelsPage() {
                     </ModelCard>
                   )}
                   <LabelsEditor />
+                  <FeatureModelsCard />
                 </div>
               ),
             },
