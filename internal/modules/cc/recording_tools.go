@@ -83,17 +83,24 @@ func recordingToolDefinition(name, description string, properties *pyjson.Object
 	return watchToolDefinition(name, description, properties)
 }
 
+// mustCall marks a tool definition must_call: the prompt lists it among the tools to always
+// call, never answer for (prompts.directAnswerSection).
+func mustCall(d *pyjson.Object) *pyjson.Object {
+	d.Set("must_call", true)
+	return d
+}
+
 type startRecordingTool struct{ m *Module }
 
 func (*startRecordingTool) Name() string { return toolStartRecording }
 
 func (*startRecordingTool) Definition() *pyjson.Object {
-	return recordingToolDefinition(toolStartRecording,
+	return mustCall(recordingToolDefinition(toolStartRecording,
 		"Call this (never just reply) for 'record this macro', 'record a macro called X', 'watch me (do this)', "+
 			"'learn how I do this', 'let me show you how to ...': it records what the user does in their browser so "+
 			"Jarvis can learn it. Not for reminders, notes or audio. Stop with stop_recording.",
 		servertools.Obj("task", strProp("The macro's name, if given"),
-			"computer", computerProp()))
+			"computer", computerProp())))
 }
 
 func (t *startRecordingTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
@@ -127,12 +134,12 @@ type stopRecordingTool struct{ m *Module }
 func (*stopRecordingTool) Name() string { return toolStopRecording }
 
 func (*stopRecordingTool) Definition() *pyjson.Object {
-	return recordingToolDefinition(toolStopRecording,
+	return mustCall(recordingToolDefinition(toolStopRecording,
 		"Call this (never just reply: saying it stopped stops nothing) for 'I'm done', 'that's it', 'stop recording', "+
 			"'stop watching': it stops recording the macro and keeps what the user showed. If it asks for a name, "+
 			"call it again with the user's answer.",
 		servertools.Obj("name", strProp("The macro's name, if given"),
-			"computer", computerProp()))
+			"computer", computerProp())))
 }
 
 func (t *stopRecordingTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
