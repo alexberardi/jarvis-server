@@ -35,6 +35,7 @@ type BlueZ struct {
 	conn   *dbus.Conn
 	log    *slog.Logger
 	paired chan string
+	conns  chan Connection
 
 	mu       sync.Mutex
 	exported bool
@@ -58,7 +59,7 @@ func newBlueZ(c *dbus.Conn, log *slog.Logger) (*BlueZ, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	b := &BlueZ{conn: c, log: log, paired: make(chan string, 8)}
+	b := &BlueZ{conn: c, log: log, paired: make(chan string, 8), conns: make(chan Connection, 8)}
 	if err := c.AddMatchSignal(dbus.WithMatchInterface(ifProps), dbus.WithMatchMember("PropertiesChanged"),
 		dbus.WithMatchArg(0, ifDevice)); err != nil {
 		return nil, err
@@ -69,7 +70,8 @@ func newBlueZ(c *dbus.Conn, log *slog.Logger) (*BlueZ, error) {
 	return b, nil
 }
 
-// signals turns a Device1 Paired: true into an address on Paired.
+// signals turns a Device1 Paired: true into an address on Paired, and a Connected change into a
+// Connection on Connections.
 func (b *BlueZ) signals(sig chan *dbus.Signal) {
 	for s := range sig {
 		if s.Name != ifProps+".PropertiesChanged" || len(s.Body) < 2 {
@@ -79,16 +81,22 @@ func (b *BlueZ) signals(sig chan *dbus.Signal) {
 			continue
 		}
 		changed, _ := s.Body[1].(map[string]dbus.Variant)
-		if v, ok := changed["Paired"]; !ok || v.Value() != true {
-			continue
-		}
 		mac := macFromPath(s.Path)
 		if mac == "" {
 			continue
 		}
-		select {
-		case b.paired <- mac:
-		default: // nobody is reading; the reconnect loop trusts nothing, so dropping is safe
+		if v, ok := changed["Paired"]; ok && v.Value() == true {
+			select {
+			case b.paired <- mac:
+			default: // nobody is reading; the reconnect loop trusts nothing, so dropping is safe
+			}
+		}
+		if v, ok := changed["Connected"]; ok {
+			on, _ := v.Value().(bool)
+			select {
+			case b.conns <- Connection{MAC: mac, Connected: on}:
+			default: // nobody is reading; the reconnect loop routes a device it connects itself
+			}
 		}
 	}
 }
@@ -103,6 +111,8 @@ func macFromPath(p dbus.ObjectPath) string {
 }
 
 func (b *BlueZ) Paired() <-chan string { return b.paired }
+
+func (b *BlueZ) Connections() <-chan Connection { return b.conns }
 
 // AudioTransport looks for a MediaTransport1 under the device's path (…/dev_XX/sep1/fd0).
 func (b *BlueZ) AudioTransport(ctx context.Context, mac string) (bool, error) {
@@ -228,8 +238,9 @@ func (b *BlueZ) Devices(ctx context.Context) ([]Device, error) {
 			continue
 		}
 		uuids, _ := d["UUIDs"].Value().([]string)
+		rssi, _ := d["RSSI"].Value().(int16)
 		out = append(out, Device{Address: strings.ToUpper(str(d["Address"])), Name: str(d["Name"]), Alias: str(d["Alias"]),
-			Icon: str(d["Icon"]), UUIDs: uuids, Paired: boolean(d["Paired"]), Connected: boolean(d["Connected"]), Trusted: boolean(d["Trusted"])})
+			Icon: str(d["Icon"]), UUIDs: uuids, Paired: boolean(d["Paired"]), Connected: boolean(d["Connected"]), Trusted: boolean(d["Trusted"]), RSSI: rssi})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
 	return out, nil

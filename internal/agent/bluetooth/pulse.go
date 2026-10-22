@@ -194,8 +194,10 @@ func (n *Node) unrouteOutput(ctx context.Context, mac string) {
 	n.mu.Lock()
 	home := n.homeSink
 	n.mu.Unlock()
-	if home == "" {
-		names, _ := n.Pulse.List(ctx, "sinks")
+	names, _ := n.Pulse.List(ctx, "sinks")
+	if !contains(names, home) {
+		// Gone since (the music's echo-cancel sink, #469): the node's own sink instead.
+		home = ""
 		for _, name := range names {
 			if !isBluezSink(name) {
 				home = name

@@ -212,6 +212,33 @@ func TestEchoCancelDisengageUndoesExactlyItsEngage(t *testing.T) {
 	}
 }
 
+// #469: with Bluetooth headphones or a speaker as the output, the node's music plays there
+// through the canceller, and a Bluetooth route made while it played is kept when it stops.
+func TestEchoCancelFollowsABluetoothOutput(t *testing.T) {
+	const bt = "bluez_sink.EC_66_D1_B4_B5_D6.a2dp_sink"
+	p := newECPulse(ecStream{7, "mpv", bt})
+	p.sinks[bt], p.def = 5, bt
+	ec, _ := newEC(p)
+	ec.Engage(context.Background(), "deferred_play")
+	if got := p.changes(); len(got) < 2 || !strings.Contains(got[1], "sink_master="+bt+" ") {
+		t.Fatalf("the canceller doesn't play to the Bluetooth output: %v", got)
+	}
+	ec.Disengage(context.Background(), "restore")
+	if p.def != bt || p.sinkOf(7) != bt {
+		t.Fatalf("after the music: default %q, player on %q", p.def, p.sinkOf(7))
+	}
+
+	// The headphones connect while the music plays on the HAT: the route they got stays.
+	p = newECPulse(ecStream{7, "mpv", "jarvis_output"})
+	ec, _ = newEC(p)
+	ec.Engage(context.Background(), "deferred_play")
+	p.sinks[bt], p.def = 5, bt // the Bluetooth node routed the output
+	ec.Disengage(context.Background(), "restore")
+	if p.def != bt || p.sinkOf(7) != bt {
+		t.Fatalf("a route made during the music was undone: default %q, player on %q", p.def, p.sinkOf(7))
+	}
+}
+
 func TestEchoCancelEngageFailureFailsOpen(t *testing.T) {
 	for _, step := range []string{"pactl load-module module-alsa-source", "pactl load-module module-echo-cancel"} {
 		t.Run(step, func(t *testing.T) {

@@ -256,6 +256,9 @@ func (m *Module) handleUploadBTPair(w http.ResponseWriter, r *http.Request, n *n
 	}
 	name, hasName := b.str("device_name", false)
 	errMsg, hasErr := b.str("error", false)
+	// A failed pair that still bonded the device (its connect or audio failed) says paired: true
+	// (#469), so the status page lists it and it can be forgotten.
+	bonded, _ := b.boolean("paired")
 	if !b.done(w) {
 		return
 	}
@@ -274,7 +277,7 @@ func (m *Module) handleUploadBTPair(w http.ResponseWriter, r *http.Request, n *n
 		m.writeErr(w, err)
 		return
 	}
-	if success {
+	if success || bonded {
 		// The node pairs, connects and only then reports success: the status page lists it
 		// connected now, not after the next scan.
 		var mac string
@@ -287,7 +290,7 @@ func (m *Module) handleUploadBTPair(w http.ResponseWriter, r *http.Request, n *n
 				if hasName && name != "" {
 					d["name"] = name
 				}
-				d["paired"], d["connected"] = true, true
+				d["paired"], d["connected"] = true, success
 				return d
 			})
 		}
@@ -303,14 +306,26 @@ func normBTMAC(mac string) string { return strings.ToUpper(strings.ReplaceAll(ma
 
 // patchBTStatus applies one device's change to the node's latest completed scan, which is what
 // GET …/bluetooth/status reads: f gets the device's entry (nil when the scan doesn't have it)
-// and returns it changed, or nil to drop it. Without a completed scan there is nothing to patch.
+// and returns it changed, or nil to drop it. Without a completed scan, a device f adds goes in a
+// completed scan row of its own (#469: a pair before the node's first scan was never listed, so
+// it couldn't be forgotten).
 func (m *Module) patchBTStatus(ctx context.Context, nodeID, mac string, f func(map[string]any) map[string]any) error {
 	var id string
 	var results sql.NullString
 	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT id, results_json FROM cc_bluetooth_scan_requests
 		WHERE node_id = ? AND status = 'completed' ORDER BY completed_at DESC, rowid DESC LIMIT 1`, nodeID).Scan(&id, &results)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		d := f(nil)
+		if d == nil {
+			return nil
+		}
+		raw, _ := json.Marshal([]map[string]any{d})
+		now := m.now()
+		_, err = m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_bluetooth_scan_requests (id, node_id, household_id, status,
+			results_json, device_count, source, created_at, expires_at, completed_at)
+			SELECT ?, node_id, COALESCE(household_id, ''), 'completed', ?, 1, 'node', ?, ?, ? FROM cc_nodes WHERE node_id = ?`,
+			uuid4(), string(raw), dbTime(now), dbTime(now.Add(jobTTL)), dbTime(now), nodeID)
+		return err
 	}
 	if err != nil {
 		return err
