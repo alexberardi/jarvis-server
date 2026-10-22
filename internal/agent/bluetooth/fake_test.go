@@ -20,7 +20,8 @@ type fakeBus struct {
 	pairErr      map[string]error
 	connectErr   map[string]error
 	removeErr    error
-	discovering  []string // transports, in order
+	pairErrOnce  map[string][]error // returned by the next Pair calls, in order, before pairErr
+	discovering  []string           // transports, in order
 	calls        []string
 	agentCount   int
 	paired       chan string
@@ -126,6 +127,10 @@ func (b *fakeBus) Pair(_ context.Context, mac string) error {
 	d, err := b.get(mac)
 	if err != nil {
 		return err
+	}
+	if q := b.pairErrOnce[mac]; len(q) > 0 {
+		b.pairErrOnce[mac] = q[1:]
+		return q[0]
 	}
 	if err := b.pairErr[mac]; err != nil {
 		return err

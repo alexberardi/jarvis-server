@@ -46,7 +46,7 @@ func rig(t *testing.T) (*Node, *fakeBus, *fakePulse, *fakeAPI) {
 	}
 	ms := time.Millisecond
 	n := &Node{Bus: bus, Pulse: pulse, Store: st, Log: slog.New(slog.DiscardHandler), ScanFor: ms, FindFor: 50 * ms, AudioFor: 200 * ms, AudioStable: 5 * ms,
-		BusyFor: 50 * ms, SourceFor: 50 * ms, Poll: ms, FirstReconnect: ms, ReconnectEvery: time.Hour}
+		BusyFor: 50 * ms, SourceFor: 50 * ms, PageRetryAfter: ms, Poll: ms, FirstReconnect: ms, ReconnectEvery: time.Hour}
 	return n, bus, pulse, &fakeAPI{}
 }
 
@@ -225,10 +225,37 @@ func TestPairFailures(t *testing.T) {
 			if _, ok := n.Store.Get(speaker); ok {
 				t.Error("a failed pair was saved for the reconnect loop")
 			}
+			if name == "page timeout" && strings.Count(strings.Join(bus.Calls(), ","), "Pair "+speaker) != 2 {
+				t.Errorf("a Page Timeout was not retried before telling the user: %v", bus.Calls())
+			}
 			if name == "audio profile never comes up" && !slices.Contains(bus.Calls(), "Disconnect "+speaker) {
 				t.Errorf("the half-connected device wasn't disconnected (BlueZ keeps retrying AVDTP): %v", bus.Calls())
 			}
 		})
+	}
+}
+
+// The first pair right after a scan often gets a Page Timeout in a second or two although the
+// device is in pairing mode (#433, jarvis-pi4 with Arctis GameBuds): the node retries once.
+func TestAFastPageTimeoutAfterAScanIsRetriedOnce(t *testing.T) {
+	n, bus, _, api := rig(t)
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicScan, map[string]any{"request_id": "r1"})
+	bus.pairErrOnce = map[string][]error{speaker: {BlueZError{Name: "org.bluez.Error.ConnectionAttemptFailed", Message: "Page Timeout"}}}
+
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+
+	if got := asJSON(t, api.pairs["p1"]); !reflect.DeepEqual(got, map[string]any{"success": true, "device_name": "JBL Flip 5"}) {
+		t.Fatalf("pair result %v", got)
+	}
+	var pairs int
+	for _, c := range bus.Calls() {
+		if c == "Pair "+speaker {
+			pairs++
+		}
+	}
+	if pairs != 2 {
+		t.Errorf("Pair called %d times: %v", pairs, bus.Calls())
 	}
 }
 

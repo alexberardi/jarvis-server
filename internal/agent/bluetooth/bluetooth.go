@@ -116,9 +116,10 @@ type Node struct {
 	// for a connect already in progress (10 s); SourceFor is the wait for a phone's a2dp_source
 	// before the loopback (5 s); FirstReconnect and ReconnectEvery pace the reconnect loop (30 s
 	// after start, then every 10 min).
-	ScanFor, FindFor, AudioFor, AudioStable, BusyFor, SourceFor time.Duration
-	FirstReconnect, ReconnectEvery                              time.Duration
-	Poll                                                        time.Duration // 500 ms
+	// PageRetryAfter is the pause before the one retry of a pair that got a fast Page Timeout (2 s).
+	ScanFor, FindFor, AudioFor, AudioStable, BusyFor, SourceFor, PageRetryAfter time.Duration
+	FirstReconnect, ReconnectEvery                                              time.Duration
+	Poll                                                                        time.Duration // 500 ms
 
 	op      sync.Mutex // one radio operation at a time
 	mu      sync.Mutex
@@ -436,9 +437,7 @@ func (n *Node) Pair(ctx context.Context, mac, role string) (string, error) {
 	if _, known := n.device(ctx, mac); !known && !n.find(ctx, mac) {
 		return "", errors.New("Device not found — put it in pairing mode and keep it close")
 	}
-	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	err := n.Bus.Pair(pctx, mac)
-	cancel()
+	err := n.pairOnce(ctx, mac)
 	if err != nil && !errors.Is(err, ErrAlreadyExists) {
 		n.log().Warn("bluetooth: pair failed", "mac", mac, "err", err)
 		d, _ := n.device(ctx, mac)
@@ -466,6 +465,38 @@ func (n *Node) Pair(ctx context.Context, mac, role string) (string, error) {
 	return name, nil
 }
 
+// pairOnce is Device1.Pair, retried once after a Page Timeout that came back fast: right after
+// an inquiry (the scan, or find's) the controller's first page often fails within a second or
+// two although the device is in pairing mode, and the next one pairs (#433). A device really out
+// of range takes the whole page timeout (about 5 s) to fail, and gets no retry.
+func (n *Node) pairOnce(ctx context.Context, mac string) error {
+	for attempt := 0; ; attempt++ {
+		start := time.Now()
+		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := n.Bus.Pair(pctx, mac)
+		cancel()
+		if attempt > 0 || !isPageTimeout(err) || time.Since(start) > pageFast {
+			return err
+		}
+		n.log().Info("bluetooth: page timeout right after discovery; retrying the pair", "mac", mac, "after", time.Since(start).Round(time.Millisecond))
+		if err := sleep(ctx, or(n.PageRetryAfter, 2*time.Second)); err != nil {
+			return err
+		}
+	}
+}
+
+// pageFast is how quickly a Page Timeout must come back to be retried.
+const pageFast = 4 * time.Second
+
+func isPageTimeout(err error) bool {
+	var be BlueZError
+	if !errors.As(err, &be) {
+		return false
+	}
+	text := strings.ToLower(be.Message)
+	return strings.Contains(text, "page timeout") || strings.Contains(text, "page-timeout")
+}
+
 // pairError is the app's message for a failed Device1.Pair: what BlueZ's error means for the
 // user, then the BlueZ error itself for support. name is the device's, or "".
 func pairError(err error, name string) error {
@@ -474,10 +505,9 @@ func pairError(err error, name string) error {
 	}
 	var be BlueZError
 	errors.As(err, &be)
-	text := strings.ToLower(be.Message)
 	var msg string
 	switch {
-	case strings.Contains(text, "page timeout") || strings.Contains(text, "page-timeout"):
+	case isPageTimeout(err):
 		msg = capitalize(name) + " didn't answer — put it in pairing mode and keep it close"
 	case be.Name == "org.bluez.Error.AuthenticationFailed", be.Name == "org.bluez.Error.AuthenticationRejected",
 		be.Name == "org.bluez.Error.AuthenticationCanceled":
