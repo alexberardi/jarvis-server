@@ -977,3 +977,32 @@ func TestRepeatedNoChangeBatch(t *testing.T) {
 		}
 	})
 }
+
+// A look after an action waits for the page to stop changing: the dialog a press opened showed
+// only its Close button at first (#485), and the model closed it as if the item were added.
+func TestLookSettlesAfterAction(t *testing.T) {
+	drawing := shopPage()
+	drawing.Elements = []Element{{Ref: "e1", Role: "button", Name: "Close", State: []string{"in dialog"}}}
+	drawn := shopPage()
+	drawn.Elements = []Element{
+		{Ref: "e1", Role: "button", Name: "Close", State: []string{"in dialog"}},
+		{Ref: "e2", Role: "button", Name: "Add to cart • $14", State: []string{"in dialog"}},
+	}
+	// The first look, then the press's: drawing, drawn, drawn (two agree).
+	e := newEnv(t, shopPage(), drawing, drawn, drawn)
+	slept := 0
+	e.loop.Settle = 3 * time.Second
+	e.loop.Sleep = func(context.Context, time.Duration) { slept++ }
+	e.script(actions(press("e3", "Open the sandwich")), actions(press("e2", "Add it")), doneAnswer)
+	if out := e.run(); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(p, "Add to cart • $14") {
+		t.Fatalf("the second round saw the dialog still drawing:\n%s", p)
+	}
+	// Two after the first press (drawing → drawn → drawn), one after the second (drawn twice).
+	if slept != 3 {
+		t.Fatalf("slept %d times, want 3", slept)
+	}
+}

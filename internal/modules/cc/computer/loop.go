@@ -108,6 +108,25 @@ type Loop struct {
 	Workflows WorkflowStore // nil: a replay's healed steps aren't stored
 	Now       func() time.Time
 	Log       *slog.Logger // nil: slog.Default()
+	// Settle is how long a browser look after an action may wait for the page to stop changing
+	// (0: no wait): a dialog the press opened renders after the click, and a look in between saw
+	// only its Close button (#485). Sleep waits (nil: a timer).
+	Settle time.Duration
+	Sleep  func(ctx context.Context, d time.Duration)
+}
+
+// settlePoll is the gap between a settling look and the next.
+const settlePoll = 400 * time.Millisecond
+
+func (l *Loop) sleep(ctx context.Context, d time.Duration) {
+	if l.Sleep != nil {
+		l.Sleep(ctx, d)
+		return
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
 }
 
 // clip keeps a log value to n bytes, on a rune boundary.
@@ -276,6 +295,8 @@ type round struct {
 	acted   map[string]bool
 	repeats int
 	page    string // pageKey of this round's observation
+	// actedSinceLook: a batch ran since the last look, so the next one waits for the page to settle.
+	actedSinceLook bool
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -688,6 +709,24 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 	if err != nil {
 		return obs, err
 	}
+	if r.actedSinceLook && !desktop && l.Settle > 0 {
+		// Look again until two looks agree (or Settle runs out): the page the model reads is the
+		// one the action led to, not one still drawing.
+		o.Screenshot = false
+		for waited := time.Duration(0); waited < l.Settle; waited += settlePoll {
+			l.sleep(ctx, settlePoll)
+			again, err := l.Exec.Observe(ctx, o)
+			if err != nil {
+				break
+			}
+			if pageKey(again) == pageKey(Observation{URL: obs.URL, App: obs.App, Elements: obs.Elements}) {
+				break
+			}
+			again.Image = obs.Image
+			obs = again
+		}
+	}
+	r.actedSinceLook = false
 	if obs.Image == nil && len(obs.Elements) < fewElements {
 		shot, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: t.Target, StartURL: t.StartURL, Screenshot: true})
 		if err == nil {
@@ -871,6 +910,7 @@ func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []d
 	res, err := l.Exec.Act(ctx, b)
 	if err == nil {
 		r.resume = false
+		r.actedSinceLook = true
 		// Only a batch that ran counts for noChange (not one sent back for a checkout or held).
 		if key := batchKey(b.Actions); key != "" {
 			if r.acted == nil {

@@ -25,6 +25,8 @@ const (
 	computerObserveTimeout = 60 * time.Second
 	computerActTimeout     = 3 * time.Minute // a batch of up to 12 actions, each with its waits
 	computerStopTimeout    = 10 * time.Second
+	// computerSettle is how long a look after an action waits for the page to stop changing.
+	computerSettle = 3 * time.Second
 )
 
 // computerTasks is the errand runner's computer_task wiring.
@@ -33,6 +35,7 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	loop := &computer.Loop{
 		LLM: m.LLM, Exec: computerExec{m: m, store: store}, Policy: m.policy, Store: store,
 		Approvals: computerApprovals{m}, Settings: m.settings, Now: m.now, Workflows: taughtWorkflows{m}, Log: m.deps.Log,
+		Settle: computerSettle,
 		Models: computer.Models{
 			Endpoint: func(ctx context.Context, label string) (llm.Endpoint, error) {
 				if m.Endpoints == nil {
