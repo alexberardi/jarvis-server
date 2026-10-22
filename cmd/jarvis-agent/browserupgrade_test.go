@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -36,6 +37,21 @@ func TestExtUpgraderOffersFirefoxOncePerVersion(t *testing.T) {
 	u.outdated(browser.BrowserInfo{Browser: "Google Chrome", Origin: "chrome-extension://" + browser.ChromeDevExtensionID + "/", ExtensionVersion: "0.1.0"}, "0.3.6")
 	if len(opened) != 2 {
 		t.Errorf("Chromium was handed the .xpi: %v", opened)
+	}
+}
+
+// A Firefox that couldn't be opened isn't marked as offered: the next connect tries again.
+func TestExtUpgraderRetriesAfterFailedOpen(t *testing.T) {
+	tries := 0
+	u := &extUpgrader{dir: t.TempDir(), log: slog.New(slog.DiscardHandler),
+		open: func(string) error { tries++; return errors.New("no firefox") },
+		xpi:  func() ([]byte, bool) { return []byte("PK-signed"), true }}
+	ff := browser.BrowserInfo{Browser: "Firefox", Origin: browser.FirefoxExtensionID, ExtensionVersion: "0.1.0"}
+
+	u.outdated(ff, "0.3.4")
+	u.outdated(ff, "0.3.4")
+	if tries != 2 {
+		t.Errorf("tried to open %d times, want a retry after the failure", tries)
 	}
 }
 

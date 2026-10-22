@@ -78,8 +78,8 @@ func (u *extUpgrader) outdated(b browser.BrowserInfo, available string) {
 	}
 	if err := u.open(p); err != nil {
 		u.log.Warn("browser: couldn't open the extension update in Firefox; open it there and click Update", "xpi", p, "err", err)
-	} else {
-		u.log.Info("browser: offered Firefox the extension update", "from", b.ExtensionVersion, "to", available, "xpi", p)
+		return // not marked: the next connect tries again
 	}
+	u.log.Info("browser: offered Firefox the extension update", "from", b.ExtensionVersion, "to", available, "xpi", p)
 	_ = os.WriteFile(marker, []byte(available+"\n"), 0o644)
 }
