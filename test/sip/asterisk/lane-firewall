@@ -1,0 +1,39 @@
+#!/bin/bash
+# lane-firewall: the lane's stand-in for FreePBX's Responsive Firewall / fail2ban. Asterisk
+# writes a SecurityEvent per failed digest to its security log (logger.conf); after
+# LANE_BAN_AFTER (default 3) failures from one address that address goes into the pjsip ACL
+# lane-ban and every later request from it is refused with 403 until `lane-firewall clear`.
+# The real firewall drops packets instead (the client sees timeouts); the decision file
+# 2026-10-21-sip-l1-lane.md says why the lane answers 403 and what L2 adds.
+#
+#   lane-firewall          watch (started by lane-entrypoint)
+#   lane-firewall clear    unban everyone, forget the counts
+set -u
+LOG=/var/log/asterisk/security
+BAN=/var/lib/asterisk/lane/pjsip_ban.conf
+STATE=/var/lib/asterisk/lane/failures
+LIMIT=${LANE_BAN_AFTER:-3}
+
+reload() { asterisk -rx 'module reload res_pjsip.so' >/dev/null 2>&1 || true; }
+
+if [ "${1:-}" = clear ]; then
+  printf '[lane-ban]\ntype=acl\ndeny=0.0.0.0/32\n' >"$BAN"
+  : >"$STATE"
+  reload
+  echo "lane-firewall: cleared"
+  exit 0
+fi
+
+: >"$STATE"
+tail -n0 -F "$LOG" 2>/dev/null | while read -r line; do
+  case $line in *'SecurityEvent="ChallengeResponseFailed"'*|*'SecurityEvent="InvalidPassword"'*) ;; *) continue ;; esac
+  ip=$(sed -n 's#.*RemoteAddress="IPV[46]/[A-Z]*/\([^/"]*\)/.*#\1#p' <<<"$line")
+  [ -n "$ip" ] || continue
+  echo "$ip" >>"$STATE"
+  n=$(grep -cx "$ip" "$STATE")
+  if [ "$n" -ge "$LIMIT" ] && ! grep -qx "deny=$ip/32" "$BAN"; then
+    echo "deny=$ip/32" >>"$BAN"
+    reload
+    echo "lane-firewall: banned $ip after $n failed authentications" >&2
+  fi
+done

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- FreePBX's max_contacts=1 with remove_existing=no: a second device (or jarvisd restarted on a
+     new port) with the right password is refused while the old contact has not expired.
+     Run by tools/siplane (scenarios.go): -key caller the extension, -au/-ap its digest
+     credentials, -i the address it registers from, -key run a nonce per run. -->
+<scenario name="lane: REGISTER while another contact holds the extension (403)">
+  <send retrans="500">
+    <![CDATA[
+
+      REGISTER sip:[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[run]
+      From: <sip:[caller]@[remote_ip]>;tag=[run]SIPpTag00[call_number]
+      To: <sip:[caller]@[remote_ip]>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:[caller]@[local_ip]:[local_port]>
+      Expires: 60
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="401" auth="true"/>
+  <send retrans="500">
+    <![CDATA[
+
+      REGISTER sip:[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[run]
+      From: <sip:[caller]@[remote_ip]>;tag=[run]SIPpTag00[call_number]
+      To: <sip:[caller]@[remote_ip]>
+      Call-ID: [call_id]
+      CSeq: 2 REGISTER
+      Contact: <sip:[caller]@[local_ip]:[local_port]>
+      Expires: 60
+      [authentication]
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="403"/>
+</scenario>

@@ -1,0 +1,66 @@
+name: sip-lane
+
+# The L1 SIP lane (docs/cc/phone-sip.md §5): Asterisk 22 configured like FreePBX 17 in Docker,
+# baresip/SIPp far ends, a sandbox for TTS and CPU whisper; tools/siplane plays the FreePBX
+# behaviours and checks what each far end heard (max WER). On changes to the phone module or
+# the lane, nightly, and by hand. Never a real PBX or carrier.
+# Choices: docs/decisions/2026-10-21-sip-l1-lane.md.
+
+on:
+  pull_request:
+    paths:
+      - 'internal/modules/cc/phone/**'
+      - 'test/sip/**'
+      - 'tools/siplane/**'
+      - 'scripts/sip-lane'
+      - '.github/workflows/sip-lane.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/modules/cc/phone/**'
+      - 'test/sip/**'
+      - 'tools/siplane/**'
+      - 'scripts/sip-lane'
+      - '.github/workflows/sip-lane.yml'
+  schedule:
+    - cron: '30 6 * * *'
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  lane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        run: scripts/fetch-sherpa-libs.sh
+      # Kokoro, the speaker model and whisper (scripts/sandbox --voice downloads them once).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-harness
+          key: jarvis-harness-voice-${{ hashFiles('scripts/sandbox') }}
+          restore-keys: jarvis-harness-voice-
+      - name: Sandbox with voice and the SIP lane
+        run: scripts/sandbox up --name ci --llm none --voice --sip
+      - name: Scenarios
+        run: go run ./tools/siplane --sandbox ci --out sip-lane-out
+      - name: Lane logs
+        if: always()
+        run: |
+          mkdir -p sip-lane-out
+          docker logs jarvis-sip-ci-asterisk > sip-lane-out/asterisk.log 2>&1 || true
+          for p in jarvis alice carrier; do docker logs jarvis-sip-ci-$p > sip-lane-out/baresip-$p.log 2>&1 || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sip-lane
+          path: sip-lane-out
+      - name: Down
+        if: always()
+        run: scripts/sandbox down --name ci --purge
