@@ -32,5 +32,13 @@
     <string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- macOS's Local Network privacy: what the server app says when it reaches devices on the
+         LAN, and the Bonjour type jarvisd advertises (the agent finds the server by it). -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Jarvis Automation Server talks to the computers, phones and devices on your local network that use Jarvis Automation, and announces itself so they can find it.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_jarvis-config._tcp</string>
+    </array>
 </dict>
 </plist>

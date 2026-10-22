@@ -235,7 +235,7 @@ func (a *app) postServer(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := choose(r.Context(), a.d.HTTP, a.d.ConfigPort, f)
 	if err != nil {
-		fail(w, http.StatusBadGateway, err.Error())
+		fail(w, http.StatusBadGateway, node.WithLocalNetworkHint(a.d.GOOS, err).Error())
 		return
 	}
 	a.mu.Lock()

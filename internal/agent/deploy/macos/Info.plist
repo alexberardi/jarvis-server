@@ -58,5 +58,14 @@
     <string>Jarvis Automation Agent types dictated text and moves, focuses and closes windows when you ask Jarvis to.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Jarvis Automation Agent reads the screen when you ask Jarvis what's on it.</string>
+    <!-- macOS's Local Network privacy blocks an app from the LAN until it is allowed, silently:
+         without these the agent can't reach a server at 10.0.0.x while Terminal can. The Bonjour
+         type is the one the server advertises and the setup page browses for. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Jarvis Automation Agent connects to your Jarvis Automation server on your local network, and looks for it there.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_jarvis-config._tcp</string>
+    </array>
 </dict>
 </plist>
