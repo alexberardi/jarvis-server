@@ -38,6 +38,9 @@ type UA struct {
 	allowed   []net.IP      // the registrar's addresses: the only peers we answer
 	calls     map[string]*Call
 	closeOnce sync.Once
+
+	refresh chan struct{}  // Check: re-register now
+	trace   *traceAccount // this UA in the process-wide SIP trace
 }
 
 // Start opens cfg's socket and starts registering. It fails at once on a bad config or a
@@ -47,7 +50,8 @@ func Start(ctx context.Context, cfg Config) (*UA, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	u := &UA{cfg: cfg, calls: map[string]*Call{}, changed: make(chan struct{}), done: make(chan struct{})}
+	u := &UA{cfg: cfg, calls: map[string]*Call{}, changed: make(chan struct{}), done: make(chan struct{}),
+		refresh: make(chan struct{}, 1)}
 	u.status = Status{State: StateRegistering, Since: time.Now()}
 	if err := u.resolveRegistrar(ctx); err != nil {
 		return nil, err
@@ -100,6 +104,8 @@ func Start(ctx context.Context, cfg Config) (*UA, error) {
 		return nil, err
 	}
 	u.dg.HandleFunc(u.handleInvite)
+	u.trace = u.newTraceAccount()
+	processTracer.add(u.trace)
 	sctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	u.cancel = cancel
 	go u.supervise(sctx)
@@ -176,7 +182,9 @@ func (u *UA) Config() Config { return u.cfg }
 func (u *UA) Status() Status {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return u.status
+	st := u.status
+	st.ActiveCalls = len(u.calls)
+	return st
 }
 
 // Changed is closed at the next status change.
@@ -236,6 +244,7 @@ func (u *UA) Close(ctx context.Context) {
 		u.setStatus(func(s *Status) { s.State = StateClosed })
 		_ = u.sock.Close()
 		<-u.served
+		processTracer.remove(u.trace)
 		u.client.Close()
 		u.server.Close()
 		u.ua.Close()
@@ -314,11 +323,36 @@ func respond(req *sip.Request, tx sip.ServerTransaction, code int, reason string
 
 // handleInvite answers a new inbound call. Inbound calls are a later step
 // (docs/cc/phone-sip.md §4 step 3): 480 sends the caller on to the PBX's next destination.
+// What the INVITE said is kept for the inbound watch self-test.
 func (u *UA) handleInvite(d *diago.DialogServerSession) {
-	u.cfg.Log.Info("sip: inbound call refused (not supported yet)", "from", d.FromUser())
+	in := inboundInvite(d.InviteRequest)
+	in.Response = sip.StatusTemporarilyUnavailable
+	u.setStatus(func(s *Status) { s.LastInbound = in })
+	u.cfg.Log.Info("sip: inbound call refused (not supported yet)", "from", in.Caller)
 	if err := d.Respond(sip.StatusTemporarilyUnavailable, "Temporarily Unavailable", nil); err != nil {
 		u.cfg.Log.Warn("sip: refusing an inbound call failed", "err", err)
 	}
+}
+
+// inboundInvite reads an INVITE's caller (P-Asserted-Identity, then From: a hint, never
+// authentication) and its audio offer.
+func inboundInvite(req *sip.Request) InboundInvite {
+	in := InboundInvite{At: time.Now()}
+	if to := req.To(); to != nil {
+		in.To = to.Address.User
+	}
+	if h := req.GetHeader("P-Asserted-Identity"); h != nil {
+		var uri sip.Uri
+		params := sip.NewParams()
+		if name, err := sip.ParseAddressValue(h.Value(), &uri, &params); err == nil {
+			in.Caller, in.CallerName = uri.User, name
+		}
+	}
+	if from := req.From(); in.Caller == "" && from != nil {
+		in.Caller, in.CallerName = from.Address.User, from.DisplayName
+	}
+	in.Media, in.Codecs = sdpAudio(req.Body())
+	return in
 }
 
 // handleUpdate answers UPDATE (a session-timer refresh, RFC 4028/3311) within a live call

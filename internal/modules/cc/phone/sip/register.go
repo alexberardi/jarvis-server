@@ -26,6 +26,7 @@ type regResult struct {
 	err     error
 	code    int           // the final status code, 0 for no response
 	expires time.Duration // granted, on success
+	rtt     time.Duration // the attempt's round trips (challenge and answer)
 }
 
 // authFailure reports a refusal that counts toward the stop: a wrong password (401/407 after
@@ -54,6 +55,7 @@ func (u *UA) supervise(ctx context.Context) {
 			refused, backoff = false, u.cfg.BackoffMin
 			u.setStatus(func(s *Status) {
 				s.State, s.LastError, s.Hint, s.AuthFailures = StateRegistered, "", "", 0
+				s.LastRegister, s.RegisterRTT = time.Now(), r.rtt
 			})
 			u.cfg.Log.Info("sip: registered", "account", u.cfg.String(), "expires", r.expires)
 			err := u.keep(ctx, r.expires)
@@ -75,6 +77,7 @@ func (u *UA) supervise(ctx context.Context) {
 		u.setStatus(func(s *Status) {
 			s.LastError = r.err.Error()
 			s.Hint = hintFor(r)
+			s.LastRegister, s.RegisterRTT = time.Now(), r.rtt
 			if counts {
 				s.AuthFailures++
 			}
@@ -93,6 +96,7 @@ func (u *UA) supervise(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(backoff):
+		case <-u.refresh: // Check: try now
 		}
 		backoff = min(backoff*2, u.cfg.BackoffMax)
 	}
@@ -128,8 +132,10 @@ func (u *UA) keep(ctx context.Context, expires time.Duration) error {
 			return ctx.Err()
 		case <-due.C:
 			return nil
+		case <-u.refresh: // Check: re-register now
+			return nil
 		case <-tick.C:
-			if err := u.options(ctx); err != nil {
+			if _, err := u.options(ctx); err != nil {
 				return err
 			}
 		}
@@ -160,20 +166,22 @@ func (u *UA) register(ctx context.Context, req *sip.Request, expires time.Durati
 	// failure for the PBX's intrusion detection.
 	req.RemoveHeader("Authorization")
 	req.RemoveHeader("Proxy-Authorization")
+	start := time.Now()
 	res, err := u.client.Do(ctx, req, sipgo.ClientRequestRegisterBuild)
 	if err != nil {
-		return regResult{err: fmt.Errorf("no answer from %s: %w", u.registrar.HostPort(), err)}
+		return regResult{err: fmt.Errorf("no answer from %s: %w", u.registrar.HostPort(), err), rtt: time.Since(start)}
 	}
 	if res.StatusCode == sip.StatusUnauthorized || res.StatusCode == sip.StatusProxyAuthRequired {
 		res, err = u.client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{Username: u.cfg.Extension, Password: u.cfg.Password})
 		if err != nil {
-			return regResult{err: fmt.Errorf("no answer from %s: %w", u.registrar.HostPort(), err)}
+			return regResult{err: fmt.Errorf("no answer from %s: %w", u.registrar.HostPort(), err), rtt: time.Since(start)}
 		}
 	}
+	rtt := time.Since(start)
 	if res.StatusCode != sip.StatusOK {
-		return regResult{code: res.StatusCode, err: fmt.Errorf("REGISTER: %d %s", res.StatusCode, res.Reason)}
+		return regResult{code: res.StatusCode, err: fmt.Errorf("REGISTER: %d %s", res.StatusCode, res.Reason), rtt: rtt}
 	}
-	return regResult{code: res.StatusCode, expires: grantedExpiry(res, &u.contact, expires)}
+	return regResult{code: res.StatusCode, expires: grantedExpiry(res, &u.contact, expires), rtt: rtt}
 }
 
 // grantedExpiry is what the registrar granted: our Contact's expires parameter, else the
@@ -211,19 +219,77 @@ func (u *UA) unregister(req *sip.Request) {
 	u.cfg.Log.Info("sip: unregistered", "account", u.cfg.String())
 }
 
-// options pings the registrar; any final response counts as alive.
-func (u *UA) options(ctx context.Context) error {
+// options pings the registrar; any final response counts as alive. It returns the round
+// trip, also kept in the status.
+func (u *UA) options(ctx context.Context) (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.cfg.RequestTimeout)
 	defer cancel()
 	req := sip.NewRequest(sip.OPTIONS, u.registrar)
 	req.AppendHeader(u.contact.Clone())
 	req.AppendHeader(sip.NewHeader("User-Agent", u.cfg.UserAgent))
+	start := time.Now()
 	res, err := u.client.Do(ctx, req)
 	if err != nil {
-		return fmt.Errorf("OPTIONS to %s: no answer: %w", u.registrar.HostPort(), err)
+		return 0, fmt.Errorf("OPTIONS to %s: no answer: %w", u.registrar.HostPort(), err)
 	}
 	if res == nil {
-		return errors.New("OPTIONS: no response")
+		return 0, errors.New("OPTIONS: no response")
 	}
-	return nil
+	rtt := time.Since(start)
+	u.setStatus(func(s *Status) { s.LastOptions, s.OptionsRTT = time.Now(), rtt })
+	return rtt, nil
+}
+
+// CheckResult is the connection self-test's outcome.
+type CheckResult struct {
+	Registered  bool
+	RegisterRTT time.Duration
+	OptionsRTT  time.Duration
+	Error       string
+	Hint        string
+}
+
+// Check is the connection self-test: register again now and ping the registrar with OPTIONS.
+// A stopped registration is not retried (one more refusal only extends a firewall ban): the
+// result says why it stopped and what to do.
+func (u *UA) Check(ctx context.Context) CheckResult {
+	st := u.Status()
+	switch st.State {
+	case StateStopped:
+		return CheckResult{Error: st.LastError, Hint: st.Hint}
+	case StateClosed:
+		return CheckResult{Error: "the SIP connection to the PBX is shut down"}
+	}
+	t0 := time.Now()
+	select {
+	case u.refresh <- struct{}{}:
+	default: // one is already pending
+	}
+	wait := time.NewTimer(2*u.cfg.RequestTimeout + time.Second)
+	defer wait.Stop()
+	for {
+		changed := u.Changed()
+		st = u.Status()
+		if st.LastRegister.After(t0) {
+			break
+		}
+		select {
+		case <-changed:
+		case <-wait.C:
+			return CheckResult{Error: "the REGISTER did not finish in time", Hint: hintFor(regResult{err: errors.New("timeout")})}
+		case <-ctx.Done():
+			return CheckResult{Error: ctx.Err().Error()}
+		}
+	}
+	res := CheckResult{Registered: st.State == StateRegistered, RegisterRTT: st.RegisterRTT, Error: st.LastError, Hint: st.Hint}
+	if !res.Registered {
+		return res
+	}
+	rtt, err := u.options(ctx)
+	if err != nil {
+		res.Error, res.Hint = err.Error(), hintFor(regResult{err: err})
+		return res
+	}
+	res.OptionsRTT = rtt
+	return res
 }

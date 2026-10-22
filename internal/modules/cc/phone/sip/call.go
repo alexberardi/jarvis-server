@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,14 +71,38 @@ type Call struct {
 	lastRTP atomic.Int64 // unix nanos of the last RTP packet (or of the answer)
 }
 
-// Dial places a call to number (already in the PBX's dial format) through the registrar.
-// It returns once the INVITE is on its way; Started, Done and End say what became of it.
+// Dial places a call to number (already in the PBX's dial format: digits, optionally after a
+// +) through the registrar. It returns once the INVITE is on its way; Started, Done and End
+// say what became of it. Feature codes (*43, ##) never go through Dial: see DialFeature.
 func (u *UA) Dial(ctx context.Context, number string) (*Call, error) {
+	if !dialable(number) {
+		return nil, fmt.Errorf("sip: bad number %q", number)
+	}
+	return u.dial(ctx, number)
+}
+
+// FeatureCodes are the PBX feature codes the self-tests dial (FreePBX's defaults): *43 the
+// echo test, *65 says the extension's number. Nothing else: other codes change PBX state
+// (*72 call forwarding, *69 call trace) or reach numbers the normal path refuses.
+var FeatureCodes = []string{"*43", "*65"}
+
+// DialFeature calls one of FeatureCodes: the self-tests' own path, apart from Dial, so the
+// normal call path keeps refusing anything that is not a phone number.
+func (u *UA) DialFeature(ctx context.Context, code string) (*Call, error) {
+	if !slices.Contains(FeatureCodes, code) {
+		return nil, fmt.Errorf("sip: %q is not a self-test feature code (%s)", code, strings.Join(FeatureCodes, ", "))
+	}
+	return u.dial(ctx, code)
+}
+
+func dialable(number string) bool {
+	digits := strings.TrimPrefix(number, "+")
+	return digits != "" && len(digits) <= 32 && strings.Trim(digits, "0123456789") == ""
+}
+
+func (u *UA) dial(ctx context.Context, number string) (*Call, error) {
 	if err := u.Ready(); err != nil {
 		return nil, err
-	}
-	if number == "" || strings.ContainsAny(number, "@:;<> \t\r\n") {
-		return nil, fmt.Errorf("sip: bad number %q", number)
 	}
 	to := u.registrar.Clone()
 	to.User = number
