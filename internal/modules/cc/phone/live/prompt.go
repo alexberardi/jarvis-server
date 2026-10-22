@@ -23,6 +23,10 @@ func (b Brief) user() string {
 // WithNoThink re-asserts the thinking directive on a caller turn.
 func WithNoThink(heard string) string { return heard + " " + NoThinkDirective }
 
+// InterruptedNote opens a caller turn that cut the agent's reply off (barge-in): the model
+// must not assume the far end heard all of it. Ours, not the gateway's (it had no barge-in).
+const InterruptedNote = "[They interrupted you: they may not have heard the end of your last reply.]"
+
 // SoundsLikeFarewell reports whether the other party has closed the conversation. A greeting
 // cue wins over a stray "bye" (STT turns "hi" into "bye").
 func SoundsLikeFarewell(heard string) bool {

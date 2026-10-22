@@ -63,6 +63,7 @@ type turnPipeline struct {
 	records              []turnRecord
 	escalationUnanswered bool
 	restricted           []live.RestrictedField
+	bargedIn             bool // the current turn's utterance cut the last reply off
 }
 
 func (s *Service) newTurnPipeline(rt *callRuntime, restricted []live.RestrictedField) *turnPipeline {
@@ -357,6 +358,7 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int
 	s := p.s
 	turnNo := len(p.records) + 1
 	t0 := time.Now()
+	p.bargedIn = ms.cutOff()
 	if s.STT == nil {
 		return nil
 	}
@@ -370,7 +372,11 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int
 	if heard == "" || live.IsNonSpeech(heard) {
 		return nil
 	}
-	p.messages = append(p.messages, chatMsg{"user", live.WithNoThink(heard)})
+	user := heard
+	if p.bargedIn {
+		user = live.InterruptedNote + " " + heard
+	}
+	p.messages = append(p.messages, chatMsg{"user", live.WithNoThink(user)})
 
 	if p.stuckInLoop(heard) {
 		s.log().Warn("phone: loop-break — far end repeated the same line", "session", p.rt.sessionID)
@@ -529,6 +535,9 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 
 // record stores the turn and reports it (the transcript append doubles as the heartbeat).
 func (p *turnPipeline) record(ctx context.Context, n int, heard, said string, sttMS float64, ttft, ttfb *float64, t0 time.Time, events []string) {
+	if p.bargedIn {
+		events = append([]string{"barge_in"}, events...)
+	}
 	r := turnRecord{n: n, heard: heard, said: said, sttMS: sttMS, llmTTFTMS: ttft, ttsTTFBMS: ttfb,
 		totalMS: msSince(t0), events: events}
 	p.records = append(p.records, r)
