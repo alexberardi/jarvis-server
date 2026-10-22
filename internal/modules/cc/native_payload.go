@@ -1,6 +1,9 @@
 package cc
 
 import (
+	"slices"
+	"strings"
+
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -19,7 +22,17 @@ const failureMessageParam = "failure_message"
 // 2026-10-20-prompt-diet): that was ~110 chars per tool (~1k tokens on a desktop node) on every
 // turn, and with native tool calling the model sees a failed result and speaks for it on the
 // next turn anyway. takeFailureMessage still strips one a model sends.
-func nativePayload(tools []prompts.Tool) []llm.Tool {
+//
+// utterance is the turn's words ("" for the warmup): the computer control switch tools
+// (enable_computer_control, disable_computer_control, computer_control_status) are left out
+// unless they say "control" (C11, askedForControl). Offered on every turn, the 9B called one of
+// them for "turn on the computer" in 10 of 10 runs (#435): enable first, and with enable left
+// out, the status and disable. Their refusals come after the call. Most turns don't say it, so
+// the warmup's bytes are theirs.
+func nativePayload(tools []prompts.Tool, utterance string) []llm.Tool {
+	if !askedForControl(utterance) {
+		tools = slices.DeleteFunc(slices.Clone(tools), func(t prompts.Tool) bool { return switchTools[toolName(t)] })
+	}
 	native := prompts.NativeTools(tools)
 	for _, t := range native {
 		if toolName(t) == notForMeTool {
@@ -82,4 +95,13 @@ func takeFailureMessage(args string) (string, string) {
 		}
 	}
 	return pyjson.Dumps(rest, true), msg
+}
+
+// switchTools are the computer control switch's voice tools (computer_voice.go).
+var switchTools = map[string]bool{toolEnableComputerControl: true, toolDisableComputerControl: true, toolComputerControlStatus: true}
+
+// askedForControl is whether the user's words ask for computer control by name: "enable
+// computer control", "turn control on". "Turn on the computer" doesn't (C11).
+func askedForControl(utterance string) bool {
+	return strings.Contains(strings.ToLower(utterance), "control")
 }

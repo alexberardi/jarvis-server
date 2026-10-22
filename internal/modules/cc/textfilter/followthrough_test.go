@@ -25,12 +25,15 @@ func TestFollowThroughShapes(t *testing.T) {
 		}
 	}
 	for _, s := range []string{"I'll keep that in mind, Jordan.", "Got it, Jordan. Parking spot B12 noted.", "I've made a note of it.",
-		"Got it, Jordan. Your parking spot is B12.", "Okay — your locker code is 4471."} {
+		"Got it, Jordan. Your parking spot is B12.", "Okay — your locker code is 4471.",
+		// #435: an offer after the claim is no question back.
+		"Got it, Jordan—your locker code is 4471. Need anything else?"} {
 		if !ClaimsRemembered(s) {
 			t.Errorf("ClaimsRemembered(%q) = false", s)
 		}
 	}
-	for _, s := range []string{"I can't save that here.", "Do you mean the garage spot?", "Sorry, I couldn't save that."} {
+	for _, s := range []string{"I can't save that here.", "Do you mean the garage spot?", "Sorry, I couldn't save that.",
+		"Got it — which locker is that?", "Sure. Which locker is that for?"} {
 		if ClaimsRemembered(s) {
 			t.Errorf("ClaimsRemembered(%q) = true", s)
 		}

@@ -48,7 +48,7 @@ func TestNativePayloadSendsNativeTools(t *testing.T) {
 	tools := toolsFrom(t, searchTools)
 	before := prompts.CompactASCII(tools[0])
 
-	out := nativePayload(tools)
+	out := nativePayload(tools, "")
 	want := llmTools(append(prompts.NativeTools(tools), notForMeToolDef()))
 	if len(out) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(out), len(want))

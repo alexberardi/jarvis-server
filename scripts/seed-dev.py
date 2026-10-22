@@ -281,6 +281,21 @@ def seed_identity(auth_url: str, home: str, password: str, setup_token: str) -> 
                 raise SeedError(f"could not make {display_i} {role}: {status} {detail(body)}")
             log(f"{display_i}: {current} -> {role}", 1)
 
+    # Everyone goes by their display name ("Jordan", not the username "jordan"): the prompts
+    # name the speaker with it, and "who am I" answers with it.
+    status, body = request("GET", f"{auth_url}/households/{household_id}/members", headers=bearer(token))
+    if status != 200 or not isinstance(body, list):
+        raise SeedError(f"GET members failed: {status} {detail(body)}")
+    shown = {m["email"]: (int(m["user_id"]), m.get("display_name")) for m in body}
+    for email_i, _, display_i, _, _ in PEOPLE:
+        uid, current = shown[email_i]
+        if current != display_i:
+            status, body = request("PATCH", f"{auth_url}/households/{household_id}/members/{uid}",
+                                   {"display_name": display_i}, bearer(token))
+            if status != 200:
+                raise SeedError(f"could not name {email_i} {display_i}: {status} {detail(body)}")
+            log(f"{email_i} goes by {display_i}", 1)
+
     members = list_members(auth_url, household_id, token)
     user_ids = {e: uid for e, (uid, _) in members.items()}
     return {"household_id": household_id, "token": token, "user_ids": user_ids}

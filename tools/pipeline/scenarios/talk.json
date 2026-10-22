@@ -42,6 +42,7 @@
   },
   {
     "name": "memory: remember then recall",
+    "fresh_memories": true,
     "turns": [
       {
         "say": "remember that my favorite color is green",

@@ -27,6 +27,9 @@ var (
 	// ackOpenerRE: a reply that opens by accepting ("Got it, Jordan. Your parking spot is B12."):
 	// to a memory request, that says it was stored.
 	ackOpenerRE = mustPyI(`^\W*(?:got\s+it|okay|ok|sure|alright|all\s+right|noted|will\s+do|done|you\s+got\s+it|understood)\b`)
+	// offerTailRE: a closing offer after the answer ("… 4471. Need anything else?"), no question
+	// about the request.
+	offerTailRE = mustPyI(`[.!]\s*(?:(?:is\s+there|do\s+you\s+need|need|want)\s+)?(?:anything|something)\s+else[^.!?]*\?\s*$`)
 
 	// rememberRequestRE: an utterance asking to store something, plain or polite.
 	rememberRequestRE = mustPyI(verbPrefix + `(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?` +
@@ -71,7 +74,7 @@ func claimsBeyondLegacy(s string) bool {
 // claim, "I'll keep that in mind", or one that opens by accepting ("Got it, …"). A question back
 // claims nothing.
 func ClaimsRemembered(reply string) bool {
-	s := parse.PyStrip(reply)
+	s := parse.PyStrip(offerTailRE.sub(parse.PyStrip(reply), "."))
 	if s == "" || strings.HasSuffix(s, "?") {
 		return false
 	}
