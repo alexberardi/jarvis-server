@@ -734,7 +734,11 @@ JARVIS_AGENT_LOG=debug ...                                                 # log
 - **Alert pattern** (loop #175): the stable layer is `alert` (middle LED purple) while the queue
   holds an alert at priority 3 or above, `normal` otherwise (N:main.py's `on_change`, re-synced
   by the queue's 10 s sweep).
-- Not ported: the ACT-LED fallback for a Pi without the HAT (`led_service.py`).
+- **ACT-LED fallback** (loop #441): with no HAT chain (`--hat auto` on a Pi without the HAT, or
+  the HAT's LEDs unusable) and `--hat` not `off`, `openHat` drives the Pi's green activity LED
+  instead (`hat.NewACTLEDs`, N:`led_service.py`): normal is lit, alert, error and
+  shutdown_warning blink, the command-flow overlays (listening, thinking, …) show the stable
+  pattern, as Python's. No button; `hardware.hat_detected` and `led_chain_available` stay false.
   (`preview_led_pattern` over MQTT came with parity item 5.4, §3.14.)
 
 **Reminders and alerts on the lab Pi 4** (loop #175; not run yet: no runner reaches the Pi). Lab
@@ -1324,13 +1328,13 @@ checked on the lab Pi 4 since it was built.
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
 | 5.10 voice-profile takes | built | no |
-| 5.11 music ducking and takeover (17a); echo cancellation during music (17b, loop #424); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; 17b's CPU on a Zero 2 W unmeasured; **open (a)**: 17e (#427) built: the greeting prefetch and the maintenance restart, and the ACT-LED backend (`hat.NewACTLEDs`), which the agent does not open yet (#441) ([decision](../decisions/2026-10-21-pi-node-17e.md)); pending the lab Pi |
+| 5.11 music ducking and takeover (17a); echo cancellation during music (17b, loop #424); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; 17b's CPU on a Zero 2 W unmeasured; **open (a)**: 17e (#427) built: the greeting prefetch and the maintenance restart, and the ACT-LED fallback (`hat.NewACTLEDs`, opened without a HAT since #441) ([decision](../decisions/2026-10-21-pi-node-17e.md)); pending the lab Pi |
 
 What each open gap blocks, if the Python node were retired today:
 
 - **(a)** echo cancellation (17b), the tentative wake (17c), the auto-calibration and the
-  not_for_me cool-down (17d) are built, not yet on a Pi; and a
-  Pi without the HAT has no LED at all until the agent opens the ACT-LED backend (#441).
+  not_for_me cool-down (17d) are built, not yet on a Pi; and the
+  ACT-LED fallback for a Pi without the HAT (#441) is built, not yet seen on one.
 - **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
   the node. The app's device control still works.
 - **(c)** the app's node settings (and their secrets' Sync) may not reach a Pi; not confirmed.

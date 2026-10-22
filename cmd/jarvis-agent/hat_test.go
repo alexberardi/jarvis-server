@@ -1,8 +1,12 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,3 +105,51 @@ type recCue struct {
 
 func (r *recCue) SetState(c voice.Cue, _ time.Duration) { r.cue = c }
 func (r *recCue) Level(v float32)                       { r.level = v }
+
+// fakeACT is a sysfs LED directory, as internal/agent/hat's tests build it.
+func fakeACT(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, v := range map[string]string{"trigger": "none timer heartbeat [mmc0] default-on\n", "brightness": "0\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(v), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// A Pi without the HAT (or with its LEDs unusable) shows the voice state on the ACT LED: no
+// button, and Close gives the LED back to its trigger. --hat off keeps it dark.
+func TestOpenHatFallsBackToTheACTLED(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	oldDetected, oldStrip, oldDirs := hatDetected, openStrip, actDirs
+	t.Cleanup(func() { hatDetected, openStrip, actDirs = oldDetected, oldStrip, oldDirs })
+	hatDetected = func() bool { return false }
+	openStrip = func(string) (hat.Strip, error) { return nil, errors.New("no SPI") }
+	var dir string
+	for _, mode := range []string{"auto", "on"} {
+		dir = fakeACT(t) // Close leaves "mmc0" in trigger, not the kernel's bracketed list
+		actDirs = []string{filepath.Join(dir, "missing"), dir}
+		hd := openHat(&hatFlags{mode: mode}, nil, log)
+		if hd == nil || !hd.act || hd.leds == nil || hd.button != nil {
+			t.Fatalf("--hat %s without the HAT: %+v, want the ACT LED alone", mode, hd)
+		}
+		if err := hd.Close(); err != nil {
+			t.Fatalf("--hat %s: close: %v", mode, err)
+		}
+		b, _ := os.ReadFile(filepath.Join(dir, "trigger"))
+		if strings.TrimSpace(string(b)) != "mmc0" {
+			t.Errorf("--hat %s: trigger after Close = %q, want mmc0 back", mode, b)
+		}
+	}
+	if hd := openHat(&hatFlags{mode: "off"}, nil, log); hd != nil {
+		t.Errorf("--hat off opened %+v", hd)
+	}
+	if hd := openHat(&hatFlags{mode: "bogus"}, nil, log); hd != nil {
+		t.Errorf("--hat bogus opened %+v", hd)
+	}
+	actDirs = []string{filepath.Join(dir, "missing")}
+	if hd := openHat(&hatFlags{mode: "auto"}, nil, log); hd != nil {
+		t.Errorf("no HAT, no ACT LED: %+v", hd)
+	}
+}
