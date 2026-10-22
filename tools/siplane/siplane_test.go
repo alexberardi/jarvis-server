@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"net"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
 )
 
 // The lane's PBX must keep the FreePBX 17 extension defaults jarvisd has to cope with
@@ -365,5 +367,16 @@ func TestFarEndsHaveNoRingback(t *testing.T) {
 		if !strings.Contains(conf[i:j], "\n"+line+"\n") {
 			t.Errorf("scripts/sip-lane's baresip config lacks %q", line)
 		}
+	}
+}
+
+func TestWavPCMReadsTheSandboxTTS(t *testing.T) {
+	pcm := []int16{0, 1000, -1000, 32767}
+	got, rate, err := wavPCM(live.WAV(pcm, 22050))
+	if err != nil || rate != 22050 || len(got) != len(pcm) || got[3] != 32767 {
+		t.Fatalf("wavPCM: %v %d %v", got, rate, err)
+	}
+	if _, _, err := wavPCM([]byte("not a wav")); err == nil {
+		t.Fatal("garbage accepted")
 	}
 }

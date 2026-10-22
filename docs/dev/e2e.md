@@ -217,7 +217,9 @@ process per flow on a headless harness emulator (the AVD, APK and adb reverse of
 `scripts/mobile-shot`, shared in `scripts/lib/mobile.sh`), logged in to the run's rich sandbox.
 Why, and the contract the flows follow (which files run, the `skip` tag and
 `properties.skip_reason`, the `-e` variables `EMAIL`, `PASSWORD`, `EMAIL_ADMIN`/`_POWER`/`_MEMBER`,
-`CHAT_MESSAGE`/`CHAT_REPLY`): [`../decisions/2026-10-18-e2e-mobile-runner.md`](../decisions/2026-10-18-e2e-mobile-runner.md).
+`CHAT_MESSAGE`/`CHAT_REPLY`, the tool turns `TIMER_`/`LIST_`/`DEVICE_MESSAGE` with their
+`_REPLY`/`_REPLY_OFFLINE`, and the seeded inbox's `INBOX_*`):
+[`../decisions/2026-10-18-e2e-mobile-runner.md`](../decisions/2026-10-18-e2e-mobile-runner.md).
 
 - Needs what `scripts/mobile-shot` needs (Linux, KVM, the Android SDK, mise for the APK build)
   plus Java 17+ for Maestro, which the first run installs into
@@ -225,7 +227,18 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
 - The flows and the APK come from one commit: `origin/main` of `$JARVIS_MOBILE_REPO` (default
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
-- During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- During the suite the scripted model answers from `e2e/llm/mobile.json`. Its tool turns
+  (a timer, a shopping-list add, `control_device` on the seeded Kitchen Ceiling light) are node
+  tools, and nothing runs the seeded node in a sandbox, so cc answers each call "the node is
+  offline" and a flow sees `*_REPLY_OFFLINE`: proof the call left the model and reached the
+  node's dispatch, not that a timer ran.
+- The superuser's inbox (seeded by `scripts/seed-dev.py`, rich profile) has one item per screen
+  the app opens one with: `INBOX_DETAIL_TITLE` (InboxDetail: a markdown body with sources),
+  `INBOX_ACTIONS_TITLE` (InboxDetail with server-plane buttons: `INBOX_ACTIONS_BUTTON` opens
+  InboxCallbackResult with `INBOX_ACTIONS_RESULT` and records a suppression for
+  SuppressedSuggestions), `INBOX_LIST_TITLE` (InteractiveList) and `INBOX_DEPLOYED_TITLE`
+  (AdapterDeployed). No AdapterProposal item: that screen needs an adapters API jarvisd does not
+  serve. A flow that reads, deletes or taps one changes it for the flows after it in the run.
 - adb transport drops: the harness emulator's adb connection can drop (adb's log:
   `emulator-5580: connection terminated: read failed`), and every drop wipes all the adb reverse
   tunnels and kills Maestro's on-device driver. So before every flow (and the real push lane)
@@ -319,16 +332,28 @@ Two layers ([`../decisions/2026-10-18-e2e-push.md`](../decisions/2026-10-18-e2e-
 
 ## The iOS lane (`scripts/e2e ios`)
 
-The same flows on the iOS Simulator of a Mac with Xcode, against a sandbox on the dev box. Why,
+The same flows on the iOS Simulator of a Mac with Xcode, against a `--lan` sandbox. Why,
 and what the flows add for iOS (platform conditions, `PUSH_URL`):
 [`../decisions/2026-10-18-e2e-ios-lane.md`](../decisions/2026-10-18-e2e-ios-lane.md). `all`
 does not include it.
 
-1. On the dev box: `scripts/sandbox up --name e2e-ios --profile rich --llm scripted --lan`
+Run the sandbox on the Mac itself (the MacBook Pro): nothing has to cross a firewall.
+
+1. `scripts/sandbox up --name e2e-ios --profile rich --llm scripted --lan`
    (`JARVIS_LAN_HOST=<ip>` if it guesses the wrong address). It is open to the LAN until step 3.
-2. On the Mac, with `.sandbox/e2e-ios/sandbox-lan.env` copied over:
-   `scripts/e2e ios --sandbox-env sandbox-lan.env [--mobile-repo PATH] [--filter RE]`.
-3. On the dev box: `scripts/sandbox down --name e2e-ios --purge`.
+2. `scripts/e2e ios --sandbox-env .sandbox/e2e-ios/sandbox-lan.env [--mobile-repo PATH] [--filter RE]`.
+3. `scripts/sandbox down --name e2e-ios --purge`.
+
+The sandbox can also run on the dev box, with `sandbox-lan.env` copied to the Mac for step 2,
+but the dev box's ufw admits only the installed jarvisd's ports, not the sandbox's (its own
+port + the offset `up` prints: config, admin and the services on 7700-7712, the scripted model
+and the fake relay on 7797-7798, recipes and OCR on 7030-7031, MQTT on 1884). Open them to the
+Mac alone for the run, and close them after step 3 (offset 10000 here):
+
+```sh
+sudo ufw allow from <mac-ip> to any port 11884,17030:17031,17700:17798 proto tcp
+sudo ufw delete allow from <mac-ip> to any port 11884,17030:17031,17700:17798 proto tcp
+```
 
 - Needs Xcode (not just the command-line tools: the Mac mini has only those) with the iOS 18.0
   simulator runtime, CocoaPods, node 22 (or mise), Go and Java 17+. The first run creates the
@@ -339,6 +364,10 @@ does not include it.
   build takes a while; its log is `build.log` there).
 - On a failure, `.e2e/<run>/ios/<flow>/` keeps `screenshot.png`, `hierarchy.json`,
   `device.log`, `maestro.log` and `maestro/`.
+- After a failed flow the runner reboots the simulator before the next one (the flow's
+  `note` says so): a system alert the flow left up, such as iOS's 'Open in "Jarvis
+  Automation"?' after an `openLink`, survives `launchApp` with `clearState` and would fail every
+  later flow at `landing-login-button`. The flow itself still has to answer that alert.
 - Writing an iOS step: `xcrun simctl boot <udid of jarvis-harness-e2e>` and
   `~/.cache/jarvis-harness/maestro/2.11.0/maestro/bin/maestro --device <udid> test -e … flow.yaml`.
 

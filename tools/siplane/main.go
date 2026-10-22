@@ -8,8 +8,9 @@
 //
 // Exits 1 when a scenario fails, 2 when the lane or sandbox is missing. --out keeps every
 // far end's recording (<scenario>-<party>.wav), its transcript, the PBX's endpoint and
-// contacts and results.md. No SIP client in jarvisd yet: the Jarvis extension (100) is a
-// baresip stand-in.
+// contacts and results.md. The Jarvis extension (100) is a baresip stand-in for the
+// scenarios that play a desk phone or the inbound route (jarvisd answers no calls yet); the
+// jarvis-* scenarios run jarvisd's own SIP provider as 100 instead (jarvis.go).
 package main
 
 import (

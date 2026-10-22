@@ -17,7 +17,8 @@
 # with the sandbox's TTS and transcribe with its CPU whisper, so the sandbox needs --voice).
 #
 # Who is on the PBX (pjsip.conf):
-#   100      the Jarvis extension; a baresip stand-in answers it until jarvisd can register
+#   100      the Jarvis extension; a baresip stand-in holds it (siplane's jarvis-* scenarios swap
+#            in jarvisd's SIP provider; jarvisd answers no inbound calls yet)
 #   101      Alice, a desk phone (baresip; rings, never answers by itself)
 #   carrier  the fake carrier's trunk (baresip; answers every call, places inbound calls)
 # Ports, from the offset O (default: the sandbox's, else 10000): Asterisk SIP 5060+O (UDP) and
@@ -34,7 +35,7 @@ say() { echo "sip-lane: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET='' PURGE=0
 while [ $# -gt 0 ]; do
@@ -42,7 +43,7 @@ while [ $# -gt 0 ]; do
     --name) NAME=$2; shift 2 ;;
     --offset) OFFSET=$2; shift 2 ;;
     --purge) PURGE=1; shift ;;
-    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --) shift; break ;;
     -*) die "unknown argument $1" ;;
     *) break ;;

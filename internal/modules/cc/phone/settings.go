@@ -48,7 +48,7 @@ func Definitions() []settings.Definition {
 			Description: "Per-household monthly call minutes cap (fail-closed when exceeded)"},
 		{Key: SettingMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1),
 			Description: "Max simultaneous active calls per household"},
-	}, credentialDefinitions()...)
+	}, append(credentialDefinitions(), sipDefinitions()...)...)
 }
 
 // Enabled is the fail-closed master gate: no household, a settings error or a non-true
