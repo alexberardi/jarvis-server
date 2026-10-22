@@ -244,7 +244,7 @@ func (t *enableComputerControlTool) Execute(ctx context.Context, call servertool
 		return e, nil
 	}
 	// C11: never from something the user said that wasn't asking for it ("turn on the computer").
-	if u := strings.ToLower(turn.Utterance); u != "" && !strings.Contains(u, "control") {
+	if turn.Utterance != "" && !askedForControl(turn.Utterance) {
 		return recordingRefusal("not_asked", `Computer control is only turned on when you ask for it by name: "enable computer control". `+
 			"I can't power a computer on."), nil
 	}

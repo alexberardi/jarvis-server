@@ -30,6 +30,9 @@ type callLine interface {
 	armIdleHangup()
 	// cutOff reports whether this turn's utterance barged in on the agent's last reply.
 	cutOff() bool
+	// requestTransfer runs transfer once the turn's reply has played (the receptionist's
+	// transfer); what it returns is said next, if the call goes on.
+	requestTransfer(transfer func() []int16)
 }
 
 // runMedia runs one call's loop until its media ends or the call is cancelled, then releases
@@ -65,6 +68,7 @@ type callSession struct {
 	playEnd       int64 // where the last buffer played ends
 	disclosureEnd int64 // where the disclosure ends; nothing before it is flushed
 	idleDeadline  time.Time
+	transfer      func() []int16
 }
 
 var _ callLine = (*callSession)(nil)
@@ -74,6 +78,8 @@ func (m *callSession) requestHangup() { m.hangup = true }
 func (m *callSession) armIdleHangup() { m.idleDeadline = time.Now().Add(idleHangupAfterDefers) }
 
 func (m *callSession) cutOff() bool { return m.bargedIn }
+
+func (m *callSession) requestTransfer(f func() []int16) { m.transfer = f }
 
 func (m *callSession) run() {
 	select {
@@ -94,6 +100,10 @@ func (m *callSession) run() {
 		m.rt.recorder.AddInbound(pcm)
 		pos, _ := m.call.Played()
 		playing := pos < m.playEnd
+		if m.rt.timeUp() {
+			m.timeUp()
+			return
+		}
 		if !m.idleDeadline.IsZero() && time.Now().After(m.idleDeadline) && !playing {
 			m.s.log().Warn("phone: idle after deferred hangup — ending the call", "session", m.rt.sessionID)
 			m.hangup = true
@@ -108,6 +118,17 @@ func (m *callSession) run() {
 			m.idleDeadline = time.Time{}
 			m.runTurn(utt)
 			m.bargedIn = false
+			if m.transfer != nil {
+				f := m.transfer
+				m.transfer = nil
+				m.awaitPlayback()
+				m.speak(f())
+				select {
+				case <-m.call.Done():
+					return
+				default:
+				}
+			}
 			if m.hangup {
 				m.awaitPlayback()
 				return
@@ -123,10 +144,34 @@ func (m *callSession) runTurn(utt []int16) {
 			m.s.log().Error("phone: turn failed — staying on the line", "session", m.rt.sessionID, "panic", p)
 		}
 	}()
-	reply := m.rt.pipeline.turn(m.rt.ctx, utt, m)
+	var reply []int16
+	if m.rt.inbound != nil {
+		reply = m.rt.inbound.turn(m.rt.ctx, utt, m)
+	} else {
+		reply = m.rt.pipeline.turn(m.rt.ctx, utt, m)
+	}
 	if len(reply) > 0 {
 		m.speak(reply)
 	}
+}
+
+// timeUp ends a call at its time limit: what is still queued is dropped, the goodbye is said
+// in full, and the call hangs up.
+func (m *callSession) timeUp() {
+	m.s.log().Warn("phone: the call reached its time limit — saying goodbye", "session", m.rt.sessionID)
+	m.rt.mu.Lock()
+	m.rt.timeUpSaid = true
+	m.rt.mu.Unlock()
+	if pos, _ := m.call.Played(); pos < m.playEnd && pos >= m.disclosureEnd {
+		if err := m.call.Flush(); err == nil {
+			m.playEnd = pos
+		}
+	}
+	if pcm, _ := m.s.synthesize(m.rt.ctx, m.rt.timeUpLine); len(pcm) > 0 {
+		m.speak(pcm)
+	}
+	m.hangup = true
+	m.awaitPlayback()
 }
 
 // bargeIn: the far end started talking over the agent at playback position pos. What has

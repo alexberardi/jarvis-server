@@ -81,9 +81,71 @@ const (
 	EndClosed EndReason = "closed"
 	// EndRejected: the media failed validation (Twilio: stream-start bound to another call).
 	EndRejected EndReason = "rejected"
-	// EndTransport: the media connection was lost.
+	// EndTransport: the media connection was lost (SIP: or the PBX never answered the INVITE).
 	EndTransport EndReason = "transport"
+	// Before an answer (SIP's final responses, docs/cc/phone-sip.md §3.3):
+	// EndBusy: the line was busy (486/600).
+	EndBusy EndReason = "busy"
+	// EndNoAnswer: nobody answered (480/408, or FreePBX's 183 announcement then 503).
+	EndNoAnswer EndReason = "no_answer"
+	// EndNotFound: the number could not be reached as dialed (404/484/604).
+	EndNotFound EndReason = "not_found"
+	// EndFailed: the provider could not place the call (any other refusal).
+	EndFailed EndReason = "failed"
+	// EndNoMedia: the far end's audio stopped (SIP's no-RTP watchdog).
+	EndNoMedia EndReason = "no_media"
+	// EndTransferred: the call was put through to someone else (SIP: a blind REFER the PBX
+	// reported done) and our leg hung up.
+	EndTransferred EndReason = "transferred"
 )
+
+// transferer is a Call that can be handed to another extension or number at the provider: an
+// answered inbound SIP call (a blind REFER). Twilio calls are not. Transfer returns nil once
+// the provider reports the target taking the call, our leg hung up; otherwise a
+// *TransferError, or ErrUnsupported.
+type transferer interface {
+	Transfer(ctx context.Context, target string) error
+}
+
+// TransferError is a transfer that did not go through. Gone: the caller is no longer on the
+// call (the PBX had already taken them), so it is over; otherwise it goes on.
+type TransferError struct {
+	Gone   bool
+	Detail string
+}
+
+func (e *TransferError) Error() string { return "phone: transfer failed: " + e.Detail }
+
+// endDetailer is a Call that can say more about its end than its EndReason (SIP: the response,
+// "486 Busy Here").
+type endDetailer interface{ EndDetail() string }
+
+// endMessage is the session's failure reason for a call that ended before it was answered.
+func endMessage(c Call) string {
+	var msg string
+	switch c.EndReason() {
+	case EndBusy:
+		msg = "the line was busy"
+	case EndNoAnswer:
+		msg = "no answer"
+	case EndNotFound:
+		msg = "the number could not be reached as dialed (check the PBX's dial format, phone.sip.dial_format)"
+	case EndFailed:
+		msg = "the phone system could not place the call"
+	case EndNoMedia:
+		msg = "no audio from the far end"
+	case EndTransport:
+		msg = "the phone system did not respond"
+	case EndRejected:
+		msg = "the call's media was rejected"
+	default:
+		msg = "the call ended before it was answered"
+	}
+	if d, ok := c.(endDetailer); ok && d.EndDetail() != "" {
+		msg += " (" + d.EndDetail() + ")"
+	}
+	return msg
+}
 
 // ErrUnsupported is a Call operation its transport does not offer.
 var ErrUnsupported = errors.New("phone: not supported by this provider")

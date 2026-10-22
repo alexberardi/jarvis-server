@@ -237,7 +237,8 @@ func startFakeBlueZ(t *testing.T, addr string) *fakeBlueZ {
 			"Connected": dbus.MakeVariant(false), "Trusted": dbus.MakeVariant(false),
 			"UUIDs": dbus.MakeVariant([]string{uuidAudioSink, "0000110e-0000-1000-8000-00805f9b34fb"})}},
 		"/org/bluez/hci0/dev_0C_0C_0C_0C_0C_0C": {ifDevice: {"Address": dbus.MakeVariant("0C:0C:0C:0C:0C:0C"),
-			"Alias": dbus.MakeVariant("0C-0C-0C-0C-0C-0C"), "Paired": dbus.MakeVariant(false), "Connected": dbus.MakeVariant(false)}},
+			"Alias": dbus.MakeVariant("0C-0C-0C-0C-0C-0C"), "Paired": dbus.MakeVariant(false), "Connected": dbus.MakeVariant(false),
+			"RSSI": dbus.MakeVariant(int16(-61))}},
 	}}
 	for _, e := range []struct {
 		v     any
@@ -278,7 +279,7 @@ func TestBlueZOverDBus(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Device{
-		{Address: "0C:0C:0C:0C:0C:0C", Alias: "0C-0C-0C-0C-0C-0C"},
+		{Address: "0C:0C:0C:0C:0C:0C", Alias: "0C-0C-0C-0C-0C-0C", RSSI: -61},
 		{Address: speaker, Name: "JBL Flip 5", Alias: "JBL Flip 5", Icon: "audio-card", UUIDs: []string{uuidAudioSink, "0000110e-0000-1000-8000-00805f9b34fb"}},
 	}
 	if fmt.Sprint(devs) != fmt.Sprint(want) {
@@ -317,6 +318,18 @@ func TestBlueZOverDBus(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no Paired event for the PropertiesChanged signal")
+	}
+	// The device's own (re)connect and disconnect (#469).
+	for _, up := range []bool{true, false} {
+		_ = f.conn.Emit(devPath, ifProps+".PropertiesChanged", ifDevice, map[string]dbus.Variant{"Connected": dbus.MakeVariant(up)}, []string{})
+		select {
+		case c := <-b.Connections():
+			if c != (Connection{MAC: speaker, Connected: up}) {
+				t.Fatalf("connection %+v, want %v", c, up)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no Connection event for Connected: %v", up)
+		}
 	}
 	if err := b.Pair(ctx, speaker); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("second pair: %v, want ErrAlreadyExists", err)

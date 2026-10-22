@@ -14,9 +14,9 @@
 #   all      every suite but voice, computer and ios (default)
 #   ios      the same Maestro flows on the iOS Simulator, on a Mac with Xcode (scripts/lib/ios.sh):
 #            the app built for the simulator, the harness's own simulator (jarvis-harness-e2e),
-#            erased per run; against a sandbox on another machine that is up with --lan
+#            erased per run; against a sandbox up with --lan (on this Mac, or another machine)
 #   --sandbox-env FILE  ios: that sandbox's sandbox-lan.env (scripts/sandbox up --lan --profile
-#            rich --llm scripted writes it), copied to this Mac; the suite neither starts nor
+#            rich --llm scripted writes it; copied over from another machine); the suite neither starts nor
 #            stops it
 #   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
 #            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
@@ -345,13 +345,28 @@ mobile_flows() {
 # flow_env sets FLOW_ENV, the flows' environment from the sourced sandbox.env: the contract in
 # docs/decisions/2026-10-18-e2e-mobile-runner.md, the same for both platforms ($1: android|ios,
 # the push token's device type). It also switches the scripted model to the chat flows' answers
-# (CHAT_MESSAGE → CHAT_REPLY).
+# (CHAT_MESSAGE → CHAT_REPLY, and a tool call per TIMER/LIST/DEVICE_MESSAGE).
 flow_env() {
   local platform=$1
   curl -sf -o /dev/null -X POST "$SBX_SCRIPTLLM/control/script" -H 'Content-Type: application/json' \
     -d '{"path": "e2e/llm/mobile.json"}' || die "could not switch the scripted model to e2e/llm/mobile.json"
   FLOW_ENV=(-e "EMAIL=$SBX_EMAIL" -e "PASSWORD=$SBX_PASSWORD" -e "EMAIL_SUPERUSER=$SBX_EMAIL"
     -e "CHAT_MESSAGE=what is 12 times 7" -e "CHAT_REPLY=12 times 7 is 84.")
+  # Tool turns (e2e/llm/mobile.json): _REPLY when the node ran the tool, _REPLY_OFFLINE when it
+  # is offline, as the seeded node is here (nothing runs it). tools/scriptllm's
+  # TestMobileScriptAnswersTheFlowEnv keeps these and the script in step.
+  FLOW_ENV+=(-e "TIMER_MESSAGE=set a timer for 10 minutes" -e "TIMER_REPLY=Your 10 minute tea timer is set."
+    -e "TIMER_REPLY_OFFLINE=Your node is offline, so the timer was not set."
+    -e "LIST_MESSAGE=add oat milk to the shopping list" -e "LIST_REPLY=Added oat milk to the shopping list."
+    -e "LIST_REPLY_OFFLINE=Your node is offline, so oat milk was not added."
+    -e "DEVICE_MESSAGE=turn on the kitchen ceiling light" -e "DEVICE_REPLY=The kitchen ceiling light is on."
+    -e "DEVICE_REPLY_OFFLINE=Your node is offline, so the kitchen ceiling light was not switched.")
+  # The superuser's seeded inbox, one item per screen (scripts/seed-dev.py, rich profile);
+  # tools/e2emobile's TestInboxFlowEnvMatchesTheSeed keeps these in step with the seed.
+  FLOW_ENV+=(-e "INBOX_DETAIL_TITLE=Research: heat pumps in cold climates"
+    -e "INBOX_ACTIONS_TITLE=Turn off the office fan at night?" -e "INBOX_ACTIONS_BUTTON=Never suggest this"
+    -e "INBOX_ACTIONS_RESULT=Won't suggest that again" -e "INBOX_LIST_TITLE=Restock the pantry"
+    -e "INBOX_DEPLOYED_TITLE=Voice assistant updated")
   local r v
   for r in ADMIN POWER MEMBER; do
     v=SBX_EMAIL_$r
@@ -444,7 +459,7 @@ run_ios() {
     source "$SANDBOX_ENV"
     # The simulator shares this Mac's network: if the Mac reaches the sandbox, so does the app.
     curl -sf -o /dev/null --max-time 5 "$SBX_CONFIG/health" ||
-      die "this Mac can't reach the sandbox's config service at $SBX_CONFIG (up with --lan on the other machine?)"
+      die "this Mac can't reach the sandbox's config service at $SBX_CONFIG (is it up with --lan?)"
     case $SBX_CONFIG in http://127.0.0.1:* | http://localhost:*) die "$SANDBOX_ENV has loopback URLs: pass the sandbox-lan.env of a --lan sandbox" ;; esac
 
     git -C "$MOBILE_REPO" rev-parse --git-dir >/dev/null 2>&1 ||

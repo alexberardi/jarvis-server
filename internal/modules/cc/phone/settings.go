@@ -2,6 +2,7 @@ package phone
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -48,7 +49,7 @@ func Definitions() []settings.Definition {
 			Description: "Per-household monthly call minutes cap (fail-closed when exceeded)"},
 		{Key: SettingMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1),
 			Description: "Max simultaneous active calls per household"},
-	}, credentialDefinitions()...)
+	}, slices.Concat(credentialDefinitions(), sipDefinitions(), inboundDefinitions())...)
 }
 
 // Enabled is the fail-closed master gate: no household, a settings error or a non-true

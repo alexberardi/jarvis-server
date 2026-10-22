@@ -156,13 +156,23 @@ type Service struct {
 	HeartbeatInterval  time.Duration
 	EscalationWindow   time.Duration
 	TurnTimeout        time.Duration
+	// StartSIP starts a SIP account's UA (nil: package sip's, registering to the real PBX);
+	// SIPReconcileEvery is how often the UAs are matched to the settings (1 min).
+	StartSIP          func(ctx context.Context, a SIPAccount) (sipUA, error)
+	SIPReconcileEvery time.Duration
+	// InboundTimeLimit overrides phone.inbound.max_call_seconds (tests).
+	InboundTimeLimit time.Duration
 
 	base     context.Context
+	sip      *sipLines
+	inbound  inboundState
+	tests    sipTests // the SIP self-tests' runs (sipsupport.go)
 	mu       sync.Mutex
 	runtimes map[string]*callRuntime
 	twilio   *twilioMedia
 	wg       sync.WaitGroup
 	planWG   sync.WaitGroup
+	sipWG    sync.WaitGroup // runSIP, which ends (unregistering) when Start's ctx does
 }
 
 func (s *Service) now() time.Time {
@@ -188,23 +198,41 @@ func (s *Service) init() {
 	if s.twilio == nil {
 		s.twilio = newTwilioMedia(s)
 	}
+	if s.sip == nil {
+		s.sip = &sipLines{lines: map[int]*sipLine{}}
+	}
 	if s.base == nil {
 		s.base = context.Background()
 	}
 }
 
-// Start binds live calls and background plans to ctx (shutdown cancels them).
+// Start binds live calls and background plans to ctx (shutdown cancels them), and runs the
+// configured SIP accounts until then (they unregister on the way out; Wait after the cancel
+// waits for it).
 func (s *Service) Start(ctx context.Context) {
 	s.init()
 	s.mu.Lock()
 	s.base = ctx
 	s.mu.Unlock()
+	s.closeInterruptedInbound(ctx)
+	if s.Provider != nil || s.Twilio != nil {
+		return // one fixed provider (tests): no SIP accounts
+	}
+	s.sipWG.Add(1)
+	go func() {
+		defer s.sipWG.Done()
+		s.runSIP(ctx)
+	}()
 }
 
-// Wait blocks until background plans and live calls have finished (tests, shutdown).
+// Wait blocks until background plans and live calls have finished (tests, shutdown), and,
+// once Start's ctx has ended, until the SIP accounts have unregistered.
 func (s *Service) Wait() {
 	s.planWG.Wait()
 	s.wg.Wait()
+	if s.baseCtx().Err() != nil {
+		s.sipWG.Wait()
+	}
 }
 
 // spawn runs fn through Go, or on a bare goroutine when Go is nil.

@@ -3,6 +3,7 @@ package phone
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -52,6 +53,15 @@ type callRuntime struct {
 	callID      string
 	cancelled   bool
 	cancelCause string
+
+	// inbound is an inbound call's receptionist (inbound_agent.go); nil on an outbound call,
+	// whose turns run through pipeline.
+	inbound *inboundAgent
+	// timeLimit, when set, is when the call loop says timeUpLine and hangs up (an inbound
+	// call's phone.inbound.max_call_seconds); timeUpSaid records that it did.
+	timeLimit  time.Time
+	timeUpLine string
+	timeUpSaid bool
 }
 
 func (rt *callRuntime) markStarted() { rt.startOnce.Do(func() { close(rt.started) }) }
@@ -185,6 +195,15 @@ func (s *Service) runCall(id string, tel Telephony) {
 
 	select {
 	case <-rt.started:
+	case <-rt.done:
+		// The call ended before it was answered: busy, no answer, a refusal (SIP's final
+		// responses), or a cancel that closed the media.
+		if ctx.Err() != nil {
+			s.endCallQuietly(call)
+			return
+		}
+		fail(endMessage(call))
+		return
 	case <-time.After(orDefault(s.StreamStartTimeout, defaultStreamStart)):
 		s.endCallQuietly(call)
 		fail("no media stream within 60s (no answer?)")
@@ -203,9 +222,23 @@ func (s *Service) runCall(id string, tel Telephony) {
 	}
 
 	s.supervise(ctx, rt)
+	if a := announcement(rt); a != "" {
+		fail(fmt.Sprintf("the call reached a recorded announcement, not a person: %q", a))
+		return
+	}
 	wctx, wcancel := bg()
 	defer wcancel()
 	s.wrapup(wctx, rt, sess)
+}
+
+// announcement is the recorded intercept the call reached, once its loop has ended.
+func announcement(rt *callRuntime) string {
+	select {
+	case <-rt.done:
+		return rt.pipeline.announcement
+	default:
+		return ""
+	}
 }
 
 // waitDone returns a channel closed when the call's media ended or after grace.

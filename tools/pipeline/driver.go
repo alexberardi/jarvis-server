@@ -123,6 +123,7 @@ type Driver struct {
 	// desktop caches it once made.
 	Desktop *DesktopSetup
 	desktop map[string]*Node // by owner ("" the primary, "removed")
+	primary *primarySignIn   // primaryHousehold's last sign-in
 	// source is the turn_source this driver's turns send when the turn sets none ("" none; "wake"
 	// for also_heard_by).
 	source string

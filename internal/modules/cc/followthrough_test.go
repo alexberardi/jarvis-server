@@ -70,6 +70,13 @@ func TestFollowThroughUnsavedAfterMustCall(t *testing.T) {
 	if last := msgs[len(msgs)-1]; last["role"] != "system" || !strings.HasPrefix(last["content"].(string), nagUnsaved) {
 		t.Fatalf("remember not called after the not-saved nudge: %v", last)
 	}
+	// #435: the 9B answered the not-saved nudge in prose again; the retry after it requires a
+	// tool call. The first call and the must-call retry stay auto.
+	for i, want := range map[int]string{len(reqs) - 4: "auto", len(reqs) - 3: "auto", len(reqs) - 2: "required"} {
+		if got := reqs[i]["tool_choice"]; got != want {
+			t.Errorf("request %d: tool_choice %v, want %s", i, got, want)
+		}
+	}
 	for _, r := range reqs {
 		for _, m := range messagesOf(r) {
 			if s, _ := m["content"].(string); m["role"] == "system" && strings.HasPrefix(s, nagNoMemoryTool) {
@@ -344,5 +351,22 @@ func TestFollowThroughNotCancelledEngine(t *testing.T) {
 	if !nagged || !strings.Contains(result, `"cancelled"`) || got.State != watches.StateDone ||
 		b["assistant_message"] != "Stopped watching price on example.com item." {
 		t.Fatalf("nagged %v, result %s, state %s, reply %v", nagged, result, got.State, b["assistant_message"])
+	}
+}
+
+// #435: "Got it, Jordan — your locker code is 4471. <exchange_complete/>" with no remember call
+// skipped every follow-through nudge (the exchange-complete marker counted as terminal).
+func TestFollowThroughUnsavedWithExchangeComplete(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.stt.recognition = true
+	ve.start("m6", desktopTools)
+	ve.eng.say("Got it, Jordan. Your locker code is 4471. <exchange_complete/>")
+	ve.eng.push(nativeCall("call_m6", "remember", `{"content": "locker code is 4471"}`))
+	ve.eng.say("I couldn't save that, because I'm not sure who's speaking.")
+	ve.turn("/api/v0/voice/command", "m6", "Remember that my locker code is 4471.", nil).want(200)
+	reqs := ve.eng.requests()
+	msgs := messagesOf(reqs[len(reqs)-2])
+	if last := msgs[len(msgs)-1]; last["role"] != "system" || !strings.HasPrefix(last["content"].(string), nagUnsaved) {
+		t.Fatalf("no not-saved nudge: %v", last)
 	}
 }

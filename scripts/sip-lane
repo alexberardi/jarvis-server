@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# The L1 SIP test lane (docs/cc/phone-sip.md §5): Asterisk 22 in Docker configured like
+# FreePBX 17 (test/sip/asterisk), with baresip far ends that play and record WAV
+# (test/sip/farend), all on host networking and bound to loopback, ports offset per sandbox.
+# Never a real PBX or carrier.
+#
+#   scripts/sip-lane up [--name N] [--offset N]   build the images (once per Dockerfile change)
+#                                                 and start Asterisk and the far ends
+#   scripts/sip-lane down [--name N]              remove the containers (the lane's files stay
+#                                                 under .sandbox/<name>/sip until down --purge)
+#   scripts/sip-lane status [--name N]            containers and registrations
+#   scripts/sip-lane cli [--name N] CMD...        an Asterisk CLI command (pjsip show endpoint 100)
+#   scripts/sip-lane unban [--name N]             clear lane-firewall's bans
+#
+# scripts/sandbox up --sip runs `up` with the sandbox's name and offset, and down/status follow
+# the sandbox. The scenarios run with `go run ./tools/siplane --sandbox N` (they speak
+# with the sandbox's TTS and transcribe with its CPU whisper, so the sandbox needs --voice).
+#
+# Who is on the PBX (pjsip.conf):
+#   100      the Jarvis extension; a baresip stand-in holds it (siplane's jarvis-* scenarios swap
+#            in jarvisd's SIP provider, which answers the jarvis-inbound* calls itself)
+#   101      Alice, a desk phone (baresip; rings, never answers by itself)
+#   carrier  the fake carrier's trunk (baresip; answers every call, places inbound calls)
+# Ports, from the offset O (default: the sandbox's, else 10000): Asterisk SIP 5060+O (UDP) and
+# RTP 20000+O..20199+O; the far ends' SIP 5070+O (100), 5071+O (101), 5072+O (carrier), their
+# ctrl_tcp 5170+O.., RTP 20200+O.. (100 each); SIPp 5090+O. lane.env in the lane's directory
+# lists them for the runner.
+#
+# Lane-firewall (the Responsive Firewall's stand-in) bans an address after 3 failed
+# authentications: requests from it get 403 until `unban` or down.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+say() { echo "sip-lane: $*" >&2; }
+die() { say "$*"; exit 1; }
+
+CMD=${1:-}
+[ -n "$CMD" ] || { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+shift
+NAME=default OFFSET='' PURGE=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --name) NAME=$2; shift 2 ;;
+    --offset) OFFSET=$2; shift 2 ;;
+    --purge) PURGE=1; shift ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown argument $1" ;;
+    *) break ;;
+  esac
+done
+case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
+
+DIR=$ROOT/.sandbox/$NAME/sip
+PREFIX=jarvis-sip-$NAME
+AST=$PREFIX-asterisk
+PARTIES="jarvis alice carrier"
+
+need_docker() {
+  command -v docker >/dev/null || die "the SIP lane needs Docker (docker not on PATH)"
+  docker info >/dev/null 2>&1 || die "the SIP lane needs Docker, and this user cannot reach its daemon (docker info failed)"
+}
+
+# image builds test/sip/<dir> as jarvis-sip-<dir>:<hash of its files>, so a changed Dockerfile
+# or script rebuilds and an unchanged one is reused.
+image() {
+  local d=$ROOT/test/sip/$1 h
+  # The .conf files are mounted at run time, not built in.
+  h=$(cd "$d" && for f in *; do case $f in *.conf) ;; *) echo "$f"; cat "$f" ;; esac; done | sha256sum | cut -c1-12)
+  local tag=jarvis-sip-$1:$h
+  if ! docker image inspect "$tag" >/dev/null 2>&1; then
+    say "building $tag"
+    docker build -q -t "$tag" "$d" >/dev/null || die "docker build of test/sip/$1 failed"
+  fi
+  echo "$tag"
+}
+
+pick_offset() {
+  if [ -n "$OFFSET" ]; then echo "$OFFSET"; return; fi
+  if [ -f "$ROOT/.sandbox/$NAME/offset" ]; then cat "$ROOT/.sandbox/$NAME/offset"; return; fi
+  echo 10000
+}
+
+# party_conf writes a baresip config and account for one far end.
+party_conf() {
+  local p=$1 user=$2 pass=$3 sip=$4 ctrl=$5 rtp=$6 answer=$7 register=$8 d=$DIR/$1 acct
+  mkdir -p "$d"
+  cat >"$d/config" <<EOF
+# scripts/sip-lane: far end $p (sip:$user), $(date -Iseconds)
+poll_method epoll
+sip_listen 127.0.0.1:$sip
+net_interface 127.0.0.1
+rtp_ports $rtp-$((rtp + 99))
+audio_source aufile,/w/say.wav
+audio_player aufile,/w/heard.wav
+audio_alert aufile,/w/silence.wav
+# No ringback: baresip 1.1.0 plays it on the call's player (aufile, /w/heard.wav) on 180 and
+# tears it down on answer as the call's own player starts, a race that segfaults it on a
+# loaded machine (CI's outbound-route, 11 crashes in 20 calls under load here).
+ringback_disabled yes
+# Nor the call-waiting tone, which goes to the same player (the file does not exist).
+callwaiting_aufile none.wav
+module_path /usr/lib/baresip/modules
+module g711.so
+module aufile.so
+module_app account.so
+module_app menu.so
+module_app ctrl_tcp.so
+ctrl_tcp_listen 127.0.0.1:$ctrl
+EOF
+  acct="<sip:$user@127.0.0.1:$SIP_PORT>;auth_pass=$pass;answermode=$answer;audio_codecs=PCMU,PCMA"
+  if [ "$register" = 1 ]; then acct="$acct;regint=120"; else acct="$acct;regint=0"; fi
+  echo "$acct" >"$d/accounts"
+}
+
+render() {
+  local f=$1
+  sed -e "s/@SIP_PORT@/$SIP_PORT/g" -e "s/@RTP_START@/$RTP_START/g" -e "s/@RTP_END@/$RTP_END/g" \
+    -e "s/@CARRIER_PORT@/$CARRIER_PORT/g" "$ROOT/test/sip/asterisk/$f" >"$DIR/etc/$f"
+}
+
+cmd_down() {
+  command -v docker >/dev/null || return 0
+  local c
+  for c in $AST $(for p in $PARTIES; do echo "$PREFIX-$p"; done); do
+    docker rm -f "$c" >/dev/null 2>&1 || true
+  done
+  [ -d "$DIR" ] && docker run --rm -v "$DIR:/lane" --entrypoint sh "$(cat "$DIR/farend-image" 2>/dev/null || echo debian:trixie-slim)" \
+    -c 'chmod -R a+rwX /lane' >/dev/null 2>&1 || true
+  if [ "$PURGE" = 1 ]; then rm -rf "$DIR"; fi
+  say "$NAME: lane down"
+}
+
+cmd_up() {
+  need_docker
+  local o
+  o=$(pick_offset)
+  [ "$o" -le 45000 ] || die "offset $o: the lane's ports would pass 65535"
+  SIP_PORT=$((5060 + o)) RTP_START=$((20000 + o)) RTP_END=$((20199 + o)) CARRIER_PORT=$((5072 + o))
+  cmd_down 2>/dev/null
+  mkdir -p "$DIR/etc" "$DIR/var"
+  local ast farend
+  ast=$(image asterisk)
+  farend=$(image farend)
+  echo "$farend" >"$DIR/farend-image"
+  for f in pjsip.conf extensions.conf rtp.conf logger.conf modules.conf; do render "$f"; done
+  party_conf jarvis 100 lane-jarvis-100 $((5070 + o)) $((5170 + o)) $((20200 + o)) auto 1
+  party_conf alice 101 lane-alice-101 $((5071 + o)) $((5171 + o)) $((20300 + o)) manual 1
+  party_conf carrier carrier lane-carrier "$CARRIER_PORT" $((5172 + o)) $((20400 + o)) auto 0
+  {
+    echo "# scripts/sip-lane $NAME ($(date -Iseconds))"
+    echo "SIP_LANE_NAME=$NAME"
+    echo "SIP_LANE_OFFSET=$o"
+    echo "SIP_LANE_DIR=$DIR"
+    echo "SIP_LANE_ASTERISK=$AST"
+    echo "SIP_LANE_FAREND_IMAGE=$farend"
+    echo "SIP_LANE_SIP=127.0.0.1:$SIP_PORT"
+    echo "SIP_LANE_SIPP_PORT=$((5090 + o))"
+    echo "SIP_LANE_SIPP_MEDIA_PORT=$((20500 + o))"
+    for p in $PARTIES; do
+      local i=0
+      case $p in alice) i=1 ;; carrier) i=2 ;; esac
+      echo "SIP_LANE_${p^^}_CONTAINER=$PREFIX-$p"
+      echo "SIP_LANE_${p^^}_CTRL=127.0.0.1:$((5170 + i + o))"
+    done
+  } >"$DIR/lane.env"
+  local mounts=()
+  for f in pjsip.conf extensions.conf rtp.conf logger.conf modules.conf; do mounts+=(-v "$DIR/etc/$f:/etc/asterisk/$f:ro"); done
+  say "starting Asterisk on 127.0.0.1:$SIP_PORT (RTP $RTP_START-$RTP_END)"
+  docker run -d --name "$AST" --network host --label jarvis-sip-lane="$NAME" \
+    -e PUID="$(id -u)" -e PGID="$(id -g)" "${mounts[@]}" -v "$DIR/var:/var/log/asterisk" "$ast" >/dev/null \
+    || die "docker run $AST failed"
+  local ok=0
+  for _ in $(seq 1 60); do
+    if docker exec "$AST" asterisk -rx 'pjsip show transports' 2>/dev/null | grep -q 0.0.0.0-udp; then ok=1; break; fi
+    docker inspect -f '{{.State.Running}}' "$AST" 2>/dev/null | grep -q true || break
+    sleep 0.5
+  done
+  [ "$ok" = 1 ] || { docker logs --tail 30 "$AST" >&2; die "Asterisk did not come up"; }
+  for p in $PARTIES; do
+    docker run --rm --user "$(id -u):$(id -g)" -v "$DIR/$p:/w" --entrypoint sox "$farend" -n -r 8000 -c 1 -b 16 /w/silence.wav trim 0 1 >/dev/null
+    cp "$DIR/$p/silence.wav" "$DIR/$p/say.wav"
+    docker run -d --name "$PREFIX-$p" --network host --label jarvis-sip-lane="$NAME" --user "$(id -u):$(id -g)" \
+      -v "$DIR/$p:/w" "$farend" baresip -f /w >/dev/null || die "docker run $PREFIX-$p failed"
+  done
+  for _ in $(seq 1 40); do
+    [ "$(registered | wc -l)" -ge 2 ] && break
+    sleep 0.5
+  done
+  [ "$(registered | wc -l)" -ge 2 ] || { cmd_status >&2; die "the far ends did not register (100, 101)"; }
+  say "up: Asterisk $AST, far ends $(echo $PARTIES); lane.env in $DIR"
+}
+
+# registered lists the extensions with a reachable contact.
+registered() {
+  docker exec "$AST" asterisk -rx 'pjsip show contacts' 2>/dev/null | sed -n 's#^ *Contact: *\(10[0-9]\)/.* \(Avail\|NonQual\|Unknown\) .*#\1#p'
+}
+
+cmd_status() {
+  command -v docker >/dev/null || { echo "$NAME: lane needs Docker"; return 0; }
+  local ps
+  ps=$(docker ps -a --filter "label=jarvis-sip-lane=$NAME" --format '{{.Names}} {{.Status}}')
+  if [ -z "$ps" ]; then echo "$NAME: SIP lane not running"; return 0; fi
+  echo "$NAME: SIP lane (lane.env: $DIR/lane.env)"
+  sed 's/^/  /' <<<"$ps"
+  echo "  registered: $(registered | tr '\n' ' ')"
+}
+
+case $CMD in
+  up) cmd_up ;;
+  down) cmd_down ;;
+  status) cmd_status ;;
+  cli) need_docker; docker exec "$AST" asterisk -rx "$*" ;;
+  unban) need_docker; docker exec "$AST" lane-firewall clear ;;
+  *) die "unknown command $CMD (up, down, status, cli, unban)" ;;
+esac

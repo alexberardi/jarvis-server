@@ -2,6 +2,7 @@ package browser
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -351,5 +352,135 @@ func TestInspectFlagsPreStoreHost(t *testing.T) {
 		if s.Target.Name == "chrome" && !strings.Contains(s.Problem, "admit") {
 			t.Fatalf("pre-store host not reported: %+v", s)
 		}
+	}
+}
+
+func translocatedExe(e Env) string {
+	return filepath.Join(e.Home, "private", "var", "folders", "xx", "T", "AppTranslocation", "ABC", "d",
+		"Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent")
+}
+
+func TestTranslocated(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/private/var/folders/xx/T/AppTranslocation/ABC/d/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent": true,
+		"/Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent":                                    false,
+		"/home/a/.local/bin/jarvis-agent": false,
+	} {
+		if got := Translocated(p); got != want {
+			t.Errorf("Translocated(%q) = %v", p, got)
+		}
+	}
+}
+
+func TestRegisterRefusesATranslocatedExe(t *testing.T) {
+	e := testEnv(t, "darwin")
+	exe := translocatedExe(e)
+	mkdirs(t, filepath.Dir(exe))
+	if err := os.WriteFile(exe, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range Register(e, exe, true, nil) {
+		if !errors.Is(r.Err, ErrTranslocated) || r.Done {
+			t.Errorf("%s: err=%v done=%v, want ErrTranslocated", r.Target.Name, r.Err, r.Done)
+		}
+		if _, err := os.Stat(r.Path); err == nil {
+			t.Errorf("%s: wrote %s", r.Target.Name, r.Path)
+		}
+	}
+}
+
+// writeManifest registers target name in e as pointing at exe, bypassing Register's checks.
+func writeManifest(t *testing.T, e Env, name, exe string) {
+	t.Helper()
+	tg := targetByName(t, e, name)
+	if err := register(e, tg, exe, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func fakeBinary(t *testing.T, p string) string {
+	t.Helper()
+	mkdirs(t, filepath.Dir(p))
+	if err := os.WriteFile(p, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func statusOf(t *testing.T, e Env, name string) TargetStatus {
+	t.Helper()
+	for _, s := range Inspect(e, nil) {
+		if s.Target.Name == name {
+			return s
+		}
+	}
+	t.Fatalf("no status for %s", name)
+	return TargetStatus{}
+}
+
+func TestInspectFlagsATranslocatedHost(t *testing.T) {
+	e := testEnv(t, "darwin")
+	writeManifest(t, e, "firefox", fakeBinary(t, translocatedExe(e)))
+	s := statusOf(t, e, "firefox")
+	if !strings.Contains(s.Problem, "temporary copy") {
+		t.Errorf("problem = %q, want the translocation explained", s.Problem)
+	}
+}
+
+func TestInspectWarnsAboutAnotherCopy(t *testing.T) {
+	e := testEnv(t, "darwin")
+	old := fakeBinary(t, filepath.Join(e.Home, "Downloads", "old", "jarvis-agent"))
+	e.Exe = fakeBinary(t, filepath.Join(e.Home, "Applications", "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent"))
+	writeManifest(t, e, "firefox", old)
+	writeManifest(t, e, "chrome", e.Exe)
+	if s := statusOf(t, e, "firefox"); s.Problem != "" || !strings.Contains(s.Warning, old) {
+		t.Errorf("firefox: problem=%q warning=%q, want a warning naming %s", s.Problem, s.Warning, old)
+	}
+	if s := statusOf(t, e, "chrome"); s.Problem != "" || s.Warning != "" {
+		t.Errorf("chrome: problem=%q warning=%q, want healthy", s.Problem, s.Warning)
+	}
+	e.Exe = ""
+	if s := statusOf(t, e, "firefox"); s.Warning != "" {
+		t.Errorf("no running exe given: warning=%q", s.Warning)
+	}
+}
+
+func TestRefreshRewritesOnlyRegisteredTargetsPointingElsewhere(t *testing.T) {
+	e := testEnv(t, "darwin")
+	as := filepath.Join(e.Home, "Library", "Application Support")
+	mkdirs(t, filepath.Join(as, "Firefox"), filepath.Join(as, "Google", "Chrome"), filepath.Join(as, "BraveSoftware", "Brave-Browser"))
+	old := fakeBinary(t, translocatedExe(e))
+	exe := fakeBinary(t, filepath.Join(e.Home, "Applications", "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent"))
+	writeManifest(t, e, "firefox", old)
+	writeManifest(t, e, "chrome", exe)
+	// brave is present but was never registered (or the user removed it): it stays that way.
+
+	res := Refresh(e, exe, nil)
+	if len(res) != 1 || res[0].Target.Name != "firefox" || !res[0].Done || res[0].Err != nil {
+		t.Fatalf("refresh results = %+v, want just firefox rewritten", res)
+	}
+	for name, want := range map[string]string{"firefox": exe, "chrome": exe} {
+		if s := statusOf(t, e, name); s.HostPath != want || s.Problem != "" {
+			t.Errorf("%s: host=%q problem=%q", name, s.HostPath, s.Problem)
+		}
+	}
+	if s := statusOf(t, e, "brave"); s.Registered {
+		t.Errorf("brave got registered")
+	}
+	if res := Refresh(e, exe, nil); len(res) != 0 {
+		t.Errorf("second refresh rewrote %+v", res)
+	}
+}
+
+func TestRefreshFromATranslocatedExeChangesNothing(t *testing.T) {
+	e := testEnv(t, "darwin")
+	good := fakeBinary(t, filepath.Join(e.Home, "Applications", "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent"))
+	writeManifest(t, e, "firefox", good)
+	res := Refresh(e, fakeBinary(t, translocatedExe(e)), nil)
+	if len(res) != 1 || !errors.Is(res[0].Err, ErrTranslocated) {
+		t.Errorf("results = %+v, want one ErrTranslocated", res)
+	}
+	if s := statusOf(t, e, "firefox"); s.HostPath != good {
+		t.Errorf("firefox now points at %q", s.HostPath)
 	}
 }

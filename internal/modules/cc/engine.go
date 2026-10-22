@@ -157,7 +157,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	native := conv.mode.Native()
 	var nativeTools []llm.Tool
 	if native {
-		nativeTools = nativePayload(conv.tools)
+		nativeTools = nativePayload(conv.tools, in.utterance)
 	}
 	smallMode := m.settings.Bool(ctx, settingSmallModelMode, settings.Scope{})
 	budget := m.thinkingBudget(ctx, hh)
@@ -192,6 +192,9 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		if native {
 			req.Tools = nativeTools
 			req.ToolChoice = json.RawMessage(`"auto"`)
+			if len(msgs) > 0 && callNowNag(msgs[len(msgs)-1]) {
+				req.ToolChoice = json.RawMessage(`"required"`)
+			}
 		} else if rf := conv.mode.ResponseFormat(); rf != nil {
 			t, _ := rf.Get("type")
 			ts, _ := t.(string)
@@ -261,6 +264,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		// result); next to real calls it is dropped and they run.
 		if native {
 			rest, only := splitNotForMe(calls)
+			if only && toolRanThisTurn(msgs[:len(msgs)-1]) && countNags(msgs, nagAnswerAfterTool) < 1 && iter+1 < in.maxIter {
+				msgs = msgs[:len(msgs)-1]
+				msgs = append(msgs, sysMsg(answerAfterToolRetry))
+				continue
+			}
 			if only {
 				raw, message, calls, finish = parse.NotForMeLiteral, parse.NotForMeLiteral, nil, parse.FinishStop
 				msgs[len(msgs)-1] = chatMsg{Role: "assistant", Content: raw}
@@ -327,7 +335,9 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			// The request was left half done: a memory request answered "noted" with no tool to
 			// store it, "not in my memory" without a search, "open X and type Y" without the
 			// typing (followthrough.go).
-			if !terminal && !doubleChecked {
+			// Each follow-through nudge needs its request and its claim, so <exchange_complete/>
+			// doesn't skip them (#435: "Got it, your locker code is 4471. <exchange_complete/>").
+			if !parse.SentinelNotForMe(raw, message) && !doubleChecked {
 				if nag := followThroughNag(conv, in.utterance, parse.OutsideThink(message), msgs); nag != "" {
 					msgs = msgs[:len(msgs)-1]
 					msgs = append(msgs, sysMsg(nag))
@@ -497,6 +507,13 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				msgs = append(msgs, chatMsg{Role: "assistant", Content: ack})
 				return withReasoning(engineResult{Stop: stopComplete, Message: ack}), msgs
 			}
+			if refusal, ok := speakerRefusal(serverResults); ok && speakerRefusedThisTurn(msgs[:len(msgs)-len(serverResults)]) {
+				// Refused an unidentified voice again: no retry changes that, and the 9B called
+				// remember over and over until the loop gave up (#435). The first refusal is the
+				// model's to word; a repeat is said as is.
+				msgs = append(msgs, chatMsg{Role: "assistant", Content: refusal})
+				return withReasoning(engineResult{Stop: stopComplete, Message: refusal}), msgs
+			}
 			// Native server-only results (or nothing callable): loop again.
 		default:
 			return withReasoning(engineResult{Stop: stopComplete, Message: message}), msgs
@@ -533,6 +550,65 @@ func acceptedAck(results []chatMsg) (string, bool) {
 		parts = append(parts, parse.PyStrip(ms))
 	}
 	return strings.Join(parts, " "), true
+}
+
+// callNowNag reports a nudge that names the one call the request still needs (remember, recall,
+// the typing, cancel_watch, stop_recording while recording, a computer control switch tool): the
+// retry after it requires a tool call. The 9B answered "[NOT_SAVED] … Call remember now" with
+// "Got it, your parking spot is B12." again (#435). The must-call retry and the other nudges
+// allow an answer, so stay auto.
+func callNowNag(m chatMsg) bool {
+	return isNag(m, nagUnsaved) || isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNotCancelled) ||
+		isNag(m, nagStopRecording) || isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun)
+}
+
+// nagAnswerAfterTool asks for the answer when the model called not_for_me after a tool ran in
+// the turn: the turn was for Jarvis (#435: stop_recording ran, then not_for_me, and the user
+// heard nothing).
+const (
+	nagAnswerAfterTool   = "[ANSWER]"
+	answerAfterToolRetry = nagAnswerAfterTool + " You already acted on this request, so it was meant for you. Tell the " +
+		"user the result in one short sentence."
+)
+
+// speakerRefusedThisTurn reports whether a tool result since the turn's user message is the
+// no_speaker refusal.
+func speakerRefusedThisTurn(msgs []chatMsg) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		switch {
+		case msgs[i].Role == "tool":
+			if _, ok := speakerRefusal(msgs[i : i+1]); ok {
+				return true
+			}
+		case msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck):
+			return false
+		}
+	}
+	return false
+}
+
+// speakerRefusal reports whether every server result is the no_speaker refusal (the memory
+// tools' toolSpeakerError) and returns its message.
+func speakerRefusal(results []chatMsg) (string, bool) {
+	msg := ""
+	for _, r := range results {
+		v, err := pyjson.Loads(r.Content)
+		if err != nil {
+			return "", false
+		}
+		o, _ := v.(*pyjson.Object)
+		if o == nil {
+			return "", false
+		}
+		e, _ := o.Get("error")
+		m, _ := o.Get("message")
+		ms, _ := m.(string)
+		if e != "no_speaker" || parse.PyStrip(ms) == "" {
+			return "", false
+		}
+		msg = parse.PyStrip(ms)
+	}
+	return msg, msg != ""
 }
 
 // closeDanglingCalls answers client calls the loop dropped with a not-executed tool reply, so

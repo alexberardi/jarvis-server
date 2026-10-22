@@ -198,6 +198,50 @@ func TestStopRecordingAsksForAName(t *testing.T) {
 	}
 }
 
+// #435: "turn on the computer" got enable_computer_control from the 9B on every run (and with it
+// gone, computer_control_status or disable_computer_control), so the model is sent the switch
+// tools only on a turn whose words say "control"; the warmup leaves them out like those turns.
+func TestSwitchToolsOfferedOnlyWhenAsked(t *testing.T) {
+	ve, _ := recordingConv(t)
+	switchNames := []string{toolEnableComputerControl, toolDisableComputerControl, toolComputerControlStatus}
+	reqs := ve.eng.requests()
+	if len(reqs) == 0 || !has(toolNamesOf(reqs[0]), toolStartRecording) {
+		t.Fatal("no warmup with the recording tools")
+	}
+	for _, n := range switchNames {
+		if has(toolNamesOf(reqs[0]), n) {
+			t.Fatalf("the warmup offers %s", n)
+		}
+	}
+	for _, tc := range []struct {
+		said    string
+		offered bool
+	}{
+		{"turn on the computer", false},
+		{"find the right type of phone case and order it", false},
+		{"enable computer control", true},
+		{"turn Control on", true},
+		{"is computer control on?", true},
+		{"stop controlling my computer", true},
+	} {
+		ve.eng.say("Okay.")
+		ve.turn("/api/v0/voice/command", "c1", tc.said, map[string]any{"turn_source": "wake"}).want(200)
+		reqs := turnRequests(ve, tc.said)
+		if len(reqs) == 0 {
+			t.Fatalf("%q: no model request", tc.said)
+		}
+		names := toolNamesOf(reqs[0])
+		for _, n := range switchNames {
+			if has(names, n) != tc.offered {
+				t.Fatalf("%q: tools %v, want %s offered %v", tc.said, names, n, tc.offered)
+			}
+		}
+		if !has(names, toolStartRecording) || !has(names, toolStopRecording) {
+			t.Fatalf("%q: the recording tools went too: %v", tc.said, names)
+		}
+	}
+}
+
 // The switch tools are offered where the recording tools are: a computer in the household and
 // a known speaker.
 func TestComputerControlToolsOffered(t *testing.T) {

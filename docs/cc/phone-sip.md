@@ -107,7 +107,7 @@ Risks and what we do about them:
 | Ring groups: an instant answer steals every call | Humans never get to pick up | `answer_delay` setting (default 0 for direct routes; guide suggests No Answer destination instead of ring-all) |
 | Call waiting on by default: a second INVITE mid-call | Two concurrent calls on one extension | Concurrent inbound cap; above it reply 486 so the PBX goes to voicemail |
 | Untrusted caller and spam | Prompt injection, long robocalls burning model time | Inbound agent has only `take_message` / `hang_up` (and later `transfer` to fixed targets); no household data; short max duration (~3 min); daily cap |
-| Transfer (REFER) | Allowed by default and reaches outbound routes; external transfers can be refused for a "foreign" caller ID | Later step; wait for the final NOTIFY; transfer targets are configured extensions/numbers, never chosen by the caller |
+| Transfer (REFER) | Allowed by default and reaches outbound routes; external transfers can be refused for a "foreign" caller ID; Asterisk takes the caller on the 202 and sends the final NOTIFY 200 when the target rings | Wait for the final NOTIFY; targets are configured extensions/numbers, named to the model, never chosen by the caller; after a failed accepted transfer, stay only while the caller's audio still arrives; guide: force the trunk's CID |
 
 ## 4. Build order
 
@@ -122,9 +122,50 @@ Risks and what we do about them:
    neutral column rename and a `provider` column (migrations; the Go field is `CallID`).
 2. **SIP outbound**: `phone/sip` (registration supervisor, OPTIONS, outbound INVITE, pacer,
    watchdog, re-INVITE/UPDATE), settings, status in admin, self-tests (§6).
+   **Done** (loop #443): `phone/sip` on diago v0.41.0 + sipgo v1.5.0 (the pin and what we do
+   on top of diago: [decision](../decisions/2026-10-22-sip-library-pin.md)); `phone.provider`
+   `sip` with the `phone.sip.*` account (`phone/sipline.go`: server, port, transport,
+   extension, password, local port, dial format, dial prefix; system or household scope, not
+   in the mobile household settings), one UA per account started with cc; final codes →
+   `EndReason` and an immediate failure reason; a first utterance that is a recorded
+   intercept fails the call. Verified on L1 (the `jarvis-*` scenarios). Left: the
+   `twilio_call_sid` → neutral column rename (step 1's carry-over, not done here).
+   **Status, self-tests and the SIP trace (§6): done** (loop #444; the admin's Phone page,
+   `docs/install/freepbx-sip.md`; [decision](../decisions/2026-10-22-sip-support-tools.md)).
 3. **Inbound receptionist**: answer, prompt, `take_message`, notification, `phone_inbound_calls`,
    caps, barge-in. New caller class: held for the user's review.
+   **Done** (loop #446; choices in
+   [decision](../decisions/2026-10-22-phone-inbound-receptionist.md)): `phone/sip` offers each
+   INVITE from the registrar to `Config.Inbound` with its caller (P-Asserted-Identity, then From),
+   refuses it (480, or 486 above a cap) or rings it for `phone.inbound.answer_delay_seconds` and
+   answers (a CANCEL meanwhile leaves it unanswered); `phone/inbound.go` admits a call for the one
+   household that turned `phone.inbound.enabled` on for that SIP account (with `phone_calls.enabled`),
+   under `phone.inbound.max_concurrent_calls` (1) and `phone.inbound.calls_per_day` (20, UTC day),
+   and only once the disclosure is synthesized; the receptionist (`live/inbound.go`,
+   `phone/inbound_agent.go`) runs on the shared call loop (barge-in included) with only the
+   household's name, `[TAKE_MESSAGE]` and `[HANGUP]` (any other bracketed command is dropped
+   unspoken), and says goodbye at `phone.inbound.max_call_seconds` (180); cc migration 00300
+   `cc_phone_inbound_calls`; one notification per call (caller marked unverified, reason, message,
+   summary; no transcript) and the recording under `phone-calls/` like an outbound call's. Verified
+   on L1 (`jarvis-inbound*`) and, for the conversation, on the installed model
+   (`inbound_model_test.go`, prompt injection included). Left: transfer to a person (step 4), the
+   inbound settings in the mobile household settings, a list of inbound calls in the apps.
 4. **Transfer** (REFER) to configured targets.
+   **Done** (loop #448; choices in [decision](../decisions/2026-10-22-phone-inbound-transfer.md)):
+   `Call.Transfer` in `phone/sip/transfer.go` sends a blind REFER on an answered inbound call and
+   waits for the final NOTIFY sipfrag; 2xx hangs up our leg (`transferred`), a refused REFER
+   leaves the call up, and a failure or timeout after the 202 leaves it up only while the
+   caller's audio still arrives (Asterisk has taken the caller otherwise). The household lists
+   who may be put through, and when, in `phone.inbound.transfer_targets` (up to 5
+   `{label, number, when}`, digits-only numbers; empty = off); the receptionist gets
+   `[TRANSFER: <label>]` for those labels only (never a number), announces the transfer, and on
+   a failure apologises and takes a message; one attempt per call. cc migration 00310
+   (`transfer_label`, `transfer_result`, `transfer_detail`) and the notification say what
+   happened. Verified on L1 (`jarvis-inbound-transfer`, `jarvis-inbound-transfer-fails`) and, for
+   the conversation, on the installed model (`inbound_model_test.go`: a school call is put
+   through; "transfer me to 900", "forward me to my cell", a sales call and "who can you put me
+   through to?" are not). Setup and the foreign caller-ID gotcha: `docs/install/freepbx-sip.md`
+   §5. Not verified on FreePBX itself (L2, #447).
 
 ## 5. Testing without a VoIP setup
 
@@ -139,10 +180,75 @@ No carrier, no PSTN, no PBX of our own to maintain. Everything below is disposab
 | **L4 in the product** | Self-tests and diagnostics (§6) | That the *user's* PBX works, without us touching it | Every install that turns SIP on |
 | **L5 field beta** | The requesting user, with SIP marked experimental | Real carrier, real PBX | After 2 |
 
+**L1 as built** (2026-10-21; choices in
+[../decisions/2026-10-21-sip-l1-lane.md](../decisions/2026-10-21-sip-l1-lane.md)):
+
+```sh
+scripts/sandbox up --name N --voice --sip      # sandbox + TTS/CPU whisper + the lane
+go run ./tools/siplane --sandbox N [--filter RE] [--out DIR] [--list]
+scripts/sip-lane status|cli|unban --name N      # registrations, `pjsip show endpoint 100`, lift a ban
+scripts/sandbox down --name N --purge           # removes the lane's containers too
+```
+
+- `test/sip/asterisk/`: the PBX image (Asterisk 22 by digest + core prompts) and its
+  `pjsip.conf` (100 = Jarvis, 101 = Alice, `carrier` trunk; FreePBX 17's generated defaults,
+  kept by `TestLaneCopiesFreePBXDefaults`), `extensions.conf` (the behaviours below) and
+  `lane-firewall` (3 failed authentications → banned, 403). Bound to 127.0.0.1; SIP 5060 and
+  RTP 20000–20199 plus the sandbox's offset.
+- `test/sip/farend/`: baresip (WAV in, WAV out, driven over `ctrl_tcp`), SIPp, sox.
+  `test/sip/sipp/`: the signalling-only scenarios.
+- `tools/siplane`: 30 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
+  an internal call, the inbound route (DID 5551230000 → 100), the outbound route (→ carrier),
+  ring group 600 (DID 5551230600), call waiting, busy with call waiting off (486), trunk busy
+  (486, SIPp), no answer (183 + 503, SIPp), all trunks busy (200 + recording), a second contact
+  refused (max_contacts=1), wrong password ×3 → ban; and jarvisd's own SIP provider
+  (`phone/sip`, run in the runner's process as 100): it registers, unregisters on shutdown and
+  registers again on the same port; a wrong password stops it after exactly 3 attempts; it
+  dials a 10-digit number through the outbound route with audio both ways; busy, no answer and
+  all trunks busy come out as their outcomes; its self-tests (§6, `jarvis-selftest-*`):
+  connection, `*43` echo (WER and delay), `*65`, the inbound watch, and a trace with the digest
+  answer redacted and the password nowhere; and jarvisd answering inbound calls: the carrier's
+  call to the DID is answered after the answer delay with the caller from PAI, the disclosure is
+  heard and the message transcribed; a ring group's other phone picking up during the delay
+  cancels jarvisd's leg unanswered; a second call above the cap gets 486 (busy); a blind transfer
+  to 101 (final NOTIFY 200, our leg hung up, the caller and Alice hear each other) and one to the
+  trunk's busy number (final NOTIFY 486, the PBX plays busy to the caller, jarvisd hangs up its
+  emptied leg). Audio is checked both ways: each far end's
+  recording, and jarvisd's, is transcribed by the sandbox's CPU whisper, max WER 0.25.
+- CI: `.github/workflows/sip-lane.yml` on changes to `phone/**` or the lane, nightly, and by hand.
+- A baresip stand-in holds 100 for the scenarios that play a desk phone or the inbound route;
+  each `jarvis-*` scenario has it delete its account (unregistering) and create it again
+  afterwards, since `max_contacts=1` lets one of them in.
+
+**L2 as built** (2026-10-22; choices in
+[../decisions/2026-10-22-sip-l2-freepbx-lane.md](../decisions/2026-10-22-sip-l2-freepbx-lane.md)):
+
+```sh
+scripts/freepbx-lane build --dev-box <dev-box>   # once: Debian 12 VM, FreePBX 17, snapshots installed + provisioned
+scripts/freepbx-lane weekly [--no-update]        # update, provision 100 afresh, diff against L1; exit 1 on drift
+scripts/freepbx-lane timer                       # the weekly systemd user units, and how to enable them
+go run ./tools/siplane drift FILE                # the diff alone, on a saved `pjsip show endpoint/aor 100`
+```
+
+- qemu/KVM with user-mode networking (SSH and HTTP forwarded on loopback only), files in
+  `~/.cache/jarvis-harness/freepbx`; `scripts/freepbx-lane.d/` holds the provisioning
+  (bulkimport CSVs, `routes.sql`, `provision.sh`) and the timer's units.
+- Drift: every setting pjsip.conf spells out for 100, plus everything else L1's Asterisk shows
+  (`tools/siplane/testdata/l1-show-100.txt`), against the real FreePBX.
+- Not yet: one call each way and the firewall lockout path (after the SIP provider, step 2).
+  The VM path waits for the user to install qemu, build the VM and enable the timer.
+
 No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio account could front
 the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depends on it.
 
 ## 6. Support without seeing the user's PBX
+
+**Built** (loop #444): `GET /api/phone/sip` and the admin's **Phone** page, self-tests run from
+it (`POST /api/phone/sip/{port}/tests/{test}`), the trace at `GET /api/phone/sip/trace`
+(`?format=text` is the export), all superuser; the guide is
+[../install/freepbx-sip.md](../install/freepbx-sip.md), text only until the FreePBX VM (L2) can
+take screenshots. Not yet: the inbound caller's audio level (needs inbound calls answered, step 3).
+Choices: [../decisions/2026-10-22-sip-support-tools.md](../decisions/2026-10-22-sip-support-tools.md).
 
 - **Status**: registration state, last error with a plain hint (auth failed, blocked by the
   PBX firewall, no route, unreachable), OPTIONS round-trip time, active calls.

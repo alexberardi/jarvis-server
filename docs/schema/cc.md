@@ -47,7 +47,7 @@ Migration: `internal/modules/cc/migrations/00001_baseline.sql` (goose, version t
 | 08 routines | `cc_routines`, `cc_schedules`, `cc_routine_seeds` (00080: households whose D44 defaults were seeded, so a deleted default stays deleted) |
 | 09 errands | `cc_errand_plans`, `cc_workflows` |
 | 10 signals / attention / proposals | `cc_signals`, `cc_proposal_suppressions`, `cc_attention_events`, `cc_attention_deliveries`, **`cc_automation_actions`** (new), **`cc_reaction_claims`** (new) |
-| 11 phone | `cc_phone_contacts`, `cc_phone_call_sessions` |
+| 11 phone | `cc_phone_contacts`, `cc_phone_call_sessions`, **`cc_phone_inbound_calls`** (new, 00300, loop #446): calls the receptionist answered on a SIP extension — the caller ID the PBX gave (a hint, never authentication), the message taken (caller's name, reason, message), the summary, outcome, end reason and recording key; no transcript (docs/cc/phone-sip.md §1, §7); 00310 (loop #448) adds `transfer_label`, `transfer_result` (transferred \| failed) and `transfer_detail`: the one transfer the receptionist may try, to a household-configured target (§4 step 4) |
 | 12 packages | `cc_package_install_requests` |
 | 13 mobile chat / callbacks | `cc_callback_jobs` |
 | autonomy (docs/autonomy/PLAN.md) | **`cc_autonomy_events`** (new, 00200): the append-only activity log — what ran without a tap, what was asked and what was blocked, by which rule, with the source (errand, goal, watch, automation); **`cc_tool_rules`** (new, 00210): the household's Custom Rules — per scope (household, goal, watch) and tool, allow/ask/block (A1, A7); **`cc_watches`** (new, 00230): watches — a web page, a search or a signal kind, a deterministic condition and a fire policy (§2, A3, A8, A9) |

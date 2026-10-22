@@ -1,0 +1,16 @@
+# The L2 SIP lane's weekly drift check (scripts/freepbx-lane weekly) as a systemd user unit on
+# the dev box. Not installed by anything: `scripts/freepbx-lane timer` renders @CHECKOUT@ (the
+# checkout it is run from) into ~/.cache/jarvis-harness/freepbx/systemd/ and prints the
+# `systemctl --user link/enable` lines. A drift fails the unit: `systemctl --user status
+# jarvis-freepbx-lane` and ~/.cache/jarvis-harness/freepbx/runs/latest/drift.txt say what moved.
+[Unit]
+Description=Jarvis L2 SIP lane: FreePBX 17 drift from the L1 lane (weekly)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@CHECKOUT@
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=@CHECKOUT@/scripts/freepbx-lane weekly
+TimeoutStartSec=3h
+Nice=10

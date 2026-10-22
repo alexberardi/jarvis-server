@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -77,9 +78,12 @@ var menuNotes = map[string]string{
 var controlCommands = map[string]bool{cmdReplan: true}
 
 const (
-	cmdReplan  = "request_replan"
-	cmdPhone   = "make_phone_call"
-	cmdWaitFor = "wait_for"
+	cmdReplan = "request_replan"
+	// cmdSearch and cmdRemember are the server tools answerRule is about.
+	cmdSearch   = "quick_search"
+	cmdRemember = "remember"
+	cmdPhone    = "make_phone_call"
+	cmdWaitFor  = "wait_for"
 	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
 	cmdReadFile   = "read_computer_file"
 	cmdWriteSheet = "write_spreadsheet"
@@ -281,6 +285,16 @@ const workflowRule = "SAVED WORKFLOWS: when the goal is a task run_workflow list
 
 // computerRulesFor is the computer rules for menu: websiteRule when it offers computer_task,
 // workflowRule when it offers run_workflow and budgetRule when it offers write_spreadsheet.
+// answerRule is the planner's line for questions (#452): Qwen3.5-9B planned quick_search plus a
+// remember step ("save a summary") for "find the best espresso machines under $X"; the save held
+// autorun and the report said the summary was not sent, with no prices, because the search query
+// asked for none. Offered when the menu has quick_search or remember.
+const answerRule = "ANSWERS: when the goal asks a question or asks to find, compare or list something, " +
+	"plan only the lookup step(s): the finished errand's report IS the answer the user receives, so " +
+	"put every fact they asked for (prices, ratings, times) in the search query. Never add a " +
+	"remember step unless the user asked to remember, save or note something.\n\n"
+
+// computerRulesFor adds the menu's own rules after the decomposition rule.
 func computerRulesFor(menu []MenuEntry) string {
 	out := ""
 	if menuHas(menu, cmdComputer) {
@@ -291,6 +305,31 @@ func computerRulesFor(menu []MenuEntry) string {
 	}
 	if menuHas(menu, cmdWriteSheet) {
 		out += budgetRule
+	}
+	if menuHas(menu, cmdSearch) || menuHas(menu, cmdRemember) {
+		out += answerRule
+	}
+	return out
+}
+
+// memoryAskRE is a goal that asks for something to be kept: a remember step is the user's.
+var memoryAskRE = regexp.MustCompile(`(?i)\b(?:remember|memori[sz]e|note|save|store|record|write\s+(?:it\s+|that\s+)?down|jot|keep\s+(?:in\s+mind|track)|don'?t\s+forget)\b`)
+
+// dropUnaskedRemember removes the remember steps of a plan whose goal asked for nothing to be
+// kept (#452): the 9B adds one to a question despite answerRule. A plan of nothing else keeps
+// them, so a goal the regexp misses still plans.
+func dropUnaskedRemember(goal string, steps []Step) []Step {
+	if memoryAskRE.MatchString(goal) {
+		return steps
+	}
+	var out []Step
+	for _, st := range steps {
+		if st.Command != cmdRemember {
+			out = append(out, st)
+		}
+	}
+	if len(out) == 0 {
+		return steps
 	}
 	return out
 }
@@ -733,7 +772,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(plan.Steps)))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(dropUnaskedRemember(goal, plan.Steps))))
 	return plan, err
 }
 
@@ -773,7 +812,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(plan.Steps)
+	plan.Steps = checkpointSpreadsheet(dropUnaskedRemember(goal, plan.Steps))
 	return plan, err
 }
 

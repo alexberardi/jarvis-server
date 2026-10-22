@@ -173,3 +173,85 @@ func TestComposePromptSendMeIsTheReport(t *testing.T) {
 		t.Fatalf("compose prompt:\n%s", p)
 	}
 }
+
+// #452: the 9B planned quick_search + remember ("save a summary") for a question. The remember
+// step held autorun (it asks) and the report said "I saved a summary … but I did not send it to
+// you". A question's errand is its lookup; the report delivers it.
+func TestUnaskedRememberIsDropped(t *testing.T) {
+	e := newTenv(t, true)
+	e.set[SettingAutonomous] = true
+	e.tools.Register(&fakeTool{name: "quick_search", def: toolDef("quick_search", "Search"), result: espressoSources()})
+	e.llm.say("plan", planJSON("Espresso machines",
+		step("quick_search", "Search for espresso machines", `{"query": "best espresso machines under $500"}`),
+		step("remember", "Save a summary", `{"fact": "the best espresso machines under $500"}`)))
+	e.llm.say("compose", espressoAnswer)
+	menu := []MenuEntry{{Command: "quick_search", Args: pyjson.NewObject()}, {Command: "remember", Args: pyjson.NewObject()}}
+	e.policy.set("quick_search", allowTool)
+	const goal = "find the best espresso machines under $500 with prices"
+	p := e.draft(goal, ptr(7), menu)
+	e.idle()
+	if st := e.wfState(p.WorkflowID); st != "done" {
+		t.Fatalf("state = %s (the plan should autorun)", st)
+	}
+	up, ok := e.cards.update(p.InboxItemID)
+	if !ok || up.Metadata["answer"] != espressoAnswer {
+		t.Fatalf("ran card = %+v", up)
+	}
+	if steps := up.Metadata["steps"].([]any); len(steps) != 1 {
+		t.Fatalf("steps = %#v", steps)
+	}
+}
+
+func TestDropUnaskedRemember(t *testing.T) {
+	search := Step{Command: "quick_search", Label: "Search"}
+	remember := Step{Command: "remember", Label: "Save it"}
+	for _, c := range []struct {
+		goal string
+		in   []Step
+		want int
+	}{
+		{"find the best espresso machines under $500 with prices", []Step{search, remember}, 1},
+		{"what are the top rated air fryers", []Step{remember, search}, 1},
+		{"look up the best espresso machine and remember it", []Step{search, remember}, 2},
+		{"search for flights to Rome and save the cheapest one", []Step{search, remember}, 2},
+		{"make a note that my locker code is 1234", []Step{remember}, 1},
+		{"don't forget that the plumber comes on Tuesday", []Step{remember}, 1},
+		// Nothing else to run: keep it rather than leave no plan.
+		{"my locker code is 1234", []Step{remember}, 1},
+	} {
+		if got := dropUnaskedRemember(c.goal, c.in); len(got) != c.want {
+			t.Errorf("%q: %d steps, want %d (%+v)", c.goal, len(got), c.want, got)
+		}
+	}
+}
+
+// The prompt says the report is the answer, and remember only when asked; menus without
+// quick_search or remember keep their bytes.
+func TestAnswerRuleInPrompts(t *testing.T) {
+	menu := []MenuEntry{{Command: "quick_search", Description: "Search the web."}, {Command: "remember", Description: "Save a fact."}}
+	for name, p := range map[string]string{
+		"plan":   BuildPrompt("find espresso machines", menu),
+		"refine": BuildRefinePrompt("s", nil, "i", menu),
+		"replan": BuildReplanPrompt("g", nil, "", "r", menu),
+	} {
+		if !strings.Contains(p, answerRule) {
+			t.Errorf("%s prompt lacks the answer rule:\n%s", name, p)
+		}
+	}
+	if strings.Contains(BuildPrompt("check the weather", commandMenu()[:1]), "ANSWERS:") {
+		t.Error("answer rule on a menu without quick_search or remember")
+	}
+	for _, want := range []string{"report IS the answer", "prices", "remember"} {
+		if !strings.Contains(answerRule, want) {
+			t.Errorf("answer rule lacks %q", want)
+		}
+	}
+}
+
+// A save step the user did ask for is not a reason to say the result was not sent.
+func TestComposePromptSaveIsNotUnsent(t *testing.T) {
+	p := ComposePrompt(espressoGoal, []Result{serverOutcome("quick_search", espressoSources())})
+	if !strings.Contains(p, "saving or noting the result is not sending it either") {
+		t.Fatalf("compose prompt:\n%s", p)
+	}
+}

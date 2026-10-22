@@ -9,6 +9,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/sip"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
@@ -99,6 +100,24 @@ func (m *Module) startPhone(ctx context.Context) error {
 // PhoneService is the phone subsystem (valid after Register): errands call CreatePlan, and
 // doc 13's /callbacks dispatches the card taps through PhoneService().Callbacks().
 func (m *Module) PhoneService() *phone.Service { return m.phone }
+
+// SIPAccounts, StartSIPTest and SIPTrace are the SIP provider's support surface for the
+// admin's Phone page (docs/cc/phone-sip.md §6).
+func (m *Module) SIPAccounts() []phone.SIPAccountView {
+	if m.phone == nil {
+		return nil
+	}
+	return m.phone.SIPAccounts()
+}
+
+func (m *Module) StartSIPTest(ctx context.Context, port int, test string, in phone.SIPTestInput) (phone.SIPTestRun, error) {
+	if m.phone == nil {
+		return phone.SIPTestRun{}, phone.ErrSIPAccountNotFound
+	}
+	return m.phone.StartSIPTest(ctx, port, test, in)
+}
+
+func (m *Module) SIPTrace() []sip.TraceDialog { return sip.Trace() }
 
 // phoneTTS adapts the voice pipeline's streaming TTS to whole-utterance PCM.
 type phoneTTS struct{ t TTS }

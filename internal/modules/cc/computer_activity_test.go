@@ -303,3 +303,103 @@ func TestStopPhraseWhileRecordingSkipsTheFollowUpGate(t *testing.T) {
 		})
 	}
 }
+
+// #435: with nothing recording, "record a macro called test2" and "stop recording" got "I'm
+// recording a macro called test2." / "Alright, recording's stopped." and no call. Such a reply
+// is nudged once to make the call, and the retry requires one. A request that isn't for a
+// recording ("record a reminder") is not.
+func TestRecordingRequestAnsweredInProseIsNudged(t *testing.T) {
+	for _, tc := range []struct {
+		said, claim, tool string
+		nudged            bool
+	}{
+		{"record a macro called test2", "Alright, I'm recording a macro called test2.", toolStartRecording, true},
+		{"learn how I do this", "I'm ready to learn how you do things, go ahead and show me.", toolStartRecording, true},
+		{"stop recording", "Alright, recording's stopped. <exchange_complete/>", toolStopRecording, true},
+		{"record a reminder to buy milk", "When should I remind you?", "", false},
+	} {
+		t.Run(tc.said, func(t *testing.T) {
+			ve, _ := recordingConv(t)
+			ve.eng.say(tc.claim)
+			ve.eng.say(tc.claim) // past the must-call retry, when the force guard asks first
+			if tc.nudged {
+				ve.eng.push(nativeCall("call_r1", tc.tool, `{}`))
+				ve.eng.say("Done.")
+			}
+			ve.turn("/api/v0/voice/command", "c1", tc.said, map[string]any{"turn_source": "wake"}).want(200)
+			nudge := -1
+			for i, r := range turnRequests(ve, tc.said) {
+				if lastIsNagIn(r, nagRecordingNotRun) {
+					nudge = i
+					if r["tool_choice"] != "required" {
+						t.Errorf("the retry after the nudge: tool_choice %v", r["tool_choice"])
+					}
+				}
+			}
+			if (nudge >= 0) != tc.nudged {
+				t.Fatalf("nudged at request %d, want nudged %v", nudge, tc.nudged)
+			}
+		})
+	}
+}
+
+// #435: "I'm done." in the follow-up ran stop_recording, then the model called not_for_me and
+// the turn went silent. A turn a tool already ran in was for Jarvis: the not-for-me gets one
+// nudge to answer.
+func TestNotForMeAfterAToolRanIsNudged(t *testing.T) {
+	ve, _ := recordingConv(t)
+	ve.eng.push(nativeCall("call_s1", toolStopRecording, `{}`))
+	ve.eng.push(nativeCall("call_n1", "not_for_me", `{}`))
+	ve.eng.say("What should I call this macro?")
+	b := ve.turn("/api/v0/voice/command", "c1", "I'm done.", map[string]any{"turn_source": "follow_up",
+		"follow_up_iteration": 1, "computer_activity": recordingNow}).want(200).json()
+	if b["stop_reason"] == "not_for_me" || b["assistant_message"] != "What should I call this macro?" {
+		t.Fatalf("body %v", b)
+	}
+	reqs := turnRequests(ve, "I'm done.")
+	if len(reqs) != 3 || !lastIsNagIn(reqs[2], nagAnswerAfterTool) {
+		t.Fatalf("%d model calls; no answer nudge", len(reqs))
+	}
+}
+
+// #435: "turn off computer control" got "Got it, computer control is off now." and no call. A
+// "computer control" request answered in prose is nudged once to call a switch tool, and the
+// retry requires one. A turn that ran one, or didn't ask, is not.
+func TestSwitchRequestAnsweredInProseIsNudged(t *testing.T) {
+	for _, tc := range []struct {
+		said, ran, tool string
+		nudged          bool
+	}{
+		{"turn off computer control", "", toolDisableComputerControl, true},
+		{"Hey Jarvis, enable computer control", "", toolEnableComputerControl, true},
+		{"is computer control on?", toolComputerControlStatus, "", false},
+		{"what's the weather like", "", "", false},
+	} {
+		t.Run(tc.said, func(t *testing.T) {
+			ve, _ := recordingConv(t)
+			if tc.ran != "" {
+				ve.eng.push(nativeCall("call_s0", tc.ran, `{}`))
+			}
+			claim := "Got it, computer control is off now."
+			ve.eng.say(claim)
+			ve.eng.say(claim) // past the must-call retry, when the force guard asks first
+			if tc.nudged {
+				ve.eng.push(nativeCall("call_s1", tc.tool, `{}`))
+				ve.eng.say("Done.")
+			}
+			ve.turn("/api/v0/voice/command", "c1", tc.said, map[string]any{"turn_source": "wake"}).want(200)
+			nudge := -1
+			for i, r := range turnRequests(ve, tc.said) {
+				if lastIsNagIn(r, nagSwitchNotRun) {
+					nudge = i
+					if r["tool_choice"] != "required" {
+						t.Errorf("the retry after the nudge: tool_choice %v", r["tool_choice"])
+					}
+				}
+			}
+			if (nudge >= 0) != tc.nudged {
+				t.Fatalf("nudged at request %d, want nudged %v", nudge, tc.nudged)
+			}
+		})
+	}
+}

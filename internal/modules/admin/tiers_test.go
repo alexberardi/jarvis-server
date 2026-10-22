@@ -146,6 +146,11 @@ var wantTiers = map[string]tier{
 	// The setup wizard's voice step.
 	"GET /api/tts/voices":  tierSuperuser,
 	"POST /api/tts/sample": tierSuperuser,
+	// The Phone page (SIP support): every household's SIP accounts, self-tests that dial out
+	// through the PBX, and the SIP trace (numbers and caller IDs of every household's calls).
+	"GET /api/phone/sip":                      tierSuperuser,
+	"POST /api/phone/sip/{port}/tests/{test}": tierSuperuser,
+	"GET /api/phone/sip/trace":                tierSuperuser,
 
 	// The catch-all: unlisted /api paths are gated, then 404.
 	"/api":  tierSuperuser,
