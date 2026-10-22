@@ -67,7 +67,9 @@ func piSetupMode(ctx context.Context, log *slog.Logger, path string, hf *hatFlag
 			log.Warn("provisioning: could not tell whether wlan0 is on a network; starting the setup hotspot", "err", err)
 		} else if home != "" {
 			log.Info("not enrolled; on a Wi-Fi network: setup over the LAN, no hotspot", "ssid", home)
-			hotspot = false
+			// No hotspot ssid either: a failed attempt must not start one ("restore" it) and
+			// drop the LAN the app reaches the node on.
+			hotspot, ssid = false, ""
 		}
 	}
 	if err := serveSetup(ctx, setupServer{path: path, wifi: w, apSSID: ssid, listen: piSetup.listen,

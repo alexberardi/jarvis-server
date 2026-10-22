@@ -237,22 +237,35 @@ echo "--- --activate on a node that isn't enrolled, over SSH on wlan0 (#423)"
 R6=$T/root-unenrolled
 seed "$R6"
 SSH="192.0.2.50 50000 192.0.2.20 22"
-if SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1; then
-  cat "$T/out"; fail "--activate went on over wlan0 with no credentials"
+# S runs it as `sudo sh install-pi.sh` does: env_reset leaves SSH_CONNECTION out of the script's
+# environment; only its parents have it. Under --root, /proc is the stand-in's: this shell (the
+# script's parent) is sudo, its parent (pid 4242) the SSH login shell.
+mkdir -p "$R6/proc/$$" "$R6/proc/4242"
+printf 'HOME=/root\0SUDO_USER=pi\0' >"$R6/proc/$$/environ"
+printf 'Name:\tsudo\nPPid:\t4242\n' >"$R6/proc/$$/status"
+printf 'HOME=/home/pi\0SSH_CONNECTION=%s\0USER=pi\0' "$SSH" >"$R6/proc/4242/environ"
+printf 'Name:\tbash\nPPid:\t1\n' >"$R6/proc/4242/status"
+S() { SSH_CONNECTION='' R "$@"; }
+if FAKE_SSH_DEV=wlan0 S --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1; then
+  cat "$T/out"; fail "--activate under sudo went on over wlan0 with no credentials"
 fi
 grep -q "not activated: this node isn't enrolled, and this SSH session runs over wlan0" "$T/out" || { cat "$T/out"; fail "refused for another reason"; }
 grep -qF "sudo -u pi -H /opt/jarvis-agent/jarvis-agent enroll --server" "$T/out" || { cat "$T/out"; fail "no enroll command"; }
 grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" && fail "the refused --activate enabled jarvis-agent"
 [ -f "$R6/etc/systemd/system/jarvis-agent.service" ] || fail "the refused --activate did not install the unit"
-SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate --setup-mode >"$T/out" 2>&1 ||
+# As root over SSH (or sudo -E), SSH_CONNECTION is the script's own.
+if SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1; then
+  cat "$T/out"; fail "--activate as root went on over wlan0 with no credentials"
+fi
+FAKE_SSH_DEV=wlan0 S --root "$R6" --from-dir "$T/dist" --activate --setup-mode >"$T/out" 2>&1 ||
   { cat "$T/out"; fail "--activate --setup-mode was refused"; }
 grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" || fail "--setup-mode did not activate"
-SSH_CONNECTION=$SSH FAKE_SSH_DEV=eth0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
+FAKE_SSH_DEV=eth0 S --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
   { cat "$T/out"; fail "--activate over ethernet was refused"; }
 grep -q "warning: this node isn't enrolled: jarvis-agent starts in setup mode" "$T/out" || { cat "$T/out"; fail "no setup-mode warning over ethernet"; }
 mkdir -p "$R6/home/pi/.config/jarvis-agent"
 echo '{}' >"$R6/home/pi/.config/jarvis-agent/node.json"
-SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
+FAKE_SSH_DEV=wlan0 S --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
   { cat "$T/out"; fail "--activate of an enrolled node over wlan0 was refused"; }
 grep -q "isn't enrolled" "$T/out" && { cat "$T/out"; fail "warned on an enrolled node"; }
 grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" || fail "an enrolled node was not activated"

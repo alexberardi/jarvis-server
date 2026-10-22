@@ -12,11 +12,16 @@ Two changes:
 - **Setup mode starts the hotspot only when wlan0 is on no network.** When `CurrentSSID` names a
   network, the agent serves the provisioning API (:8080, and :80) on its LAN address, with the
   HAT's setup pattern, and leaves the radio alone. When the question fails, it starts the hotspot
-  as before. A failed provisioning attempt still brings the hotspot back (unchanged), so the app
+  as before. On a network it gives the provisioning server no hotspot ssid either, so a failed
+  attempt rolls back its own profile (NetworkManager goes back to the home network) and starts no
+  hotspot; with the hotspot running, a failed attempt still brings it back (unchanged), so the app
   can retry from it. This narrows D6, where the hotspot was always part of setup mode.
 - **`install-pi.sh --activate` refuses on a node with no credentials
   (`~<user>/.config/jarvis-agent/node.json`) when the SSH session's route goes out wlan0**, and
-  prints the enroll command; the install itself is done and the unit left disabled.
+  prints the enroll command; the install itself is done and the unit left disabled. The script
+  runs under `sudo`, whose `env_reset` drops `SSH_CONNECTION`, so the client's address comes from
+  the script's own environment or, failing that, from the nearest parent process that has it
+  (`/proc/<pid>/environ`, readable as root): the user's login shell above `sudo`.
   `--setup-mode` activates anyway. Over ethernet or a local console it warns and activates.
 
 Open: whether jarvis-node-mobile can find and provision a node in setup mode on the LAN rather

@@ -726,11 +726,32 @@ EOF
 
 # --- Which node runs ----------------------------------------------------------------------------
 
+# ssh_connection: this session's SSH_CONNECTION ("" when not over SSH). sudo's env_reset drops it
+# from the script's own environment, so it comes from the nearest parent that has it: the login
+# shell above sudo (root reads any /proc/<pid>/environ).
+ssh_connection() {
+  if [ -n "${SSH_CONNECTION:-}" ]; then
+    printf '%s\n' "$SSH_CONNECTION"
+    return 0
+  fi
+  sc_pid=$PPID sc_hops=0
+  while [ "${sc_pid:-0}" -gt 1 ] 2>/dev/null && [ $sc_hops -lt 32 ]; do
+    sc=$(tr '\0' '\n' 2>/dev/null <"$(P "/proc/$sc_pid/environ")" | sed -n 's/^SSH_CONNECTION=//p' | head -n 1)
+    if [ -n "$sc" ]; then
+      printf '%s\n' "$sc"
+      return 0
+    fi
+    sc_pid=$(sed -n 's/^PPid:[[:space:]]*//p' "$(P "/proc/$sc_pid/status")" 2>/dev/null) || sc_pid=
+    sc_hops=$((sc_hops + 1))
+  done
+}
+
 # ssh_link: the interface this SSH session comes in on ("" when not over SSH or unknown).
 ssh_link() {
-  [ -n "${SSH_CONNECTION:-}" ] || return 0
+  sl=$(ssh_connection)
+  [ -n "$sl" ] || return 0
   # shellcheck disable=SC2086 # the client's address is its first field
-  set -- $SSH_CONNECTION
+  set -- $sl
   ip -o route get "$1" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1
 }
 

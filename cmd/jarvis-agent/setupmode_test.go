@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -26,6 +27,8 @@ type setupRadio struct {
 	mu    sync.Mutex
 	calls []string
 	home  string // the network wlan0 is already on ("": none)
+	// connectErr fails every join (a wrong password, a network out of range).
+	connectErr error
 }
 
 func (r *setupRadio) note(s string) { r.mu.Lock(); r.calls = append(r.calls, s); r.mu.Unlock() }
@@ -50,6 +53,9 @@ func (r *setupRadio) CurrentSSID(ctx context.Context) (string, error) {
 }
 func (r *setupRadio) Connect(ctx context.Context, ssid, pw string) error {
 	r.note("connect " + ssid)
+	if r.connectErr != nil {
+		return r.connectErr
+	}
 	return r.Simulated.Connect(ctx, ssid, pw)
 }
 
@@ -195,6 +201,47 @@ func TestSetupModeKeepsAWorkingWiFi(t *testing.T) {
 		if err != nil {
 			t.Errorf("stopped in setup mode: %v", err)
 		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("setup mode didn't stop")
+	}
+}
+
+// #423: a failed provisioning attempt on a Pi that kept its Wi-Fi (no hotspot ran) must not start
+// one: restoring "the" hotspot would drop the LAN the app reaches the node on, and strand it.
+func TestSetupModeOnWiFiFailedAttemptStartsNoHotspot(t *testing.T) {
+	dir := agentHome(t)
+	path := filepath.Join(dir, "jarvis-agent", "node.json")
+	r := newSetupRig(t, false)
+	r.radio.home = "Home"
+	r.radio.connectErr = errors.New("secrets were required, but not provided")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() { errc <- piSetupMode(ctx, slog.New(slog.DiscardHandler), path, &hatFlags{}) }()
+	a := r.addr(t, errc)
+	body, _ := json.Marshal(map[string]any{
+		"wifi_ssid": "Elsewhere", "wifi_password": "wrong", "room": "kitchen",
+		"command_center_url": "http://192.0.2.1:7703", "household_id": "hh-1",
+		"node_id": "cc-node-1", "provisioning_token": "tok-1",
+	})
+	resp, err := http.Post("http://"+a+"/api/v1/provision", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	for getJSON(t, "http://"+a+"/api/v1/status")["state"] != string(provisioning.StateError) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the attempt didn't fail: %v", getJSON(t, "http://"+a+"/api/v1/status"))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.radio.Calls(); got != "connect Elsewhere" {
+		t.Errorf("radio %q, want only the join: no hotspot after a failed attempt on a connected wlan0", got)
+	}
+	cancel()
+	select {
+	case <-errc:
 	case <-time.After(10 * time.Second):
 		t.Fatal("setup mode didn't stop")
 	}
