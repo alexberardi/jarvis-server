@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"regexp"
+	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -90,9 +91,13 @@ const (
 	nagStopRecording   = "[STOP_RECORDING]"
 	nagNotStopped      = "[NOT_STOPPED]"
 	nagRecordingNotRun = "[RECORDING_NOT_RUN]"
+	nagSwitchNotRun    = "[SWITCH_NOT_RUN]"
 
 	startNotRunRetry = nagRecordingNotRun + " Nothing is recording: start_recording has not run this turn, so your " +
 		"reply is not true yet. Call start_recording now."
+	switchNotRunRetry = nagSwitchNotRun + " No computer control tool has run this turn, so your reply is not true " +
+		"yet. Call enable_computer_control, disable_computer_control or computer_control_status now, whichever " +
+		"the user asked for."
 	stopNotRunRetry = nagRecordingNotRun + " Nothing was stopped: stop_recording has not run this turn, so your reply " +
 		"is not true yet. Call stop_recording now."
 
@@ -150,6 +155,22 @@ func recordingNotRunNag(conv *conversation, utterance string, msgs []chatMsg) st
 		return startNotRunRetry
 	}
 	return ""
+}
+
+// switchNotRunNag is the follow-through nudge for a "computer control" request answered in prose
+// without a switch tool (#435: "turn off computer control" got "Got it, computer control is off
+// now." and no call), or "".
+func switchNotRunNag(conv *conversation, utterance string, msgs []chatMsg) string {
+	if !conv.serverNames[toolDisableComputerControl] || countNags(msgs, nagSwitchNotRun) >= 1 ||
+		!strings.Contains(strings.ToLower(utterance), "computer control") {
+		return ""
+	}
+	for n := range switchTools {
+		if calledThisTurn(msgs, n) {
+			return ""
+		}
+	}
+	return switchNotRunRetry
 }
 
 // mustStopRecording is the tool a turn has to call: stop_recording on a stop phrase while the

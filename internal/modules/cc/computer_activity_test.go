@@ -361,3 +361,45 @@ func TestNotForMeAfterAToolRanIsNudged(t *testing.T) {
 		t.Fatalf("%d model calls; no answer nudge", len(reqs))
 	}
 }
+
+// #435: "turn off computer control" got "Got it, computer control is off now." and no call. A
+// "computer control" request answered in prose is nudged once to call a switch tool, and the
+// retry requires one. A turn that ran one, or didn't ask, is not.
+func TestSwitchRequestAnsweredInProseIsNudged(t *testing.T) {
+	for _, tc := range []struct {
+		said, ran, tool string
+		nudged          bool
+	}{
+		{"turn off computer control", "", toolDisableComputerControl, true},
+		{"Hey Jarvis, enable computer control", "", toolEnableComputerControl, true},
+		{"is computer control on?", toolComputerControlStatus, "", false},
+		{"what's the weather like", "", "", false},
+	} {
+		t.Run(tc.said, func(t *testing.T) {
+			ve, _ := recordingConv(t)
+			if tc.ran != "" {
+				ve.eng.push(nativeCall("call_s0", tc.ran, `{}`))
+			}
+			claim := "Got it, computer control is off now."
+			ve.eng.say(claim)
+			ve.eng.say(claim) // past the must-call retry, when the force guard asks first
+			if tc.nudged {
+				ve.eng.push(nativeCall("call_s1", tc.tool, `{}`))
+				ve.eng.say("Done.")
+			}
+			ve.turn("/api/v0/voice/command", "c1", tc.said, map[string]any{"turn_source": "wake"}).want(200)
+			nudge := -1
+			for i, r := range turnRequests(ve, tc.said) {
+				if lastIsNagIn(r, nagSwitchNotRun) {
+					nudge = i
+					if r["tool_choice"] != "required" {
+						t.Errorf("the retry after the nudge: tool_choice %v", r["tool_choice"])
+					}
+				}
+			}
+			if (nudge >= 0) != tc.nudged {
+				t.Fatalf("nudged at request %d, want nudged %v", nudge, tc.nudged)
+			}
+		})
+	}
+}

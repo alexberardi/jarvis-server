@@ -90,6 +90,8 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 		return notStoppedRetry
 	case recordingNotRunNag(conv, utterance, msgs) != "":
 		return recordingNotRunNag(conv, utterance, msgs)
+	case switchNotRunNag(conv, utterance, msgs) != "":
+		return switchNotRunRetry
 	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool):
 		if words := tf.TypeAfterOpenWords(utterance); words != "" {
 			return fmt.Sprintf(unfinishedTypeFormat, words)
@@ -119,5 +121,5 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 func isFollowThroughNag(m chatMsg) bool {
 	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
 		isNag(m, nagNotCancelled) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) || isNag(m, nagRecordingNotRun) ||
-		isNag(m, nagAnswerAfterTool)
+		isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool)
 }

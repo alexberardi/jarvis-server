@@ -553,12 +553,13 @@ func acceptedAck(results []chatMsg) (string, bool) {
 }
 
 // callNowNag reports a nudge that names the one call the request still needs (remember, recall,
-// the typing, cancel_watch, stop_recording while recording): the retry after it requires a tool
-// call. The 9B answered "[NOT_SAVED] … Call remember now" with "Got it, your parking spot is
-// B12." again (#435). The must-call retry and the other nudges allow an answer, so stay auto.
+// the typing, cancel_watch, stop_recording while recording, a computer control switch tool): the
+// retry after it requires a tool call. The 9B answered "[NOT_SAVED] … Call remember now" with
+// "Got it, your parking spot is B12." again (#435). The must-call retry and the other nudges
+// allow an answer, so stay auto.
 func callNowNag(m chatMsg) bool {
 	return isNag(m, nagUnsaved) || isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNotCancelled) ||
-		isNag(m, nagStopRecording) || isNag(m, nagRecordingNotRun)
+		isNag(m, nagStopRecording) || isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun)
 }
 
 // nagAnswerAfterTool asks for the answer when the model called not_for_me after a tool ran in
