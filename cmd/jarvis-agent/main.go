@@ -1025,6 +1025,11 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	closeAll := func() {}
 	var bt *browser.Tools
 	if !*f.noBrowser {
+		if exe, err := agentExe(); err == nil {
+			if benv, err := browserEnv(); err == nil {
+				refreshBrowserHosts(benv, exe, log)
+			}
+		}
 		hub, stopBrowser := startBrowser(ctx, log)
 		bt = browser.NewTools(hub)
 		bt.Confirm = dt.Confirm

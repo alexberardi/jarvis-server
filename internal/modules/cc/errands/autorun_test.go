@@ -206,7 +206,7 @@ func TestAutorunStepCap(t *testing.T) {
 	}
 	e.llm.say("plan", planJSON("Four things", step("get_weather", "Weather", ""), step("get_news", "News", ""),
 		step("remember", "Remember", `{"content": "x"}`), step("quick_search", "Search", `{"query": "x"}`)))
-	p := e.draft("four things", ptr(7), menu)
+	p := e.draft("weather, news, remember x, search x", ptr(7), menu)
 	if titles := e.cards.titles(); len(titles) != 1 || titles[0] != planTitlePrefix+"Four things" || p.State != "draft" {
 		t.Fatalf("cards = %v, plan %+v", titles, p)
 	}

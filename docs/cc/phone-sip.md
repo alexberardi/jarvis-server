@@ -139,6 +139,32 @@ No carrier, no PSTN, no PBX of our own to maintain. Everything below is disposab
 | **L4 in the product** | Self-tests and diagnostics (§6) | That the *user's* PBX works, without us touching it | Every install that turns SIP on |
 | **L5 field beta** | The requesting user, with SIP marked experimental | Real carrier, real PBX | After 2 |
 
+**L1 as built** (2026-10-21; choices in
+[../decisions/2026-10-21-sip-l1-lane.md](../decisions/2026-10-21-sip-l1-lane.md)):
+
+```sh
+scripts/sandbox up --name N --voice --sip      # sandbox + TTS/CPU whisper + the lane
+go run ./tools/siplane --sandbox N [--filter RE] [--out DIR] [--list]
+scripts/sip-lane status|cli|unban --name N      # registrations, `pjsip show endpoint 100`, lift a ban
+scripts/sandbox down --name N --purge           # removes the lane's containers too
+```
+
+- `test/sip/asterisk/`: the PBX image (Asterisk 22 by digest + core prompts) and its
+  `pjsip.conf` (100 = Jarvis, 101 = Alice, `carrier` trunk; FreePBX 17's generated defaults,
+  kept by `TestLaneCopiesFreePBXDefaults`), `extensions.conf` (the behaviours below) and
+  `lane-firewall` (3 failed authentications → banned, 403). Bound to 127.0.0.1; SIP 5060 and
+  RTP 20000–20199 plus the sandbox's offset.
+- `test/sip/farend/`: baresip (WAV in, WAV out, driven over `ctrl_tcp`), SIPp, sox.
+  `test/sip/sipp/`: the signalling-only scenarios.
+- `tools/siplane`: 14 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
+  an internal call, the inbound route (DID 5551230000 → 100), the outbound route (→ carrier),
+  ring group 600 (DID 5551230600), call waiting, busy with call waiting off (486), trunk busy
+  (486, SIPp), no answer (183 + 503, SIPp), all trunks busy (200 + recording), a second contact
+  refused (max_contacts=1), wrong password ×3 → ban. Audio is checked both ways: each far end's
+  recording is transcribed by the sandbox's CPU whisper, max WER 0.25.
+- CI: `.github/workflows/sip-lane.yml` on changes to `phone/**` or the lane, nightly, and by hand.
+- Until the SIP provider exists (step 2) a baresip stand-in registers as 100.
+
 No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio account could front
 the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depends on it.
 

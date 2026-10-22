@@ -1,0 +1,41 @@
+[
+  {
+    "name": "errands (#452): find me … with prices is a short lookup, not a deep_research report",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "find me the best espresso machines under 500 dollars with their prices",
+       "expect": {"any_tool": ["run_errand", "quick_search"], "not_tool": ["deep_research", "remember"],
+                  "not_reply": "(?i)saved|not sure who|turned off"}}
+    ]
+  },
+  {
+    "name": "errands (#452): what are the best … and what do they cost is a short lookup",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "what are the best espresso machines under 500 dollars and how much do they cost",
+       "expect": {"any_tool": ["run_errand", "quick_search"], "not_tool": ["deep_research", "remember"],
+                  "not_reply": "(?i)saved|not sure who|turned off"}}
+    ]
+  },
+  {
+    "name": "errands (#452): run an errand to find … with prices plans an errand whose goal keeps the prices",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "run an errand to find the three best espresso machines under 500 dollars with their prices",
+       "expect": {"server_tool": "run_errand", "args_match": {"goal": "(?i)price"},
+                  "not_tool": ["deep_research", "remember"]}}
+    ]
+  },
+  {
+    "name": "errands (#452): research … in depth may stay deep_research",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "research espresso machines under 500 dollars in depth",
+       "expect": {"any_tool": ["deep_research", "run_errand", "quick_search"], "not_tool": ["remember"]}}
+    ]
+  }
+]
