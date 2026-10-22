@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -318,6 +319,72 @@ func TestRelease(t *testing.T) {
 			t.Errorf("disconnect before remove: %v", calls)
 		}
 	})
+}
+
+// logRecorder keeps the records a Node logs at Info and above, as "LEVEL msg".
+type logRecorder struct {
+	mu   sync.Mutex
+	recs []string
+}
+
+func (l *logRecorder) Enabled(_ context.Context, lv slog.Level) bool { return lv >= slog.LevelInfo }
+func (l *logRecorder) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.recs = append(l.recs, r.Level.String()+" "+r.Message)
+	return nil
+}
+func (l *logRecorder) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *logRecorder) WithGroup(string) slog.Handler      { return l }
+func (l *logRecorder) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.recs)
+}
+
+func TestForgetIsIdempotent(t *testing.T) {
+	n, bus, _, api := rig(t)
+	logs := &logRecorder{}
+	n.Log = slog.New(logs)
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+	send(t, n, api, TopicRelease, map[string]any{"mac_address": speaker, "forget": true})
+	send(t, n, api, TopicRelease, map[string]any{"mac_address": speaker, "forget": true}) // BlueZ no longer knows it
+	// The app may still send its auto-connect switch for it.
+	send(t, n, api, TopicAutoConnect, map[string]any{"mac_address": speaker, "enabled": true})
+
+	if bus.devices[speaker] != nil {
+		t.Fatal("still known to BlueZ")
+	}
+	if _, ok := n.Store.Get(speaker); ok {
+		t.Fatal("record kept")
+	}
+	var forgotten int
+	for _, r := range logs.all() {
+		if strings.HasPrefix(r, "WARN") || strings.HasPrefix(r, "ERROR") {
+			t.Errorf("a repeated forget logged %q", r)
+		}
+		if r == "INFO bluetooth: device forgotten" {
+			forgotten++
+		}
+	}
+	if forgotten != 2 {
+		t.Errorf("forgotten logged %d times: %v", forgotten, logs.all())
+	}
+}
+
+func TestAFailedRemoveIsNotForgotten(t *testing.T) {
+	n, bus, _, api := rig(t)
+	logs := &logRecorder{}
+	n.Log = slog.New(logs)
+	bus.inRange[speaker] = speakerDev()
+	send(t, n, api, TopicPair, map[string]any{"request_id": "p1", "mac_address": speaker})
+	bus.removeErr = BlueZError{Name: "org.bluez.Error.Failed", Message: "Operation failed"}
+	send(t, n, api, TopicRelease, map[string]any{"mac_address": speaker, "forget": true})
+	got := logs.all()
+	if slices.Contains(got, "INFO bluetooth: device forgotten") || !slices.Contains(got, "WARN bluetooth: remove failed") {
+		t.Fatalf("logs %v", got)
+	}
 }
 
 func TestAutoConnectSwitch(t *testing.T) {

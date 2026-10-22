@@ -19,6 +19,7 @@ type fakeBus struct {
 	inRange      map[string]Device
 	pairErr      map[string]error
 	connectErr   map[string]error
+	removeErr    error
 	discovering  []string // transports, in order
 	calls        []string
 	agentCount   int
@@ -110,6 +111,9 @@ func (b *fakeBus) Remove(_ context.Context, mac string) error {
 	b.call("Remove", mac)
 	if _, err := b.get(mac); err != nil {
 		return err
+	}
+	if b.removeErr != nil {
+		return b.removeErr
 	}
 	delete(b.devices, mac)
 	return nil

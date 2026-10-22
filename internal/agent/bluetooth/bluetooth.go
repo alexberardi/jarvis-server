@@ -605,15 +605,21 @@ func (n *Node) release(ctx context.Context, mac string, forget bool) {
 	n.unrouteAudio(ctx, mac)
 	_ = n.Bus.Disconnect(ctx, mac)
 	if forget {
-		if err := n.Bus.Remove(ctx, mac); err != nil {
+		// Idempotent: a device BlueZ no longer knows is already forgotten there.
+		ok := true
+		if err := n.Bus.Remove(ctx, mac); err != nil && !errors.Is(err, ErrUnknownDevice) {
 			n.log().Warn("bluetooth: remove failed", "mac", mac, "err", err)
+			ok = false
 		}
 		if n.Store != nil {
 			if err := n.Store.Delete(mac); err != nil {
 				n.log().Warn("bluetooth: record not deleted", "mac", mac, "err", err)
+				ok = false
 			}
 		}
-		n.log().Info("bluetooth: device forgotten", "mac", mac)
+		if ok {
+			n.log().Info("bluetooth: device forgotten", "mac", mac)
+		}
 		return
 	}
 	if n.Store != nil {
@@ -633,7 +639,8 @@ func (n *Node) setAutoConnect(mac string, on bool) {
 	case err != nil:
 		n.log().Error("bluetooth: auto_connect not saved", "mac", mac, "err", err)
 	case !found:
-		n.log().Warn("bluetooth: auto_connect for a device this node never paired", "mac", mac)
+		// The app's switch for a device forgotten (or paired by another node) a moment ago.
+		n.log().Debug("bluetooth: auto_connect for a device this node has no record of", "mac", mac)
 	default:
 		n.log().Info("bluetooth: auto_connect set", "mac", mac, "enabled", on)
 	}
