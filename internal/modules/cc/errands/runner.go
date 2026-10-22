@@ -680,7 +680,8 @@ func ComposePrompt(goal string, results []Result) string {
 		"a reminder'). Do not imply a conditional follow-up happened just because its " +
 		"condition was met. EXCEPTION: asking for the result to be sent, told or summarized " +
 		"to the user themselves ('send me a summary', 'let me know') is NOT an undone " +
-		"action: this report is how they get it, so never say it was not sent. No " +
+		"action: this report is how they get it, so never say it was not sent; saving or noting " +
+		"the result is not sending it either. No " +
 		"preamble, no markdown (plain lines only)."
 }
 
