@@ -6,6 +6,60 @@
       "reply": "12 times 7 is 84."
     },
     {
+      "match": "(?i)set a timer for 10 minutes",
+      "tool_calls": [{"name": "set_timer", "arguments": {"duration_seconds": 600, "label": "tea"}}]
+    },
+    {
+      "after_tool": "set_timer",
+      "match": "(?i)\"success\":\\s*true",
+      "reply": "Your 10 minute tea timer is set."
+    },
+    {
+      "after_tool": "set_timer",
+      "match": "\"offline\":\\s*true",
+      "reply": "Your node is offline, so the timer was not set."
+    },
+    {
+      "after_tool": "set_timer",
+      "reply": "Sorry, the timer was not set."
+    },
+    {
+      "match": "(?i)add oat milk to the shopping list",
+      "tool_calls": [{"name": "shopping_list", "arguments": {"action": "add", "items": ["oat milk"]}}]
+    },
+    {
+      "after_tool": "shopping_list",
+      "match": "(?i)\"success\":\\s*true",
+      "reply": "Added oat milk to the shopping list."
+    },
+    {
+      "after_tool": "shopping_list",
+      "match": "\"offline\":\\s*true",
+      "reply": "Your node is offline, so oat milk was not added."
+    },
+    {
+      "after_tool": "shopping_list",
+      "reply": "Sorry, oat milk was not added to the list."
+    },
+    {
+      "match": "(?i)turn on the kitchen ceiling light",
+      "tool_calls": [{"name": "control_device", "arguments": {"device_name": "Kitchen Ceiling", "entity_id": "light.kitchen_ceiling", "action": "turn_on"}}]
+    },
+    {
+      "after_tool": "control_device",
+      "match": "(?i)\"success\":\\s*true",
+      "reply": "The kitchen ceiling light is on."
+    },
+    {
+      "after_tool": "control_device",
+      "match": "\"offline\":\\s*true",
+      "reply": "Your node is offline, so the kitchen ceiling light was not switched."
+    },
+    {
+      "after_tool": "control_device",
+      "reply": "Sorry, the kitchen ceiling light did not respond."
+    },
+    {
       "match": "(?i)\\b(hello|hi|hey)\\b",
       "reply": "Hello from the scripted model."
     }

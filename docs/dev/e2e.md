@@ -217,7 +217,9 @@ process per flow on a headless harness emulator (the AVD, APK and adb reverse of
 `scripts/mobile-shot`, shared in `scripts/lib/mobile.sh`), logged in to the run's rich sandbox.
 Why, and the contract the flows follow (which files run, the `skip` tag and
 `properties.skip_reason`, the `-e` variables `EMAIL`, `PASSWORD`, `EMAIL_ADMIN`/`_POWER`/`_MEMBER`,
-`CHAT_MESSAGE`/`CHAT_REPLY`): [`../decisions/2026-10-18-e2e-mobile-runner.md`](../decisions/2026-10-18-e2e-mobile-runner.md).
+`CHAT_MESSAGE`/`CHAT_REPLY`, the tool turns `TIMER_`/`LIST_`/`DEVICE_MESSAGE` with their
+`_REPLY`/`_REPLY_OFFLINE`, and the seeded inbox's `INBOX_*`):
+[`../decisions/2026-10-18-e2e-mobile-runner.md`](../decisions/2026-10-18-e2e-mobile-runner.md).
 
 - Needs what `scripts/mobile-shot` needs (Linux, KVM, the Android SDK, mise for the APK build)
   plus Java 17+ for Maestro, which the first run installs into
@@ -225,7 +227,18 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
 - The flows and the APK come from one commit: `origin/main` of `$JARVIS_MOBILE_REPO` (default
   `../jarvis-node-mobile` next to the main checkout), or the `HEAD` of `--mobile-repo PATH`.
   Commit flow changes before running them; uncommitted edits are not picked up.
-- During the suite the scripted model answers from `e2e/llm/mobile.json`.
+- During the suite the scripted model answers from `e2e/llm/mobile.json`. Its tool turns
+  (a timer, a shopping-list add, `control_device` on the seeded Kitchen Ceiling light) are node
+  tools, and nothing runs the seeded node in a sandbox, so cc answers each call "the node is
+  offline" and a flow sees `*_REPLY_OFFLINE`: proof the call left the model and reached the
+  node's dispatch, not that a timer ran.
+- The superuser's inbox (seeded by `scripts/seed-dev.py`, rich profile) has one item per screen
+  the app opens one with: `INBOX_DETAIL_TITLE` (InboxDetail: a markdown body with sources),
+  `INBOX_ACTIONS_TITLE` (InboxDetail with server-plane buttons: `INBOX_ACTIONS_BUTTON` opens
+  InboxCallbackResult with `INBOX_ACTIONS_RESULT` and records a suppression for
+  SuppressedSuggestions), `INBOX_LIST_TITLE` (InteractiveList) and `INBOX_DEPLOYED_TITLE`
+  (AdapterDeployed). No AdapterProposal item: that screen needs an adapters API jarvisd does not
+  serve. A flow that reads, deletes or taps one changes it for the flows after it in the run.
 - adb transport drops: the harness emulator's adb connection can drop (adb's log:
   `emulator-5580: connection terminated: read failed`), and every drop wipes all the adb reverse
   tunnels and kills Maestro's on-device driver. So before every flow (and the real push lane)
