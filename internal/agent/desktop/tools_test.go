@@ -18,6 +18,7 @@ type fakeBackend struct {
 	opened   []string
 	launched []string
 	actions  []string
+	windows  []host.Window // nil: one editor window
 }
 
 func (f *fakeBackend) Platform() string                           { return "linux" }
@@ -25,6 +26,9 @@ func (f *fakeBackend) Capabilities(context.Context) []string      { return f.cap
 func (f *fakeBackend) GetVolume(context.Context) (int, error)     { return f.volume, nil }
 func (f *fakeBackend) ApplyVolume(_ context.Context, l int) error { f.volume = l; return nil }
 func (f *fakeBackend) ListWindows(context.Context) ([]host.Window, error) {
+	if f.windows != nil {
+		return f.windows, nil
+	}
 	return []host.Window{{ID: "0x1", Title: "Doc", App: "editor"}}, nil
 }
 func (f *fakeBackend) MinimizeWindow(_ context.Context, id string) error { return f.act("min " + id) }
@@ -202,6 +206,59 @@ func TestWindowToolsPassIDsThrough(t *testing.T) {
 	}
 	if _, ok := ts.Call(context.Background(), "nope", nil, node.Request{}); ok {
 		t.Fatal("unknown tool handled")
+	}
+}
+
+// The model often guesses an id from the app's name ("text-edit-window", "terminal-1", #419):
+// a name resolves against the window list, so one turn does it.
+func TestWindowToolsResolveNames(t *testing.T) {
+	ws := []host.Window{
+		{ID: "33410/1", Title: "alex — zsh", App: "Terminal"},
+		{ID: "643/1", Title: "Untitled", App: "TextEdit"},
+		{ID: "77/1", Title: "Inbox", App: "Mail", Minimized: true},
+	}
+	for _, c := range []struct{ tool, id, want string }{
+		{ToolFocus, "text-edit-window", "focus 643/1"},
+		{ToolFocus, "TextEdit", "focus 643/1"},
+		{ToolFocus, "the TextEdit window", "focus 643/1"},
+		{ToolClose, "terminal-1", "close 33410/1"},
+		{ToolClose, "the terminal", "close 33410/1"},
+		{ToolMinimize, "zsh", "min 33410/1"},
+		{ToolFocus, "mail", "focus 77/1"},
+		{ToolFocus, "643/1", "focus 643/1"},
+	} {
+		b := &fakeBackend{caps: all, windows: ws}
+		out := call(t, New(host.New(b), OpenPolicy{}, catalogue), c.tool, map[string]any{"window_id": c.id})
+		if out["success"] != true || strings.Join(b.actions, ";") != c.want {
+			t.Errorf("%s %q: got %v, actions %v; want %s", c.tool, c.id, out, b.actions, c.want)
+		}
+		if c.id != "643/1" && out["matched_window"] == nil {
+			t.Errorf("%s %q: no matched_window in %v", c.tool, c.id, out)
+		}
+	}
+}
+
+func TestWindowToolsAmbiguousOrUnknownNameListsWindows(t *testing.T) {
+	ws := []host.Window{
+		{ID: "1/1", Title: "build", App: "Terminal"},
+		{ID: "1/2", Title: "logs", App: "Terminal"},
+		{ID: "2/1", Title: "Untitled", App: "TextEdit"},
+	}
+	b := &fakeBackend{caps: all, windows: ws}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	out := call(t, ts, ToolClose, map[string]any{"window_id": "terminal"})
+	if out["success"] != false || out["error_code"] != "ambiguous_window" || len(out["candidates"].([]string)) != 2 {
+		t.Fatalf("ambiguous: %v", out)
+	}
+	out = call(t, ts, ToolFocus, map[string]any{"window_id": "spotify-window"})
+	if out["success"] != false || out["error_code"] != "window_not_found" {
+		t.Fatalf("unknown: %v", out)
+	}
+	if got, _ := out["windows"].([]host.Window); len(got) != 3 {
+		t.Fatalf("not found should list the windows to retry with: %v", out)
+	}
+	if len(b.actions) != 0 {
+		t.Fatalf("acted on a guess: %v", b.actions)
 	}
 }
 
