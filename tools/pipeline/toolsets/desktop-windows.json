@@ -402,7 +402,7 @@
       "parameters": {
         "properties": {
           "app": {
-            "description": "The app the user named ('in slack', 'into X'); always set when named",
+            "description": "The app the user named ('in slack', 'into X'), as said, even one you don't know; never in text",
             "type": "string"
           },
           "submit": {
@@ -475,7 +475,7 @@
       "parameters": {
         "properties": {
           "app": {
-            "description": "The app the user named ('in slack', 'into X'); always set when named",
+            "description": "The app the user named ('in slack', 'into X'), as said, even one you don't know; never in text",
             "type": "string"
           },
           "key": {

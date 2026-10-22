@@ -957,3 +957,14 @@ func TestForOS(t *testing.T) {
 		t.Error("unknown OS accepted")
 	}
 }
+
+// The prompt diet cut the app parameter to "always set when named", and the 9B put an app it
+// didn't know into the text ("type buy more coffee filters into omawrite" → text "… into
+// omawrite", no app; #435). The boundary stays.
+func TestTypeAppParamKeepsUnknownApps(t *testing.T) {
+	for _, w := range []string{"even one you don't know", "never in text"} {
+		if !strings.Contains(appParam.Description, w) {
+			t.Errorf("app description %q lacks %q", appParam.Description, w)
+		}
+	}
+}

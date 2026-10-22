@@ -133,8 +133,6 @@ func TestWakeGreetingIsPrefetchedAndPlayedInsteadOfTheChime(t *testing.T) {
 func TestWakeGreetingIsNotInTheCommand(t *testing.T) {
 	for _, greeting := range []bool{true, false} {
 		mic := script(rep(noise, 40))
-		// The 8 command chunks after the chime must outlast the pipeline taking the pre-roll
-		// (a slow CI runner stalled it past 2 ms a chunk), as in TestSpeechUnderTheChimeIsKept.
 		mic.pace = 5 * time.Millisecond
 		r, srv := newGreetRig(t, mic, "Mhm?")
 		r.p.lockstep = false // a real microphone: it keeps capturing while the greeting plays
@@ -163,7 +161,9 @@ func TestWakeGreetingIsNotInTheCommand(t *testing.T) {
 		}
 		mic.mu.Lock()
 		base = mic.reads
-		mic.chunks = append(mic.chunks, slices.Concat(rep(wake, 3), rep(speech, 13))...)
+		// Enough speech that a slow runner, still reading the mic between the drain and the
+		// pre-roll, cannot run past it into the room before the chunks checked below.
+		mic.chunks = append(mic.chunks, slices.Concat(rep(wake, 3), rep(speech, 40))...)
 		mic.mu.Unlock()
 		tr := r.turn(t)
 		_ = stop()
