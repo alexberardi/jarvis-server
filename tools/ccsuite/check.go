@@ -50,6 +50,11 @@ type SitesState struct {
 		ID     string            `json:"id"`
 		Fields map[string]string `json:"fields"`
 	} `json:"forms"`
+	MenuCart []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Qty  int    `json:"qty"`
+	} `json:"menu_cart"`
 }
 
 // Doc is a file in the agent's ~/Documents/Jarvis: its path there and its text (a spreadsheet's
@@ -103,6 +108,16 @@ func (ch Check) Eval(st *State) string {
 			}
 		}
 		return fmt.Sprintf("no order with an item matching %q%s (orders: %s)", ch.Product, maxTotal(ch.MaxTotal), orders(st))
+	case "in_cart":
+		re := regexp.MustCompile(ch.Product)
+		var got []string
+		for _, it := range st.Sites.MenuCart {
+			if re.MatchString(it.ID) || re.MatchString(it.Name) {
+				return ""
+			}
+			got = append(got, fmt.Sprintf("%s x%d", it.ID, it.Qty))
+		}
+		return fmt.Sprintf("no item matching %q in the menu cart (cart: %s)", ch.Product, list(got))
 	case "no_order":
 		if len(st.Sites.Orders) == 0 {
 			return ""

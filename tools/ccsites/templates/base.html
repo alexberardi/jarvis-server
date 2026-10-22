@@ -35,6 +35,7 @@ fieldset label { display: inline; font-weight: 400; margin-right: 12px; }
 <a href="{{.U "/store/cart"}}">Cart</a></header>
 {{else if eq .Site "bank"}}<header><a class="brand" href="{{.U "/bank/statements"}}">Test Bank</a><a href="{{.U "/bank/statements"}}">Statements</a></header>
 {{else if eq .Site "card"}}<header><a class="brand" href="{{.U "/card/statements"}}">Test Card Services</a><a href="{{.U "/card/statements"}}">Statements</a></header>
+{{else if eq .Site "menu"}}<header><a class="brand" href="/menu/">Smoke &amp; Oak BBQ</a><a href="/menu/">Order online</a><a href="/menu/#catering">Catering</a><a href="/menu/#gift-cards">Gift cards</a><a href="/menu/#rewards">Rewards</a><a href="/menu/#sign-in">Sign in</a><a href="/menu/cart">Cart ({{.D.Count}})</a></header>
 {{else if eq .Site "form"}}<header><a class="brand" href="/form/">Springfield Community Gardens</a></header>
 {{else}}<header><span class="brand">Fixture sites</span></header>{{end}}
 <main>

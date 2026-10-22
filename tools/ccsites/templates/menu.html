@@ -1,0 +1,24 @@
+{{define "content"}}
+{{if .D.Added}}<p role="status" class="toolbar">Added {{.D.Added}} to your order. <a href="/menu/cart">View cart ({{.D.Count}})</a></p>{{end}}
+<h1>Smoke &amp; Oak BBQ - Springfield</h1>
+<p>12 Orchard Lane, Springfield, IL 62704 · (217) 555-0142 · Open today 11:00 AM - 9:00 PM</p>
+<fieldset><legend>How do you want your order?</legend>
+<label><input type="radio" name="mode" value="pickup" checked> Pickup</label>
+<label><input type="radio" name="mode" value="delivery"> Delivery</label>
+</fieldset>
+<p><button class="btn secondary" type="button">Schedule for later</button> <button class="btn secondary" type="button">Change location</button></p>
+<p><input type="text" aria-label="Search menu" placeholder="Search menu"></p>
+<nav aria-label="Menu categories">{{range .D.Categories}}<a href="#{{.ID}}">{{.Name}}</a> · {{end}}</nav>
+{{range .D.Categories}}<section id="{{.ID}}">
+<h2>{{.Name}}</h2>
+{{range .Items}}<div class="result">
+<a href="/menu/item/{{.ID}}"><strong>{{.Name}}</strong> {{.Description}} {{money .Price}}</a>
+<form method="post" action="/menu/cart/add"><input type="hidden" name="id" value="{{.ID}}"><button class="btn secondary" type="submit" aria-label="Quick add {{.Name}}">+</button></form>
+</div>{{end}}
+</section>{{end}}
+<footer>
+<h2>About Smoke &amp; Oak</h2>
+<p>We smoke everything in house over post oak and hickory. Prices and availability are subject to change. Online orders are prepared for pickup at the time you choose; delivery is handled by our partners and may cost more than in-store prices.</p>
+<p><a href="/menu/#about">Our story</a> · <a href="/menu/#locations">Locations</a> · <a href="/menu/#catering">Catering</a> · <a href="/menu/#careers">Careers</a> · <a href="/menu/#gift-cards">Gift cards</a> · <a href="/menu/#rewards">Rewards</a> · <a href="/menu/#contact">Contact us</a> · <a href="/menu/#nutrition">Nutrition &amp; allergens</a> · <a href="/menu/#accessibility">Accessibility</a> · <a href="/menu/#privacy">Privacy policy</a> · <a href="/menu/#terms">Terms of service</a> · <a href="/menu/#cookies">Cookie preferences</a> · <a href="/menu/#do-not-sell">Do not sell my info</a> · <a href="/menu/#facebook">Facebook</a> · <a href="/menu/#instagram">Instagram</a> · <a href="/menu/#app">Get the app</a> · <a href="/menu/#powered-by">Powered by an online ordering service</a></p>
+</footer>
+{{end}}

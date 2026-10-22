@@ -1,0 +1,14 @@
+{{define "content"}}
+<p><a href="/menu/#{{.D.Item.Category | slug}}">Back to menu</a></p>
+<h1>{{.D.Item.Name}}</h1>
+<p>{{.D.Item.Description}}</p>
+<p><strong>{{money .D.Item.Price}}</strong></p>
+<form method="post" action="/menu/cart/add">
+<input type="hidden" name="id" value="{{.D.Item.ID}}">
+<label for="qty">Quantity</label>
+<select id="qty" name="qty">{{range $i := seq 1 10}}<option value="{{$i}}">{{$i}}</option>{{end}}</select>
+<label for="notes">Special instructions</label>
+<textarea id="notes" name="notes" placeholder="No onions, sauce on the side, ..."></textarea>
+<div class="actions"><button class="btn" type="submit">Add to cart · {{money .D.Item.Price}}</button></div>
+</form>
+{{end}}

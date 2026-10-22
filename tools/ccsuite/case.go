@@ -65,6 +65,8 @@ type Check struct {
 	// at most MaxTotal when set.
 	Product  string  `json:"product,omitempty"`
 	MaxTotal float64 `json:"max_total,omitempty"`
+	// in_cart: the menu site's guest cart (tools/ccsites menu.go) has an item whose id or name
+	// matches Product.
 	// download: a statement downloaded from Site (bank, card) for Month (YYYY-MM, optional).
 	Site  string `json:"site,omitempty"`
 	Month string `json:"month,omitempty"`
@@ -88,6 +90,7 @@ var (
 	checkKinds = map[string]string{
 		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains",
 		"form_submitted": "fields", "note_exists": "title", "reply_matches": "pattern", "asked": "", "refused": "",
+		"in_cart": "product",
 	}
 	loginSites = []string{"store", "bank", "card"}
 	answerWhen = []string{"confirm", "plan"}
@@ -182,6 +185,8 @@ func (ch Check) Validate() error {
 		missing = ch.Title == ""
 	case "pattern":
 		missing = ch.Pattern == ""
+	case "product":
+		missing = ch.Product == ""
 	}
 	if missing {
 		return fmt.Errorf("%s needs %s", ch.Kind, need)

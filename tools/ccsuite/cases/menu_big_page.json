@@ -1,0 +1,12 @@
+{
+  "name": "menu_big_page",
+  "about": "A big restaurant ordering page in the shape of a Toast menu (#485: the errand failed on toasttab.com with 'The model's answers couldn't be read'): about 400 elements, so the snapshot is at its 300 cap, and long page text. Add the pulled pork sandwich (not the platter, nachos or pulled chicken) to the guest cart; nothing to confirm.",
+  "phase": "browser",
+  "status": "required",
+  "say": "Open the Smoke and Oak BBQ ordering page at {{sites}}/menu/ and add a pulled pork sandwich to the cart.",
+  "target": "browser",
+  "checks": [
+    {"kind": "in_cart", "product": "^pulled-pork-sandwich$"}
+  ],
+  "max_minutes": 10
+}

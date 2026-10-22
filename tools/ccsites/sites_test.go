@@ -474,3 +474,53 @@ func TestControlLayout(t *testing.T) {
 		t.Fatalf("buttons %q after a reset, want %q", after, before)
 	}
 }
+
+// The menu site is big on purpose (#485): close to the agent's 300-element snapshot default with
+// long text; the pulled pork sandwich, among look-alikes, goes into the guest cart.
+func TestMenuSite(t *testing.T) {
+	_, hs := newSites(t, "")
+	c := browser(t)
+	code, _, body := get(t, c, hs.URL+"/menu/")
+	if code != 200 {
+		t.Fatalf("menu: %d", code)
+	}
+	links := strings.Count(body, "<a ") + strings.Count(body, "<button") + strings.Count(body, "<input type=\"radio\"")
+	if links < 300 {
+		t.Errorf("menu page has %d interactive elements, want at least 300 (a snapshot at its cap)", links)
+	}
+	if text := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(body, ""); len(text) < 20000 {
+		t.Errorf("menu page text is %d bytes, want a long page", len(text))
+	}
+	for _, name := range []string{"Pulled Pork Sandwich", "Pulled Pork Platter", "Pulled Pork Nachos", "Pulled Chicken Sandwich"} {
+		if !strings.Contains(body, name) {
+			t.Errorf("menu has no %q", name)
+		}
+	}
+	code, _, body = get(t, c, hs.URL+"/menu/item/"+PulledPorkSandwich)
+	if code != 200 || !strings.Contains(body, "Add to cart · $12.95") {
+		t.Fatalf("item page: %d %q", code, body)
+	}
+	code, h, _ := post(t, c, hs.URL+"/menu/cart/add", url.Values{"id": {PulledPorkSandwich}, "qty": {"1"}})
+	if code != http.StatusSeeOther || h.Get("Location") != "/menu/?added="+PulledPorkSandwich {
+		t.Fatalf("add: %d %q", code, h.Get("Location"))
+	}
+	if _, _, body = get(t, c, hs.URL+"/menu/?added="+PulledPorkSandwich); !strings.Contains(body, "Added Pulled Pork Sandwich to your order") || !strings.Contains(body, "Cart (1)") {
+		t.Error("menu after the add: no banner or cart count")
+	}
+	if _, _, body = get(t, c, hs.URL+"/menu/cart"); !strings.Contains(body, "Pulled Pork Sandwich") {
+		t.Error("cart page lacks the sandwich")
+	}
+	st := state(t, hs.URL)
+	if len(st.MenuCart) != 1 || st.MenuCart[0].ID != PulledPorkSandwich || st.MenuCart[0].Qty != 1 {
+		t.Fatalf("state menu_cart = %+v", st.MenuCart)
+	}
+	post(t, c, hs.URL+"/menu/cart/remove", url.Values{"id": {PulledPorkSandwich}})
+	if st := state(t, hs.URL); len(st.MenuCart) != 0 {
+		t.Fatalf("after remove: %+v", st.MenuCart)
+	}
+	post(t, c, hs.URL+"/menu/cart/add", url.Values{"id": {"pulled-pork-platter"}})
+	post(t, c, hs.URL+"/control/reset", nil)
+	if st := state(t, hs.URL); st.MenuCart == nil || len(st.MenuCart) != 0 {
+		t.Fatalf("after reset: %#v", st.MenuCart)
+	}
+}

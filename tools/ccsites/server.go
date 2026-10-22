@@ -25,6 +25,7 @@ var templateFS embed.FS
 //	/bank/    Test Bank: monthly statements with a CSV download (bank.go)
 //	/card/    Test Card Services: the card's statements, same pages (bank.go)
 //	/form/    a 10-field application form with validation (form.go)
+//	/menu/    Smoke & Oak BBQ: a big restaurant ordering page with a guest cart (menu.go)
 //	/control/ state, reset and login for the suite (control.go)
 //
 // store, bank and card answer 401 with a sign-in page without their session cookie.
@@ -48,6 +49,7 @@ type State struct {
 	Downloads []Download `json:"downloads"`
 	Forms     []FormSub  `json:"forms"`
 	Sessions  []Session  `json:"sessions"`
+	MenuCart  []CartItem `json:"menu_cart"` // the menu site's guest cart (no login)
 }
 
 type Order struct {
@@ -163,6 +165,9 @@ func (st *State) fill() {
 	if st.Sessions == nil {
 		st.Sessions = []Session{}
 	}
+	if st.MenuCart == nil {
+		st.MenuCart = []CartItem{}
+	}
 }
 
 // save writes the state file; the caller holds s.mu.
@@ -185,7 +190,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	case "control":
 		s.control(w, r)
-	case "store", "bank", "card", "form":
+	case "store", "bank", "card", "form", "menu":
 		if path == "/"+site {
 			http.Redirect(w, r, "/"+site+"/", http.StatusFound)
 			return
@@ -205,6 +210,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.bank(w, r, site)
 		case "form":
 			s.form(w, r)
+		case "menu":
+			s.menuSite(w, r)
 		}
 	case "":
 		s.render(w, r, http.StatusOK, "index", "Fixture sites", nil)
@@ -315,6 +322,14 @@ var funcs = template.FuncMap{
 	},
 	"query":   url.QueryEscape,
 	"dollars": dollars,
+	"slug":    slug,
+	"seq": func(a, b int) []int {
+		var s []int
+		for i := a; i <= b; i++ {
+			s = append(s, i)
+		}
+		return s
+	},
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, code int, name, title string, d any) {

@@ -36,7 +36,7 @@ func TestCasesParse(t *testing.T) {
 			t.Errorf("%s: placeholders left in %q", c.Name, c.Message("http://127.0.0.1:1/"))
 		}
 	}
-	want := []string{"blocked_site", "budget_last_month", "injection_stops", "notes_macos", "notes_wlroots", "notes_x11",
+	want := []string{"blocked_site", "budget_last_month", "injection_stops", "menu_big_page", "notes_macos", "notes_wlroots", "notes_x11",
 		"replay_changed_param", "replay_moved_button", "store_order_approve", "store_order_cancel", "web_form"}
 	if !slices.Equal(names, want) {
 		t.Errorf("cases %v, want %v", names, want)
@@ -65,15 +65,16 @@ func TestCasesRejected(t *testing.T) {
 	good := `{"name": "x", "phase": "browser", "status": "pending", "say": "hi", "target": "browser",
 	  "setup": {"login": ["store"]}, "answers": [], "checks": [CHECK], "max_minutes": 5}`
 	for name, tc := range map[string]struct{ file, body, want string }{
-		"unknown kind":   {"x", strings.Replace(good, "CHECK", `{"kind": "teleported"}`, 1), `kind "teleported"`},
-		"missing field":  {"x", strings.Replace(good, "CHECK", `{"kind": "note_exists"}`, 1), "note_exists needs title"},
-		"bad regexp":     {"x", strings.Replace(good, "CHECK", `{"kind": "reply_matches", "pattern": "("}`, 1), "missing closing"},
-		"bad month":      {"x", strings.Replace(good, "CHECK", `{"kind": "download", "site": "bank", "month": "Sept"}`, 1), "YYYY-MM"},
-		"unknown field":  {"x", strings.Replace(good, "CHECK", `{"kind": "no_order", "colour": "red"}`, 1), "unknown field"},
-		"name vs file":   {"y", strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), "not the file's name"},
-		"bad phase":      {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `"browser", "status"`, `"web", "status"`, 1), `phase "web"`},
-		"bad login site": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]`, `["shop"]`, 1), `setup.login "shop"`},
-		"bad block site": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "block": ["http://x/"]}`, 1), `setup.block "http://x/"`},
+		"unknown kind":            {"x", strings.Replace(good, "CHECK", `{"kind": "teleported"}`, 1), `kind "teleported"`},
+		"missing field":           {"x", strings.Replace(good, "CHECK", `{"kind": "note_exists"}`, 1), "note_exists needs title"},
+		"in_cart needs a product": {"x", strings.Replace(good, "CHECK", `{"kind": "in_cart"}`, 1), "in_cart needs product"},
+		"bad regexp":              {"x", strings.Replace(good, "CHECK", `{"kind": "reply_matches", "pattern": "("}`, 1), "missing closing"},
+		"bad month":               {"x", strings.Replace(good, "CHECK", `{"kind": "download", "site": "bank", "month": "Sept"}`, 1), "YYYY-MM"},
+		"unknown field":           {"x", strings.Replace(good, "CHECK", `{"kind": "no_order", "colour": "red"}`, 1), "unknown field"},
+		"name vs file":            {"y", strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), "not the file's name"},
+		"bad phase":               {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `"browser", "status"`, `"web", "status"`, 1), `phase "web"`},
+		"bad login site":          {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]`, `["shop"]`, 1), `setup.login "shop"`},
+		"bad block site":          {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "block": ["http://x/"]}`, 1), `setup.block "http://x/"`},
 		"bad demonstration": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "demonstrate": "bank_upload"}`, 1),
 			`setup.demonstrate "bank_upload": one of bank_download`},
 		"demonstration on the desktop": {"x", strings.Replace(strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1),

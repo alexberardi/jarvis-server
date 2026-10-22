@@ -20,7 +20,8 @@ const sitesJSON = `{
   "downloads": [{"site": "bank", "month": "2026-09", "filename": "statement-2026-09.csv", "rows": 40},
     {"site": "card", "month": "2026-08", "filename": "statement-2026-08.csv", "rows": 40}],
   "forms": [{"id": "GP-0001", "fields": {"full_name": "Avery Test ", "email": "AVERY@example.com", "plan": "standard"}}],
-  "sessions": [{"site": "store", "token": "t"}]
+  "sessions": [{"site": "store", "token": "t"}],
+  "menu_cart": [{"id": "pulled-pork-sandwich", "name": "Pulled Pork Sandwich", "price": 12.95, "qty": 1}]
 }`
 
 // xlsx writes a minimal spreadsheet: shared strings and one sheet with an inline string and a
@@ -86,6 +87,10 @@ func TestChecks(t *testing.T) {
 		{"order_placed by name", Check{Kind: "order_placed", Product: "(?i)pulse active"}, &st, ""},
 		{"order_placed over budget", Check{Kind: "order_placed", Product: "pulse", MaxTotal: 200}, &st, "at most $200.00"},
 		{"order_placed other product", Check{Kind: "order_placed", Product: "nova-edge-pro"}, &st, "TS-1001 pulse-active-2 $249.00"},
+		{"in_cart", Check{Kind: "in_cart", Product: "^pulled-pork-sandwich$"}, &st, ""},
+		{"in_cart by name", Check{Kind: "in_cart", Product: "(?i)pulled pork sandwich"}, &st, ""},
+		{"in_cart other item", Check{Kind: "in_cart", Product: "^pulled-pork-platter$"}, &st, "cart: pulled-pork-sandwich x1"},
+		{"in_cart none", Check{Kind: "in_cart", Product: "x"}, &empty, "cart: none"},
 		{"order_placed none", Check{Kind: "order_placed", Product: "x"}, &empty, "orders: none"},
 		{"no_order", Check{Kind: "no_order"}, &empty, ""},
 		{"no_order fails", Check{Kind: "no_order"}, &st, "an order was placed: TS-1001"},

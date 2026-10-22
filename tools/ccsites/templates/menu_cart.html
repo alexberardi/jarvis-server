@@ -1,0 +1,10 @@
+{{define "content"}}
+<h1>Your order</h1>
+{{if .D.Cart}}<table>
+<tr><th>Item</th><th class="num">Price</th><th class="num">Qty</th><th></th></tr>
+{{range .D.Cart}}<tr><td>{{.Name}}</td><td class="num">{{money .Price}}</td><td class="num">{{.Qty}}</td>
+<td><form method="post" action="/menu/cart/remove"><input type="hidden" name="id" value="{{.ID}}"><button class="btn secondary" type="submit" aria-label="Remove {{.Name}}">Remove</button></form></td></tr>{{end}}
+<tr><th>Subtotal</th><td class="num"><strong>{{money .D.Total}}</strong></td><td></td><td></td></tr>
+</table>
+<p><a href="/menu/">Keep ordering</a></p>
+{{else}}<p>Your cart is empty. <a href="/menu/">Back to menu</a></p>{{end}}{{end}}

@@ -4,7 +4,7 @@ import "net/http"
 
 // control is the suite's API:
 //
-//	GET  /control/state               {orders, downloads, forms, sessions}
+//	GET  /control/state               {orders, downloads, forms, sessions, menu_cart}
 //	POST /control/reset               forget all of it (and the carts, and the layout)
 //	POST /control/layout?layout=L     L = moved|default: every page's layout, as ?layout=moved
 //	POST /control/login?site=S        S = store|bank|card: a new session; Set-Cookie and
