@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
 
 // greetServer is command-center with /wake-response: texts in turn, then errors.
@@ -101,10 +103,6 @@ func TestWakeGreetingIsPrefetchedAndPlayedInsteadOfTheChime(t *testing.T) {
 	if tr.Outcome != OutcomeSpoken || tr.Transcript != "What time is it?" {
 		t.Fatalf("turn %+v", tr)
 	}
-	// The mic heard the greeting: none of it is kept as pre-roll.
-	if tr.PreRollSecs != 0 {
-		t.Fatalf("pre-roll %.2f s kept from under the greeting", tr.PreRollSecs)
-	}
 	// One prefetch per turn: the next greeting is fetched once this turn is over.
 	waitGreeting(t, r.p, srv, 2)
 
@@ -125,6 +123,67 @@ func TestWakeGreetingIsPrefetchedAndPlayedInsteadOfTheChime(t *testing.T) {
 	}
 	if got := srv.said; !slices.Equal(got, []string{"Mhm?", "Go ahead."}) {
 		t.Fatalf("rendered %v", got)
+	}
+}
+
+// Under a spoken greeting the mic hears a voice, which whisper would write down: with a
+// pre-roll on, none of what was heard while it played is kept, and the first chunks after it
+// (the greeting's last words, still in the mic's buffers) are zeroed. A chime-only wake keeps
+// the pre-roll and the command heard right after the chime.
+func TestWakeGreetingIsNotInTheCommand(t *testing.T) {
+	for _, greeting := range []bool{true, false} {
+		mic := script(rep(noise, 40))
+		mic.pace = 2 * time.Millisecond
+		r, srv := newGreetRig(t, mic, "Mhm?")
+		r.p.lockstep = false // a real microphone: it keeps capturing while the greeting plays
+		r.p.Cfg.Endpointing.PreRollSecs = 1
+		r.p.Cfg.Greeting = greeting
+		var base int
+		open, first := r.p.Playback, true
+		r.p.Playback = func(rate, ch int) (device.Playback, error) {
+			pb, err := open(rate, ch)
+			if first { // the wake ack drains until the mic has captured 5 command chunks
+				first = false
+				pb = slowDrain{pb, func() {
+					for mic.readCount() < base+3+5 {
+						time.Sleep(time.Millisecond)
+					}
+				}}
+			}
+			return pb, err
+		}
+		stop := r.run(t)
+		if greeting {
+			waitGreeting(t, r.p, srv, 1)
+		}
+		for mic.readCount() < 40 { // the room, so the wake comes after the push
+			time.Sleep(time.Millisecond)
+		}
+		mic.mu.Lock()
+		base = mic.reads
+		mic.chunks = append(mic.chunks, slices.Concat(rep(wake, 3), rep(speech, 13))...)
+		mic.mu.Unlock()
+		tr := r.turn(t)
+		_ = stop()
+		cmd, _ := decodeWAV(t, r.srv.cmdWAV)
+		head := cmd[:min(len(cmd), int(tr.PreRollSecs*CaptureRate)+chimeTailChunks*ChunkSamples)]
+		if greeting {
+			if tr.PreRollSecs != 0 {
+				t.Errorf("greeting: pre-roll %.2f s kept from under the greeting", tr.PreRollSecs)
+			}
+			if slices.ContainsFunc(head, func(v int16) bool { return v != 0 }) {
+				t.Errorf("greeting: the first %d samples of the command are not zeroed", len(head))
+			}
+			continue
+		}
+		if tr.PreRollSecs == 0 {
+			t.Error("chime: no pre-roll kept")
+		}
+		for i := len(head) - chimeTailChunks*ChunkSamples; i < len(head); i += ChunkSamples {
+			if rms := RMS(head[i : i+ChunkSamples]); rms < 1000 {
+				t.Errorf("chime: command chunk at %d after the pre-roll muted (RMS %.0f)", i, rms)
+			}
+		}
 	}
 }
 
