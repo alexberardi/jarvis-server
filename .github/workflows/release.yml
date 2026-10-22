@@ -142,6 +142,11 @@ jobs:
           npm --prefix web/admin run build
       - name: Check the admin UI is embedded (not the placeholder)
         run: go test ./web/admin -run TestEmbeddedUI -tags release_ui -count=1 -v
+      # Firefox runs the signed package the agent embeds, not the extension source: a release whose
+      # package is behind the source ships the old extension (#449). Re-sign with
+      # scripts/browser-ext-sign.sh (docs/agent/store-listing.md) and commit the .xpi.
+      - name: Check the signed Firefox extension matches the extension source
+        run: go test ./internal/agent/browser -run TestSignedXPICurrent -tags release_xpi -count=1 -v
       # A pull request's dry run: a throwaway signing key, trusted only by this run's binaries.
       - name: Throwaway signing key (pull request dry run)
         if: github.event_name == 'pull_request'

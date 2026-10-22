@@ -63,6 +63,11 @@ type Hub struct {
 	changed chan struct{} // closed and replaced whenever the set of ready browsers changes
 
 	recordSink func(RecordEvent) // SetRecordSink; guarded by mu
+
+	// OnOutdated, when set before Serve, is called once per connection whose extension is older
+	// than the one this build can give that browser (Outdated), with the newer version. It runs
+	// on its own goroutine.
+	OnOutdated func(b BrowserInfo, available string)
 }
 
 type hubConn struct {
@@ -175,8 +180,15 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 			if !wasReady || accessChanged {
 				h.notifyLocked()
 			}
+			info := hc.info
 			h.mu.Unlock()
 			if !wasReady {
+				if available, old := Outdated(info); old {
+					h.Log.Warn("browser extension is out of date", "id", id, "browser", m.Browser, "extension", m.ExtensionVersion, "available", available)
+					if h.OnOutdated != nil {
+						go h.OnOutdated(info, available) // it may start Firefox; keep reading
+					}
+				}
 				h.Log.Info("browser connected", "id", id, "browser", m.Browser, "version", m.BrowserVersion, "extension", m.ExtensionVersion,
 					"website_access", accessText(m.WebsiteAccess))
 			}

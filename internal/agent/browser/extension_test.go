@@ -329,3 +329,65 @@ func TestPopupSurface(t *testing.T) {
 		}
 	}
 }
+
+func TestCompareVersions(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{
+		{"0.1.0", "0.3.4", -1}, {"0.3.4", "0.3.4", 0}, {"0.10.0", "0.9.9", 1}, {"0.3", "0.3.0", 0},
+		{"1.0", "0.99.99", 1}, {"0.3.4", "0.3.10", -1},
+	} {
+		if got := CompareVersions(c.a, c.b); got != c.want {
+			t.Errorf("CompareVersions(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// The signed package is read from the embedded zip's own manifest. It is never newer than the
+// source (that would be a package built from another tree); being behind is the release gate's
+// call (extension_release_test.go), so an extension change doesn't wait for a re-sign to merge.
+func TestSignedXPIVersion(t *testing.T) {
+	if _, ok := SignedXPI(); !ok {
+		if SignedXPIVersion() != "" {
+			t.Fatal("a version without a package")
+		}
+		return
+	}
+	v := SignedXPIVersion()
+	if v == "" {
+		t.Fatal("the signed package has no readable manifest version")
+	}
+	if CompareVersions(v, ExtensionVersion()) > 0 {
+		t.Fatalf("signed package %s is newer than the extension source %s", v, ExtensionVersion())
+	}
+}
+
+func TestOutdated(t *testing.T) {
+	chromeDev := "chrome-extension://" + ChromeDevExtensionID + "/"
+	for _, c := range []struct {
+		origin, installed string
+		want              bool
+	}{
+		{chromeDev, "0.0.1", true},
+		{chromeDev, ExtensionVersion(), false},
+		{chromeDev, "", false},
+		{"chrome-extension://" + ChromeStoreExtensionID + "/", "0.0.1", false},
+		{FirefoxExtensionID, "0.0.1", SignedXPIVersion() != ""},
+		{FirefoxExtensionID, SignedXPIVersion(), false},
+	} {
+		if _, got := Outdated(BrowserInfo{Origin: c.origin, ExtensionVersion: c.installed}); got != c.want {
+			t.Errorf("Outdated(%s, %q) = %v, want %v", c.origin, c.installed, got, c.want)
+		}
+	}
+	dir := t.TempDir()
+	if v := InstalledVersion(dir); v != "" {
+		t.Errorf("empty folder: %q", v)
+	}
+	if err := WriteExtension(dir, TargetChromium); err != nil {
+		t.Fatal(err)
+	}
+	if v := InstalledVersion(dir); v != ExtensionVersion() {
+		t.Errorf("InstalledVersion = %q, want %q", v, ExtensionVersion())
+	}
+}

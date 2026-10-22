@@ -29,10 +29,11 @@ The legacy Python stack is retired for new installs as of `v0.1.0-rc18` (user 20
   Store submissions: follow `docs/agent/store-listing.md` (kit in `internal/agent/browser/store/`);
   the Chrome store id (`abkbjmelelgelkhneobebgoilejlgbob`) is in `ChromeExtensionIDs`; release the
   agent and re-run `jarvis-agent browser install` so existing hosts admit it.
-  **The extension is now 0.2.1** (0.2.0: dictation's `fill` and `click`, 2026-10-13; 0.2.1: the
-  toolbar popup linking to the agent download, install plan 3.5): upload 0.2.1, not an older
-  version, to both stores, and re-sign the embedded `.xpi` (it is 0.1.0, which answers fill/click
-  with `unknown_command` and has no popup).
+  **The extension is now 0.3.4**: upload 0.3.4, not an older version, to both stores, and re-sign
+  the embedded `.xpi` (it is 0.1.0, which has no fill/click, snapshot/act, screenshot, download
+  or popup; #449). The release now fails until it is re-signed (`release_xpi` gate,
+  [decision](decisions/2026-10-21-signed-xpi-release-gate.md)); steps in
+  `docs/agent/store-listing.md` → "Re-signing".
   **Device sign-out** (user 2026-10-14, [decision](decisions/2026-10-14-device-sign-out.md)): the
   pairer or a household admin signs a device out from Add-ons; desktop agents get no factory reset
   and return to their first-run page with their settings kept.

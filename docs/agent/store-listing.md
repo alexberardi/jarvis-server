@@ -113,10 +113,10 @@ way.
 The add-on already exists on AMO (`browser@jarvis.agent`, signed **unlisted**). Going public
 means submitting a **listed** version of the same add-on.
 
-1. **The version is already above the signed one:** `0.2.1` (0.2.0, 2026-10-13: dictation's `fill`
-   and `click`; 0.2.1, 2026-10-14: the toolbar popup with the agent download link, install plan 3.5). AMO refuses any version it has already signed, on either channel, and `0.1.0`
-   was signed unlisted. Submit 0.2.1 (not an older checkout) to both stores. The Chrome store will also need a version above the one it has
-   for the next Chrome update, so this bump serves both.
+1. **Submit the version the source is at** (`0.3.4` today; `version` in
+   `internal/agent/browser/extension/manifest.json`). AMO refuses any version it has already
+   signed, on either channel: `0.1.0` was signed unlisted, and so is any version later signed
+   with `scripts/browser-ext-sign.sh` (below). Submit the same version to both stores.
 2. Build: `scripts/browser-ext-store-zip.sh firefox` → `dist/jarvis-browser-firefox-<version>.zip`.
 3. Developer Hub → My Add-ons → Jarvis Browser Control → **Upload New Version** → "On this
    site" (listed) → upload the zip.
@@ -139,13 +139,51 @@ means submitting a **listed** version of the same add-on.
 ## The Firefox package inside the agent
 
 `jarvis-agent browser install` opens the Mozilla-signed `.xpi` embedded in the binary
-(`internal/agent/browser/signed/jarvis-browser.xpi`). That file is version 0.1.0 (no `fill` or
-`click`: an agent with dictation gets `unknown_command` from it for those two) and still has
-the **old manifest description and placeholder icons**: the source changed after it was signed.
-It changes only when it is signed again, and signing is the user's step, because the AMO
-credentials stay with them.
+(`internal/agent/browser/signed/jarvis-browser.xpi`), and Firefox runs that package, not the
+source. It changes only when it is signed again, and signing is the user's step, because the
+AMO credentials stay with them. Until #449 nothing noticed it falling behind: agents through
+rc18 shipped the 0.1.0 package beside 0.3.2 source, so Firefox had no `fill`, `click`,
+`snapshot`, `act`, `screenshot` or `download`.
 
-Once the listed version is approved:
+What keeps it current now (decision: `docs/decisions/2026-10-21-signed-xpi-release-gate.md`):
+
+- **Release gate:** `release.yml` runs `go test ./internal/agent/browser -run
+  TestSignedXPICurrent -tags release_xpi`, which fails when the package's version is not the
+  source's. A tag (or a release dry run) whose `.xpi` is behind does not build. Ordinary PRs are
+  not gated, so an extension change can merge before it is re-signed; the release can't.
+- **Upgrade of installed copies:** when Firefox connects with an extension older than the
+  embedded package, the agent writes the package to `<DataDir>/browser/jarvis-browser.xpi` and
+  opens it in Firefox once per version (`firefox-offered-version` remembers it), which shows
+  Firefox's update prompt. The unpacked Chromium folder (`<DataDir>/browser/extension-chromium`)
+  is rewritten when the agent starts, and the browser loads it on its next start (or Reload on
+  its extensions page). `jarvis-agent browser status` shows each browser's installed version and
+  the update it can have.
+
+### Re-signing (the user's step)
+
+What you need:
+
+- The addons.mozilla.org account that owns `browser@jarvis.agent`.
+- An API key pair: addons.mozilla.org → sign in → Tools → **Manage API Keys**
+  (https://addons.mozilla.org/developers/addon/api/key/) → **Generate new credentials**. The
+  **JWT issuer** (`user:NNN:NNN`) is `AMO_JWT_ISSUER`; the **JWT secret** is `AMO_JWT_SECRET`.
+  Keep them out of the repo and your shell history.
+- Go (`mise exec go@1.27`) and Node with `npx` (or `mise`, which the script falls back to).
+
+Then, in a checkout of the branch to ship:
+
+1. Decide the channel for this version. **Unlisted** (the script) is signed automatically,
+   usually in minutes, but uses up the version number: the listed channel can't take it later.
+   **Listed** (the AMO section above) goes through review, which can take days; then download
+   the approved `.xpi` from the version's page in the Developer Hub instead of running the script.
+2. Unlisted: `AMO_JWT_ISSUER=… AMO_JWT_SECRET=… scripts/browser-ext-sign.sh`. It packs the Firefox
+   build, runs `scripts/browser-ext-lint.sh`, then `web-ext sign --channel=unlisted`, and writes
+   `internal/agent/browser/signed/jarvis-browser.xpi`.
+3. Check it: `go test ./internal/agent/browser -run TestSignedXPICurrent -tags release_xpi`
+   passes.
+4. Commit the `.xpi` and release the agent.
+
+Once a listed version is approved:
 
 - **Installed copies update themselves:** Firefox checks AMO for newer versions of
   `browser@jarvis.agent` and installs the listed one.
@@ -167,7 +205,8 @@ Once the listed version is approved:
    or the data the extension reads changed.
 4. **Firefox:** `scripts/browser-ext-store-zip.sh firefox` → Developer Hub → **Upload New
    Version** → "On this site" → source: No → reviewer notes → submit. After approval, commit the
-   signed `.xpi` as above.
+   signed `.xpi` as above (or, before the listing exists, re-sign unlisted as above). The release
+   gate fails until the committed `.xpi` is at the new version.
 5. If a permission or the data read changes, update `listing.md`, the privacy policy's extension section (jarvis-docs),
    both stores' privacy answers, and `data_collection_permissions`.
    0.3.1 added `downloads` (justification in `listing.md`: save statements and files the user

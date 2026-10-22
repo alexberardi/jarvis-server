@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"archive/zip"
 	"bytes"
 	"embed"
 	"encoding/json"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // The extension's source, one Manifest V3 codebase for Firefox and Chromium browsers. Its
@@ -133,4 +136,106 @@ func SignedXPI() ([]byte, bool) {
 		return nil, false
 	}
 	return b, true
+}
+
+// SignedXPIVersion is the version in the embedded signed package's manifest, "" when this build
+// has none (or it can't be read).
+func SignedXPIVersion() string {
+	b, ok := SignedXPI()
+	if !ok {
+		return ""
+	}
+	return xpiVersion(b)
+}
+
+func xpiVersion(xpi []byte) string {
+	zr, err := zip.NewReader(bytes.NewReader(xpi), int64(len(xpi)))
+	if err != nil {
+		return ""
+	}
+	f, err := zr.Open("manifest.json")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	var m struct {
+		Version string `json:"version"`
+	}
+	if json.NewDecoder(f).Decode(&m) != nil {
+		return ""
+	}
+	return m.Version
+}
+
+// CompareVersions compares two extension versions (dotted numbers, as manifests use): -1, 0 or
+// +1. A missing part counts as 0 ("0.3" == "0.3.0"); a part that isn't a number counts as 0 too.
+func CompareVersions(a, b string) int {
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var x, y int
+		if i < len(pa) {
+			x, _ = strconv.Atoi(pa[i])
+		}
+		if i < len(pb) {
+			y, _ = strconv.Atoi(pb[i])
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+// FamilyOf is the extension the agent gave the browser behind a host's origin: TargetFirefox
+// for the signed package (origin browser@jarvis.agent), TargetChromium for the unpacked folder
+// (the development id's origin). "" for anything else, including the Chrome Web Store build,
+// which the store keeps current itself.
+func FamilyOf(origin string) string {
+	switch origin {
+	case FirefoxExtensionID:
+		return TargetFirefox
+	case "chrome-extension://" + ChromeDevExtensionID + "/":
+		return TargetChromium
+	}
+	return ""
+}
+
+// AvailableVersion is the newest extension this build can give the browser behind origin: the
+// signed package's version for Firefox (release Firefox installs only that), the source's for
+// the unpacked Chromium folder. "" when it has none to give.
+func AvailableVersion(origin string) string {
+	switch FamilyOf(origin) {
+	case TargetFirefox:
+		return SignedXPIVersion()
+	case TargetChromium:
+		return ExtensionVersion()
+	}
+	return ""
+}
+
+// Outdated reports whether the browser's installed extension is older than the one this build
+// can give it, and that version.
+func Outdated(b BrowserInfo) (available string, outdated bool) {
+	available = AvailableVersion(b.Origin)
+	if available == "" || b.ExtensionVersion == "" {
+		return available, false
+	}
+	return available, CompareVersions(b.ExtensionVersion, available) < 0
+}
+
+// InstalledVersion is the version of the extension files in dir (a WriteExtension directory),
+// "" when there are none.
+func InstalledVersion(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Version string `json:"version"`
+	}
+	_ = json.Unmarshal(b, &m)
+	return m.Version
 }
