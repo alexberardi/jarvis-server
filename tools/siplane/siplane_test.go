@@ -291,3 +291,64 @@ func TestSIPpTrace(t *testing.T) {
 		t.Errorf("no trace: %q", got)
 	}
 }
+
+// fakeDocker puts a docker on PATH that answers `inspect` from states (container → "running
+// exit"), prints a log for `logs` and records every call in the returned file.
+func fakeDocker(t *testing.T, states map[string]string) (calls string) {
+	dir := t.TempDir()
+	calls = filepath.Join(dir, "calls")
+	var sh strings.Builder
+	sh.WriteString("#!/bin/sh\necho \"$*\" >>" + calls + "\ncase $1 in\n inspect)\n  for c; do :; done\n  case $c in\n")
+	for c, st := range states {
+		sh.WriteString("   " + c + ") echo '" + st + "' ;;\n")
+	}
+	sh.WriteString("   *) echo 'No such object' >&2; exit 1 ;;\n  esac ;;\n logs) echo 'auframe: init: unsupported sample format 24128 (???)' >&2 ;;\nesac\n")
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(sh.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return calls
+}
+
+// A far end that exited (baresip 1.1.0 segfaulting) is named with its exit code, and its log
+// is kept, so the scenario it died in says so instead of every later one failing on docker exec.
+func TestDeadFarEnds(t *testing.T) {
+	fakeDocker(t, map[string]string{"lane-jarvis": "false 139", "lane-alice": "true 0", "lane-carrier": "true 0"})
+	out := t.TempDir()
+	l := &lane{out: out, env: map[string]string{
+		"SIP_LANE_JARVIS_CONTAINER": "lane-jarvis", "SIP_LANE_ALICE_CONTAINER": "lane-alice", "SIP_LANE_CARRIER_CONTAINER": "lane-carrier"}}
+	dead, err := l.deadFarEnds(context.Background(), "outbound-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dead) != 1 || !strings.Contains(dead[0], "jarvis") || !strings.Contains(dead[0], "139") || !strings.Contains(dead[0], "segmentation fault") {
+		t.Fatalf("dead = %q, want jarvis exited 139 (segmentation fault)", dead)
+	}
+	b, err := os.ReadFile(filepath.Join(out, "outbound-route-jarvis-baresip.log"))
+	if err != nil || !strings.Contains(string(b), "unsupported sample format") {
+		t.Errorf("the dead far end's log is kept: %q, %v", b, err)
+	}
+
+	fakeDocker(t, map[string]string{"lane-jarvis": "true 0", "lane-alice": "true 0", "lane-carrier": "true 0"})
+	if dead, err := l.deadFarEnds(context.Background(), "echo"); err != nil || len(dead) != 0 {
+		t.Errorf("all running: dead = %q, %v", dead, err)
+	}
+	fakeDocker(t, map[string]string{})
+	if _, err := l.deadFarEnds(context.Background(), "echo"); err == nil {
+		t.Error("a missing container is a lane error")
+	}
+}
+
+// The far ends never play ringback: baresip 1.1.0 plays it on the call's own player and
+// segfaults tearing it down on answer when the machine is loaded (CI's outbound-route).
+func TestFarEndsHaveNoRingback(t *testing.T) {
+	b, err := os.ReadFile("../../scripts/sip-lane")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := string(b)
+	i, j := strings.Index(conf, `cat >"$d/config" <<EOF`), strings.Index(conf, "\nEOF\n")
+	if i < 0 || j < i || !strings.Contains(conf[i:j], "\nringback_disabled yes\n") {
+		t.Error("scripts/sip-lane's baresip config lacks ringback_disabled yes")
+	}
+}

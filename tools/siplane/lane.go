@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
@@ -261,4 +262,51 @@ func (l *lane) keep(name, text string) {
 	if l.out != "" {
 		os.WriteFile(filepath.Join(l.out, name), []byte(text), 0o644)
 	}
+}
+
+// farEnds are the lane's baresip parties.
+var farEnds = []string{"jarvis", "alice", "carrier"}
+
+// deadFarEnds names the far ends that have exited ("jarvis exited with code 139 (segmentation fault)"),
+// keeping each one's log under --out as <scenario>-<party>-baresip.log. A container that is
+// not there at all is a lane error.
+func (l *lane) deadFarEnds(ctx context.Context, scenario string) ([]string, error) {
+	var dead []string
+	for _, n := range farEnds {
+		c := l.party(n).container
+		st, err := l.docker(ctx, "inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", c)
+		if err != nil {
+			return dead, err
+		}
+		f := strings.Fields(st)
+		if len(f) == 2 && f[0] == "true" {
+			continue
+		}
+		why := "exited"
+		if len(f) == 2 {
+			why += " with code " + f[1]
+			if code, err := strconv.Atoi(f[1]); err == nil && code > 128 {
+				why += " (" + syscall.Signal(code-128).String() + ")"
+			}
+		}
+		log, _ := l.docker(ctx, "logs", "--tail", "300", c)
+		l.keep(scenario+"-"+n+"-baresip.log", log)
+		dead = append(dead, n+" "+why)
+	}
+	return dead, nil
+}
+
+// restart brings the whole lane up again (scripts/sip-lane up, same name and ports): a far
+// end restarted alone would register a new contact, which max_contacts=1 with
+// remove_existing=no refuses while the dead one's is still bound.
+func (l *lane) restart(ctx context.Context) error {
+	args := []string{"up", "--name", l.env["SIP_LANE_NAME"]}
+	if o := l.env["SIP_LANE_OFFSET"]; o != "" {
+		args = append(args, "--offset", o)
+	}
+	cmd := exec.CommandContext(ctx, filepath.Join(l.root, "scripts", "sip-lane"), args...)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("scripts/sip-lane up: %w: %s", err, strings.TrimSpace(string(b)))
+	}
+	return nil
 }

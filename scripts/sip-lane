@@ -93,6 +93,10 @@ rtp_ports $rtp-$((rtp + 99))
 audio_source aufile,/w/say.wav
 audio_player aufile,/w/heard.wav
 audio_alert aufile,/w/silence.wav
+# No ringback: baresip 1.1.0 plays it on the call's player (aufile, /w/heard.wav) on 180 and
+# tears it down on answer as the call's own player starts, a race that segfaults it on a
+# loaded machine (CI's outbound-route, 11 crashes in 20 calls under load here).
+ringback_disabled yes
 module_path /usr/lib/baresip/modules
 module g711.so
 module aufile.so
@@ -143,6 +147,7 @@ cmd_up() {
   {
     echo "# scripts/sip-lane $NAME ($(date -Iseconds))"
     echo "SIP_LANE_NAME=$NAME"
+    echo "SIP_LANE_OFFSET=$o"
     echo "SIP_LANE_DIR=$DIR"
     echo "SIP_LANE_ASTERISK=$AST"
     echo "SIP_LANE_FAREND_IMAGE=$farend"

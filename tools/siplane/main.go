@@ -95,6 +95,15 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		if err := s.Run(ctx, l, &r); err != nil {
 			r.failf("lane error: %v", err)
 		}
+		// A far end that died fails this scenario, and the lane restarts for the next one.
+		if dead, err := l.deadFarEnds(ctx, s.Name); err != nil {
+			r.failf("lane error: %v", err)
+		} else if len(dead) > 0 {
+			r.failf("far end %s during this scenario (its log: %s-<party>-baresip.log under --out); restarting the lane", strings.Join(dead, ", "), s.Name)
+			if err := l.restart(ctx); err != nil {
+				return fmt.Errorf("after %s: %w", s.Name, err)
+			}
+		}
 		took := time.Since(start).Round(100 * time.Millisecond)
 		res := "PASS"
 		if len(r.failures) > 0 {
