@@ -21,6 +21,7 @@ type Run struct {
 	Window  string // "KEY:N", the task window; a desktop task's window id
 	URL     string
 	Snap    *computeruse.Snapshot
+	Opening bool // its task window was just opened and its page not snapshotted yet
 	Stopped bool
 	App     string // desktop: the task's app, as its window names it ("Notes")
 	PID     int    // desktop: its process
