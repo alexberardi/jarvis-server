@@ -295,11 +295,38 @@ func secondCall(ctx context.Context, l *lane, r *report) (map[string]*ctrl, func
 		return nil, nil, event{}, errFirstCall
 	}
 	time.Sleep(time.Second)
-	if err := cs["carrier"].Command(ctx, "dial", l.uri("5551230000")); err != nil {
+	// 100 lets the second call ring: auto-answering it would put the first on hold, and
+	// baresip 1.1.0 can segfault replacing the call's player for the hold on a loaded machine.
+	// Ringing is all call waiting has to show; the carrier hangs up once it has.
+	if err := cs["jarvis"].Command(ctx, "answermode", "manual"); err != nil {
 		done()
 		return nil, nil, event{}, err
 	}
+	restore := func() {
+		w, cancel := within(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := cs["jarvis"].Command(w, "answermode", "auto"); err != nil {
+			r.failf("100 back to auto answer: %v", err)
+		}
+	}
+	if err := cs["carrier"].Command(ctx, "dial", l.uri("5551230000")); err != nil {
+		restore()
+		done()
+		return nil, nil, event{}, err
+	}
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if cs["carrier"].Saw("CALL_CLOSED") {
+			break
+		}
+		if cs["jarvis"].Calls("incoming") >= 2 {
+			if err := cs["carrier"].Command(ctx, "hangup", ""); err != nil {
+				r.failf("carrier hanging up the second call: %v", err)
+			}
+			break
+		}
+	}
 	ev := waitClosed(ctx, r, 30*time.Second, cs, "carrier")
+	restore()
 	waitClosed(ctx, r, 30*time.Second, cs, "alice")
 	return cs, done, ev["carrier"], nil
 }

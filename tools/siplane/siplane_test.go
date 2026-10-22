@@ -339,8 +339,9 @@ func TestDeadFarEnds(t *testing.T) {
 	}
 }
 
-// The far ends never play ringback: baresip 1.1.0 plays it on the call's own player and
-// segfaults tearing it down on answer when the machine is loaded (CI's outbound-route).
+// The far ends never play ringback or the call-waiting tone: baresip 1.1.0 plays them on the
+// call's own player and segfaults tearing one down on answer when the machine is loaded (CI's
+// outbound-route).
 func TestFarEndsHaveNoRingback(t *testing.T) {
 	b, err := os.ReadFile("../../scripts/sip-lane")
 	if err != nil {
@@ -348,7 +349,12 @@ func TestFarEndsHaveNoRingback(t *testing.T) {
 	}
 	conf := string(b)
 	i, j := strings.Index(conf, `cat >"$d/config" <<EOF`), strings.Index(conf, "\nEOF\n")
-	if i < 0 || j < i || !strings.Contains(conf[i:j], "\nringback_disabled yes\n") {
-		t.Error("scripts/sip-lane's baresip config lacks ringback_disabled yes")
+	if i < 0 || j < i {
+		t.Fatal("no baresip config in scripts/sip-lane")
+	}
+	for _, line := range []string{"ringback_disabled yes", "callwaiting_aufile none.wav"} {
+		if !strings.Contains(conf[i:j], "\n"+line+"\n") {
+			t.Errorf("scripts/sip-lane's baresip config lacks %q", line)
+		}
 	}
 }

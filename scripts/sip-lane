@@ -97,6 +97,8 @@ audio_alert aufile,/w/silence.wav
 # tears it down on answer as the call's own player starts, a race that segfaults it on a
 # loaded machine (CI's outbound-route, 11 crashes in 20 calls under load here).
 ringback_disabled yes
+# Nor the call-waiting tone, which goes to the same player (the file does not exist).
+callwaiting_aufile none.wav
 module_path /usr/lib/baresip/modules
 module g711.so
 module aufile.so
