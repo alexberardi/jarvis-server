@@ -14,9 +14,9 @@
 #   all      every suite but voice, computer and ios (default)
 #   ios      the same Maestro flows on the iOS Simulator, on a Mac with Xcode (scripts/lib/ios.sh):
 #            the app built for the simulator, the harness's own simulator (jarvis-harness-e2e),
-#            erased per run; against a sandbox on another machine that is up with --lan
+#            erased per run; against a sandbox up with --lan (on this Mac, or another machine)
 #   --sandbox-env FILE  ios: that sandbox's sandbox-lan.env (scripts/sandbox up --lan --profile
-#            rich --llm scripted writes it), copied to this Mac; the suite neither starts nor
+#            rich --llm scripted writes it; copied over from another machine); the suite neither starts nor
 #            stops it
 #   voice    the virtual node voice lane (tools/voicelane, e2e/voice/cases.json): the real
 #            jarvis-agent (--profile pi) hears TTS and its spoken replies are transcribed and
@@ -444,7 +444,7 @@ run_ios() {
     source "$SANDBOX_ENV"
     # The simulator shares this Mac's network: if the Mac reaches the sandbox, so does the app.
     curl -sf -o /dev/null --max-time 5 "$SBX_CONFIG/health" ||
-      die "this Mac can't reach the sandbox's config service at $SBX_CONFIG (up with --lan on the other machine?)"
+      die "this Mac can't reach the sandbox's config service at $SBX_CONFIG (is it up with --lan?)"
     case $SBX_CONFIG in http://127.0.0.1:* | http://localhost:*) die "$SANDBOX_ENV has loopback URLs: pass the sandbox-lan.env of a --lan sandbox" ;; esac
 
     git -C "$MOBILE_REPO" rev-parse --git-dir >/dev/null 2>&1 ||

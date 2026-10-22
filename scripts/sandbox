@@ -141,7 +141,21 @@ running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 tap_running() { [ -f "$TAPPID" ] && kill -0 "$(cat "$TAPPID")" 2>/dev/null; }
 scriptllm_running() { [ -f "$SCRIPTPID" ] && kill -0 "$(cat "$SCRIPTPID")" 2>/dev/null; }
 relay_running() { [ -f "$RELAYPID" ] && kill -0 "$(cat "$RELAYPID")" 2>/dev/null; }
-port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
+# port_busy: is something listening on TCP port $1? ss on Linux, lsof where there is no ss (macOS).
+port_busy() {
+  if command -v ss >/dev/null; then
+    ss -Hltn "sport = :$1" 2>/dev/null | grep -q .
+  else
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+  fi
+}
+# detach runs a command as its own session and process-group leader, so `down` can kill the whole
+# group (kill -- -PID). setsid(1) is Linux-only; elsewhere (macOS) perl's POSIX::setsid does the
+# same. It execs, so call it only in the background (`detach cmd ... &`): $! is then the leader.
+detach() {
+  if command -v setsid >/dev/null; then exec setsid "$@"; fi
+  exec perl -MPOSIX -e 'POSIX::setsid() or die "setsid: $!\n"; exec @ARGV or die "exec $ARGV[0]: $!\n"' -- "$@"
+}
 port() { echo $(($1 + $(cat "$OFFSETF"))); }
 # svc_url is a listener's base URL: its own port, or with --single-port (as the sandbox was last
 # brought up) its path on the config port.
@@ -356,7 +370,7 @@ setup_voice() {
   set_setting "$llm" stt.gpu_layers 0
   # whisper-server's default is 4 threads: half the cores, at most 8, is ~1.5x faster on a
   # short command without taking the whole box.
-  local threads=$(( $(nproc) / 2 ))
+  local threads=$(( $(getconf _NPROCESSORS_ONLN) / 2 ))
   [ "$threads" -gt 8 ] && threads=8
   [ "$threads" -lt 1 ] && threads=1
   set_setting "$llm" stt.extra_args "\"-t $threads\""
@@ -401,6 +415,8 @@ for role, var in (("admin", "ADMIN"), ("power_user", "POWER"), ("member", "MEMBE
 lan_host() {
   local h=${JARVIS_LAN_HOST:-}
   [ -n "$h" ] || h=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
+  # macOS has no ip(8): the default route's interface, then its address.
+  [ -n "$h" ] || h=$(ipconfig getifaddr "$(route -n get default 2>/dev/null | sed -n 's/.*interface: //p')" 2>/dev/null)
   [ -n "$h" ] && [ "$h" != 127.0.0.1 ] || return 1
   echo "$h"
 }
@@ -488,7 +504,7 @@ cmd_up() {
   local relay_url=
   case $RELAY in
     fake)
-      setsid "$DIR/fakerelay" --listen "$bind:$(port 7797)" --log "$DIR/pushes.jsonl" >>"$DIR/fakerelay.log" 2>&1 </dev/null &
+      detach "$DIR/fakerelay" --listen "$bind:$(port 7797)" --log "$DIR/pushes.jsonl" >>"$DIR/fakerelay.log" 2>&1 </dev/null &
       echo $! >"$RELAYPID"
       relay_url=http://127.0.0.1:$(port 7797) ;;
     none) ;;
@@ -500,11 +516,11 @@ cmd_up() {
   [ "$SINGLE_PORT" = 0 ] || legacy=0
   RELAY_URL=$relay_url JARVIS_LEGACY_PORTS=$legacy JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
-    setsid "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
+    detach "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
   local upstream
   if [ "$LLM" = scripted ]; then
-    setsid "$DIR/scriptllm" --listen "$bind:$(port 7798)" --dir "$ROOT" --script e2e/llm/default.json \
+    detach "$DIR/scriptllm" --listen "$bind:$(port 7798)" --dir "$ROOT" --script e2e/llm/default.json \
       --log "$DIR/scriptllm-unmatched.jsonl" >>"$DIR/scriptllm.log" 2>&1 </dev/null &
     echo $! >"$SCRIPTPID"
     upstream=http://127.0.0.1:$(port 7798) INSTALLED_APP_ID= INSTALLED_APP_KEY=
@@ -513,7 +529,7 @@ cmd_up() {
     upstream=$INSTALLED_LLM_URL
   fi
   JARVIS_TAP_APP_ID=$INSTALLED_APP_ID JARVIS_TAP_APP_KEY=$INSTALLED_APP_KEY \
-    setsid "$DIR/pipeline" tap --listen "127.0.0.1:$(port 7799)" --upstream "$upstream" --log "$DIR/llm.jsonl" \
+    detach "$DIR/pipeline" tap --listen "127.0.0.1:$(port 7799)" --upstream "$upstream" --log "$DIR/llm.jsonl" \
     >>"$DIR/tap.log" 2>&1 </dev/null &
   echo $! >"$TAPPID"
   for _ in $(seq 1 60); do
@@ -570,7 +586,7 @@ cmd_node_sim() {
     HOME=$h XDG_CONFIG_HOME=$h/.config XDG_CACHE_HOME=$h/.cache XDG_DATA_HOME=$h/.local/share \
     XDG_STATE_HOME=$h/.local/state XDG_RUNTIME_DIR=$run \
     JARVIS_AGENT_CONTROL_SOCKET=$run/control.sock JARVIS_AGENT_BROWSER_SOCKET=$run/browser.sock \
-    setsid bash -c 'echo y | "$1" enroll --code --profile pi --no-browser --name "$2" --creds "$3" --server "$4" &&
+    detach bash -c 'echo y | "$1" enroll --code --profile pi --no-browser --name "$2" --creds "$3" --server "$4" &&
       exec "$1" run --profile pi --voice=false --no-auto-update --creds "$3"' \
     simnode "$agent" "$NODE_NAME" "$creds" "http://127.0.0.1:$(port 7700)" >"$sim/agent.log" 2>&1 </dev/null &
   pid=$!

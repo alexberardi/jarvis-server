@@ -142,6 +142,49 @@ func TestRunIOS(t *testing.T) {
 	}
 }
 
+// A failed flow can leave a system alert up (iOS's 'Open in "Jarvis Automation"?' after an
+// openLink) that survives launchApp's clearState and fails every later flow: the runner reboots
+// the harness simulator after a failure, before the next flow, and not after a pass or the last.
+func TestRunIOSRebootsTheSimulatorAfterAFailedFlow(t *testing.T) {
+	noSocket(t)
+	d := flowsDir(t)
+	write(t, filepath.Join(d, "zz-last-fail.yaml"), "appId: com.jarvis.nodemobile\nname: last\n---\n- assertVisible: nope\n")
+	c, calls := iosConfig(t, d, t.TempDir())
+	flows, err := Discover(c.flowsDir, c.rel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := run(context.Background(), c, flows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seq []string
+	log, _ := os.ReadFile(calls)
+	for _, l := range strings.Split(string(log), "\n") {
+		switch {
+		case strings.HasPrefix(l, "maestro ") && strings.Contains(l, " test "):
+			seq = append(seq, "test "+filepath.Base(strings.Fields(l[strings.Index(l, " test "):])[1]))
+		case strings.HasPrefix(l, "xcrun simctl shutdown "), strings.HasPrefix(l, "xcrun simctl boot"):
+			seq = append(seq, strings.TrimPrefix(l, "xcrun simctl "))
+		}
+	}
+	want := []string{
+		"test bare.yml",
+		"test chat-fail.yaml",
+		"shutdown " + harnessUDID, "boot " + harnessUDID, "bootstatus " + harnessUDID + " -b",
+		"test login-admin.yaml",
+		"test zz-last-fail.yaml",
+	}
+	if strings.Join(seq, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(seq, "\n"), strings.Join(want, "\n"))
+	}
+	for _, r := range res.Tests {
+		if r.ID == "chat-fail" && !strings.Contains(r.Note, "rebooted") {
+			t.Errorf("chat-fail note %q: want it to say the simulator was rebooted", r.Note)
+		}
+	}
+}
+
 func TestRunIOSRefusesDevicesItDidNotCreate(t *testing.T) {
 	noSocket(t)
 	for _, udid := range []string{"", "booted", "11111111-2222-3333-4444-555555555555", "no-such-device"} {
