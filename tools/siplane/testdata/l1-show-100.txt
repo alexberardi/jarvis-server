@@ -1,4 +1,4 @@
-# Captured from the L1 lane (scripts/sip-lane up --name loop-447, Asterisk 22.11.0 with
+# Captured from the L1 lane (scripts/sip-lane up --name loop-447; the 9 settings L2 found drifted recaptured on loop-489, Asterisk 22.11.0 with
 # test/sip/asterisk/pjsip.conf), NOT from a real FreePBX: scripts/sip-lane cli pjsip show endpoint 100,
 # then pjsip show aor 100. The baseline the L2 lane's drift check compares a real FreePBX 17 with;
 # recapture it when pjsip.conf's extension 100 changes (TestL1BaselineMatchesConf fails until then).
@@ -27,7 +27,7 @@
  accept_multiple_sdp_answers        : false
  accountcode                        :
  acl                                :
- aggregate_mwi                      : true
+ aggregate_mwi                      : false
  allow                              : (ulaw|alaw|gsm|g726|g722)
  allow_overlap                      : true
  allow_subscribe                    : true
@@ -50,7 +50,7 @@
  contact_acl                        :
  context                            : from-internal
  cos_audio                          : 5
- cos_video                          : 0
+ cos_video                          : 4
  device_state_busy_at               : 0
  direct_media                       : true
  direct_media_glare_mitigation      : none
@@ -96,19 +96,19 @@
  moh_passthrough                    : false
  moh_suggest                        : default
  mwi_from_user                      :
- mwi_subscribe_replaces_unsolicited : no
+ mwi_subscribe_replaces_unsolicited : yes
  named_call_group                   :
  named_pickup_group                 :
  notify_early_inuse_ringing         : false
- one_touch_recording                : false
+ one_touch_recording                : true
  outbound_auth                      :
  outbound_proxy                     :
  outgoing_call_offer_pref           : remote_merge
  overlap_context                    :
  pickup_group                       :
  preferred_codec_only               : false
- record_off_feature                 : automixmon
- record_on_feature                  : automixmon
+ record_off_feature                 : apprecord
+ record_on_feature                  : apprecord
  redirect_method                    : user
  refer_blind_progress               : true
  rewrite_contact                    : true
@@ -151,11 +151,11 @@
  timers_sess_expires                : 1800
  tone_zone                          :
  tos_audio                          : 184
- tos_video                          : 0
+ tos_video                          : 136
  transport                          :
  trust_connected_line               : yes
  trust_id_inbound                   : true
- trust_id_outbound                  : true
+ trust_id_outbound                  : false
  use_avpf                           : false
  use_ptime                          : false
  user_eq_phone                      : false
@@ -185,7 +185,7 @@
  qualify_2xx_only     : false
  qualify_frequency    : 60
  qualify_timeout      : 3.000000
- remove_existing      : false
+ remove_existing      : true
  remove_unavailable   : false
  support_path         : false
  voicemail_extension  :
