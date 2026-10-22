@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -520,9 +521,13 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 // real page can be read from the log (the history keeps no elements).
 func (l *Loop) logRound(r *round, obs Observation, reply Reply) {
 	inDialog := 0
+	var dialog []string
 	for _, e := range obs.Elements {
 		if slices.Contains(e.State, "in dialog") {
 			inDialog++
+			if len(dialog) < 20 {
+				dialog = append(dialog, e.Ref+" "+e.Role+" "+strconv.Quote(clip(e.Name, 60)))
+			}
 		}
 	}
 	var acts []string
@@ -538,7 +543,7 @@ func (l *Loop) logRound(r *round, obs Observation, reply Reply) {
 	l.log().Info("computer: round", "run", r.run.ID, "n", r.run.Rounds, "url", obs.URL,
 		"elements", len(obs.Elements), "in_dialog", inDialog, "thought", clip(reply.Thought, 300),
 		"actions", strings.Join(acts, "; "), "done", reply.Done, "summary", clip(reply.Summary, 300),
-		"ask", clip(reply.Ask, 300), "feedback", clip(r.feedback, 200))
+		"ask", clip(reply.Ask, 300), "feedback", clip(r.feedback, 200), "dialog", strings.Join(dialog, "; "))
 }
 
 // maxRepeats is how many times the model may ask again for a batch that left the page as it was
@@ -725,11 +730,13 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 			if err != nil {
 				break
 			}
-			if pageKey(again) == pageKey(Observation{URL: obs.URL, App: obs.App, Elements: obs.Elements}) {
-				break
-			}
+			// The newest look is the one acted on: every look renumbers the refs.
+			same := pageKey(again) == pageKey(Observation{URL: obs.URL, App: obs.App, Elements: obs.Elements})
 			again.Image = obs.Image
 			obs = again
+			if same {
+				break
+			}
 		}
 	}
 	r.actedSinceLook = false
