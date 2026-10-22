@@ -408,3 +408,58 @@ func TestDuckerRearmsAFailedEngageWhenTheMusicStops(t *testing.T) {
 		t.Fatal("not engaged on the next start")
 	}
 }
+
+// #486: while the node's music plays on Bluetooth headphones or a speaker, the node's replies
+// and chimes open ReplyPCM (the HAT's sink, jarvis_output), and the players keep following the
+// default sink; the canceller still cancels the Bluetooth sink and never takes the reply stream.
+func TestRepliesStayOnTheNodeWhileTheMusicIsOnBluetooth(t *testing.T) {
+	ctx := context.Background()
+	const bt = "bluez_sink.EC_66_D1_B4_B5_D6.a2dp_sink"
+	p := newECPulse()
+	ec, _ := newEC(p)
+	if got := ec.ReplyOutput(ctx, "output"); got != "output" {
+		t.Fatalf("no Bluetooth: replies on %q, want output (the default sink, through the canceller while music plays)", got)
+	}
+
+	// The Bluetooth node routed the output: the default sink is the headphones.
+	p.sinks[bt], p.def = 5, bt
+	if got := ec.ReplyOutput(ctx, "output"); got != ReplyPCM {
+		t.Fatalf("default sink %s: replies on %q, want %s", bt, got, ReplyPCM)
+	}
+	if ec.ReplyOutput(ctx, "wav:/tmp/out.wav") != "wav:/tmp/out.wav" {
+		t.Fatal("a wav: output was replaced")
+	}
+
+	// The music starts: the canceller plays to the headphones and moves only the player; the
+	// reply already playing on the HAT stays there, and the next reply still opens ReplyPCM.
+	p.streams = []ecStream{{7, "mpv", bt}, {8, "jarvis-agent", DefaultSink}}
+	ec.Engage(ctx, "deferred_play")
+	if got := p.changes(); len(got) < 2 || !strings.Contains(got[1], "sink_master="+bt+" ") {
+		t.Fatalf("the canceller doesn't cancel the Bluetooth sink: %v", got)
+	}
+	if p.def != ECSink || p.sinkOf(7) != ECSink || p.sinkOf(8) != DefaultSink {
+		t.Fatalf("default %q, player on %q, reply on %q", p.def, p.sinkOf(7), p.sinkOf(8))
+	}
+	if got := ec.ReplyOutput(ctx, "output"); got != ReplyPCM {
+		t.Fatalf("engaged over Bluetooth: replies on %q, want %s", got, ReplyPCM)
+	}
+	ec.Disengage(ctx, "restore")
+
+	// Engaged over the HAT: replies go through the canceller as before.
+	p = newECPulse(ecStream{7, "mpv", DefaultSink})
+	ec, _ = newEC(p)
+	ec.Engage(ctx, "deferred_play")
+	if got := ec.ReplyOutput(ctx, "output"); got != "output" {
+		t.Fatalf("engaged over the HAT: replies on %q, want output", got)
+	}
+
+	// Pulse not answering: the output as given.
+	p.fail["pactl get-default-sink"] = true
+	if got := ec.ReplyOutput(ctx, "output"); got != "output" {
+		t.Fatalf("pactl failing: replies on %q", got)
+	}
+	var nilEC *EchoCancel
+	if nilEC.ReplyOutput(ctx, "output") != "output" {
+		t.Fatal("no canceller (no HAT): the output was replaced")
+	}
+}

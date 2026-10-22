@@ -57,6 +57,8 @@ type Settings struct {
 	MaintenanceRestart      *bool   `json:"maintenance_restart,omitempty"`
 	MaintenanceRestartAt    *string `json:"maintenance_restart_at,omitempty"`
 	MaintenanceRSSCeilingMB *int    `json:"maintenance_rss_ceiling_mb,omitempty"`
+	// Where a Pi's replies and chimes play while its output is on Bluetooth (#486): ReplyOutputs.
+	VoiceReplies *string `json:"voice_replies,omitempty"`
 	// ComputerControl: Jarvis may use this computer (COMPUTER-CONTROL.md C11). Unset is off:
 	// a new install and an upgrade both start off; the menu's toggle sets it.
 	ComputerControl *bool `json:"computer_control,omitempty"`
@@ -103,6 +105,8 @@ var Keys = []Key{
 		func(s *Settings) any { return &s.MaintenanceRestartAt }},
 	{"maintenance_rss_ceiling_mb", "maintenance-rss-ceiling-mb", false, "a Pi restarts when its resident memory reaches this many MB (0: never)",
 		func(s *Settings) any { return &s.MaintenanceRSSCeilingMB }},
+	{"voice_replies", "voice-replies", false, `a Pi's replies and chimes while its music is on Bluetooth: node (its own speaker, the default) or bluetooth`,
+		func(s *Settings) any { return &s.VoiceReplies }},
 	{"computer_control", "computer-control", false, `let Jarvis use this computer (off by default; the menu's "Computer control" sets it)`,
 		func(s *Settings) any { return &s.ComputerControl }},
 }
@@ -128,6 +132,9 @@ func KeyNames() string {
 // ConfirmModes are confirm_dictation's values (dictate.Confirm*; repeated here so this package
 // stays a leaf).
 var ConfirmModes = []string{"off", "submit", "all"}
+
+// ReplyOutputs are voice_replies' values (pinode.RepliesOnNode and RepliesOnBluetooth).
+var ReplyOutputs = []string{"node", "bluetooth"}
 
 // DefaultPath is <user config dir>/jarvis-agent/agent.json.
 func DefaultPath() (string, error) {
@@ -178,6 +185,9 @@ func Load(path string) (Settings, []string, error) {
 func (s Settings) Validate() error {
 	if s.ConfirmDictation != nil && !slices.Contains(ConfirmModes, *s.ConfirmDictation) {
 		return fmt.Errorf("confirm_dictation is %q; use off, submit or all", *s.ConfirmDictation)
+	}
+	if s.VoiceReplies != nil && !slices.Contains(ReplyOutputs, *s.VoiceReplies) {
+		return fmt.Errorf("voice_replies is %q; use node or bluetooth", *s.VoiceReplies)
 	}
 	if s.WakeThreshold != nil && (*s.WakeThreshold <= 0 || *s.WakeThreshold >= 1) {
 		return fmt.Errorf("wake_threshold is %v; use a number between 0 and 1", *s.WakeThreshold)

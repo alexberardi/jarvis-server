@@ -772,7 +772,8 @@ func runAgent(ctx context.Context, args []string) error {
 		tf.host.Alerts.Watch(alertLED(hd.leds))
 	}
 	var nodeConfig func() map[string]any
-	var live *voice.Live // the Pi's: the app's settings and noise measurements reach the pipeline
+	var nodeState func() pinode.State // the Pi's node settings in effect (nil: a computer)
+	var live *voice.Live              // the Pi's: the app's settings and noise measurements reach the pipeline
 	if !p.desktop {
 		live = voice.NewLive()
 		sp, err := settingsPath(*f.config)
@@ -783,9 +784,8 @@ func runAgent(ctx context.Context, args []string) error {
 		if tf.host != nil {
 			audio = tf.host.Audio
 		}
-		var state func() pinode.State
-		nodeConfig, state = wirePiNode(r, vf, hf, f.mf, hd, live, audio, sp, log)
-		startMaintenance(ctx, state, quit, log)
+		nodeConfig, nodeState = wirePiNode(r, vf, hf, f.mf, hd, live, audio, sp, log)
+		startMaintenance(ctx, nodeState, quit, log)
 	}
 	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
 	// and are in its settings snapshot; a computer has none.
@@ -832,7 +832,7 @@ func runAgent(ctx context.Context, args []string) error {
 		o := vs.options(cc, served, log, nil)
 		o.Mic = mic
 		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
-		withPiMusic(&o, duck)
+		withPiMusic(&o, duck, nodeState)
 		_ = voice.Serve(ctx, o)
 	}
 	sw.persist = func(on bool) error { return saveVoice(*f.config, on) }

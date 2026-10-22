@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -65,5 +66,45 @@ func TestServeListensThroughTheSwitch(t *testing.T) {
 	if sw.Base() != "dsnoopmic" || len(opened) == 0 || opened[0] != "dsnoopmic" || reads.Load() == 0 {
 		t.Fatalf("base %q, opened %v, reads %d: the pipeline must read the Switch started on Input",
 			sw.Base(), opened, reads.Load())
+	}
+}
+
+// #486: each reply and chime opens the device ReplyOutput names when it starts (a node setting
+// or a Bluetooth route changes it between replies), and Output when that device won't open (a
+// Pi whose asound.conf predates it).
+func TestPlaybackOpensTheReplyOutputOrFallsBack(t *testing.T) {
+	var opened []string
+	open := func(name string, rate, ch int) (device.Playback, error) {
+		opened = append(opened, name)
+		if name == "jarvis_reply" {
+			return nil, errors.New("Unknown PCM jarvis_reply")
+		}
+		return device.CreateWAVPlayback(t.TempDir()+"/out.wav", rate, ch)
+	}
+	reply := "output"
+	o := Options{Output: "output", ReplyOutput: func() string { return reply },
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	pb := playback(o, open)
+	for _, r := range []string{"output", "jarvis_reply"} {
+		reply = r
+		p, err := pb(24000, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Close()
+	}
+	if want := []string{"output", "jarvis_reply", "output"}; !slices.Equal(opened, want) {
+		t.Fatalf("opened %v, want %v", opened, want)
+	}
+
+	// No ReplyOutput: Output, as before.
+	opened = nil
+	if p, err := playback(Options{Output: "output"}, open)(24000, 1); err != nil {
+		t.Fatal(err)
+	} else {
+		p.Close()
+	}
+	if !slices.Equal(opened, []string{"output"}) {
+		t.Fatalf("opened %v", opened)
 	}
 }

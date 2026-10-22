@@ -298,6 +298,13 @@ pcm.output {
     type pulse
 }
 
+# The HAT's sink, whatever the default is: the node's replies and chimes while its music plays
+# on Bluetooth headphones or a speaker (voice_reply_output, internal/agent/music ReplyOutput).
+pcm.jarvis_reply {
+    type pulse
+    device jarvis_output
+}
+
 # --- Capture ------------------------------------------------------------
 pcm.dsnoopmic_hw {
     type dsnoop

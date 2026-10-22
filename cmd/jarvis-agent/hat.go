@@ -295,7 +295,15 @@ func piState(vf *voiceFlags, hf *hatFlags) pinode.State {
 	return pinode.State{WakeThreshold: vf.threshold, WakeAuto: vf.wakeAuto, WakeAck: !vf.noChimes, FollowUpListen: vf.followUp,
 		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDBrightness: hf.brightness,
 		SilenceThreshold: vf.silenceThreshold, SilenceSecs: vf.listenSilence,
-		FollowUpMinAfterOnset: vf.followMinAfterOnset, FollowUpMinSpeech: vf.followMinSpeech}
+		FollowUpMinAfterOnset: vf.followMinAfterOnset, FollowUpMinSpeech: vf.followMinSpeech, VoiceReplies: replyOutput(vf.replies)}
+}
+
+// replyOutput is --voice-replies as the node settings have it: bluetooth, else node.
+func replyOutput(flag string) string {
+	if flag == pinode.RepliesOnBluetooth {
+		return flag
+	}
+	return pinode.RepliesOnNode
 }
 
 // piAudio is the speaker's volume as the settings verbs set it and the snapshot reports it
@@ -360,6 +368,7 @@ func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio
 			"maintenance_restart_at_time":           st.Maintenance.At,
 			"led_enabled":                           st.LEDEnabled,
 			"led_brightness_percent":                st.LEDBrightness,
+			"voice_reply_output":                    st.VoiceReplies,
 			"hardware": map[string]any{
 				"hat_detected":        detected || chain,
 				"led_chain_available": chain,

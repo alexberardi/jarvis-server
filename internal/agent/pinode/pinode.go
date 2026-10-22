@@ -60,7 +60,17 @@ type State struct {
 	FollowUpMinSpeech     float64 // follow_up_min_speech_secs
 	// maintenance_restart_enabled, _at_time and _rss_ceiling_mb: read at every poll.
 	Maintenance maintenance.Settings
+	// VoiceReplies is voice_reply_output: where replies and chimes play while the node's output
+	// is routed to Bluetooth headphones or a speaker (#486), RepliesOnNode or RepliesOnBluetooth.
+	// Read before each reply.
+	VoiceReplies string
 }
+
+// voice_reply_output's values (settings.ReplyOutputs).
+const (
+	RepliesOnNode      = "node"      // this node's speaker (the HAT), the default
+	RepliesOnBluetooth = "bluetooth" // the Bluetooth device, with the music
+)
 
 // Node handles the verbs. Set LEDs, Voice and Audio after New when the Pi has them.
 type Node struct {
@@ -240,6 +250,12 @@ func parse(key string, v any) (change, string) {
 	case "is_muted":
 		b := truthy(v)
 		return change{audio: func(ctx context.Context, a Audio) { a.SetMuted(ctx, b) }}, ""
+	case "voice_reply_output":
+		r, _ := v.(string)
+		if !slices.Contains(settings.ReplyOutputs, r) {
+			return change{}, "use node (this node's speaker) or bluetooth (the Bluetooth device)"
+		}
+		return change{state: func(s *State) { s.VoiceReplies = r }, save: func(s *settings.Settings) { s.VoiceReplies = &r }}, ""
 	case "wake_word_model":
 		return change{}, "the Go node has one wake word (hey_jarvis); not applied or saved"
 	}

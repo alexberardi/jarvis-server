@@ -13,13 +13,17 @@ import (
 // Options is a pipeline bound to real devices.
 type Options struct {
 	Input, Output string // device names: "default", an ALSA PCM name, or "wav:PATH"
-	Config        Config
-	Detector      Detector
-	Server        Server
-	Tools         node.Toolset // client tools for voice turns (nil: none)
-	Log           *slog.Logger
-	OnTurn        func(Turn)
-	Indicator     Indicator // the on-screen state (nil: none)
+	// ReplyOutput, when set, names the device each reply and chime opens, asked as it starts
+	// (the Pi keeps them on its own speaker while its music plays on Bluetooth, #486); Output
+	// when that device won't open.
+	ReplyOutput func() string
+	Config      Config
+	Detector    Detector
+	Server      Server
+	Tools       node.Toolset // client tools for voice turns (nil: none)
+	Log         *slog.Logger
+	OnTurn      func(Turn)
+	Indicator   Indicator // the on-screen state (nil: none)
 	// Vocabulary is the names speech-to-text should expect (nil: none; Pipeline.Vocabulary).
 	Vocabulary func(ctx context.Context) string
 	// Live, if set, retunes and measures whichever pipeline is running (Pipeline.Live).
@@ -72,6 +76,23 @@ func openMic(o Options) (device.Capture, error) {
 	return o.Switch, nil
 }
 
+// playback opens the speaker for a reply or a chime: ReplyOutput's device, else Output.
+func playback(o Options, open func(name string, rate, ch int) (device.Playback, error)) PlaybackOpener {
+	return func(rate, ch int) (device.Playback, error) {
+		name := o.Output
+		if o.ReplyOutput != nil {
+			name = o.ReplyOutput()
+		}
+		pb, err := open(name, rate, ch)
+		if err != nil && name != o.Output {
+			o.Log.Warn("voice: reply device not opened; playing on the output instead (install-pi.sh adds it)",
+				"device", name, "output", o.Output, "err", err)
+			return open(o.Output, rate, ch)
+		}
+		return pb, err
+	}
+}
+
 func serveOnce(ctx context.Context, o Options) error {
 	mic, err := openMic(o)
 	if err != nil {
@@ -81,7 +102,7 @@ func serveOnce(ctx context.Context, o Options) error {
 	o.Detector.Reset()
 	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Tools: o.Tools, Log: o.Log, OnTurn: o.OnTurn, Indicator: o.Indicator,
 		Vocabulary: o.Vocabulary, Live: o.Live, Mic: o.Mic, Music: o.Music, Computer: o.Computer, WakeScores: o.WakeScores,
-		Playback: func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
+		Playback: playback(o, device.OpenPlayback)}
 	o.Log.Info("voice: listening", "input", o.Input, "output", o.Output, "backend", device.Backend(),
 		"wake_threshold", o.Config.WakeThreshold, "wake_threshold_auto", o.Config.WakeThresholdAuto)
 	err = p.Run(ctx)

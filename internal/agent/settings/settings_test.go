@@ -38,6 +38,7 @@ func runFlags() (*flag.FlagSet, map[string]any) {
 		"no-maintenance-restart":     fs.Bool("no-maintenance-restart", false, ""),
 		"maintenance-restart-at":     fs.String("maintenance-restart-at", "03:00", ""),
 		"maintenance-rss-ceiling-mb": fs.Int("maintenance-rss-ceiling-mb", -1, ""),
+		"voice-replies":              fs.String("voice-replies", "node", ""),
 	}
 	return fs, v
 }
@@ -138,6 +139,7 @@ func TestBadValuesAreRefused(t *testing.T) {
 		`{"maintenance_restart_at": "24:00"}`,
 		`{"maintenance_restart_at": "3"}`,
 		`{"maintenance_rss_ceiling_mb": -1}`,
+		`{"voice_replies": "headphones"}`,
 		`[1, 2]`,
 		`{"voice": tru`,
 	} {
@@ -152,7 +154,8 @@ func TestSetGetUnsetSaveRoundTrip(t *testing.T) {
 	for name, val := range map[string]string{"voice": "true", "island": "false", "confirm_dictation": "all", "wake_threshold": "0.55", "voice_output": "wav:out.wav",
 		"follow_up": "6", "follow_up_silence": "0.5", "leds": "false", "led_brightness": "40",
 		"silence_threshold": "1000", "listen_silence": "0.5", "follow_up_min_after_onset": "0.9", "follow_up_min_speech": "0",
-		"maintenance_restart": "false", "maintenance_restart_at": "04:30", "maintenance_rss_ceiling_mb": "0"} {
+		"maintenance_restart": "false", "maintenance_restart_at": "04:30", "maintenance_rss_ceiling_mb": "0",
+		"voice_replies": "bluetooth"} {
 		k, ok := Lookup(name)
 		if !ok {
 			t.Fatal(name)

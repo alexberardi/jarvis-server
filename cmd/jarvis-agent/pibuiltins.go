@@ -11,6 +11,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/reminders"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -167,13 +168,27 @@ func micSwitch(d *music.Ducker) *device.Switch {
 }
 
 // withPiMusic gives the voice pipeline the Pi's music (nil: none): ducked for each turn, and the
-// microphone through the echo canceller's switch.
-func withPiMusic(o *voice.Options, d *music.Ducker) {
+// microphone through the echo canceller's switch. With the HAT, the replies and chimes stay on
+// its speaker while the music plays on Bluetooth, unless the node setting voice_reply_output
+// (state; nil: the default) sends them there too (#486).
+func withPiMusic(o *voice.Options, d *music.Ducker, state func() pinode.State) {
 	if d == nil {
 		return
 	}
 	o.Music = d
 	o.Switch = micSwitch(d)
+	if d.EC == nil {
+		return // no HAT: no jarvis_output to keep the replies on
+	}
+	ec, base := d.EC, o.Output
+	o.ReplyOutput = func() string {
+		if state != nil && state().VoiceReplies == pinode.RepliesOnBluetooth {
+			return base
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		return ec.ReplyOutput(ctx, base)
+	}
 }
 
 // hatGain is the HAT codec's mic PGA.

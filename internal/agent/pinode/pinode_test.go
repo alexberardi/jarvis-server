@@ -106,7 +106,7 @@ func (f *fakeCC) PostAmbientResult(_ context.Context, rid string, p map[string]a
 func initial() State {
 	return State{WakeThreshold: 0.4, WakeAck: true, FollowUpListen: 4, FollowUpSilence: 1, LEDEnabled: true, LEDBrightness: 100,
 		SilenceThreshold: 300, SilenceSecs: 0.8, FollowUpMinAfterOnset: 0.7, FollowUpMinSpeech: 0.3,
-		Maintenance: maintenance.Settings{Enabled: true, At: "03:00", CeilingMB: -1}}
+		Maintenance: maintenance.Settings{Enabled: true, At: "03:00", CeilingMB: -1}, VoiceReplies: RepliesOnNode}
 }
 
 func newNode(t *testing.T) (*Node, *fakeLEDs, *fakeVoice, string) {
@@ -200,7 +200,8 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		t.Fatalf("voice cfg %+v", v.cfg)
 	}
 	want := State{WakeThreshold: 0.55, WakeAuto: true, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40,
-		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45, Maintenance: initial().Maintenance}
+		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45, Maintenance: initial().Maintenance,
+		VoiceReplies: RepliesOnNode}
 	if got := n.State(); got != want {
 		t.Fatalf("state %+v", got)
 	}
@@ -482,5 +483,34 @@ func TestUpdateRejectsANegativeFollowUpWindow(t *testing.T) {
 	}})
 	if v.tunes != 0 || n.State() != initial() {
 		t.Fatalf("tunes %d, state %+v", v.tunes, n.State())
+	}
+}
+
+// #486: voice_reply_output picks where replies and chimes play while the music is on Bluetooth;
+// it applies from the next reply (the voice pipeline asks State before each) and is saved.
+func TestUpdateVoiceReplyOutput(t *testing.T) {
+	n, leds, v, path := newNode(t)
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{"voice_reply_output": "bluetooth"}})
+	want := initial()
+	want.VoiceReplies = RepliesOnBluetooth
+	if got := n.State(); got != want {
+		t.Fatalf("state %+v", got)
+	}
+	if v.tunes != 0 || len(leds.enabled) != 0 {
+		t.Fatalf("tunes %d, leds %v", v.tunes, leds.enabled)
+	}
+	s, _, err := settings.Load(path)
+	if err != nil || s.VoiceReplies == nil || *s.VoiceReplies != RepliesOnBluetooth {
+		t.Fatalf("saved %+v %v", s, err)
+	}
+	for _, bad := range []any{"headphones", 1.0, true} {
+		run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{"voice_reply_output": bad}})
+	}
+	if n.State().VoiceReplies != RepliesOnBluetooth {
+		t.Fatalf("a bad value was applied: %q", n.State().VoiceReplies)
+	}
+	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{"voice_reply_output": "node"}})
+	if s, _, _ := settings.Load(path); n.State().VoiceReplies != RepliesOnNode || *s.VoiceReplies != RepliesOnNode {
+		t.Fatalf("back on the node: state %q, saved %q", n.State().VoiceReplies, *s.VoiceReplies)
 	}
 }

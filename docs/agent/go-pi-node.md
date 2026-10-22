@@ -897,6 +897,7 @@ to agent.json in one serialized write (`settings.Update`, shared with the voice 
 | `silence_duration` | `listen_silence` / `--listen-silence` | same (`Endpointing.SilenceSecs`) |
 | `follow_up_min_record_after_onset_secs` | `follow_up_min_after_onset` / `--follow-up-min-after-onset` | same (`FollowUp.MinAfterOnsetSecs`) |
 | `follow_up_min_speech_secs` | `follow_up_min_speech` / `--follow-up-min-speech` | same (`FollowUp.MinSpeechSecs`) |
+| `voice_reply_output` (`node`, the default, or `bluetooth`) | `voice_replies` / `--voice-replies` | read before each reply and chime (§3.15, #486) |
 | `volume_percent`, `is_muted` | not in agent.json: `sdkhost.Audio` persists them in `volume.json` and applies them again at start | `sdkhost.Audio.SetVolume` / `SetMuted` (pactl on the default sink or `jarvis_output`, else amixer; plus Bluetooth sinks), as `N:set_volume_percent` |
 
 A bad value skips that key with a log line (#295 added the endpointing keys and the volume;
@@ -959,14 +960,21 @@ system bus, no adapter) the node runs without Bluetooth. Decisions:
 At start the agent is registered as BlueZ's default and the adapter made pairable; a pairing a
 phone starts (the node discoverable) is trusted and connected, as N:'s agent does on
 `Paired: yes`. The reconnect loop runs 30 s after start, then every 10 minutes. A connected
-speaker or headphones (role `source`) are Pulse's default sink, so replies and music play on them;
+speaker or headphones (role `source`) are Pulse's default sink, so the music plays on them;
 `jarvis_output` is the default again when they disconnect (#433). A saved device that connects by
 itself (headphones turned back on) gets the output again at once (#469). Each time the output
 moves to or from a speaker, the node restarts the music players that are running (shairport-sync,
 spotifyd, go-librespot; `packages.System.RestartUnits`): a sink switch can kill a player's Pulse
 stream for good (#478). A package's system unit goes through `jarvis-post-install restart-service`,
 a user unit through `systemctl --user restart`; a failure is logged, never fatal
-([decision](../decisions/2026-10-22-pi-node-bluetooth-player-restart.md)).
+([decision](../decisions/2026-10-22-pi-node-bluetooth-player-restart.md)). The node's own replies
+and chimes stay on the HAT meanwhile (#486,
+[decision](../decisions/2026-10-22-pi-node-reply-output.md)): before each one the agent asks Pulse
+for the default sink, and while that is a bluez sink (or the echo canceller's master is) it opens
+asound.conf's `jarvis_reply` (type pulse, device `jarvis_output`) instead of `output`. The node
+setting `voice_reply_output` = `bluetooth` (agent.json `voice_replies`) sends them to the device
+with the music, as before. A Pi whose asound.conf has no `jarvis_reply` yet (install-pi.sh not
+run again) plays them on `output` with a warning in the log.
 `install-pi.sh` installs `bluez`, `pulseaudio-module-bluetooth` and `rfkill`, unblocks the radio
 and sets BlueZ's Class of Device to audio (0x240404) in `/etc/bluetooth/main.conf`.
 
@@ -984,7 +992,8 @@ jarvis-agent run --profile pi --voice --voice-input dsnoopmic --voice-output out
 #   Scan: the speaker (in pairing mode) is listed as audio_sink; the log has "scan complete"
 #   Pair it: "Paired"; bluetoothctl info <MAC> shows Paired/Trusted/Connected: yes
 pactl list sinks short            # a bluez_sink.<MAC>.a2dp_sink, and jarvis_output
-pactl get-default-sink            # the bluez sink: "What time is it?" is spoken on the speaker
+pactl get-default-sink            # the bluez sink: music plays on the speaker; "What time is it?" is spoken on the HAT
+#   voice_reply_output "bluetooth" (the app, or agent.json voice_replies): the next reply is spoken on the speaker
 paplay -d bluez_sink.<MAC_>.a2dp_sink /usr/share/sounds/alsa/Front_Center.wav   # plays on the speaker
 #   Status (no new scan needed): the speaker under Connected
 #   Disconnect: bluetoothctl info shows Connected: no; the bluez sink is gone; pactl get-default-sink is jarvis_output

@@ -7,11 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
+	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
@@ -118,13 +121,50 @@ func TestPiMusicOnlyOnAPi(t *testing.T) {
 		t.Fatal("a switch without music")
 	}
 	var o voice.Options
-	withPiMusic(&o, d)
+	withPiMusic(&o, d, nil)
 	if sw, _ := d.EC.Capture.(*device.Switch); o.Music != d || o.Switch == nil || o.Switch != sw {
 		t.Fatalf("voice options %+v: want the ducker and the echo canceller's switch as the mic", o)
 	}
 	o = voice.Options{}
-	withPiMusic(&o, nil)
-	if o.Music != nil || o.Switch != nil {
+	withPiMusic(&o, nil, nil)
+	if o.Music != nil || o.Switch != nil || o.ReplyOutput != nil {
 		t.Fatalf("no music: options %+v", o)
+	}
+	o = voice.Options{Output: "output"}
+	withPiMusic(&o, newPiMusic(no, marker, nil), nil)
+	if o.ReplyOutput != nil {
+		t.Fatal("no HAT (no jarvis_output): the replies' device was replaced")
+	}
+}
+
+// #486: with the Bluetooth node's route (the default sink is the headphones), the replies open
+// the PCM pinned to the HAT's sink while the players keep the default; the node setting
+// voice_reply_output "bluetooth" sends them to the headphones too, as before.
+func TestRepliesFollowTheNodeSetting(t *testing.T) {
+	var calls []string
+	def := "bluez_sink.EC_66_D1_B4_B5_D6.a2dp_sink"
+	run := func(_ context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return def + "\n", nil
+	}
+	d := music.New(nil, nil)
+	d.EC = &music.EchoCancel{Run: run, Mic: music.DefaultMic, Sink: music.DefaultSink, Capture: device.NewSwitch(voice.CaptureRate, 1)}
+	st := pinode.State{VoiceReplies: pinode.RepliesOnNode}
+	o := voice.Options{Output: "output"}
+	withPiMusic(&o, d, func() pinode.State { return st })
+	if o.ReplyOutput == nil {
+		t.Fatal("no reply device on a Pi with the HAT")
+	}
+	if got := o.ReplyOutput(); got != music.ReplyPCM {
+		t.Fatalf("default sink %s: replies on %q, want %s (type pulse, device jarvis_output)", def, got, music.ReplyPCM)
+	}
+	def = music.DefaultSink
+	if got := o.ReplyOutput(); got != "output" {
+		t.Fatalf("no Bluetooth route: replies on %q, want output", got)
+	}
+	def, calls = "bluez_sink.EC_66_D1_B4_B5_D6.a2dp_sink", nil
+	st.VoiceReplies = pinode.RepliesOnBluetooth
+	if got := o.ReplyOutput(); got != "output" || len(calls) != 0 {
+		t.Fatalf("voice_reply_output bluetooth: replies on %q (pactl %v), want output", got, calls)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Echo cancellation while the node's own music plays (17b; N:core/echo_cancel.py, reworked for
@@ -31,6 +32,9 @@ const (
 	// DefaultMic and DefaultSink are install-pi.sh's capture PCM and HAT sink.
 	DefaultMic  = "dsnoopmic"
 	DefaultSink = "jarvis_output"
+	// ReplyPCM is install-pi.sh's ALSA PCM pinned to the HAT's sink (type pulse, device
+	// jarvis_output): the node's replies open it while the music plays on Bluetooth (#486).
+	ReplyPCM = "jarvis_reply"
 )
 
 // Capture is the voice pipeline's microphone (device.Switch): Use moves it to another ALSA
@@ -56,6 +60,9 @@ type EchoCancel struct {
 	gaveUp      bool     // an engage failed or the capture fell back: no retry until Rearm
 	modules     []string // the module indexes this engage loaded, in load order
 	prevDefault string   // the default sink before the engage
+	// master is the sink the engaged canceller plays to (ReplyOutput reads it without mu,
+	// which an engage holds across its pactl calls).
+	master atomic.Value // string
 }
 
 // NewEchoCancel is the Pi's canceller over the real pactl, switching capture.
@@ -123,6 +130,7 @@ func (e *EchoCancel) Engage(ctx context.Context, trigger string) bool {
 		return fail("load_echo_cancel", err)
 	}
 	e.modules = append(e.modules, idx)
+	e.master.Store(master)
 	// New streams (the player a deferred play just started, the replies) land on ECSink too.
 	if _, err := e.Run(ctx, "pactl", "set-default-sink", ECSink); err != nil {
 		e.log().Warn("music: echo cancel: default sink not moved; new streams skip the canceller", "err", err)
@@ -133,6 +141,29 @@ func (e *EchoCancel) Engage(ctx context.Context, trigger string) bool {
 	e.log().Info("music: echo cancel engaged", "modules", e.modules, "moved", moved, "capture", ECCapture,
 		"trigger", trigger)
 	return true
+}
+
+// ReplyOutput is the device the node's replies and chimes open, asked before each (#486): ReplyPCM
+// while the music plays on Bluetooth headphones or a speaker (the default sink is a bluez one,
+// or the engaged canceller's master is), so the replies stay on the node's speaker; base
+// otherwise, so they go through the canceller while the node's music plays on the HAT. A wav:
+// output, no canceller (no HAT) or Pulse not answering: base.
+func (e *EchoCancel) ReplyOutput(ctx context.Context, base string) string {
+	if e == nil || strings.HasPrefix(base, "wav:") {
+		return base
+	}
+	out, err := e.Run(ctx, "pactl", "get-default-sink")
+	if err != nil {
+		return base
+	}
+	sink := strings.TrimSpace(out)
+	if sink == ECSink {
+		sink, _ = e.master.Load().(string)
+	}
+	if strings.HasPrefix(sink, "bluez_sink.") || strings.HasPrefix(sink, "bluez_output.") {
+		return ReplyPCM
+	}
+	return base
 }
 
 // Disengage switches capture back, moves the streams off ECSink and unloads what Engage

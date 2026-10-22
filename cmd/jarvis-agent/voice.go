@@ -18,6 +18,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
@@ -33,6 +34,7 @@ type voiceFlags struct {
 	followUp      float64
 	followSilence float64
 	bargeIn       bool
+	replies       string // a Pi's voice_reply_output: pinode.RepliesOnNode or RepliesOnBluetooth
 	// Endpointing (#295): the app's silence_threshold, silence_duration,
 	// follow_up_min_record_after_onset_secs and follow_up_min_speech_secs.
 	silenceThreshold    float64
@@ -72,6 +74,8 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 		"a follow-up answer records at least this many seconds after speech starts (the Python node's follow_up_min_record_after_onset_secs)")
 	fs.Float64Var(&v.followMinSpeech, "follow-up-min-speech", fu.MinSpeechSecs,
 		"a follow-up answer shorter than this many seconds of speech is noise (the Python node's follow_up_min_speech_secs)")
+	fs.StringVar(&v.replies, "voice-replies", pinode.RepliesOnNode,
+		"a Pi's replies and chimes while its music is on Bluetooth: node (its own speaker) or bluetooth (the Python node: wherever the default sink is)")
 	fs.BoolVar(&v.bargeIn, "barge-in", voice.DefaultBargeIn().Enabled,
 		"stop a reply when \"hey Jarvis\" is said over it (-barge-in=false: off; the Python node's barge_in_enabled)")
 	fs.DurationVar(&v.debounce, "wake-debounce", voice.DefaultConfig().Debounce,
