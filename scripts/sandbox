@@ -4,7 +4,8 @@
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
 #   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich|empty] [--llm shared|none|scripted] [--ui]
-#                      [--voice [--stt-model ID]] [--sip] [--relay fake|none|URL] [--lan] [--single-port]
+#                      [--voice [--stt-model ID]] [--speech local|fake|speaches] [--sip] [--relay fake|none|URL]
+#                      [--lan] [--single-port]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
 #   scripts/sandbox env [--name N]         print the sandbox's env file (source it in a shell)
@@ -47,6 +48,15 @@
 #                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
 #   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
 #                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
+#   --speech local   (default) STT on the local whisper-server (--voice) or off
+#   --speech fake    STT is remote (stt.engine=remote, docs/llm/07-remote-speech.md): tools/fakespeech
+#                    (port 7796 + offset) answers every clip with canned text and records each request
+#                    at $SBX_FAKESPEECH/control/requests (canned text: POST /control/text; failures:
+#                    POST /control/fail). For the contract suite; voice scenarios mishear on purpose
+#   --speech speaches  STT is remote on speaches (an OpenAI-compatible server) in Docker (port 7795 +
+#                    offset, the "Other" preset, model $SPEACHES_STT_MODEL, default
+#                    Systran/faster-distil-whisper-small.en, cached in ~/.cache/jarvis-harness/speaches),
+#                    so pipeline say|run --voice round-trips through a real remote; with --voice. down removes it
 #   --sip            the L1 SIP lane beside it (scripts/sip-lane, docs/cc/phone-sip.md §5): Asterisk 22
 #                    in Docker configured like FreePBX 17, baresip far ends, ports offset like the
 #                    sandbox's; sandbox.env gets SBX_SIP_LANE (its lane.env). Its scenarios:
@@ -85,7 +95,7 @@
 # (default sim-node) is the name the pairing asks for; one agent per name. Log: simnode/<X>/agent.log.
 #
 # Nodes may claim who is speaking (JARVIS_DEV_SPEAKER_HINTS=1), standing in for voice ID.
-# Without --voice, STT is off and TTS has no voice models: pipeline tests start from text
+# Without --voice (or --speech), STT is off and TTS has no voice models: pipeline tests start from text
 # (go run ./tools/pipeline say "turn on the kitchen lights"; ... run for the scenarios).
 set -euo pipefail
 
@@ -97,10 +107,10 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,89p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,99p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0
-VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0
+VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -110,6 +120,7 @@ while [ $# -gt 0 ]; do
     --ui) UI=1; shift ;;
     --voice) VOICE=1; shift ;;
     --sip) SIP=1; shift ;;
+    --speech) SPEECH=$2; shift 2 ;;
     --stt-model) STT_MODEL=$2; shift 2 ;;
     --version) VERSION=$2; shift 2 ;;
     --trust-key) TRUST_KEY=$2; shift 2 ;;
@@ -119,7 +130,7 @@ while [ $# -gt 0 ]; do
     --purge) PURGE=1; shift ;;
     --node-name) NODE_NAME=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,89p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,99p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -128,6 +139,7 @@ case $NODE_NAME in *[!a-zA-Z0-9_-]*|'') die "--node-name: letters, digits, - and
 case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or scripted" ;; esac
 case $PROFILE in minimal | rich | empty) ;; *) die "--profile: minimal, rich or empty" ;; esac
 case $RELAY in fake | none | http://* | https://*) ;; *) die "--relay: fake, none or an http(s) URL" ;; esac
+case $SPEECH in local | fake | speaches) ;; *) die "--speech: local, fake or speaches" ;; esac
 
 DIR=$SBX_ROOT/$NAME
 HOME_DIR=$DIR/home
@@ -139,6 +151,10 @@ OFFSETF=$DIR/offset
 TAPPID=$DIR/tap.pid
 SCRIPTPID=$DIR/scriptllm.pid
 RELAYPID=$DIR/fakerelay.pid
+SPEECHPID=$DIR/fakespeech.pid
+SPEACHES=jarvis-sbx-$NAME-speaches
+SPEACHES_IMAGE=${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu}
+SPEACHES_STT_MODEL=${SPEACHES_STT_MODEL:-Systran/faster-distil-whisper-small.en}
 LLMF=$DIR/llm-mode
 SINGLEF=$DIR/single-port
 
@@ -146,6 +162,7 @@ running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 tap_running() { [ -f "$TAPPID" ] && kill -0 "$(cat "$TAPPID")" 2>/dev/null; }
 scriptllm_running() { [ -f "$SCRIPTPID" ] && kill -0 "$(cat "$SCRIPTPID")" 2>/dev/null; }
 relay_running() { [ -f "$RELAYPID" ] && kill -0 "$(cat "$RELAYPID")" 2>/dev/null; }
+speech_running() { [ -f "$SPEECHPID" ] && kill -0 "$(cat "$SPEECHPID")" 2>/dev/null; }
 # port_busy: is something listening on TCP port $1? ss on Linux, lsof where there is no ss (macOS).
 port_busy() {
   if command -v ss >/dev/null; then
@@ -359,12 +376,56 @@ for e in json.load(open(sys.argv[1])):
   STT_FILE=$CACHE/$file
 }
 
-# setup_voice turns on TTS, the speaker model and STT (whisper on the CPU), then waits until a
-# synthesized phrase comes back as text through command-center, as a node would see it.
+# setup_remote_stt points the stt label at the --speech remote, as a superuser would with the
+# "Other" preset (docs/llm/07-remote-speech.md): tools/fakespeech (started by up) or speaches in
+# Docker, started here (the first run pulls its image and model into the harness cache).
+setup_remote_stt() {
+  local llm=llm url model key=
+  case $SPEECH in
+    fake)
+      url=http://127.0.0.1:$(port 7796)/v1 model=fake-transcribe key=$(cat "$DIR/fakespeech-key") ;;
+    speaches)
+      start_speaches
+      url=http://127.0.0.1:$(port 7795)/v1 model=$SPEACHES_STT_MODEL ;;
+  esac
+  set_setting "$llm" stt.remote_url "\"$url\""
+  set_setting "$llm" stt.remote_api '"openai"'
+  set_setting "$llm" stt.remote_model "\"$model\""
+  set_setting "$llm" stt.remote_api_key "\"$key\""
+  # The first speaches transcription loads the model: give it longer than a voice turn's 8 s.
+  [ "$SPEECH" != speaches ] || set_setting "$llm" stt.remote_timeout_ms 60000
+  set_setting "$llm" stt.engine '"remote"'
+  say "stt: remote, $url ($model)"
+}
+
+start_speaches() {
+  command -v docker >/dev/null && docker info >/dev/null 2>&1 || die "--speech speaches needs Docker (docker info failed)"
+  local cache=${JARVIS_HARNESS_CACHE:-$HOME/.cache/jarvis-harness}/speaches p
+  p=$(port 7795)
+  mkdir -p "$cache"
+  docker rm -f "$SPEACHES" >/dev/null 2>&1 || true
+  say "speaches: starting $SPEACHES_IMAGE on :$p (the first run pulls the image)"
+  docker run -d --name "$SPEACHES" --label jarvis-sandbox="$NAME" -p "127.0.0.1:$p:8000" \
+    -v "$cache:/home/ubuntu/.cache/huggingface/hub" "$SPEACHES_IMAGE" >/dev/null || die "docker run $SPEACHES failed"
+  for _ in $(seq 1 120); do
+    curl -sf "http://127.0.0.1:$p/health" >/dev/null && break
+    docker inspect -f '{{.State.Running}}' "$SPEACHES" 2>/dev/null | grep -q true || break
+    sleep 1
+  done
+  curl -sf "http://127.0.0.1:$p/health" >/dev/null || { docker logs --tail 30 "$SPEACHES" >&2; die "speaches did not come up"; }
+  say "speaches: fetching $SPEACHES_STT_MODEL (once)"
+  curl -sf -X POST "http://127.0.0.1:$p/v1/models/$SPEACHES_STT_MODEL" >/dev/null ||
+    curl -sf "http://127.0.0.1:$p/v1/models/$SPEACHES_STT_MODEL" >/dev/null || die "speaches: could not fetch $SPEACHES_STT_MODEL"
+}
+
+# setup_voice turns on TTS, the speaker model and STT (whisper on the CPU, or the --speech
+# remote), then waits until a synthesized phrase comes back as text through command-center, as
+# a node would see it.
 setup_voice() {
   local llm=llm cc=cc
+  [ "$SPEECH" = local ] || setup_remote_stt
   if [ "$VOICE" != 1 ]; then
-    set_setting "$llm" stt.engine '"off"'
+    [ "$SPEECH" != local ] || set_setting "$llm" stt.engine '"off"'
     return
   fi
   fetch_voice_models
@@ -379,10 +440,14 @@ setup_voice() {
   [ "$threads" -gt 8 ] && threads=8
   [ "$threads" -lt 1 ] && threads=1
   set_setting "$llm" stt.extra_args "\"-t $threads\""
-  set_setting "$llm" stt.engine '"local"'
-  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code
+  [ "$SPEECH" != local ] || set_setting "$llm" stt.engine '"local"'
+  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code stt_desc="$STT_MODEL on the CPU; the first start fetches whisper-server"
+  case $SPEECH in
+    fake) stt_desc="remote: tools/fakespeech" ;;
+    speaches) stt_desc="remote: speaches, $SPEACHES_STT_MODEL" ;;
+  esac
   node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json")
-  say "voice: warming TTS and STT ($STT_MODEL on the CPU; the first start fetches whisper-server)"
+  say "voice: warming TTS and STT ($stt_desc)"
   for _ in $(seq 1 120); do
     code=$(curl -s -o "$DIR/.warm.wav" -w '%{http_code}' -X POST "$(svc_url cc)/api/v0/media/tts/speak" \
       -H "X-API-Key: $node_id:$node_key" -H 'Content-Type: application/json' -d '{"text": "Testing one two three."}')
@@ -451,6 +516,8 @@ write_env() {
     if [ "$LLM" = scripted ]; then echo "export SBX_SCRIPTLLM=http://127.0.0.1:$(port 7798)"; fi
     if [ "$RELAY" = fake ]; then echo "export SBX_FAKERELAY=http://127.0.0.1:$(port 7797)"; echo "export SBX_PUSH_LOG=$DIR/pushes.jsonl"; fi
     case $RELAY in http*) echo "export SBX_RELAY=$RELAY" ;; esac
+    if [ "$SPEECH" = fake ]; then echo "export SBX_FAKESPEECH=http://127.0.0.1:$(port 7796)"; echo "export SBX_SPEECH_LOG=$DIR/speech.jsonl"; fi
+    if [ "$SPEECH" = speaches ]; then echo "export SBX_SPEACHES=http://127.0.0.1:$(port 7795)"; fi
     echo "export SBX_ADMIN_API_KEY=$(cat "$DIR/admin-api-key")"
     echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
     if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
@@ -492,6 +559,7 @@ cmd_up() {
   (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/pipeline" ./tools/pipeline)
   [ "$LLM" != scripted ] || (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/scriptllm" ./tools/scriptllm)
   [ "$RELAY" != fake ] || (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/fakerelay" ./tools/fakerelay)
+  [ "$SPEECH" != fake ] || (cd "$ROOT" && CGO_ENABLED=0 go build -o "$DIR/fakespeech" ./tools/fakespeech)
   echo "$LLM" >"$LLMF"
   echo "$RELAY" >"$DIR/relay-mode"
   if [ "$SINGLE_PORT" = 1 ]; then touch "$SINGLEF"; else rm -f "$SINGLEF"; fi
@@ -516,6 +584,12 @@ cmd_up() {
     none) ;;
     *) relay_url=$RELAY ;;
   esac
+  if [ "$SPEECH" = fake ]; then
+    [ -f "$DIR/fakespeech-key" ] || echo "sk-fake-$(head -c 12 /dev/urandom | base64 | tr -d '/+=')" >"$DIR/fakespeech-key"
+    FAKESPEECH_KEY=$(cat "$DIR/fakespeech-key") detach "$DIR/fakespeech" --listen "$bind:$(port 7796)" \
+      --log "$DIR/speech.jsonl" >>"$DIR/fakespeech.log" 2>&1 </dev/null &
+    echo $! >"$SPEECHPID"
+  fi
   say "push relay: ${relay_url:-none}$([ "$RELAY" != fake ] || echo " (tools/fakerelay; pushes in $DIR/pushes.jsonl)")"
   # Every harness URL assumes the legacy ports unless --single-port asks for a fresh install's.
   local legacy=1
@@ -634,6 +708,11 @@ cmd_stop() {
   rm -f "$SCRIPTPID"
   if relay_running; then kill "$(cat "$RELAYPID")"; fi
   rm -f "$RELAYPID"
+  if speech_running; then kill "$(cat "$SPEECHPID")"; fi
+  rm -f "$SPEECHPID"
+  if command -v docker >/dev/null && docker ps -aq --filter "name=^$SPEACHES\$" 2>/dev/null | grep -q .; then
+    docker rm -f "$SPEACHES" >/dev/null 2>&1 || true
+  fi
   if [ -f "$DIR/sip/lane.env" ]; then "$ROOT/scripts/sip-lane" down --name "$NAME" || true; fi
 }
 

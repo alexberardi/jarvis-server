@@ -348,7 +348,7 @@ type LabelConfig struct {
 	RemoteAPIMode string `json:"remote_api"`
 	RemoteAPI     string `json:"remote_api_effective"`
 	// RemoteTimeoutMS bounds one remote request (remote_timeout_ms, stt only; 0 = none).
-	RemoteTimeoutMS int `json:"remote_timeout_ms,omitempty"`
+	RemoteTimeoutMS int `json:"remote_timeout_ms"`
 
 	// Problem says why the label can't run as configured (missing model file, …).
 	Problem string `json:"problem,omitempty"`
