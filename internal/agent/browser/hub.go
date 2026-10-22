@@ -172,13 +172,13 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 			if hc.info.Key == "" {
 				hc.info.Key = h.keyFor(m.Browser, id)
 			}
+			if !wasReady || accessChanged {
+				h.notifyLocked()
+			}
 			h.mu.Unlock()
 			if !wasReady {
 				h.Log.Info("browser connected", "id", id, "browser", m.Browser, "version", m.BrowserVersion, "extension", m.ExtensionVersion,
 					"website_access", accessText(m.WebsiteAccess))
-				h.notify()
-			} else if accessChanged {
-				h.notify()
 			}
 		case "event":
 			if m.Event == "record" {
@@ -200,10 +200,12 @@ func (h *Hub) handle(ctx context.Context, c net.Conn) {
 				changed := !sameAccess(hc.info.WebsiteAccess, m.WebsiteAccess)
 				hc.info.WebsiteAccess = m.WebsiteAccess
 				ready := hc.ready
+				if changed && ready {
+					h.notifyLocked()
+				}
 				h.mu.Unlock()
 				if changed && ready {
 					h.Log.Info("browser website access changed", "id", id, "website_access", accessText(m.WebsiteAccess))
-					h.notify()
 				}
 			}
 		case "result":
@@ -223,10 +225,12 @@ func (h *Hub) drop(id int, hc *hubConn) {
 	wasReady := hc.ready
 	delete(h.conns, id)
 	close(hc.done)
+	if wasReady {
+		h.notifyLocked()
+	}
 	h.mu.Unlock()
 	if wasReady {
 		h.Log.Info("browser disconnected", "id", id, "browser", hc.info.Browser)
-		h.notify()
 	}
 }
 
@@ -245,11 +249,11 @@ func accessText(a *bool) string {
 	return "off"
 }
 
-func (h *Hub) notify() {
-	h.mu.Lock()
+// notifyLocked fires Changed. Callers hold mu, so the change and its firing are one step: a
+// Changed taken after a change can be seen waits for the next one.
+func (h *Hub) notifyLocked() {
 	close(h.changed)
 	h.changed = make(chan struct{})
-	h.mu.Unlock()
 }
 
 // keyFor names a browser for tab ids: the last word of its name, lowercased ("Google Chrome" ->
