@@ -32,6 +32,8 @@
 # Needs /dev/kvm (read-write), qemu-system-x86_64, qemu-img, ssh, ssh-keygen, curl, and
 # cloud-localds or xorriso/genisoimage/mkisofs for the seed. Building needs the network (Debian's
 # cloud images, Sangoma's repositories, GitHub); weekly needs it unless --no-update.
+# FREEPBX_INSTALLER_REF pins the installer to a commit and FREEPBX_INSTALLER_SHA256 to a checksum
+# (checked before it runs as root; unset, the sha256 is only logged).
 # Choices: docs/decisions/2026-10-22-sip-l2-freepbx-lane.md.
 set -euo pipefail
 
@@ -48,11 +50,13 @@ IMAGE_URL=${FREEPBX_IMAGE_URL:-https://cloud.debian.org/images/cloud/bookworm/la
 IMAGE=debian-12-genericcloud-amd64.qcow2
 INSTALLER_REF=${FREEPBX_INSTALLER_REF:-master}
 INSTALLER_URL=https://github.com/FreePBX/sng_freepbx_debian_install/raw/$INSTALLER_REF/sng_freepbx_debian_install.sh
+INSTALLER_SHA256=${FREEPBX_INSTALLER_SHA256:-}
+[[ "$INSTALLER_SHA256" =~ ^([0-9a-f]{64})?$ ]] || { echo "freepbx-lane: FREEPBX_INSTALLER_SHA256 is not a sha256" >&2; exit 2; }
 DISK=$DIR/disk.qcow2
 PIDFILE=$DIR/qemu.pid
 say() { echo "freepbx-lane: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
 
 CMD=${1:-}
 [ -n "$CMD" ] || { usage; exit 2; }
@@ -227,8 +231,10 @@ cmd_build() {
   x qemu-img resize -q "$DISK" "$DISK_SIZE"
   seed_iso
   boot 0
+  local installer_check=''
+  [ -z "$INSTALLER_SHA256" ] || installer_check=" && echo '$INSTALLER_SHA256  sng_freepbx_debian_install.sh' | sha256sum -c --quiet"
   step "sng_freepbx_debian_install.sh ($INSTALLER_REF) inside the VM; its log is $DIR/install.log"
-  xtee "$DIR/install.log" vssh "curl -fsSL -o sng_freepbx_debian_install.sh '$INSTALLER_URL' && sha256sum sng_freepbx_debian_install.sh && sudo bash sng_freepbx_debian_install.sh"
+  xtee "$DIR/install.log" vssh "curl -fsSL -o sng_freepbx_debian_install.sh '$INSTALLER_URL' && sha256sum sng_freepbx_debian_install.sh$installer_check && sudo bash sng_freepbx_debian_install.sh"
   x vssh "sudo fwconsole -V; sudo asterisk -rx 'core show version'"
   shutdown_vm
   step "snapshot installed (FreePBX as the installer leaves it; weekly updates and provisions from here)"

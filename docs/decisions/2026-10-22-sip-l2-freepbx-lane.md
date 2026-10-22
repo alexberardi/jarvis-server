@@ -28,7 +28,9 @@ shows it), never a real carrier.
 drive: a NoCloud seed adds the lane's own user and SSH key (kept next to the disk, never
 `~/.ssh`). The image is checked against Debian's `SHA512SUMS`. The installer is FreePBX's
 `sng_freepbx_debian_install.sh` from GitHub (`FREEPBX_INSTALLER_REF` pins a commit; its sha256
-goes in `install.log`).
+goes in `install.log`, and `FREEPBX_INSTALLER_SHA256`, when set, is checked before it runs as
+root). It defaults to `master`, unchecked, because the lane exists to see what a fresh install
+gets today; pin both to rebuild a known install.
 
 **Two snapshots; weekly starts from the bare install.** FreePBX writes an extension's defaults
 when the extension is created, so re-reading an extension made at build time would never show

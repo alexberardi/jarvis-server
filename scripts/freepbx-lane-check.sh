@@ -52,6 +52,13 @@ for want in 'debian-12-genericcloud-amd64\.qcow2' 'sha512sum' 'qemu-system-x86_6
   grep -qE -- "$want" <<<"$plan" || err "build plan lacks /$want/"
 done
 lacks 'hostfwd=tcp:0\.0\.0\.0|hostfwd=tcp::' "$plan"
+lacks 'sha256sum -c' "$plan"
+# A pinned installer checksum is checked before the installer runs as root.
+sum=$(printf '%064d' 0)
+plan=$(FREEPBX_INSTALLER_SHA256=$sum expect 0 'sha256sum -c' build --dev-box devbox --dry-run)
+grep -qE -- "$sum  sng_freepbx_debian_install\.sh' \| sha256sum -c --quiet && sudo bash" <<<"$plan" ||
+  err "build plan does not check the installer's sha256 before running it"
+FREEPBX_INSTALLER_SHA256=nothex expect 2 'is not a sha256' build --dev-box devbox --dry-run >/dev/null
 [ ! -e "$T/lane" ] || err "build --dry-run wrote $T/lane"
 
 # The weekly plan: from "installed", updated, provisioned afresh, captured, diffed against L1.

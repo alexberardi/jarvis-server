@@ -77,10 +77,19 @@ func TestShownSettings(t *testing.T) {
  max_contacts                       : 1
  remove_existing                    : false
  qualify_frequency                  : 60
+ 100rel                             : yes
+ mailboxes                          : 
 `
 	got := shownSettings(out)
 	if got["direct_media"] != "true" || got["qualify_frequency"] != "60" || got["remove_existing"] != "false" {
 		t.Fatalf("got %v", got)
+	}
+	// Settings with digits in the name and empty values are read too: drift compares them.
+	if v, ok := got["100rel"]; !ok || v != "yes" {
+		t.Errorf("100rel = %q, %v; want yes", v, ok)
+	}
+	if v, ok := got["mailboxes"]; !ok || v != "" {
+		t.Errorf("mailboxes = %q, %v; want empty", v, ok)
 	}
 	if bad := missingDefaults(got); len(bad) != 0 {
 		t.Errorf("missing: %v", bad)
