@@ -146,6 +146,11 @@ func TestNeedsComputer(t *testing.T) {
 		"do my budget: download the bank statements":                  true,
 		"fill in the plot application at http://127.0.0.1:8080/form/": true,
 		"fill in the blanks for me":                                   false,
+		// Typed words are the text, not the request (#435).
+		"type buy more coffee filters into omawrite":       false,
+		"write order the cake on friday in slack":          false,
+		"Hey Jarvis, type check out the new deck in notes": false,
+		"buy a type-c cable":                               true,
 	} {
 		if got := needsComputer(s); got != want {
 			t.Errorf("needsComputer(%q) = %v, want %v", s, got, want)
