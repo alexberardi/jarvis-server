@@ -1280,11 +1280,6 @@ func (l *Loop) decide(ctx context.Context, t Task, tgt computeruse.Target, obs O
 		}
 	}
 	d.risk = computeruse.Classify(a, el, computeruse.Target{Kind: tgt.Kind, Site: d.site, App: d.app})
-	if d.risk.Category == computeruse.CatDelete && cartLineRemoval(obs, el) {
-		// Taking a line out of a cart spends nothing and is put back with one press: asking for
-		// each one made a cart with leftovers a string of phone taps (#485).
-		d.risk = computeruse.Risk{Level: computeruse.LevelNone}
-	}
 	if d.risk.Level == computeruse.LevelDeny {
 		d.verdict = policy.Verdict{Effect: policy.Block, Reason: d.risk.Reason}
 		return d
@@ -1306,6 +1301,12 @@ func (l *Loop) decide(ctx context.Context, t Task, tgt computeruse.Target, obs O
 		if rank(v.Effect) > rank(d.verdict.Effect) || d.target == "" {
 			d.verdict, d.target = v, target
 		}
+	}
+	if d.risk.Category == computeruse.CatDelete && d.verdict.Effect == policy.Ask && cartLineRemoval(obs, el) {
+		// Taking a line out of a cart spends nothing and is put back with one press: asking for
+		// each one made a cart with leftovers a string of phone taps (#485). It stays a risky
+		// action, so it runs with a token minted here, which the agent checks as for any other.
+		d.verdict = policy.Verdict{Effect: policy.Allow, Reason: "a cart line's removal"}
 	}
 	return d
 }

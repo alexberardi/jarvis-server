@@ -1233,6 +1233,10 @@ func TestMisstepDropsOnlyTheBadAction(t *testing.T) {
 		if len(e.exec.batches) != 1 || len(e.exec.batches[0].Actions) != 1 || e.exec.batches[0].Actions[0].Ref != "e3" {
 			t.Fatalf("batches %+v, want only the burger's removal", e.exec.batches)
 		}
+		// Still a risky action: it goes with a token minted for it, which the agent checks.
+		if e.exec.batches[0].Actions[0].Approval == "" {
+			t.Fatal("the cart line's removal went without an approval token")
+		}
 		if p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "Not run:") || !strings.Contains(p, "adds, it doesn't remove") {
 			t.Fatalf("no note of the dropped action:\n%s", p)
 		}
