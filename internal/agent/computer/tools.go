@@ -265,6 +265,9 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 	}
 	if a.Snapshot {
 		s, err := t.Browser.Snapshot(ctx, run.Tab, 0)
+		if a.URL != "" {
+			s, err = t.settledSnapshot(ctx, run.Tab, s, err)
+		}
 		if err != nil {
 			return failCode(errorCode(err), "%v", err)
 		}
@@ -311,6 +314,29 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 			"data": base64.StdEncoding.EncodeToString(data), "label": "screenshot of the task window"}}
 	}
 	return out
+}
+
+// settleFor and settlePoll are how long, and how often, observe snapshots a task window it has
+// just opened while its tab is still loading (vars for the tests).
+var (
+	settleFor  = 10 * time.Second
+	settlePoll = 300 * time.Millisecond
+)
+
+// settledSnapshot snapshots a task window just opened on a web address until its page has loaded,
+// from the first try's s and err: the new tab is about:blank for its first moments, which the
+// browser doesn't let extensions script (restricted_page), so that isn't the page yet (#418).
+func (t *Tools) settledSnapshot(ctx context.Context, tab string, s computeruse.Snapshot, err error) (computeruse.Snapshot, error) {
+	deadline := time.Now().Add(settleFor)
+	for errorCode(err) == "restricted_page" && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return s, err
+		case <-time.After(settlePoll):
+		}
+		s, err = t.Browser.Snapshot(ctx, tab, 0)
+	}
+	return s, err
 }
 
 // open puts run id on rawURL: a new task window (the extension can't load an address into a

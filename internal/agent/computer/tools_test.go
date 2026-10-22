@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -31,6 +32,10 @@ type fakeBrowser struct {
 	shotErr error
 	text    string // the page's text (read_page)
 	textErr error
+	// loading is how many snapshots after an open see the new tab still on about:blank, which
+	// the browser doesn't let extensions script.
+	loading int
+	snaps   int
 }
 
 func (b *fakeBrowser) PageText(_ context.Context, tab string, max int) (string, error) {
@@ -51,6 +56,12 @@ func (b *fakeBrowser) OpenBackground(_ context.Context, u string) (string, strin
 }
 
 func (b *fakeBrowser) Snapshot(_ context.Context, tab string, _ int) (computeruse.Snapshot, error) {
+	b.snaps++
+	if b.loading > 0 {
+		b.loading--
+		return computeruse.Snapshot{}, &browser.CommandError{Code: "restricted_page",
+			Message: "the browser doesn't let extensions read or control this page (about:blank)"}
+	}
 	s := b.snap
 	s.URL = b.url
 	return s, nil
@@ -172,6 +183,34 @@ func wantCodes(t *testing.T, rs []map[string]any, want ...string) {
 	t.Helper()
 	if got := strings.Join(codes(rs), ","); got != strings.Join(want, ",") {
 		t.Fatalf("results %s, want %s (%v)", got, strings.Join(want, ","), rs)
+	}
+}
+
+// TestObserveWaitsForNewWindow: a task window's tab is about:blank for its first moments, which
+// the extension can't snapshot (#418: a replay failed at once with "doesn't let extensions read
+// or control this page (about:blank)"). observe waits for the page instead.
+func TestObserveWaitsForNewWindow(t *testing.T) {
+	defer func(p time.Duration) { settlePoll = p }(settlePoll)
+	settlePoll = time.Millisecond
+	tl, b, _ := testTools(t)
+	b.loading = 3
+	out := call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "url": store, "snapshot": true})
+	if out["success"] != true || out["url"] != store || b.snaps != 4 {
+		t.Fatalf("observe %v after %d snapshots", out, b.snaps)
+	}
+	// A page that stays restricted fails once the wait is over.
+	defer func(d time.Duration) { settleFor = d }(settleFor)
+	settleFor = 20 * time.Millisecond
+	b.loading = 1 << 30
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_2", "target": browserTarget, "url": store, "snapshot": true})
+	if out["success"] == true || out["error_code"] != "restricted_page" {
+		t.Fatalf("observe %v", out)
+	}
+	// In a window already open, a restricted page is the page: no wait.
+	b.loading, b.snaps = 1, 0
+	out = call(t, tl, computeruse.ToolObserve, map[string]any{"run_id": "cr_1", "target": browserTarget, "snapshot": true})
+	if out["error_code"] != "restricted_page" || b.snaps != 1 {
+		t.Fatalf("observe %v after %d snapshots", out, b.snaps)
 	}
 }
 

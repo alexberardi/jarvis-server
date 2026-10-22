@@ -595,3 +595,35 @@ func TestLearnFromLinkPickedMonth(t *testing.T) {
 		t.Fatalf("the submit the button caused is in the prompt:\n%s", user)
 	}
 }
+
+// docsTrace starts on the site, with no navigation: the recording began on a page already open
+// (tw_765a722bc1e6c3bb, #418).
+const docsTrace = `[
+ {"seq":1,"ts":1760000000000,"kind":"click","url":"https://docs.jarvisautomation.dev/guide/start?q=wake#install","tab":1,"element":{"role":"link","name":"Install","tag":"a","selector":"link \"Install\""}},
+ {"seq":2,"ts":1760000001000,"kind":"navigate","url":"https://docs.jarvisautomation.dev/guide/install","tab":1}
+]`
+
+const docsModel = `{"name":"Open the install guide","triggers":["open the install guide"],"steps":[{"intent":"Open Install","event_seqs":[1,2],"target":"Install"}],"params":[],"success":{"url_contains":"/guide/install"}}`
+
+// TestLearnStartPage: a workflow recorded from a page already open starts by opening that page
+// (without its query and fragment), so a replay doesn't depend on what the browser's tab shows.
+func TestLearnStartPage(t *testing.T) {
+	le := newLearnEnv(t, docsModel)
+	w := le.store("rec_docs1", json.RawMessage(docsTrace), "")
+
+	if len(w.Steps) != 2 {
+		t.Fatalf("steps %+v", w.Steps)
+	}
+	s := w.Steps[0]
+	if s.Action.Kind != "navigate" || s.Action.URL != "https://docs.jarvisautomation.dev/guide/start" ||
+		s.Site != "docs.jarvisautomation.dev" || s.Target != "browser" || s.Intent == "" || s.Action.Intent != s.Intent {
+		t.Fatalf("start step %+v", s)
+	}
+	if a := w.Steps[1].Action; a.Kind != "press" {
+		t.Fatalf("second step %+v", w.Steps[1])
+	}
+	// A recording that starts with a navigation has no step added.
+	if _, ok := startStep(w.Steps, "https://docs.jarvisautomation.dev/"); ok {
+		t.Fatal("a start step before a navigation")
+	}
+}
