@@ -35,6 +35,8 @@ const (
 	// SettingAutoApproveCents is the spend limit: a checkout at most this many cents is approved
 	// without asking (0 = off). The errand step reads it (piece 11).
 	SettingAutoApproveCents = "computer.auto_approve_cents"
+	// SettingBuyOnAnyModel lets a model that isn't able to buy (Pick.CanBuy) buy anyway.
+	SettingBuyOnAnyModel = "computer.buy_on_any_model"
 
 	defaultMaxRounds  = 40
 	defaultMaxMinutes = 20
@@ -95,6 +97,7 @@ type Approvals interface {
 type Settings interface {
 	Int(ctx context.Context, key string, sc settings.Scope) int64
 	String(ctx context.Context, key string, sc settings.Scope) string
+	Bool(ctx context.Context, key string, sc settings.Scope) bool
 }
 
 // Loop runs computer tasks. LLM, Exec, Policy and Store are required.
@@ -417,9 +420,74 @@ var (
 	wordRe    = regexp.MustCompile(`[\pL\pN]+`)
 )
 
+// removedItem is what a remove button removes: "Remove <item>".
+var removedItem = regexp.MustCompile(`(?i)^\s*(?:remove|delete)\s+(.+?)\s*$`)
+
+// itemWords are s's words that can name an item (no stop words, no cart words).
+func itemWords(s string) []string {
+	var out []string
+	for _, w := range wordRe.FindAllString(strings.ToLower(s), -1) {
+		if !stopWords[w] && !cartWords[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// overlap counts the words of b that are in a.
+func overlap(a, b []string) int {
+	n := 0
+	for _, w := range b {
+		if slices.Contains(a, w) {
+			n++
+		}
+	}
+	return n
+}
+
+var cartWords = map[string]bool{"item": true, "items": true, "basket": true, "bag": true, "it": true, "this": true,
+	"that": true, "one": true, "extra": true, "other": true, "from": true}
+
 // stopWords don't make an item match the task.
 var stopWords = map[string]bool{"a": true, "an": true, "the": true, "to": true, "of": true, "and": true, "with": true,
 	"for": true, "me": true, "my": true, "from": true, "on": true, "in": true, "cart": true, "add": true, "order": true}
+
+// buyGate ends a task at its first purchase when the model isn't able to buy (Pick.CanBuy):
+// the house 9B model invented cart items and "added" things it never added, so it fills the cart
+// and the user places the order (#485; on a large or cloud model the purchase is confirmed on the
+// phone as before). The household can allow it anyway (SettingBuyOnAnyModel).
+func (l *Loop) buyGate(ctx context.Context, r *round, pending []PendingAction, co *Checkout) (Outcome, bool) {
+	if r.pick.CanBuy {
+		return Outcome{}, false
+	}
+	pays := false
+	for _, p := range pending {
+		pays = pays || p.Category == computeruse.CatPay
+	}
+	if !pays || l.Settings != nil && l.Settings.Bool(ctx, SettingBuyOnAnyModel, settings.Scope{HouseholdID: r.task.HouseholdID}) {
+		return Outcome{}, false
+	}
+	total := ""
+	if co != nil && strings.TrimSpace(co.Price) != "" {
+		total = " (" + strings.TrimSpace(co.Price) + ")"
+	}
+	for _, p := range pending {
+		r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: p.Action.Kind, Intent: p.Action.Intent,
+			Ref: p.Action.Ref, Result: "not run: buying needs a larger model"})
+	}
+	return Outcome{State: StateDone, Summary: fmt.Sprintf("Your order is ready at checkout%s, but I didn't place it: "+
+		"check the cart and place the order yourself. Ordering for you needs a larger model than this one (%s).",
+		total, firstNonEmptyStr(r.pick.Model, r.pick.Label))}, true
+}
+
+func firstNonEmptyStr(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
 
 // misstep is why a batch is sent back before it runs, when it contradicts itself or the task
 // (#485: the house model pressed "Add Mutiny Thick Burger to Cart" to remove the burger, and added
@@ -437,7 +505,19 @@ func misstep(goal string, obs Observation, actions []computeruse.Action) (feedba
 	}
 	for _, a := range actions {
 		e, ok := byRef[a.Ref]
-		if !ok || (a.Kind != "press" && a.Kind != "click") || !addName.MatchString(e.Name) {
+		if !ok || (a.Kind != "press" && a.Kind != "click") {
+			continue
+		}
+		if m := removedItem.FindStringSubmatch(e.Name); m != nil && removeIntent.MatchString(a.Intent) {
+			// "Remove Chopped Brisket Sandwich from the cart" on "Remove Pulled Pork Sandwich".
+			// Only a button that names its item ("Remove item" names none).
+			named, said := itemWords(m[1]), itemWords(removeIntent.ReplaceAllString(a.Intent, " "))
+			if len(named) > 0 && len(said) > 0 && overlap(named, said)*2 <= len(said) {
+				return fmt.Sprintf("%q (%s) removes %q, not what you meant (%q): find the remove button for that item, and check the cart lists it.",
+					e.Name, e.Ref, m[1], a.Intent), ""
+			}
+		}
+		if !addName.MatchString(e.Name) {
 			continue
 		}
 		if removeIntent.MatchString(a.Intent) {
@@ -988,6 +1068,9 @@ func (l *Loop) decideAndAct(ctx context.Context, r *round, obs Observation, acti
 			pending = append(pending, PendingAction{Index: i, Action: d.action, Reason: h.Reason, Digest: h.Digest})
 		}
 		held.Actions = append(held.Actions, h)
+	}
+	if out, stop := l.buyGate(ctx, r, pending, co); stop {
+		return out, true
 	}
 	if len(pending) > 0 && co == nil && !r.checkoutAsked {
 		for _, p := range pending {

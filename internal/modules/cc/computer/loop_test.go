@@ -118,6 +118,11 @@ func (s fakeSettings) String(_ context.Context, key string, _ settings.Scope) st
 	return v
 }
 
+func (s fakeSettings) Bool(_ context.Context, key string, _ settings.Scope) bool {
+	v, _ := s[key].(bool)
+	return v
+}
+
 // --- environment ---
 
 type tenv struct {
@@ -1117,6 +1122,7 @@ func TestMisstep(t *testing.T) {
 		{Ref: "e4", Role: "button", Name: "Add to Cart $14.00", State: []string{"in dialog"}},
 		{Ref: "e5", Role: "button", Name: "Increase quantity"},
 		{Ref: "e6", Role: "button", Name: "Remove item"},
+		{Ref: "e7", Role: "button", Name: "Remove Pulled Pork Sandwich"},
 	}}
 	goal := "Order me a pulled pork sandwich from Mutiny BBQ"
 	for _, c := range []struct {
@@ -1130,6 +1136,9 @@ func TestMisstep(t *testing.T) {
 		{"e2", "Add a burger", true, true},
 		{"e3", "Add potato salad", true, true},
 		{"e6", "Remove the burger", false, false},
+		{"e7", "Remove Chopped Brisket Sandwich from cart", true, false},
+		{"e7", "Remove the pulled pork sandwich", false, false},
+		{"e7", "Remove it", false, false},
 	} {
 		fb, key := misstep(goal, page, []computeruse.Action{{Kind: "press", Ref: c.ref, Intent: c.intent}})
 		if (fb != "") != c.sent || (key != "") != c.once {
@@ -1152,4 +1161,53 @@ func TestMisstep(t *testing.T) {
 	if p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "doesn't ask for") {
 		t.Fatalf("no send-back feedback:\n%s", p)
 	}
+}
+
+// A model that isn't able to buy (not large, not cloud) stops at the checkout: nothing is bought,
+// and the user is told to place the order (#485: the 9B model invented cart items).
+func TestBuyGate(t *testing.T) {
+	small := func(e *tenv) {
+		e.loop.Models = Models{Endpoint: func(context.Context, string) (llm.Endpoint, error) {
+			return llm.Endpoint{Model: "qwen3.5-9b", Vision: true}, nil
+		}}
+	}
+	order := `{"checkout": {"product": "Lavender soap", "price": "$4.99"}, "actions": [` + press("e5", "Place the order") + `]}`
+	t.Run("small model stops", func(t *testing.T) {
+		e := newEnv(t)
+		small(e)
+		e.script(order)
+		out := e.run()
+		if out.State != StateDone || !strings.Contains(out.Summary, "didn't place it") || !strings.Contains(out.Summary, "$4.99") {
+			t.Fatalf("outcome %+v", out)
+		}
+		if len(e.exec.batches) != 0 {
+			t.Fatalf("%d batches sent", len(e.exec.batches))
+		}
+	})
+	t.Run("allowed anyway", func(t *testing.T) {
+		e := newEnv(t)
+		small(e)
+		e.setts[SettingBuyOnAnyModel] = true
+		e.script(order)
+		if out := e.run(); out.State != StateNeedsApproval {
+			t.Fatalf("outcome %+v", out)
+		}
+	})
+	t.Run("large model asks", func(t *testing.T) {
+		e := newEnv(t)
+		e.script(order)
+		if out := e.run(); out.State != StateNeedsApproval {
+			t.Fatalf("outcome %+v", out)
+		}
+	})
+	t.Run("cloud asks", func(t *testing.T) {
+		e := newEnv(t)
+		e.loop.Models = Models{Endpoint: func(context.Context, string) (llm.Endpoint, error) {
+			return llm.Endpoint{Model: "some-cloud-model", Remote: true}, nil
+		}}
+		e.script(order)
+		if out := e.run(); out.State != StateNeedsApproval {
+			t.Fatalf("outcome %+v", out)
+		}
+	})
 }
