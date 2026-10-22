@@ -690,12 +690,14 @@ func TestDriverDesktopRemovedOwner(t *testing.T) {
 func TestDriverFreshMemories(t *testing.T) {
 	var mu sync.Mutex
 	var deleted []string
+	logins := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/auth/login":
+			logins++
 			io.WriteString(w, `{"access_token":"jwt"}`)
 		case r.URL.Path == "/households":
 			io.WriteString(w, `[{"id":"hh-1","role":"admin"}]`)
@@ -728,6 +730,16 @@ func TestDriverFreshMemories(t *testing.T) {
 	want := []string{"/api/v0/mobile/memories/3?household_id=hh-1", "/api/v0/mobile/memories/5?household_id=hh-1"}
 	if !slices.Equal(deleted, want) {
 		t.Fatalf("deleted %v", deleted)
+	}
+	// A run per repeat signs in once: a login each hit the auth rate limit (429) mid --repeat 10,
+	// and the run counted as a failed scenario (#435).
+	for range 3 {
+		if l := d.Run(context.Background(), sc); !l.Pass {
+			t.Fatalf("%+v", l)
+		}
+	}
+	if logins != 1 {
+		t.Fatalf("%d logins for 4 runs, want 1", logins)
 	}
 	// Without the sandbox's sign-in it fails the run instead of playing it on stale memories.
 	d.Desktop = nil

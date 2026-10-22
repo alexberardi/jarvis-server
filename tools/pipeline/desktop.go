@@ -148,12 +148,33 @@ func (d *Driver) pairDesktop(ctx context.Context, n *Node, removeOwner bool, sta
 	return os.WriteFile(statePath, b, 0o600)
 }
 
+// primaryLoginTTL is how long primaryHousehold reuses a sign-in: a login per run hit the auth
+// rate limit (429) during run --repeat, and the run failed as if the model had (#435).
+const primaryLoginTTL = 5 * time.Minute
+
 // primaryHousehold signs the primary user in and returns their bearer header and the
-// household they administer (else their first).
+// household they administer (else their first). A sign-in is reused for primaryLoginTTL.
 func (d *Driver) primaryHousehold(ctx context.Context) (map[string]string, string, error) {
 	if d.Desktop == nil || d.Desktop.AuthURL == "" || d.Desktop.Email == "" {
 		return nil, "", errors.New("the sandbox exports no SBX_AUTH / SBX_EMAIL (scripts/sandbox up again)")
 	}
+	if d.primary != nil && time.Since(d.primary.at) < primaryLoginTTL {
+		return d.primary.hdr, d.primary.hh, nil
+	}
+	hdr, hh, err := d.signInPrimary(ctx)
+	if err == nil {
+		d.primary = &primarySignIn{hdr: hdr, hh: hh, at: time.Now()}
+	}
+	return hdr, hh, err
+}
+
+type primarySignIn struct {
+	hdr map[string]string
+	hh  string
+	at  time.Time
+}
+
+func (d *Driver) signInPrimary(ctx context.Context) (map[string]string, string, error) {
 	var login struct {
 		AccessToken string `json:"access_token"`
 	}
