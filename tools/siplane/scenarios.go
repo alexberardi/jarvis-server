@@ -66,6 +66,12 @@ var scenarios = []scenario{
 	{"jarvis-busy", "jarvisd's call the trunk refuses busy ends busy (486), never answered", jarvisOutcome("2125550486", sip.EndBusy)},
 	{"jarvis-no-answer", "jarvisd's call nobody answers (183 + 503) ends no answer, never answered", jarvisOutcome("2125550480", sip.EndNoAnswer)},
 	{"jarvis-all-trunks-busy", "all trunks busy: jarvisd's call is answered and what it hears is taken for a recording", jarvisAllTrunksBusy},
+	// jarvisd's SIP self-tests (selftest.go; docs/cc/phone-sip.md §6), what the admin's Phone page runs.
+	{"jarvis-selftest-connection", "the connection self-test re-registers and pings the PBX, with both round-trip times", selftestConnection},
+	{"jarvis-selftest-echo", "the echo self-test dials *43, plays a phrase after the prompt and understands what comes back", selftestEcho},
+	{"jarvis-selftest-digits", "the *65 self-test hears the PBX say 100", selftestDigits},
+	{"jarvis-selftest-inbound", "the inbound watch sees Alice's call to 100 (refused 480) with her caller ID and audio offer", selftestInbound},
+	{"jarvis-selftest-trace", "the SIP trace holds the REGISTER and a *43 call, the digest answer redacted, the password nowhere", selftestTrace},
 }
 
 // within is ctx with a timeout, for one wait.

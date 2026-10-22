@@ -729,3 +729,31 @@ func wordErrorRateWithin(said, heard string) float64 {
 
 // SIPTrace is every SIP account's recent signalling, redacted (package sip's trace).
 func (s *Service) SIPTrace() []sip.TraceDialog { return sip.Trace() }
+
+// RunSIPSelfTest runs one self-test against ua and waits for its result: tools/siplane runs
+// jarvisd's own self-tests this way on the L1 lane. call_me needs a household's confirm card
+// and is not available here.
+func RunSIPSelfTest(ctx context.Context, ua *sip.UA, test string, tts TTS, speech STT) SIPTestRun {
+	cfg := ua.Config()
+	s := &Service{TTS: tts, STT: speech, Log: cfg.Log}
+	line := &sipLine{acct: SIPAccount{Server: cfg.Server, Port: cfg.Port, Transport: cfg.Transport,
+		Extension: cfg.Extension, LocalPort: cfg.LocalPort}, ua: realUA{ua}}
+	run := &SIPTestRun{Test: test, State: SIPTestRunning, Started: s.now(), Steps: []string{}}
+	t := &testRun{s: s, run: run}
+	switch test {
+	case SIPTestConnection:
+		s.connectionTest(ctx, t, line)
+	case SIPTestEcho:
+		s.echoTest(ctx, t, line)
+	case SIPTestDigits:
+		s.digitsTest(ctx, t, line)
+	case SIPTestInbound:
+		s.inboundTest(ctx, t, line)
+	default:
+		t.fail(fmt.Sprintf("%s cannot run outside jarvisd", test), "")
+	}
+	t.s.tests.mu.Lock()
+	defer t.s.tests.mu.Unlock()
+	out := *run
+	return out
+}
