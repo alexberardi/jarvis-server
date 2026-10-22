@@ -307,25 +307,28 @@ func TestLoadToolSet(t *testing.T) {
 // The checked-in desktop toolset is what the agent's own toolsets render, so a desktop scenario
 // offers what a real agent sends (keywords included: the must-call guard reads them).
 // Regenerate with: go run ./tools/pipeline toolset desktop > tools/pipeline/toolsets/desktop.json
+// (and desktop-windows the same way).
 func TestDesktopToolsetIsCurrent(t *testing.T) {
-	want, err := RenderDesktopToolset()
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile("toolsets/desktop.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatal("toolsets/desktop.json is stale: go run ./tools/pipeline toolset desktop > tools/pipeline/toolsets/desktop.json")
-	}
-	var tools []map[string]any
-	if err := json.Unmarshal(got, &tools); err != nil {
-		t.Fatal(err)
-	}
-	for _, tl := range tools {
-		if kw, _ := tl["keywords"].([]any); len(kw) == 0 {
-			t.Errorf("%v: no keywords", tl["function"])
+	for name, render := range map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset} {
+		want, err := render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile("toolsets/" + name + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("toolsets/%s.json is stale: go run ./tools/pipeline toolset %[1]s > tools/pipeline/toolsets/%[1]s.json", name)
+		}
+		var tools []map[string]any
+		if err := json.Unmarshal(got, &tools); err != nil {
+			t.Fatal(err)
+		}
+		for _, tl := range tools {
+			if kw, _ := tl["keywords"].([]any); len(kw) == 0 {
+				t.Errorf("%s %v: no keywords", name, tl["function"])
+			}
 		}
 	}
 }

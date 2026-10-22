@@ -69,5 +69,53 @@
     }
    }
   ]
+ },
+ {
+  "name": "desktop: focus the TextEdit window in one turn (#419)",
+  "tools": "../toolsets/desktop-windows.json",
+  "home": "none",
+  "results": {
+   "desktop_list_windows": {
+    "success": true,
+    "windows": [
+     {
+      "id": "33410/1",
+      "title": "alex — zsh",
+      "app": "Terminal",
+      "minimized": false
+     },
+     {
+      "id": "643/1",
+      "title": "Untitled",
+      "app": "TextEdit",
+      "minimized": false
+     },
+     {
+      "id": "512/1",
+      "title": "Inbox",
+      "app": "Mail",
+      "minimized": false
+     }
+    ]
+   },
+   "desktop_focus_window": {
+    "success": true,
+    "window_id": "643/1",
+    "action": "focus",
+    "matched_window": "TextEdit — Untitled"
+   }
+  },
+  "turns": [
+   {
+    "say": "focus the TextEdit window",
+    "expect": {
+     "tool": "desktop_focus_window",
+     "args_match": {
+      "window_id": "(?i)^(643/1|.*text ?-?edit.*)$"
+     },
+     "not_reply": "(?i)didn't work|not found|which window"
+    }
+   }
+  ]
  }
 ]
