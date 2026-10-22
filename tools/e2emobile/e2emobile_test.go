@@ -470,3 +470,12 @@ func TestRunFailsAFlowWhenTheSandboxIsUnreachable(t *testing.T) {
 		t.Errorf("%d probes, want 3 per try, 3 tries", n)
 	}
 }
+
+func TestHostLoad(t *testing.T) {
+	if _, err := os.Stat("/proc/loadavg"); err != nil {
+		t.Skip("no /proc")
+	}
+	if h := hostLoad(); !regexp.MustCompile(`^, host load [0-9.]+, [0-9.]+ GB available$`).MatchString(h) {
+		t.Errorf("hostLoad() = %q", h)
+	}
+}

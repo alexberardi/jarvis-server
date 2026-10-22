@@ -440,14 +440,26 @@ func (c *config) recoverDevice(ctx context.Context) error {
 	return nil
 }
 
-// hostLoad is ", host load L" (the 1-minute load average) on Linux, "" elsewhere: drops have
-// come with a busy host, so each retry says how busy it was.
+// hostLoad is ", host load L, M GB available" (the 1-minute load average and MemAvailable) on
+// Linux, "" elsewhere: the host a drop happened on was busy and deep in swap, so each retry
+// says how busy it was.
 func hostLoad() string {
-	raw, err := os.ReadFile("/proc/loadavg")
-	if f := strings.Fields(string(raw)); err == nil && len(f) > 0 {
-		return ", host load " + f[0]
+	out := ""
+	if f := strings.Fields(readFile("/proc/loadavg")); len(f) > 0 {
+		out = ", host load " + f[0]
 	}
-	return ""
+	for _, l := range strings.Split(readFile("/proc/meminfo"), "\n") {
+		var kb int64
+		if _, err := fmt.Sscanf(l, "MemAvailable: %d kB", &kb); err == nil {
+			out += fmt.Sprintf(", %.1f GB available", float64(kb)/(1<<20))
+		}
+	}
+	return out
+}
+
+func readFile(p string) string {
+	raw, _ := os.ReadFile(p)
+	return string(raw)
 }
 
 func failed(r Record, msg string) Record {
