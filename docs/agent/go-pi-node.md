@@ -1306,7 +1306,7 @@ is checked on the lab Pi 4 and the soak meets the pass bar:
 |---|---|
 | A score is above the threshold | It fires unless the gate is shut. A fire shuts it for the 8 s debounce and drops any override. A held score leaves the gate as it was (log `wake-suppressed-gate` above 0.3) |
 | A turn ends `not_for_me` (the woken command or a follow-up answer) | The gate shuts for 20 s, or 60 s with 2 or more verdicts in 120 s, never earlier than it already was, with a 0.6 override: a score of 0.6 or more fires anyway (`wake-override-cooldown`) and leaves only the debounce |
-| A turn ends spoken, silent or interrupted, without an error, not over the node's own music | Its wake score joins the last 20 in `<cache>/jarvis-agent/wake_scores.json` |
+| The woken command ends spoken, silent or interrupted, without an error, not over the node's own music | Its wake score joins the last 20 in `<cache>/jarvis-agent/wake_scores.json`, even when a follow-up answer then ends `not_for_me` (that also arms the cool-down) |
 | `wake_word_threshold_auto` is on | The threshold is the 20th percentile of those scores less 15%, in [0.10, 0.50]; `wake_word_threshold` until there are 5 |
 
 The app's `update_node_config` sets `wake_word_threshold_auto` (agent.json
@@ -1316,8 +1316,9 @@ transcript, which the Go node doesn't have before CC; see the decision).
 
 **Verified** with unit tests: N:'s `tests/test_wake_calibration.py` cases and the gate with a
 fake clock (`voice/wakegate_test.go`), and through the pipeline with the fake detector: a 0.5
-wake held after a `not_for_me` turn and a 0.95 one let through, a spoken turn recorded, a wake
-over the node's own music not, and the calibrated threshold letting a 0.5 wake through a static
+wake held after a `not_for_me` turn, or after a spoken turn whose follow-up answer was `not_for_me`,
+and a 0.95 one let through; a spoken turn recorded (with a `not_for_me` follow-up too), a wake
+that heard no words and a wake over the node's own music not, and the calibrated threshold letting a 0.5 wake through a static
 0.6. **Not yet on a Pi**: the scores a room gives, and the cool-down against a TV. On the lab
 Pi 4 (`--wake-threshold-auto`, or the setting from the app), the log has `not-for-me-cooldown-armed`
 after a side conversation, then `wake-suppressed-gate` or `wake-override-cooldown`.

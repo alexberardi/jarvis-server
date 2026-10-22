@@ -278,3 +278,46 @@ func TestAutoThresholdFromTheHistory(t *testing.T) {
 		_ = stop()
 	}
 }
+
+// A spoken turn whose follow-up answer is not_for_me arms the cool-down too, and the wake that
+// opened it is still a calibration sample (N:core/wake_loop.py records it before the follow-up).
+func TestNotForMeFollowUpArmsTheCooldownAndRecordsTheWake(t *testing.T) {
+	srv := newServer()
+	srv.texts, srv.speakPCM = []string{"Pass the remote."}, pcmOf(50)
+	srv.followUp = func(StreamRequest) (*Control, error) { return &Control{StopReason: "not_for_me"}, nil }
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.WakeScores = &WakeScores{}
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	defer func() { _ = stop() }()
+	if tr := r.turn(t); tr.Outcome != OutcomeSpoken || tr.FollowUpEnd != EndNotForMe {
+		t.Fatalf("turn %+v", tr)
+	}
+	if got := r.p.WakeScores.scores; len(got) != 1 || got[0] != float64(float32(0.95)) {
+		t.Fatalf("recorded %v, want the first wake", got)
+	}
+	n := mic.readCount()
+	mic.push(rep(weak, 3), rep(speech, 12))
+	r.noTurnBy(t, mic, n+3+12+20)
+	mic.push(rep(wake, 3), rep(speech, 12))
+	if tr := r.turn(t); tr.WakeScore != 0.95 {
+		t.Fatalf("the decisive wake: %+v", tr)
+	}
+}
+
+// A wake that heard no words is not a calibration sample.
+func TestNonSpeechWakeIsNotRecorded(t *testing.T) {
+	srv := newServer()
+	srv.text = " [BLANK_AUDIO]"
+	r := newRig(t, oneWake(), srv)
+	r.p.WakeScores = &WakeScores{}
+	stop := r.run(t)
+	if tr := r.turn(t); tr.Outcome != OutcomeNonSpeech {
+		t.Fatalf("turn %+v", tr)
+	}
+	_ = stop()
+	if got := r.p.WakeScores.scores; len(got) != 0 {
+		t.Fatalf("recorded %v for a wake that heard no words", got)
+	}
+}

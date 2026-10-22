@@ -10,9 +10,13 @@ The Go agent's wake gate now matches N:'s (`N:core/wake_detector.py` `decide_wak
 - **Auto-calibration is opt-in, as in N:.** `wake_word_threshold_auto` (the app's key; agent.json
   `wake_threshold_auto`, flag `--wake-threshold-auto`) defaults to off. The history is
   `<cache>/jarvis-agent/wake_scores.json`, N:'s format (a JSON list of the last 20 floats), so it
-  survives a restart. A sample is a wake whose turn ended spoken, silent or interrupted, with no
-  error and not over the node's own music; `not_for_me`, errors and a wake that heard no words are
-  not (N: records only a wake whose transcription returned a result).
+  survives a restart. A sample is a wake whose command (the first one, before any follow-up)
+  ended spoken, silent or interrupted, with no error and not over the node's own music; a
+  `not_for_me` command, errors and a wake that heard no words are not (N: records only a wake
+  whose transcription returned a result). Recording and the cool-down are independent: a spoken
+  command whose follow-up answer ends `not_for_me` is a sample and arms the cool-down, as in N:
+  (`N:core/wake_loop.py:829-834` records before the follow-up loop,
+  `N:core/follow_up_loop.py:353-358` arms).
 - **The cool-down's tunables are N:'s defaults, fixed:** `not_for_me_quiet_seconds` 20,
   `not_for_me_escalated_quiet_seconds` 60, `not_for_me_escalation_window_seconds` 120,
   `not_for_me_override_threshold` 0.6. The app does not send them today (jarvis-node-mobile has

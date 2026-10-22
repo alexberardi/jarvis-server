@@ -205,18 +205,19 @@ func (p *Pipeline) fire(score float32) bool {
 }
 
 // afterWake feeds the turn's verdict back to the wake gate (N:core/wake_loop.py, follow_up_loop.py):
-// not_for_me, from the woken command or a follow-up answer, arms the cool-down; a wake that
-// led to a real exchange, not over the node's own music, is a calibration sample. Errors and
+// not_for_me, from the woken command or a follow-up answer, arms the cool-down; a wake whose
+// command got a real answer, not over the node's own music, is a calibration sample, even when
+// a follow-up answer then ends not_for_me (N: records it before the follow-up loop). Errors and
 // a wake that heard no words are neither.
 func (p *Pipeline) afterWake(log *slog.Logger, t *Turn, selfPlaying bool) {
-	switch {
-	case t.Outcome == OutcomeNotForMe || t.FollowUpEnd == EndNotForMe:
+	if t.Outcome == OutcomeNotForMe || t.FollowUpEnd == EndNotForMe {
 		if d := p.gate.armNotForMe(p.Now(), p.Cfg.NotForMe); d > 0 {
 			log.Info("not-for-me-cooldown-armed", "cooldown_s", d.Seconds(), "recent_events", len(p.gate.history),
 				"override_threshold", p.Cfg.NotForMe.Override)
 		}
-	case t.Err != nil || selfPlaying || p.WakeScores == nil:
-	case t.Outcome == OutcomeSpoken || t.Outcome == OutcomeSilent || t.Outcome == OutcomeInterrupted:
+	}
+	answered := t.Outcome == OutcomeSpoken || t.Outcome == OutcomeSilent || t.Outcome == OutcomeInterrupted
+	if answered && t.Err == nil && !selfPlaying && p.WakeScores != nil {
 		p.WakeScores.Record(float64(t.WakeScore))
 	}
 }
