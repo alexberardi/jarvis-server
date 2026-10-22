@@ -968,3 +968,19 @@ func TestCheckpointReadsTheDownloads(t *testing.T) {
 		t.Fatalf("steps %+v", w.Steps)
 	}
 }
+
+// The confirmation lists every line in the cart, so a cart holding more than the task asked for
+// shows before the user taps (#485: four sandwiches for "a sandwich").
+func TestConfirmCardListsCartItems(t *testing.T) {
+	body, co := ComputerConfirmCard(&computer.Checkout{Product: "Pulled Pork Sandwich", Price: "$59.72",
+		Items: []string{"4 × Pulled Pork Sandwich $56.00", " "}}, nil)
+	if !strings.Contains(body, "In the cart:\n- 4 × Pulled Pork Sandwich $56.00") {
+		t.Fatalf("body %q", body)
+	}
+	if items, _ := co["items"].([]any); len(items) != 1 {
+		t.Fatalf("checkout %+v", co)
+	}
+	if body, co := ComputerConfirmCard(&computer.Checkout{Product: "Soap", Price: "4.99"}, nil); strings.Contains(body, "In the cart") || co["items"] != nil {
+		t.Fatalf("no items, yet %q %+v", body, co)
+	}
+}

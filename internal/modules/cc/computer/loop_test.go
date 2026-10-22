@@ -253,8 +253,9 @@ func TestLoopDone(t *testing.T) {
 	if req.Priority != llm.PriorityBackground || *req.MaxTokens != 1024 || *req.Temperature != 0 || req.Label != llm.LabelBackground {
 		t.Fatalf("request %+v", req)
 	}
-	// The second round's prompt carries the first round's action and its result.
-	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `- round 1: press e3 "Add the soap to the cart": ok`) {
+	// The second round's prompt carries the first round's action and its result (not its ref:
+	// refs are renumbered on every look).
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `- round 1: press "Add the soap to the cart": ok`) {
 		t.Fatalf("history not in the prompt:\n%s", txt)
 	}
 }
@@ -1073,4 +1074,36 @@ func TestSkippedCheckoutPointedAt(t *testing.T) {
 			t.Fatalf("outcome %+v batches %+v", out, e.exec.batches)
 		}
 	})
+}
+
+// The model's notes carry its plan and progress to the next turn (the house model re-added an
+// item it had added, having nothing but a list of actions to go on), and are kept once.
+func TestNotesCarryOver(t *testing.T) {
+	e := newEnv(t, shopPage(), func() Observation { p := shopPage(); p.URL += "?added"; return p }())
+	e.script(`{"thought": "add", "notes": "Plan: 1 add soap 2 check out. Next: add.", "actions": [`+press("e3", "Add the soap")+`]}`,
+		`{"thought": "go", "notes": "Soap added (cart shows 1). Next: check out.", "actions": [`+press("e4", "Open the cart")+`]}`,
+		doneAnswer)
+	if out := e.run(); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(p, "Your notes from last turn: Plan: 1 add soap 2 check out. Next: add.") {
+		t.Fatalf("round 2 lacks the notes:\n%s", p)
+	}
+	p3 := e.llm.reqs[2].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(p3, "Soap added (cart shows 1)") || strings.Contains(p3, "Next: add.") {
+		t.Fatalf("round 3 notes aren't the latest:\n%s", p3)
+	}
+	if strings.Contains(p3, "- round 1: notes") || strings.Contains(p3, " e3 ") && strings.Contains(p3, "What you did so far:\n- round 1: press e3") {
+		t.Fatalf("history shows notes or refs:\n%s", p3)
+	}
+	notes := 0
+	for _, h := range e.storedRun(e.exec.batches[0].RunID).History {
+		if h.Kind == KindNotes {
+			notes++
+		}
+	}
+	if notes != 1 {
+		t.Fatalf("%d notes entries, want 1", notes)
+	}
 }

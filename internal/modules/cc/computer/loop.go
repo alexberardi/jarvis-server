@@ -518,6 +518,10 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{State: StateFailed, Summary: err.Error()}, true
 	}
 	l.logRound(r, obs, reply)
+	// A replay's rounds keep none: its steps track the progress, keyed on the last history entry.
+	if n := strings.TrimSpace(reply.Notes); n != "" && r.wstep == 0 {
+		setNotes(r.run, r.run.Rounds, clip(oneLine(n), 600))
+	}
 	r.feedback, r.clipboard = "", ""
 	switch {
 	case reply.Done:
@@ -596,6 +600,7 @@ func (l *Loop) logRound(r *round, obs Observation, reply Reply) {
 	}
 	l.log().Info("computer: round", "run", r.run.ID, "n", r.run.Rounds, "url", obs.URL,
 		"elements", len(obs.Elements), "in_dialog", inDialog, "thought", clip(reply.Thought, 300),
+		"notes", clip(reply.Notes, 300),
 		"actions", strings.Join(acts, "; "), "done", reply.Done, "summary", clip(reply.Summary, 300),
 		"ask", clip(reply.Ask, 300), "feedback", clip(r.feedback, 200), "dialog", strings.Join(dialog, "; "))
 }
@@ -810,6 +815,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		Goal: t.Goal, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
+		Notes: notesOf(r.run.History),
 	})
 	parts := []llm.Part{{Type: "text", Text: text}}
 	for _, im := range r.shots {

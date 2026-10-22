@@ -422,8 +422,22 @@ func ComputerConfirmCard(co *computer.Checkout, pending []computer.PendingAction
 				lines = append(lines, l[0]+": "+l[1])
 			}
 		}
+		// Every line in the cart, so more than the task asked for shows before the user taps.
+		var items []any
+		if len(co.Items) > 0 {
+			lines = append(lines, "In the cart:")
+			for _, it := range co.Items {
+				if it = strings.TrimSpace(it); it != "" {
+					lines = append(lines, "- "+it)
+					items = append(items, it)
+				}
+			}
+		}
 		checkout = map[string]any{"product": co.Product, "price": co.Price, "currency": co.Currency,
 			"seller": co.Seller, "ship_to": co.ShipTo, "card": co.Card}
+		if len(items) > 0 {
+			checkout["items"] = items
+		}
 	}
 	if len(lines) == 0 || len(pending) > 1 {
 		if len(lines) > 0 {
@@ -547,7 +561,7 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 	}
 	for _, h := range run.History {
 		// What the task did: not the actions it held for the user, nor the ones that never ran.
-		if h.Intent != "" && h.Result != heldResult && h.Result != "not run" {
+		if h.Intent != "" && h.Kind != computer.KindNotes && h.Result != heldResult && h.Result != "not run" {
 			intents = append(intents, h.Intent)
 		}
 	}

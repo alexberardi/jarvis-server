@@ -26,6 +26,9 @@ type Checkout struct {
 	Seller   string `json:"seller,omitempty"`
 	ShipTo   string `json:"ship_to,omitempty"`
 	Card     string `json:"card,omitempty"` // last 4 only
+	// Items are the cart's lines as the page shows them ("2 × Pulled Pork Sandwich $28.00"):
+	// the confirmation card lists them, so a cart with more than the task asked for shows.
+	Items []string `json:"items,omitempty"`
 }
 
 // Reply is one parsed model answer: a batch of actions (with an optional checkout), done, or a
@@ -37,6 +40,7 @@ type Reply struct {
 	Done     bool                 `json:"done,omitempty"`
 	Summary  string               `json:"summary,omitempty"`
 	Verify   *SuccessCheck        `json:"verify,omitempty"`
+	Notes    string               `json:"notes,omitempty"`
 	Ask      string               `json:"ask,omitempty"`
 	Reason   string               `json:"reason,omitempty"`
 }
