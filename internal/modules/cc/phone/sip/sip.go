@@ -1,14 +1,18 @@
 // Package sip is the SIP phone provider's transport (docs/cc/phone-sip.md §1-§3): jarvisd joins
 // a PBX (FreePBX, Asterisk, FreeSWITCH, 3CX) as an ordinary extension, keeps that registration
-// alive, and places outbound calls through the PBX's own routes. It wraps emiago/diago and
-// emiago/sipgo (pinned in go.mod, docs/decisions/2026-10-22-sip-library-pin.md) so neither
-// leaks past this package: package phone sees a UA and a Call carrying 8 kHz PCM.
+// alive, places outbound calls through the PBX's own routes and answers the calls it routes
+// in. It wraps emiago/diago and emiago/sipgo (pinned in go.mod,
+// docs/decisions/2026-10-22-sip-library-pin.md) so neither leaks past this package: package
+// phone sees a UA and a Call carrying 8 kHz PCM.
 //
 // What it adds over the libraries, from the gotchas in phone-sip.md §3:
 //   - a registration supervisor: exponential backoff, OPTIONS keepalive to the registrar, a
 //     stable local port and Contact, Expires: 0 on a clean shutdown, and a hard STOP after 3
 //     authentication failures, since a PBX firewall bans a host that keeps retrying;
 //   - requests are accepted only from the registrar's address; OPTIONS is answered 200;
+//   - an inbound call is offered to Config.Inbound with its caller (P-Asserted-Identity, then
+//     From: a hint, never authentication), refused as it says (480, or 486 busy), or answered
+//     after its delay with 180 Ringing meanwhile; a CANCEL while it rings leaves it unanswered;
 //   - an outbound call is answered on 200 only (183 never is), and its final code maps to an
 //     outcome; Started waits for the first RTP packet after the 200, so the disclosure plays
 //     to audio that is flowing;
@@ -19,6 +23,7 @@
 package sip
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,6 +51,9 @@ type Config struct {
 	// UserAgent is the User-Agent header; default "Jarvis".
 	UserAgent string
 	Log       *slog.Logger
+	// Inbound decides each call the PBX routes to the extension (inbound.go); nil refuses
+	// every one 480, which sends the caller on to the PBX's next destination.
+	Inbound func(ctx context.Context, in Incoming) Admission
 
 	// Timings and limits; zero takes the default.
 	RegisterExpiry  time.Duration // asked for in REGISTER (300 s)

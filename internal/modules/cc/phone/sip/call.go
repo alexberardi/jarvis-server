@@ -31,11 +31,13 @@ const maxInbound = 3000
 // telephone-event in its SDP).
 var ErrUnsupported = errors.New("sip: not negotiated with the far end")
 
-// Call is one outbound call. Its audio is 8 kHz mono PCM16 both ways, in 20 ms frames.
+// Call is one call, placed (Dial) or answered (Config.Inbound). Its audio is 8 kHz mono PCM16
+// both ways, in 20 ms frames.
 type Call struct {
 	ua     *UA
 	id     string
-	d      *diago.DialogClientSession
+	d      *diago.DialogClientSession // an outbound call's dialog (nil inbound)
+	dlg    dialog                     // the call's dialog, either way
 	ctx    context.Context // the INVITE's: cancelling it before the answer sends CANCEL
 	cancel context.CancelFunc
 
@@ -70,6 +72,13 @@ type Call struct {
 	lastRTP atomic.Int64 // unix nanos of the last RTP packet (or of the answer)
 }
 
+// dialog is what a call needs of its diago dialog, client (outbound) or server (inbound).
+type dialog interface {
+	Hangup(ctx context.Context) error
+	Close() error
+	Context() context.Context
+}
+
 // Dial places a call to number (already in the PBX's dial format) through the registrar.
 // It returns once the INVITE is on its way; Started, Done and End say what became of it.
 func (u *UA) Dial(ctx context.Context, number string) (*Call, error) {
@@ -90,7 +99,7 @@ func (u *UA) Dial(ctx context.Context, number string) (*Call, error) {
 	id := sip.CallIDHeader(sip.GenerateTagN(32) + "@jarvis")
 	d.InviteRequest.AppendHeader(&id)
 	ictx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	c := &Call{ua: u, d: d, ctx: ictx, cancel: cancel, id: id.Value(),
+	c := &Call{ua: u, d: d, dlg: d, ctx: ictx, cancel: cancel, id: id.Value(),
 		started: make(chan struct{}), done: make(chan struct{}), frames: make(chan []int16),
 		inReady: make(chan struct{}, 1), playedCh: make(chan struct{}), dtmfPT: -1}
 	u.track(c)
@@ -193,7 +202,7 @@ func (c *Call) Hangup(ctx context.Context) error {
 		return nil
 	}
 	c.endWith(EndClosed, "hung up")
-	err := c.d.Hangup(ctx)
+	err := c.dlg.Hangup(ctx)
 	c.finish(EndClosed, "hung up")
 	return err
 }
@@ -218,7 +227,7 @@ func (c *Call) finish(end End, detail string) {
 		if med != nil {
 			_ = med.Close()
 		}
-		_ = c.d.Close()
+		_ = c.dlg.Close()
 		c.ua.untrack(c)
 		c.ua.cfg.Log.Info("sip: call ended", "call_id", c.id, "end", string(end), "detail", detail)
 	})
@@ -249,11 +258,16 @@ func (c *Call) run() {
 		return
 	}
 	c.answer(med)
+	c.serve(med)
+}
+
+// serve runs an answered call's media until the call ends, either way.
+func (c *Call) serve(med *diago.DialogMedia) {
 	go c.read(med)
 	go c.pace(med)
 	go c.watch()
 	select {
-	case <-c.d.Context().Done():
+	case <-c.dlg.Context().Done():
 		c.mu.Lock()
 		end, detail := c.ending, c.endingDetail
 		c.mu.Unlock()
@@ -393,7 +407,7 @@ func (c *Call) read(med *diago.DialogMedia) {
 			// end. Only a socket that fails on its own is a transport end.
 			select {
 			case <-c.done:
-			case <-c.d.Context().Done():
+			case <-c.dlg.Context().Done():
 			case <-time.After(time.Second):
 				c.finish(EndTransport, "media: "+err.Error())
 			}
@@ -547,7 +561,7 @@ func (c *Call) watch() {
 		detail := fmt.Sprintf("no audio from the far end for %s", c.ua.cfg.NoRTPTimeout)
 		c.endWith(EndNoMedia, detail)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = c.d.Hangup(ctx)
+		_ = c.dlg.Hangup(ctx)
 		cancel()
 		c.finish(EndNoMedia, detail)
 		return

@@ -312,15 +312,6 @@ func respond(req *sip.Request, tx sip.ServerTransaction, code int, reason string
 	_ = tx.Respond(sip.NewResponseFromRequest(req, code, reason, nil))
 }
 
-// handleInvite answers a new inbound call. Inbound calls are a later step
-// (docs/cc/phone-sip.md §4 step 3): 480 sends the caller on to the PBX's next destination.
-func (u *UA) handleInvite(d *diago.DialogServerSession) {
-	u.cfg.Log.Info("sip: inbound call refused (not supported yet)", "from", d.FromUser())
-	if err := d.Respond(sip.StatusTemporarilyUnavailable, "Temporarily Unavailable", nil); err != nil {
-		u.cfg.Log.Warn("sip: refusing an inbound call failed", "err", err)
-	}
-}
-
 // handleUpdate answers UPDATE (a session-timer refresh, RFC 4028/3311) within a live call
 // with the SDP we already use: nothing about the media changes.
 func (u *UA) handleUpdate(req *sip.Request, tx sip.ServerTransaction) {
