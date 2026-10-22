@@ -57,7 +57,7 @@ var scenarios = []scenario{
 		return sippCall(ctx, l, r, "uac-noanswer.xml", "2125550480")
 	}},
 	{"all-trunks-busy", "all trunks busy: 200 OK, then the \"all circuits are busy\" recording", allTrunksBusy},
-	{"contact-taken", "a second device registering 101 with the right password is refused 403 (max_contacts=1, remove_existing=no)", contactTaken},
+	{"contact-taken", "on 102 (Remove Existing = no, an older install's setting) a second device registering with the right password is refused 403 while the first holds it", contactTaken},
 	{"wrong-password-ban", "3 wrong passwords from one address: banned, the right password gets 403 (Responsive Firewall stand-in)", wrongPasswordBan},
 	// jarvisd's own SIP provider as 100 (jarvis.go): the stand-in steps aside for each.
 	{"jarvis-registers", "jarvisd's SIP provider registers as 100, unregisters on shutdown, registers again on the same port", jarvisRegisters},
@@ -67,6 +67,7 @@ var scenarios = []scenario{
 	{"jarvis-no-answer", "jarvisd's call nobody answers (183 + 503) ends no answer, never answered", jarvisOutcome("2125550480", sip.EndNoAnswer)},
 	{"jarvis-all-trunks-busy", "all trunks busy: jarvisd's call is answered and what it hears is taken for a recording", jarvisAllTrunksBusy},
 	{"jarvis-inbound", "the carrier calls the Jarvis DID: jarvisd answers after the answer delay (caller from PAI), says the disclosure and hears the message", jarvisInbound},
+	{"jarvis-inbound-withheld", "a caller who withheld their number (pres prohib): no PAI, an anonymous From (trust_id_outbound=no); jarvisd records no caller ID, answers and hears the message", jarvisInboundWithheld},
 	{"jarvis-inbound-ring-group", "the ring-group DID: Alice picks up during jarvisd's answer delay; jarvisd's leg is cancelled, never answered", jarvisInboundRingGroup},
 	{"jarvis-inbound-transfer", "jarvisd transfers the caller to Alice (101) with REFER: it waits for the final NOTIFY (200 once 101 rings), hangs up its leg, and the caller and Alice hear each other", jarvisInboundTransfer},
 	{"jarvis-inbound-transfer-fails", "a transfer to a busy number (the outbound route, trunk busy): the final NOTIFY says 486, the PBX gives the caller busy, and jarvisd hangs up its emptied leg", jarvisInboundTransferFails},
@@ -425,28 +426,35 @@ func allTrunksBusy(ctx context.Context, l *lane, r *report) error {
 		"all circuits are busy now please try your call later", "all circuits are busy now please try your call again later")
 }
 
+// holderAddr is where contactTaken's first device registers 102 from; the second comes from
+// 127.0.0.1, so the two contacts differ (rewrite_contact takes the source address).
+const holderAddr = "127.0.0.2"
+
 func contactTaken(ctx context.Context, l *lane, r *report) error {
-	if err := l.sipp(ctx, "register-contact-taken.xml", "127.0.0.1", "-key", "caller", "101", "-au", "101", "-ap", "lane-alice-101"); err != nil {
+	ext := contactTakenExt
+	creds := []string{"-key", "caller", ext, "-au", ext, "-ap", "lane-desk-" + ext}
+	register := func(addr, expires string) error {
+		return l.sipp(ctx, "register.xml", addr, append(creds, "-key", "expires", expires)...)
+	}
+	if err := register(holderAddr, "60"); err != nil {
+		r.failf("the first device did not register %s: %v", ext, err)
+		return nil
+	}
+	defer register(holderAddr, "0") // the next run's first device registers again
+	if err := l.sipp(ctx, "register-contact-taken.xml", "127.0.0.1", creds...); err != nil {
 		r.failf("%v", err)
 		return nil
 	}
-	out, err := l.cli(ctx, "pjsip show aor 101")
+	out, err := l.cli(ctx, "pjsip show aor "+ext)
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(out, ":"+portOf(l.party("alice").ctrl, -100)) {
-		r.failf("101's contact is no longer Alice's:\n%s", out)
+	l.keep("contact-taken-aor-"+ext+".txt", out)
+	if !strings.Contains(out, holderAddr+":") {
+		r.failf("%s's contact is no longer the first device's:\n%s", ext, out)
 	}
-	r.notef("a second contact for 101 was refused 403; Alice's stays")
+	r.notef("a second contact for %s was refused 403 (remove_existing=no); the first device's stays", ext)
 	return nil
-}
-
-// portOf is addr's port plus delta: a far end's SIP port is its ctrl port - 100.
-func portOf(addr string, delta int) string {
-	_, p, _ := strings.Cut(addr, ":")
-	var n int
-	fmt.Sscan(p, &n)
-	return fmt.Sprint(n + delta)
 }
 
 // The banned address: anything on loopback but 127.0.0.1, so the far ends keep working.

@@ -296,9 +296,8 @@ func (l *lane) deadFarEnds(ctx context.Context, scenario string) ([]string, erro
 	return dead, nil
 }
 
-// restart brings the whole lane up again (scripts/sip-lane up, same name and ports): a far
-// end restarted alone would register a new contact, which max_contacts=1 with
-// remove_existing=no refuses while the dead one's is still bound.
+// restart brings the whole lane up again (scripts/sip-lane up, same name and ports), so every
+// far end, its registration and its ctrl_tcp start from a known state together.
 func (l *lane) restart(ctx context.Context) error {
 	args := []string{"up", "--name", l.env["SIP_LANE_NAME"]}
 	if o := l.env["SIP_LANE_OFFSET"]; o != "" {

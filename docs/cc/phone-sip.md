@@ -71,7 +71,7 @@ Risks and what we do about them:
 | Gotcha | Impact | Mitigation |
 |---|---|---|
 | **Responsive Firewall + Intrusion Detection (fail2ban)**: ~3 failed REGISTERs → dropped; repeated → banned 30 min to 24 h+ | A wrong password plus a retry loop locks the Jarvis host out of the PBX (and possibly its web UI) | Stop after 3 auth failures and say so ("check password; the PBX may have blocked this host, unblock under Firewall → Status"). Exponential backoff always. Setup guide: put the Jarvis IP in Firewall **Trusted** and the IDS whitelist |
-| `max_contacts=1`, `remove_existing=no` | After a restart on a new port/IP, the new REGISTER is rejected until the old one expires; rejections feed the firewall | Stable local SIP port and Contact across restarts; `Expires: 0` on clean shutdown; guide says set Remove Existing = yes |
+| `max_contacts=1`, `remove_existing=no` (FreePBX 17 defaults Remove Existing to yes, where a new contact replaces the old; no is an older install's or an admin's setting) | Where it is no: after a restart on a new port/IP, the new REGISTER is rejected until the old one expires; rejections feed the firewall | Stable local SIP port and Contact across restarts; `Expires: 0` on clean shutdown; guide says set Remove Existing = yes |
 | `qualify_frequency=60` (OPTIONS) | Unanswered OPTIONS marks us unavailable → inbound calls go to voicemail | Answer OPTIONS 200 |
 | Inbound needs the PBX to reach us | INVITE and RTP to jarvisd on the LAN | Listen on a configured port (not 5060 by default, in case the PBX shares the host) and a pinned RTP range; Docker installs need host networking; macOS firewall prompt; Windows firewall rule |
 | SIP scanners | Random INVITEs if the port is exposed | Accept requests only from the registrar's address; never forward the port |
@@ -104,6 +104,7 @@ Risks and what we do about them:
 | Gotcha | Impact | Mitigation |
 |---|---|---|
 | Caller identity: P-Asserted-Identity (`sendrpid=pai`), then From; CNAM only if the trunk provides it; Diversion unreliable | Wrong/missing caller | Read PAI, then From; treat all of it as a hint, never as authentication |
+| Withheld numbers: FreePBX 17's `trust_id_outbound=no` sends a caller who restricted presentation with no PAI and From `"Anonymous" <sip:anonymous@anonymous.invalid>` | "anonymous" recorded as if it were a caller ID | An anonymous From or `Privacy: id` is a withheld number: no number or name recorded (`caller_id_source` = `withheld`), the card says "withheld by the caller"; the receptionist answers and takes the message as for anyone (it never sees the caller ID) |
 | Ring groups: an instant answer steals every call | Humans never get to pick up | `answer_delay` setting (default 0 for direct routes; guide suggests No Answer destination instead of ring-all) |
 | Call waiting on by default: a second INVITE mid-call | Two concurrent calls on one extension | Concurrent inbound cap; above it reply 486 so the PBX goes to voicemail |
 | Untrusted caller and spam | Prompt injection, long robocalls burning model time | Inbound agent has only `take_message` / `hang_up` (and later `transfer` to fixed targets); no household data; short max duration (~3 min); daily cap |
@@ -197,11 +198,12 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   RTP 20000–20199 plus the sandbox's offset.
 - `test/sip/farend/`: baresip (WAV in, WAV out, driven over `ctrl_tcp`), SIPp, sox.
   `test/sip/sipp/`: the signalling-only scenarios.
-- `tools/siplane`: 30 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
+- `tools/siplane`: 31 scenarios: registration and the endpoint's defaults, `*43` echo, `*65`,
   an internal call, the inbound route (DID 5551230000 → 100), the outbound route (→ carrier),
   ring group 600 (DID 5551230600), call waiting, busy with call waiting off (486), trunk busy
   (486, SIPp), no answer (183 + 503, SIPp), all trunks busy (200 + recording), a second contact
-  refused (max_contacts=1), wrong password ×3 → ban; and jarvisd's own SIP provider
+  refused on 102 (max_contacts=1 with Remove Existing = no, the older setting; 100 and 101 have
+  FreePBX 17's yes), wrong password ×3 → ban; and jarvisd's own SIP provider
   (`phone/sip`, run in the runner's process as 100): it registers, unregisters on shutdown and
   registers again on the same port; a wrong password stops it after exactly 3 attempts; it
   dials a 10-digit number through the outbound route with audio both ways; busy, no answer and
@@ -209,7 +211,8 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   connection, `*43` echo (WER and delay), `*65`, the inbound watch, and a trace with the digest
   answer redacted and the password nowhere; and jarvisd answering inbound calls: the carrier's
   call to the DID is answered after the answer delay with the caller from PAI, the disclosure is
-  heard and the message transcribed; a ring group's other phone picking up during the delay
+  heard and the message transcribed; the same from a caller who withheld their number (no PAI,
+  an anonymous From) is answered with no caller ID recorded; a ring group's other phone picking up during the delay
   cancels jarvisd's leg unanswered; a second call above the cap gets 486 (busy); a blind transfer
   to 101 (final NOTIFY 200, our leg hung up, the caller and Alice hear each other) and one to the
   trunk's busy number (final NOTIFY 486, the PBX plays busy to the caller, jarvisd hangs up its

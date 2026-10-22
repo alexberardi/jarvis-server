@@ -31,8 +31,8 @@ On the extension's **Advanced** tab:
 
 - **Direct Media: No.** With Yes, Asterisk moves the audio to another address in the middle of a
   call; Jarvis copes, but No keeps the audio on one path and is what the tests use.
-- **Remove Existing: Yes.** FreePBX allows one registration per extension (Max Contacts 1). With
-  Remove Existing No, a Jarvis that restarted on a new address is refused until the old
+- **Remove Existing: Yes** (FreePBX 17's default; check it on older installs). FreePBX allows one
+  registration per extension (Max Contacts 1). With Remove Existing No, a Jarvis that restarted on a new address is refused until the old
   registration expires, and each refusal counts against it in the firewall (step 3).
 - Leave **Max Contacts** at 1, **Media Encryption** off, and the transport on UDP (or TCP, if you
   set Jarvis to TCP too). Codecs: keep **ulaw** and **alaw** allowed.

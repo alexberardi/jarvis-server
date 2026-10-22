@@ -26,13 +26,26 @@ var freePBXEndpoint = map[string]string{
 	"force_rport":       "yes",
 	"rewrite_contact":   "yes",
 	"max_audio_streams": "1",
+	// What the L2 lane's first run (FreePBX 17.0.33.2, 2026-10-22) found L1 had wrong.
+	"trust_id_outbound":                  "no",
+	"aggregate_mwi":                      "no",
+	"mwi_subscribe_replaces_unsolicited": "yes",
+	"one_touch_recording":                "yes",
+	"record_on_feature":                  "apprecord",
+	"record_off_feature":                 "apprecord",
+	"tos_video":                          "af41",
+	"cos_video":                          "4",
 }
 
 var freePBXAOR = map[string]string{
 	"max_contacts":      "1",
-	"remove_existing":   "no",
+	"remove_existing":   "yes",
 	"qualify_frequency": "60",
 }
+
+// contactTakenExt is the lane's extension set to Remove Existing = no, as an older FreePBX
+// install or an admin has it: a second contact is refused while the first is bound.
+const contactTakenExt = "102"
 
 // parsePJSIPConf reads pjsip.conf into "<section>/<type>" → settings. FreePBX reuses a name
 // for an extension's endpoint and aor, so the type tells them apart. Comments and #include
@@ -94,7 +107,7 @@ var shownDefaults = map[string]string{
 	"rtp_timeout":       "30",
 	"send_pai":          "true",
 	"max_contacts":      "1",
-	"remove_existing":   "false",
+	"remove_existing":   "true",
 	"qualify_frequency": "60",
 }
 

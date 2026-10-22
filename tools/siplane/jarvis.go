@@ -157,8 +157,9 @@ func jarvisRegisters(ctx context.Context, l *lane, r *report) error {
 	if st := ua.Status(); st.State != sip.StateRegistered {
 		r.failf("registration dropped: %+v", st)
 	}
-	// Close unregisters (Expires: 0): the contact goes at once, so a restart is not refused
-	// by max_contacts=1 with remove_existing=no.
+	// Close unregisters (Expires: 0): the contact goes at once. FreePBX 17's Remove Existing =
+	// yes would replace it anyway, but an install set to no (contact-taken, 102) refuses a
+	// restart on another port while the old contact is bound.
 	ua.Close(context.Background())
 	if err := l.waitContact(ctx, "100", port, false); err != nil {
 		r.failf("the contact stayed after shutdown: %v", err)
