@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1274,7 +1275,7 @@ func TestStackEndToEnd(t *testing.T) {
 		t.Fatalf("live %+v bg %+v stt %+v", live, bg, stt)
 	}
 	code, out := call("GET", "/v1/models/labels", "")
-	if code != 200 || len(out["labels"].([]any)) != 4 || len(out["engines"].([]any)) != 2 {
+	if code != 200 || len(out["labels"].([]any)) != 5 || len(out["engines"].([]any)) != 2 {
 		t.Fatalf("labels %d %v", code, out)
 	}
 	code, out = call("GET", "/v1/models/installed", "")
@@ -1772,5 +1773,89 @@ func TestUpdateLabelsModelDirectory(t *testing.T) {
 	e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"dir_engine": "auto"}})
 	if c, _ := src.Label(e.ctx, "live"); c.Kind != engine.KindTransformers || c.Problem != "" {
 		t.Fatalf("windows, auto: %s %q", c.Kind, c.Problem)
+	}
+}
+
+// The cloud label (2026-10-22-cloud-model-slot.md) is remote only and empty by default: nothing
+// leaves the network until a superuser gives it a URL; then it resolves like any remote.
+func TestCloudLabel(t *testing.T) {
+	e := newEnv(t)
+	src := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store}
+	r := &engine.Resolver{Source: src, Log: quiet()}
+
+	c, err := src.Label(e.ctx, engine.LabelCloud)
+	if err != nil || c.Engine != engine.ModeRemote || c.RemoteURL != "" || c.RemoteModel != "" || c.RemoteAPIKey != "" || c.ModelKind != engine.ModelLLM {
+		t.Fatalf("defaults %+v %v", c, err)
+	}
+	if _, err := r.Resolve(e.ctx, engine.LabelCloud); !errors.Is(err, engine.ErrNotConfigured) {
+		t.Fatalf("unset cloud resolves: %v", err)
+	}
+	var st engine.LabelStatus
+	for _, s := range r.Status(e.ctx) {
+		if s.Label == engine.LabelCloud {
+			st = s
+		}
+	}
+	if st.State != "not_configured" {
+		t.Fatalf("status %+v", st)
+	}
+
+	keys := map[string]settings.Definition{}
+	for _, d := range engine.SettingDefinitions() {
+		keys[d.Key] = d
+	}
+	for _, k := range []string{"engine", "remote_url", "remote_api", "remote_model", "remote_api_key", "remote_vision", "context", "fold_system_messages"} {
+		if _, ok := keys["llm.cloud."+k]; !ok {
+			t.Errorf("missing llm.cloud.%s", k)
+		}
+	}
+	for _, k := range []string{"model", "mmproj", "gpu_backend", "gpu_layers", "gpu_devices", "parallel", "extra_args", "dir_engine"} {
+		if _, ok := keys["llm.cloud."+k]; ok {
+			t.Errorf("llm.cloud.%s on a remote-only label", k)
+		}
+	}
+	if d := keys["llm.cloud.engine"]; !slices.Equal(d.Options, []any{engine.ModeRemote, engine.ModeOff}) || d.Default != engine.ModeRemote {
+		t.Errorf("engine %+v", d)
+	}
+	if !keys["llm.cloud.remote_api_key"].IsSecret {
+		t.Error("the cloud key is not secret")
+	}
+
+	for _, u := range []map[string]map[string]any{
+		{"cloud": {"engine": "local"}},
+		{"cloud": {"engine": "shared"}},
+		{"cloud": {"model": "tiny"}},
+		{"cloud": {"gpu_layers": float64(0)}},
+	} {
+		if err := e.mgr.UpdateLabels(e.ctx, u); err == nil {
+			t.Errorf("%v accepted", u)
+		}
+	}
+	if err := e.mgr.Assign(e.ctx, engine.LabelCloud, "tiny"); err == nil || !strings.Contains(err.Error(), "remote") {
+		t.Errorf("assign to cloud: %v", err)
+	}
+	if _, _, err := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "whisper-tiny", Assign: []string{engine.LabelCloud}}); err == nil {
+		t.Error("install assigned to cloud")
+	}
+
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"cloud": {
+		"remote_url": "https://api.anthropic.com/v1/messages", "remote_model": "claude-sonnet-5-5", "remote_api_key": "sk-ant", "remote_vision": true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ep, err := r.Resolve(e.ctx, engine.LabelCloud)
+	if err != nil || !ep.Remote || ep.BaseURL != "https://api.anthropic.com/v1" || ep.API != engine.APIAnthropic ||
+		ep.Model != "claude-sonnet-5-5" || ep.APIKey != "sk-ant" || !ep.Vision || ep.Label != engine.LabelCloud {
+		t.Fatalf("configured cloud %+v %v", ep, err)
+	}
+	// The local slots are untouched by it.
+	if _, err := r.Resolve(e.ctx, engine.LabelLive); !errors.Is(err, engine.ErrNotConfigured) {
+		t.Fatalf("live after cloud: %v", err)
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"cloud": {"engine": "off"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Resolve(e.ctx, engine.LabelCloud); !errors.Is(err, engine.ErrNotConfigured) {
+		t.Fatalf("cloud off: %v", err)
 	}
 }

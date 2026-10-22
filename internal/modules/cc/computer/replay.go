@@ -41,7 +41,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: "I couldn't start the computer task: " + err.Error()}
 	}
 	sc := settings.Scope{HouseholdID: t.HouseholdID}
-	pick, err := pickLabel(ctx, l.Models, l.str(ctx, SettingModel, sc, ModelAuto), t.UseCloud)
+	pick, err := pickLabel(ctx, l.Models, l.str(ctx, SettingModel, sc, ModelAuto))
 	if err != nil {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}

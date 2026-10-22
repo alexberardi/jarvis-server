@@ -10,19 +10,20 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/models"
 )
 
-// computer.model values.
+// computer.model values (llm.SlotChoices).
 const (
-	ModelAuto       = "auto"
+	ModelAuto       = llm.SlotAuto
 	ModelLive       = llm.LabelLive
 	ModelBackground = llm.LabelBackground
+	ModelCloud      = llm.LabelCloud
 )
 
-// ErrNoCloud is pickLabel's error when a task asks for the cloud and no slot is remote.
+// ErrNoCloud is pickLabel's error when computer.model is cloud and the cloud slot isn't set up.
 var ErrNoCloud = errors.New("No cloud model is set up")
 
 // Models is what the loop knows about the llm slots. cc fills it from its Module (piece 11).
 type Models struct {
-	// Endpoint resolves a slot ("live", "background") for its model and capabilities.
+	// Endpoint resolves a slot ("live", "background", "cloud") for its model and capabilities.
 	Endpoint func(ctx context.Context, label string) (llm.Endpoint, error)
 	// VisionLabel is the slot a background caller sends images to (cc's visionLabel).
 	VisionLabel func(ctx context.Context) (string, bool)
@@ -38,11 +39,11 @@ type Pick struct {
 	Adapter computeruse.Adapter
 }
 
-// pickLabel chooses the slot for a computer task. useCloud (the task opted into the cloud) takes
-// the slot configured remote_*, or fails with ErrNoCloud. Otherwise mode is computer.model: live
-// or background name the slot; auto takes the vision slot whose model the catalogue tags "large",
-// else the background vision slot (visionLabel), else background without images.
-func pickLabel(ctx context.Context, m Models, mode string, useCloud bool) (Pick, error) {
+// pickLabel chooses the slot for a computer task from computer.model (mode): live, background
+// or cloud name the slot, and cloud fails with ErrNoCloud when it isn't set up. auto (or anything
+// else) never picks cloud: it takes the vision slot whose model the catalogue tags "large", else
+// the background vision slot (visionLabel), else background without images.
+func pickLabel(ctx context.Context, m Models, mode string) (Pick, error) {
 	ep := func(label string) (llm.Endpoint, bool) {
 		if m.Endpoint == nil {
 			return llm.Endpoint{}, false
@@ -54,20 +55,16 @@ func pickLabel(ctx context.Context, m Models, mode string, useCloud bool) (Pick,
 		e, _ := ep(label)
 		return Pick{Label: label, Model: e.Model, Vision: e.Vision, Adapter: computeruse.AdapterFor(e.Model)}
 	}
-	labels := []string{llm.LabelBackground, llm.LabelLive}
-
-	if useCloud {
-		for _, l := range labels {
-			if e, ok := ep(l); ok && e.Remote {
-				return pick(l), nil
-			}
-		}
-		return Pick{}, ErrNoCloud
-	}
 	switch mode {
+	case ModelCloud:
+		if _, ok := ep(ModelCloud); !ok {
+			return Pick{}, ErrNoCloud
+		}
+		return pick(ModelCloud), nil
 	case ModelLive, ModelBackground:
 		return pick(mode), nil
 	}
+	labels := []string{llm.LabelBackground, llm.LabelLive}
 	tags := m.Tags
 	if tags == nil {
 		tags = catalogTags

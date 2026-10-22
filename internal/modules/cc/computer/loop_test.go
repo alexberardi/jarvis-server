@@ -151,6 +151,9 @@ func newEnv(t *testing.T, pages ...Observation) *tenv {
 		LLM: e.llm, Exec: e.exec, Policy: &policy.Policy{Rules: e.rules}, Audit: e.rules,
 		Store: &Store{DB: d, Now: now}, Approvals: e.mint, Settings: e.setts,
 		Models: Models{Endpoint: func(_ context.Context, label string) (llm.Endpoint, error) {
+			if label == llm.LabelCloud {
+				return llm.Endpoint{}, &llm.NotReadyError{State: llm.StateNotConfigured} // not set up
+			}
 			return llm.Endpoint{Model: "qwen3.8-27b", Vision: true}, nil
 		}},
 		Now: now,
@@ -723,35 +726,41 @@ func TestPickLabel(t *testing.T) {
 	}
 	big := llm.Endpoint{Model: "qwen3.8-27b", Vision: true}
 	small := llm.Endpoint{Model: "qwen3.5-9b", Vision: true}
-	cloud := llm.Endpoint{Model: "claude-sonnet-5-5", Vision: true, Remote: true}
+	remote := llm.Endpoint{Model: "claude-sonnet-5-5", Vision: true, Remote: true}
+	cloud := llm.Endpoint{Model: "claude-opus-5-5", Vision: true, Remote: true}
 	cases := []struct {
 		name    string
 		m       Models
 		mode    string
-		cloud   bool
 		label   string
 		adapter string
 		vision  bool
 		wantErr error
 	}{
 		{"auto takes the large vision model on live", Models{Endpoint: eps(map[string]llm.Endpoint{"background": small, "live": big}), VisionLabel: vision("background")},
-			ModelAuto, false, "live", "norm1000", true, nil},
+			ModelAuto, "live", "norm1000", true, nil},
 		{"auto prefers background when both are large", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": big})},
-			ModelAuto, false, "background", "norm1000", true, nil},
+			ModelAuto, "background", "norm1000", true, nil},
 		{"auto falls back to visionLabel", Models{Endpoint: eps(map[string]llm.Endpoint{"background": small, "live": small}), VisionLabel: vision("live")},
-			ModelAuto, false, "live", "norm1000", true, nil},
+			ModelAuto, "live", "norm1000", true, nil},
 		{"auto without vision is background, text only", Models{Endpoint: eps(map[string]llm.Endpoint{"background": {Model: "x"}}), VisionLabel: vision("")},
-			ModelAuto, false, "background", "pixels", false, nil},
+			ModelAuto, "background", "pixels", false, nil},
 		{"named slot", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": small})},
-			ModelLive, false, "live", "norm1000", true, nil},
-		{"cloud", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": cloud})},
-			ModelAuto, true, "live", "pixels", true, nil},
-		{"no cloud", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": big})},
-			ModelAuto, true, "", "", false, ErrNoCloud},
+			ModelLive, "live", "norm1000", true, nil},
+		{"a remote live slot is still live", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": remote})},
+			ModelLive, "live", "pixels", true, nil},
+		{"cloud chosen and set up", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": big, "cloud": cloud})},
+			ModelCloud, "cloud", "pixels", true, nil},
+		{"cloud chosen but not set up", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "live": remote})},
+			ModelCloud, "", "", false, ErrNoCloud},
+		{"auto never picks cloud", Models{Endpoint: eps(map[string]llm.Endpoint{"background": {Model: "x"}, "live": small, "cloud": cloud}), VisionLabel: vision("")},
+			ModelAuto, "background", "pixels", false, nil},
+		{"an unknown mode is auto", Models{Endpoint: eps(map[string]llm.Endpoint{"background": big, "cloud": cloud})},
+			"gpt", "background", "norm1000", true, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p, err := pickLabel(ctx, c.m, c.mode, c.cloud)
+			p, err := pickLabel(ctx, c.m, c.mode)
 			if !errors.Is(err, c.wantErr) {
 				t.Fatalf("err %v, want %v", err, c.wantErr)
 			}
@@ -764,11 +773,10 @@ func TestPickLabel(t *testing.T) {
 		})
 	}
 
-	// A task that wants the cloud with none set up fails with the reason, before any model call.
+	// computer.model=cloud with none set up fails the task with the reason, before any model call.
 	e := newEnv(t)
-	tk := task()
-	tk.UseCloud = true
-	out := e.loop.Run(ctx, tk)
+	e.setts[SettingModel] = ModelCloud
+	out := e.loop.Run(ctx, task())
 	if out.State != StateFailed || out.Summary != "No cloud model is set up" || len(e.llm.reqs) != 0 {
 		t.Fatalf("outcome %+v", out)
 	}

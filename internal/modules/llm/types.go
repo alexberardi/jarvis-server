@@ -8,11 +8,13 @@ import (
 	"strings"
 )
 
-// Labels (LD1): the two chat labels, and the embeddings engine.
+// Labels (LD1): the two chat labels, and the embeddings engine. cloud is the optional remote
+// chat label only callers inside jarvisd reach, by naming it (decisions/2026-10-22-cloud-model-slot.md).
 const (
 	LabelLive       = "live"
 	LabelBackground = "background"
 	LabelEmbeddings = "embeddings"
+	LabelCloud      = "cloud"
 )
 
 // Priorities: a live call never waits; a background one waits for live calls on its engine.
