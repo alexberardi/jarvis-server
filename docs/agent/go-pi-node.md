@@ -89,8 +89,8 @@ Tags:
 | 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
 | 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
 | 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
-| 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | later (cheap) |
-| 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | later |
+| 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | **done in the Go agent (§3.16, 17c)** |
+| 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | tentative wake **done in the Go agent (§3.16, 17c)**; cool-down and auto threshold later (17d) |
 | 23 | Boot warmup that sends a real "hello" LLM turn | `N:scripts/main.py:390-424` | – | drop |
 
 **Wake verification is server-side only.** There is no `wake_unverified` logic on the node.
@@ -369,7 +369,7 @@ onnxruntime.
 | 8 | RMS endpointing: clamp(median pre-wake RMS × 2, 200, 1000) else 300; 0.8 s silence, 2–7 s; then DC removal + gain to −18 dBFS (≤ +18 dB). Golden-tested against `speech_to_text.py`. | yes, including the normaliser |
 | 9 | STT multipart: `file` (48 kHz), `speaker_audio` (wake clip + command), `conversation_id` | yes (48 kHz per §8 Q1) |
 | 10 | `is_non_speech` port, golden-tested against `voice_filters.py` | yes |
-| 11 | Join the warmup ≤ 10 s, then `/voice/command/stream` `{voice_command, conversation_id, turn_source:"wake", wake_confidence, affect}` | yes (no `pre_wake_speech_seconds` yet) |
+| 11 | Join the warmup ≤ 10 s, then `/voice/command/stream` `{voice_command, conversation_id, turn_source:"wake", wake_confidence, affect}` | yes (with `pre_wake_speech_seconds` and `self_playback` since 17c, §3.16) |
 | 12 | 200: PCM streamed to the speaker at `X-Audio-*`, 8 s inter-chunk idle timeout | yes |
 | 13 | 202 `not_for_me` silent; `complete` spoken via `/media/tts/speak` (≤ 200 chars) or `/speak/stream`; empty `complete` stays **silent** (§1.4: Python says "Task completed."); `tool_calls` run locally (§3.8); `validation_required` asked aloud (§3.9); `error` speaks its message | as §1.1, minus the §1.4 quirk |
 | 14 | `/conversation/end` always, after both the turn and start have finished | Go always sends it |
@@ -1022,6 +1022,31 @@ amixer -c seeed2micvoicec sget PGA     # 49% while the music plays
 sudo systemctl start jarvis-node
 ```
 
+#### 17c: tentative wake and `pre_wake_speech_seconds` (2026-10-21, loop #425)
+
+Ports `N:core/wake_loop.py:143-261,403-530` (`voice/tentative.go`, `voice/endpoint.go`
+`PreWakeVAD`), with N:'s defaults fixed (`Config.Tentative`, `Config.PreWakeVAD`):
+
+| When | Does |
+|---|---|
+| The node's own music plays (`Music.SelfPlaying`, the cached flag) and a chunk scores in [0.20, the wake threshold] without firing | Tentative wake: `Duck` in the background and keep scoring ("tentative wake triggered"). Not a fire: no debounce, chime, indicator or turn. At most one per 10 s (the cool-down is the pipeline's, so it outlives a turn) |
+| 1.6 s pass with no fire, or listening pauses (a voice take, a room measure) or stops | `Restore` ("tentative wake expired", with the peak score and the reason) |
+| The wake word fires inside the window | The fire completes it (`Turn.Tentative`; "wake" logs `tentative_triggered` / `tentative_completed`). The turn's own duck is a no-op on the levels: `Ducker.Duck` keeps the first saved volume |
+| While the band is armed | The wake clip's ring holds 2 s + 1.6 s; a fire that completes a tentative sends all of it (the phrase from before the duck), any other fire the usual 2 s |
+| Every wake turn | `/voice/command/stream` carries `pre_wake_speech_seconds` (chunks of the 5 s pre-wake window above clamp(median × 3, 300, 2500), × 80 ms; the static 2500 with no floor or during the node's own music) and `self_playback` (+ `self_playback_kind: "music"`), snapshotted at the fire. "wake" logs the threshold and its source (`auto`, `static`, `static_self_playback`) |
+
+Not ported here: N:'s self-playback bypass of the adaptive *silence* threshold
+(`wake_loop.py:575`), which belongs with 17b's capture work. Note that command-center's wake
+verification transcribes the leading 2.2 s of `speaker_audio`; a tentative-completed clip
+(up to 3.6 s) puts the oldest audio there, as N:'s does.
+
+**Verified** with unit tests (`voice/tentative_test.go`: the duck-then-expire, the completing
+fire and its clip, the cool-down, no music, stopping mid-window, the pre-wake seconds table and
+the JSON). **Not yet on a Pi.** On the lab Pi 4, with music playing through a music package:
+"Hey Jarvis" over it; the log has "tentative wake triggered", then "wake ...
+tentative_completed=true", the music ducking before the chime. A lyric that scores in the band
+logs "tentative wake expired ... reason=window" and the music comes back within ~2 s.
+
 ### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
 
 The Pi profile answers the app's device requests over the household's device families, which
@@ -1248,12 +1273,12 @@ checked on the lab Pi 4 since it was built.
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
 | 5.10 voice-profile takes | built | no |
-| 5.11 music ducking and takeover (17a) | built | no; **open (a)**: 17b echo cancellation during music, 17c tentative wake and `pre_wake_speech_seconds`, 17d wake auto-calibration and the false-wake cool-down, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
+| 5.11 music ducking and takeover (17a); tentative wake and `pre_wake_speech_seconds` (17c, loop #425) | built | no; **open (a)**: 17b echo cancellation during music, 17d wake auto-calibration and the false-wake cool-down, 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
 
 What each open gap blocks, if the Python node were retired today:
 
 - **(a)** music is louder in the mic than with the Python node (no AEC), so wakes over music fail
-  more often; there is no tentative wake, no auto-calibration and no false-wake cool-down; and a
+  more often; there is no auto-calibration and no false-wake cool-down (the tentative wake is built, 17c, not yet on a Pi); and a
   Pi without the HAT has no LED at all.
 - **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
   the node. The app's device control still works.
@@ -1640,9 +1665,11 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
        `upload_failed` / `verify_failed` shapes). Unit tests; not yet run on a Pi.
    11. Music ducking and takeover (loop #180 17a). **Built 2026-10-19 (§3.16)**: duck on wake
        and each follow-up, restore before the deferred play, the mic gain profile, takeover on a
-       music command's play. Unit tests; not yet on a Pi. Still to build from #180, in order
+       music command's play. Unit tests; not yet on a Pi. 17c (tentative wake and
+       `pre_wake_speech_seconds`, §1.1 rows 21–22) built 2026-10-21 (loop #425, §3.16), not yet
+       on a Pi. Still to build from #180, in order
        ([decision](../decisions/2026-10-19-pi-node-music-ducking.md)): 17b echo cancellation
-       during music; 17c tentative wake and `pre_wake_speech_seconds` (§1.1 rows 21–22); 17d wake
+       during music; 17d wake
        auto-calibration and the false-wake cool-down; 17e the wake greeting prefetch (row 20),
        maintenance restart and the ACT-LED fallback without a HAT.
 
