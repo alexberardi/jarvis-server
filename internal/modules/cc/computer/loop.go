@@ -300,6 +300,9 @@ type round struct {
 	acted   map[string]bool
 	repeats int
 	page    string // pageKey of this round's observation
+	// downloaded are the files this task downloaded so far, as listed before the round's model
+	// call (nil: not a download task).
+	downloaded []string
 	// actedSinceLook: a batch ran since the last look (or the page is just opening), so the
 	// next look waits for the page to settle.
 	actedSinceLook bool
@@ -374,6 +377,9 @@ func unsentForm(history []Entry, obs Observation) *Element {
 	}
 	return nil
 }
+
+// downloadGoal is a task that downloads or saves files.
+var downloadGoal = regexp.MustCompile(`(?i)\b(download|statement|export|save|csv|pdf|file)s?\b`)
 
 var (
 	// buyGoal is a task that buys something; checkoutName the button that goes on to pay.
@@ -726,6 +732,13 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if stop != nil {
 		return *stop, true
 	}
+	if r.downloadsBefore != nil && downloadGoal.MatchString(r.task.Goal) {
+		// Checked, unlike the model's notes, which claimed a download a press never made (#485).
+		r.downloaded = l.newDownloads(ctx, r)
+		if r.downloaded == nil {
+			r.downloaded = []string{}
+		}
+	}
 	reply, err := l.ask(ctx, r, obs)
 	if err != nil {
 		return Outcome{State: StateFailed, Summary: err.Error()}, true
@@ -1070,7 +1083,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		Goal: t.Goal, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
-		Notes: notesOf(r.run.History),
+		Notes: notesOf(r.run.History), Downloaded: r.downloaded,
 	})
 	parts := []llm.Part{{Type: "text", Text: text}}
 	for _, im := range r.shots {

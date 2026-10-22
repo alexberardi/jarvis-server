@@ -1092,7 +1092,7 @@ func TestNotesCarryOver(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 	p := e.llm.reqs[1].Messages[1].Content.Parts[0].Text
-	if !strings.Contains(p, "Your notes from last turn: Plan: 1 add soap 2 check out. Next: add.") {
+	if !strings.Contains(p, "Plan: 1 add soap 2 check out. Next: add.") {
 		t.Fatalf("round 2 lacks the notes:\n%s", p)
 	}
 	p3 := e.llm.reqs[2].Messages[1].Content.Parts[0].Text
@@ -1293,5 +1293,26 @@ func TestMisstepItemGone(t *testing.T) {
 		if !strings.Contains(fb, "isn't in the cart any more") {
 			t.Errorf("%s: %q", ref, fb)
 		}
+	}
+}
+
+// A download task's prompt says, checked, what it downloaded so far: the model's notes claimed a
+// download a press never made, and it moved on to the next month (#485).
+func TestDownloadsChecked(t *testing.T) {
+	e := newEnv(t)
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {}}
+	e.script(doneAnswer)
+	tk := task()
+	tk.Goal = "Download last month's bank statement"
+	e.loop.Run(context.Background(), tk)
+	if p := e.llm.reqs[0].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "Files downloaded during this task (checked): none yet") {
+		t.Fatalf("no checked downloads in a download task's prompt:\n%s", p)
+	}
+	e2 := newEnv(t)
+	e2.exec.files = map[string]FileInfo{"list ~/Downloads": {}}
+	e2.script(doneAnswer)
+	e2.run()
+	if p := e2.llm.reqs[0].Messages[1].Content.Parts[0].Text; strings.Contains(p, "Files downloaded during this task") {
+		t.Fatal("a non-download task's prompt lists downloads")
 	}
 }

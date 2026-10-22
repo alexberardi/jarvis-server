@@ -65,6 +65,8 @@ type promptInput struct {
 	Clipboard   string // what the last batch read from the clipboard (content, like the page)
 	Desktop     bool   // the task is in a desktop app: its window, not a page
 	Notes       string // the model's notes from its last turn (plan and progress)
+	// Downloaded are the files the task downloaded so far, checked (nil: not a download task).
+	Downloaded []string
 }
 
 // renderPrompt is the user turn's text for one round.
@@ -87,7 +89,14 @@ func renderPrompt(in promptInput) string {
 	}
 
 	if in.Notes != "" {
-		fmt.Fprintf(&b, "\nYour notes from last turn: %s\n", oneLine(in.Notes))
+		fmt.Fprintf(&b, "\nYour notes from last turn (not checked: where they disagree with the page or the facts below, trust those): %s\n", oneLine(in.Notes))
+	}
+	if in.Downloaded != nil {
+		got := "none yet"
+		if len(in.Downloaded) > 0 {
+			got = strings.Join(in.Downloaded, ", ")
+		}
+		fmt.Fprintf(&b, "Files downloaded during this task (checked): %s\n", got)
 	}
 
 	b.WriteString("\nWhat you did so far:\n")
