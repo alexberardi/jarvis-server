@@ -8,9 +8,12 @@ package computer
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,6 +151,13 @@ type Outcome struct {
 	Downloads []string
 	Rounds    int
 	Healed    []Heal // a replay's done: the steps whose element moved (stored when Loop.Workflows is set)
+	// Err and the prompt size are a failed model call's diagnostics, for the log, not the user:
+	// the call's own error, and the engine's n_prompt_tokens when it reported one (PromptTokens)
+	// or else an estimate of the text alone (PromptTokensEst, plus PromptImages screenshots).
+	Err             string
+	PromptTokens    int
+	PromptTokensEst int
+	PromptImages    int
 }
 
 // PendingAction is one risky action held for the user's confirmation. All the risky actions of a
@@ -420,7 +430,15 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	reply, err := l.ask(ctx, r, obs)
 	if err != nil {
-		return Outcome{State: StateFailed, Summary: err.Error()}, true
+		out := Outcome{State: StateFailed, Summary: err.Error()}
+		var me *modelError
+		if errors.As(err, &me) {
+			out.Err, out.PromptImages = me.err.Error(), me.images
+			if out.PromptTokens = enginePromptTokens(me.err); out.PromptTokens == 0 {
+				out.PromptTokensEst = me.textTokens
+			}
+		}
+		return out, true
 	}
 	r.feedback, r.clipboard = "", ""
 	switch {
@@ -597,7 +615,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 			ReasoningBudget: &think, Messages: msgs,
 		})
 		if err != nil {
-			return Reply{}, fmt.Errorf("The model didn't answer: %v", err)
+			return Reply{}, &modelError{err: err, textTokens: (len(systemPrompt) + len(text)) / 4, images: len(r.shots)}
 		}
 		reply, err := parseReply(resp.Content)
 		if err == nil {
@@ -610,6 +628,34 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 				". Answer with exactly one JSON object in one of the four shapes.")})
 	}
 	return Reply{}, fmt.Errorf("The model's answers couldn't be read (%v).", lastErr)
+}
+
+// modelError is a model call that failed: the user's message, and what the log says about it.
+type modelError struct {
+	err        error
+	textTokens int // estimated, at about four bytes a token
+	images     int
+}
+
+func (e *modelError) Error() string { return fmt.Sprintf("The model didn't answer: %v", e.err) }
+
+func (e *modelError) Unwrap() error { return e.err }
+
+var nPromptTokens = regexp.MustCompile(`"n_prompt_tokens"\s*:\s*(\d+)`)
+
+// enginePromptTokens is the prompt size an engine's error reports (a context overflow's
+// n_prompt_tokens), 0 when it has none.
+func enginePromptTokens(err error) int {
+	var ae *llm.APIError
+	if !errors.As(err, &ae) {
+		return 0
+	}
+	m := nPromptTokens.FindStringSubmatch(ae.Message)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
 }
 
 // decision is one action's verdict.

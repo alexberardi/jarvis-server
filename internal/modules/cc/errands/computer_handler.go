@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/url"
 	"regexp"
@@ -170,7 +171,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		t.ApprovedReason = "within your " + dollars(limit) + " spend limit"
 		out = run(t)
 	}
-	s.log().Info("errands: step (computer)", "run", out.RunID, "state", out.State, "rounds", out.Rounds)
+	logComputerStep(s.log(), out)
 	switch out.State {
 	case computer.StateDone:
 		msg := strings.TrimSpace(firstNonEmpty(out.Summary, "Done.") + " " + note)
@@ -609,4 +610,25 @@ func (s *Service) stopComputer(ctx context.Context, workflowID string, ended boo
 		s.Computer.Loop.Exec.Stop(ctx, run.ID)
 	}
 	return true
+}
+
+// logComputerStep is the step's journal line: a failed or stopped one at WARN with why (the
+// card's reason, and a failed model call's error and prompt size).
+func logComputerStep(log *slog.Logger, out computer.Outcome) {
+	args := []any{"run", out.RunID, "state", out.State, "rounds", out.Rounds}
+	if out.State != computer.StateFailed && out.State != computer.StateStopped {
+		log.Info("errands: step (computer)", args...)
+		return
+	}
+	args = append(args, "summary", out.Summary)
+	if out.Err != "" {
+		args = append(args, "err", out.Err)
+	}
+	switch {
+	case out.PromptTokens > 0:
+		args = append(args, "prompt_tokens", out.PromptTokens, "images", out.PromptImages)
+	case out.PromptTokensEst > 0:
+		args = append(args, "prompt_tokens_est", out.PromptTokensEst, "images", out.PromptImages)
+	}
+	log.Warn("errands: step (computer)", args...)
 }

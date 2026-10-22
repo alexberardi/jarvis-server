@@ -1,7 +1,10 @@
 package errands
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +15,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -953,5 +957,86 @@ func TestCheckpointReadsTheDownloads(t *testing.T) {
 	}
 	if last := w.Steps[len(w.Steps)-1]; last.Command != cmdReplan {
 		t.Fatalf("steps %+v", w.Steps)
+	}
+}
+
+// logBuf is a logger's output, safe to read while the queue's workers write it.
+type logBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *logBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+// line is the first logged line containing msg.
+func (l *logBuf) line(msg string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for ln := range strings.Lines(l.b.String()) {
+		if strings.Contains(ln, msg) {
+			return ln
+		}
+	}
+	return ""
+}
+
+// captureLog sends the service's log to a buffer the test reads.
+func (c *cenv) captureLog() *logBuf {
+	buf := &logBuf{}
+	c.s.Log = slog.New(slog.NewTextHandler(buf, nil))
+	return buf
+}
+
+// A failed computer step says why in the journal, not only on the card (#484).
+func TestComputerStepFailureLogsSummary(t *testing.T) {
+	c := newComputerEnv(t)
+	logs := c.captureLog()
+	wrong := `{"done": true, "summary": "Ordered the blue mug.", "verify": {"url_contains": "/thanks"}}`
+	for range 6 {
+		c.llm.say("computer", wrong)
+	}
+	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
+	c.idle()
+	if st := c.wfState("wf_c"); st != "failed" {
+		t.Fatalf("state = %s", st)
+	}
+	ln := logs.line(`msg="errands: step (computer)"`)
+	if !strings.Contains(ln, "level=WARN") || !strings.Contains(ln, "state=failed") ||
+		!strings.Contains(ln, `summary="I couldn't confirm the address contains \"/thanks\"`) {
+		t.Fatalf("step line = %q", ln)
+	}
+}
+
+func TestComputerStepModelErrorLogsErrAndPromptTokens(t *testing.T) {
+	c := newComputerEnv(t)
+	logs := c.captureLog()
+	c.llm.fail("computer", &llm.APIError{Status: 400, Type: "invalid_request_error",
+		Message: `{"error":{"message":"request (40213 tokens) exceeds the context","n_prompt_tokens":40213,"n_ctx":32768}}`})
+	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
+	c.idle()
+	if st := c.wfState("wf_c"); st != "failed" {
+		t.Fatalf("state = %s", st)
+	}
+	ln := logs.line(`msg="errands: step (computer)"`)
+	if !strings.Contains(ln, "level=WARN") || !strings.Contains(ln, `summary="The model didn't answer`) ||
+		!strings.Contains(ln, "err=") || !strings.Contains(ln, "n_ctx") || !strings.Contains(ln, "prompt_tokens=40213") {
+		t.Fatalf("step line = %q", ln)
+	}
+}
+
+func TestComputerStepModelErrorEstimatesPromptTokens(t *testing.T) {
+	c := newComputerEnv(t)
+	logs := c.captureLog()
+	c.llm.fail("computer", errors.New("Request failed: connection refused"))
+	c.launchRun("wf_c", "errand", computerStep("find a blue mug"))
+	c.idle()
+	ln := logs.line(`msg="errands: step (computer)"`)
+	if !strings.Contains(ln, "level=WARN") || !strings.Contains(ln, `err="Request failed: connection refused"`) ||
+		!strings.Contains(ln, "prompt_tokens_est=") {
+		t.Fatalf("step line = %q", ln)
 	}
 }
