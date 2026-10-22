@@ -63,7 +63,8 @@ type turnPipeline struct {
 	records              []turnRecord
 	escalationUnanswered bool
 	restricted           []live.RestrictedField
-	bargedIn             bool // the current turn's utterance cut the last reply off
+	bargedIn             bool   // the current turn's utterance cut the last reply off
+	announcement         string // the first utterance was a recorded intercept (set once, then the call ends)
 }
 
 func (s *Service) newTurnPipeline(rt *callRuntime, restricted []live.RestrictedField) *turnPipeline {
@@ -370,6 +371,15 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int
 	heard := strings.TrimSpace(res.Text)
 	sttMS := msSince(t0)
 	if heard == "" || live.IsNonSpeech(heard) {
+		return nil
+	}
+	if turnNo == 1 && live.IsAnnouncement(heard) {
+		// Answered by a recording (FreePBX's all-trunks-busy is 200 OK and a message): no
+		// conversation, and the call failed.
+		s.log().Warn("phone: answered by a recorded announcement — hanging up", "session", p.rt.sessionID)
+		p.announcement = heard
+		ms.requestHangup()
+		p.record(ctx, turnNo, heard, "", sttMS, nil, nil, t0, []string{"announcement", "hangup"})
 		return nil
 	}
 	user := heard
