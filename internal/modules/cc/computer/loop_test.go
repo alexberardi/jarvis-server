@@ -37,6 +37,9 @@ func (s *scriptLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespo
 	}
 	a := s.answers[0]
 	s.answers = s.answers[1:]
+	if cut, ok := strings.CutPrefix(a, cutOff); ok {
+		return &llm.ChatResponse{Content: cut, FinishReason: "length"}, nil
+	}
 	return &llm.ChatResponse{Content: a}, nil
 }
 
@@ -149,7 +152,7 @@ func newEnv(t *testing.T, pages ...Observation) *tenv {
 	now := func() time.Time { e.clock = e.clock.Add(e.tick); return e.clock }
 	e.rules = &policy.Store{DB: d, Now: now}
 	e.loop = &Loop{
-		LLM: e.llm, Exec: e.exec, Policy: &policy.Policy{Rules: e.rules}, Audit: e.rules,
+		LLM: e.llm, Exec: e.exec, Sleep: func(context.Context, time.Duration) {}, Policy: &policy.Policy{Rules: e.rules}, Audit: e.rules,
 		Store: &Store{DB: d, Now: now}, Approvals: e.mint, Settings: e.setts,
 		Models: Models{Endpoint: func(_ context.Context, label string) (llm.Endpoint, error) {
 			if label == llm.LabelCloud {
@@ -579,6 +582,32 @@ func TestUnparseableRetriesOnce(t *testing.T) {
 			t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
 		}
 	})
+}
+
+// cutOff marks a scripted answer the token cap cut off (finish "length").
+const cutOff = "\x00length:"
+
+// An answer cut off by the token cap (#485: the thought went round in circles) is retried warmer
+// and without the circle sent back.
+func TestCutOffAnswerRetriedFresh(t *testing.T) {
+	e := newEnv(t)
+	loop := strings.Repeat("I will open the cart to verify. However, the cart already has 1 item. ", 40)
+	e.script(cutOff+`{"thought": "`+loop, doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	retry := e.llm.reqs[1]
+	if *retry.Temperature == 0 {
+		t.Fatal("the retry ran at temperature 0 again")
+	}
+	for _, m := range retry.Messages {
+		if m.Role == "assistant" || m.Content.Text != nil && strings.Contains(*m.Content.Text, "However, the cart") {
+			t.Fatalf("the cut-off answer was sent back: %+v", m)
+		}
+	}
+	if last := retry.Messages[len(retry.Messages)-1]; !strings.Contains(*last.Content.Text, "cut off") {
+		t.Fatalf("no cut-off feedback: %+v", last)
+	}
 }
 
 func TestHistoryHasNoImages(t *testing.T) {

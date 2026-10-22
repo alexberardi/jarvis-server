@@ -706,6 +706,12 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 	o := Observe{RunID: r.run.ID, Target: t.Target, StartURL: t.StartURL, Snapshot: true, Screenshot: desktop || r.wantShot}
 	r.wantShot = false
 	obs, err := l.Exec.Observe(ctx, o)
+	if err != nil && ctx.Err() == nil {
+		// Once more: a look while the page is mid-load can fail ("result is non-structured-
+		// clonable data"), and the next one doesn't.
+		l.sleep(ctx, settlePoll)
+		obs, err = l.Exec.Observe(ctx, o)
+	}
 	if err != nil {
 		return obs, err
 	}
@@ -756,6 +762,10 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		temp, mt, think := 0.0, maxTokens, 0
+		if attempt > 0 {
+			// At temperature 0 the retry runs into the same loop the first answer did (#485).
+			temp = 0.7
+		}
 		resp, err := l.LLM.Chat(ctx, llm.ChatRequest{
 			Label: r.pick.Label, Priority: llm.PriorityBackground, Temperature: &temp, MaxTokens: &mt,
 			ReasoningBudget: &think, Messages: msgs,
@@ -772,6 +782,13 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 			"finish", resp.FinishReason, "prompt_tokens", resp.Usage.PromptTokens,
 			"completion_tokens", resp.Usage.CompletionTokens, "answer", clip(resp.Content, 2000))
 		lastErr = err
+		if resp.FinishReason == "length" {
+			// Cut off: the house model's thought went round in circles until the token cap
+			// (#485). Its answer isn't sent back, since that would start the circle again.
+			msgs = append(msgs, llm.Message{Role: "user", Content: llm.TextContent(
+				`Your last answer was cut off: the "thought" ran on. Answer again with a "thought" of one short sentence (at most 25 words), then the actions.`)})
+			continue
+		}
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", Content: llm.TextContent(resp.Content)},
 			llm.Message{Role: "user", Content: llm.TextContent("I couldn't read that: " + err.Error() +

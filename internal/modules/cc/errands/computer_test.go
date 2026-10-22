@@ -137,7 +137,7 @@ func newComputerEnv(t *testing.T) *cenv {
 			{Ref: "e5", Role: "textbox", Name: "Search"},
 		}}}
 	e.s.Computer = &ComputerTasks{
-		Loop:    &computer.Loop{LLM: e.llm, Exec: c.comp, Policy: e.policy, Audit: e.act, Store: c.runs, Approvals: c.appr},
+		Loop:    &computer.Loop{LLM: e.llm, Exec: c.comp, Sleep: func(context.Context, time.Duration) {}, Policy: e.policy, Audit: e.act, Store: c.runs, Approvals: c.appr},
 		Targets: func(context.Context, string) ([]string, string) { return []string{"comp-1"}, "" },
 	}
 	// The household allows the shop; paying asks (the defaults).
