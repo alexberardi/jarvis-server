@@ -64,6 +64,17 @@ func TestGoNodeBluetoothAgainstTheseRoutes(t *testing.T) {
 	if p := e.do("GET", base+"/bluetooth/pair/"+pair["id"].(string), nil, bearer(tok)).want(200).json(); p["status"] != "completed" || p["device_name"] != "JBL Flip 5" {
 		t.Fatalf("pair poll %v", p)
 	}
+	// The status page shows the pair at once, without another scan.
+	status := func() (connected, paired []any) {
+		t.Helper()
+		s := e.do("GET", base+"/bluetooth/status", nil, bearer(tok)).want(200).json()
+		connected, _ = s["connected"].([]any)
+		paired, _ = s["paired"].([]any)
+		return connected, paired
+	}
+	if conn, pd := status(); len(conn) != 1 || conn[0].(map[string]any)["mac_address"] != mac || conn[0].(map[string]any)["name"] != "JBL Flip 5" || len(pd) != 0 {
+		t.Fatalf("status after the pair: connected %v paired %v", conn, pd)
+	}
 
 	// The status page reads the latest scan, which now has the device paired and connected.
 	e.do("POST", base+"/bluetooth-scan/request", nil, bearer(tok)).want(201)
@@ -91,12 +102,19 @@ func TestGoNodeBluetoothAgainstTheseRoutes(t *testing.T) {
 	if r, _ := st.Get(mac); r.AutoConnect {
 		t.Fatal("auto-connect still on")
 	}
-	e.do("POST", base+"/bluetooth/disconnect", map[string]any{"mac_address": mac}, bearer(tok)).want(202)
+	e.do("POST", base+"/bluetooth/disconnect", map[string]any{"mac_address": strings.ToLower(mac)}, bearer(tok)).want(202)
 	deliver()
+	if conn, pd := status(); len(conn) != 0 || len(pd) != 1 || pd[0].(map[string]any)["mac_address"] != mac {
+		t.Fatalf("status after a disconnect: connected %v paired %v", conn, pd)
+	}
 	e.do("POST", base+"/bluetooth/release", map[string]any{"mac_address": mac, "forget": true}, bearer(tok)).want(202)
 	deliver()
 	if _, ok := st.Get(mac); ok {
 		t.Fatal("forget kept the record")
+	}
+	// Forget is gone from the app at once (#433: it stayed listed until the next scan).
+	if conn, pd := status(); len(conn)+len(pd) != 0 {
+		t.Fatalf("status after forget: connected %v paired %v", conn, pd)
 	}
 	want := "SetAdapter Powered,SetAdapter Pairable,SetAdapter DiscoverableTimeout=120,SetAdapter Discoverable,Disconnect,Disconnect,Remove"
 	if got := strings.Join(bus.tail(7), ","); got != want {

@@ -268,11 +268,72 @@ func (m *Module) handleUploadBTPair(w http.ResponseWriter, r *http.Request, n *n
 	if success {
 		sets, args = []string{"status = 'completed'", "device_name = ?"}, []any{opt(name, hasName)}
 	}
-	if err := m.uploadJob(r.Context(), btPairJob, r.PathValue("request_id"), nodeID, sets, args); err != nil {
+	rid := r.PathValue("request_id")
+	if err := m.uploadJob(r.Context(), btPairJob, rid, nodeID, sets, args); err != nil {
 		m.writeErr(w, err)
 		return
 	}
+	if success {
+		// The node pairs, connects and only then reports success: the status page lists it
+		// connected now, not after the next scan.
+		var mac string
+		err := m.deps.DB.Read.QueryRowContext(r.Context(), `SELECT mac_address FROM cc_bluetooth_pair_requests WHERE id = ?`, rid).Scan(&mac)
+		if err == nil {
+			err = m.patchBTStatus(r.Context(), nodeID, mac, func(d map[string]any) map[string]any {
+				if d == nil {
+					d = map[string]any{"mac_address": normBTMAC(mac), "device_type": "unknown"}
+				}
+				if hasName && name != "" {
+					d["name"] = name
+				}
+				d["paired"], d["connected"] = true, true
+				return d
+			})
+		}
+		if err != nil {
+			m.internalError(w, err)
+			return
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func normBTMAC(mac string) string { return strings.ToUpper(strings.ReplaceAll(mac, "-", ":")) }
+
+// patchBTStatus applies one device's change to the node's latest completed scan, which is what
+// GET …/bluetooth/status reads: f gets the device's entry (nil when the scan doesn't have it)
+// and returns it changed, or nil to drop it. Without a completed scan there is nothing to patch.
+func (m *Module) patchBTStatus(ctx context.Context, nodeID, mac string, f func(map[string]any) map[string]any) error {
+	var id string
+	var results sql.NullString
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT id, results_json FROM cc_bluetooth_scan_requests
+		WHERE node_id = ? AND status = 'completed' ORDER BY completed_at DESC, rowid DESC LIMIT 1`, nodeID).Scan(&id, &results)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	want, found := normBTMAC(mac), false
+	out := []map[string]any{}
+	for _, d := range decodeResults(results) {
+		if normBTMAC(getStr(d, "mac_address", "")) == want {
+			found = true
+			d = f(d)
+		}
+		if d != nil {
+			out = append(out, d)
+		}
+	}
+	if !found {
+		if d := f(nil); d != nil {
+			out = append(out, d)
+		}
+	}
+	raw, _ := json.Marshal(out)
+	_, err = m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_bluetooth_scan_requests SET results_json = ?, device_count = ? WHERE id = ?`,
+		string(raw), len(out), id)
+	return err
 }
 
 // jobState is the shared poll prelude: 404, household check (D4/D5), lazy expiry → 410.
@@ -583,6 +644,22 @@ func (m *Module) handleBTFire(topic string) provHandler {
 			return
 		}
 		m.publishNode(nodeID, topic, payload)
+		// What the node is now doing is what the status page shows (#433: a forgotten device
+		// stayed listed, and the app kept sending its auto-connect, until the next scan).
+		if mac, _ := payload["mac_address"].(string); topic == "bluetooth-disconnect" || topic == "bluetooth-release" {
+			forget, _ := payload["forget"].(bool)
+			err := m.patchBTStatus(r.Context(), nodeID, mac, func(d map[string]any) map[string]any {
+				if d == nil || forget {
+					return nil
+				}
+				d["connected"] = false
+				return d
+			})
+			if err != nil {
+				m.internalError(w, err)
+				return
+			}
+		}
 		httpx.WriteJSON(w, http.StatusAccepted, resp)
 	}
 }
