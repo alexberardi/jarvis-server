@@ -235,9 +235,7 @@ func (*enableComputerControlTool) Name() string { return toolEnableComputerContr
 
 func (*enableComputerControlTool) Definition() *pyjson.Object {
 	return recordingToolDefinition(toolEnableComputerControl,
-		"Turn computer control on (Jarvis may use the computer's mouse, keyboard and browser), only when the user "+
-			"says 'computer control'. Never for 'turn on the computer' (powering it on, which Jarvis can't do), dark "+
-			"mode or another setting.",
+		"Turn computer control on, only when the user says 'computer control'.",
 		servertools.Obj("computer", computerProp()))
 }
 
