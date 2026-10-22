@@ -19,8 +19,6 @@ const (
 	modeAuto       = "auto"
 	thinkingSuffix = "suffix"
 	thinkingNone   = "none"
-	forceOn        = "on"
-	forceOff       = "off"
 )
 
 // Mode sources (ModeSetting.Source).
@@ -78,17 +76,10 @@ func (m *Module) llmMode(ctx context.Context, prefs prompts.ModePrefs) (prompts.
 	default:
 		th.Effective, th.Source = thinkingNone, ModeSourceDefault
 	}
-	force := traits.Local || m.LiveModelTraits == nil
-	switch m.modeValue(ctx, settingForceTools) {
-	case forceOn:
-		force = true
-	case forceOff:
-		force = false
-	}
 	mode := prompts.Mode{
 		ToolCalling:    prompts.ToolCalling(tc.Effective),
 		ThinkingSuffix: th.Effective == thinkingSuffix,
-		ForceTools:     force,
+		ForceTools:     traits.Local || m.LiveModelTraits == nil,
 	}
 	return mode, tc, th
 }

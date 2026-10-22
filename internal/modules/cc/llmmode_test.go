@@ -108,38 +108,6 @@ func TestLLMModeThinkingDetected(t *testing.T) {
 	}
 }
 
-// llm.force_tools: auto keeps the force-tools guard to a local model (and to no traits at all);
-// on and off choose it, e.g. the sandbox's remote tap to the installed jarvisd's local model.
-func TestLLMModeForceTools(t *testing.T) {
-	remote := llm.ModelTraits{ToolCalling: "native", ToolCallingFrom: "remote"}
-	local := llm.ModelTraits{ToolCalling: "native", ToolCallingFrom: "template", Local: true}
-	for _, c := range []struct {
-		setting string // "" = unset
-		traits  llm.ModelTraits
-		want    bool
-	}{
-		{"", remote, false},
-		{"", local, true},
-		{"auto", remote, false},
-		{"on", remote, true},
-		{"off", local, false},
-		{"on", local, true},
-	} {
-		e := newEnv(t, envOpts{configure: func(m *Module) {
-			m.LiveModelTraits = func(context.Context) llm.ModelTraits { return c.traits }
-		}})
-		ctx := context.Background()
-		if c.setting != "" {
-			if err := e.m.settings.Set(ctx, settingForceTools, c.setting, settings.Scope{}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if mode, _, _ := e.m.llmMode(ctx, prompts.ModePrefs{}); mode.ForceTools != c.want {
-			t.Errorf("%q, local=%v: force tools %v, want %v", c.setting, c.traits.Local, mode.ForceTools, c.want)
-		}
-	}
-}
-
 // A setting write outside the options is rejected; the options are accepted.
 func TestLLMModeSettingsValidate(t *testing.T) {
 	e := newEnv(t)
@@ -147,7 +115,6 @@ func TestLLMModeSettingsValidate(t *testing.T) {
 	for key, ok := range map[string][]string{
 		settingToolCalling:    {"auto", "native", "text"},
 		settingThinkingSwitch: {"auto", "suffix", "none"},
-		settingForceTools:     {"auto", "on", "off"},
 	} {
 		for _, v := range ok {
 			if err := e.m.settings.Set(ctx, key, v, settings.Scope{}); err != nil {
