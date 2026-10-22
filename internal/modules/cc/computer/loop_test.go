@@ -259,8 +259,8 @@ func TestLoopStopsAtBudget(t *testing.T) {
 	t.Run("rounds", func(t *testing.T) {
 		e := newEnv(t)
 		e.setts[SettingMaxRounds] = 3
-		for range 5 {
-			e.script(actions(press("e1", "Go home")))
+		for i := range 5 {
+			e.script(actions(press([]string{"e1", "e6"}[i%2], "Go somewhere")))
 		}
 		out := e.run()
 		if out.State != StateFailed || out.Rounds != 3 || !strings.Contains(out.Summary, "3 rounds") {
@@ -908,4 +908,53 @@ func TestBrowserRunEndsOnComputer(t *testing.T) {
 	if out := e.run(); out.State != StateFailed || len(e.exec.stops) != 1 {
 		t.Fatalf("failed: outcome %+v, stops %v", out, e.exec.stops)
 	}
+}
+
+// A press that leaves the page as it was, asked for again and again (#485: 30 presses of a ref
+// that wasn't the dialog's close button), isn't run again: the model hears it did nothing, and
+// the task ends stuck instead of spending its rounds.
+func TestRepeatedNoChangeBatch(t *testing.T) {
+	t.Run("stuck", func(t *testing.T) {
+		e := newEnv(t) // the shop page, unchanged by anything
+		e.script(actions(press("e1", "Close the modal dialog")), actions(press("e1", "Close the modal dialog")),
+			actions(press("e1", "Close the modal dialog")), actions(press("e1", "Close the modal dialog")))
+		out := e.run()
+		if out.State != StateFailed || !strings.Contains(out.Summary, "got stuck") {
+			t.Fatalf("outcome %+v", out)
+		}
+		if len(e.exec.batches) != 1 {
+			t.Fatalf("%d batches sent, want 1 (repeats aren't run)", len(e.exec.batches))
+		}
+		if len(e.llm.reqs) != 3 {
+			t.Fatalf("%d model calls, want 3", len(e.llm.reqs))
+		}
+		if p := e.llm.reqs[2].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "that did nothing") {
+			t.Fatalf("no feedback in the repeat's prompt:\n%s", p)
+		}
+	})
+	t.Run("another element", func(t *testing.T) {
+		e := newEnv(t)
+		e.script(actions(press("e1", "Close")), actions(press("e1", "Close")), actions(press("e3", "Add to cart")), doneAnswer)
+		out := e.run()
+		if out.State != StateDone || len(e.exec.batches) != 2 {
+			t.Fatalf("outcome %+v batches %d", out, len(e.exec.batches))
+		}
+	})
+	t.Run("page changed", func(t *testing.T) {
+		changed := shopPage()
+		changed.Elements[1].Value = "2"
+		e := newEnv(t, shopPage(), changed)
+		e.script(actions(press("e1", "Next")), actions(press("e1", "Next")), doneAnswer)
+		if out := e.run(); out.State != StateDone || len(e.exec.batches) != 2 {
+			t.Fatalf("outcome %+v batches %d", out, len(e.exec.batches))
+		}
+	})
+	t.Run("scrolls", func(t *testing.T) {
+		e := newEnv(t)
+		scroll := `{"actions": [{"kind": "scroll", "dy": 600, "intent": "Scroll down"}]}`
+		e.script(scroll, scroll, scroll, doneAnswer)
+		if out := e.run(); out.State != StateDone || len(e.exec.batches) != 3 {
+			t.Fatalf("outcome %+v batches %d", out, len(e.exec.batches))
+		}
+	})
 }

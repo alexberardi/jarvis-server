@@ -165,8 +165,8 @@ func TestVerifyFailsThenRecovers(t *testing.T) {
 
 func TestVerifyFailsReports(t *testing.T) {
 	e := newEnv(t)
-	e.script(doneThanks, actions(press("e1", "Go home")), doneThanks, actions(press("e1", "Go home")),
-		actions(press("e1", "Go home")), doneThanks, actions(press("e1", "Go home")))
+	e.script(doneThanks, actions(press("e1", "Go somewhere")), doneThanks, actions(press("e6", "Go somewhere")),
+		actions(press("e1", "Go somewhere")), doneThanks, actions(press("e6", "Go somewhere")))
 	out := e.run()
 	if out.State != StateFailed || out.Rounds != 6 ||
 		out.Summary != `I couldn't confirm the address contains "/thanks": the address is https://shop.example.com/soap, not one with "/thanks".` {
@@ -185,7 +185,7 @@ func TestVerifyFailsReports(t *testing.T) {
 
 func TestVerifyBudgetSurvivesResume(t *testing.T) {
 	e := newEnv(t)
-	e.script(doneThanks, actions(press("e1", "Go home")), `{"ask": "Which colour?", "reason": "unclear"}`)
+	e.script(doneThanks, actions(press("e1", "Go somewhere")), `{"ask": "Which colour?", "reason": "unclear"}`)
 	out := e.run()
 	if out.State != StateAsk || out.Rounds != 3 {
 		t.Fatalf("outcome %+v", out)
@@ -195,8 +195,8 @@ func TestVerifyBudgetSurvivesResume(t *testing.T) {
 	}
 	tk := task()
 	tk.RunID, tk.Answer = out.RunID, "purple"
-	e.script(actions(press("e1", "Go home")), actions(press("e1", "Go home")), actions(press("e1", "Go home")),
-		actions(press("e1", "Go home")))
+	e.script(actions(press("e6", "Go somewhere")), actions(press("e1", "Go somewhere")), actions(press("e6", "Go somewhere")),
+		actions(press("e1", "Go somewhere")))
 	out = e.loop.Run(context.Background(), tk)
 	if out.State != StateFailed || out.Rounds != 6 || !strings.HasPrefix(out.Summary, "I couldn't confirm") {
 		t.Fatalf("outcome %+v", out)

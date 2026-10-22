@@ -550,7 +550,9 @@ func TestProgressCardUpdates(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		intent := "Look at item " + string(rune('0'+i))
 		intents = append(intents, intent)
-		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "e3", "intent": "`+intent+`"}]}`)
+		// e3 and e4 by turns: the same press again on an unchanged page is sent back (noChange).
+		ref := []string{"e3", "e4"}[i%2]
+		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "`+ref+`", "intent": "`+intent+`"}]}`)
 	}
 	c.llm.say("computer", append(replies, doneReply)...)
 	var seen []Card

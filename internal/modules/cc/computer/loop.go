@@ -7,7 +7,9 @@ package computer
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -267,6 +269,12 @@ type round struct {
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
 	sendAsked int
+	// lastKey and lastPage are the last batch acted on and the page it was acted on; repeats
+	// counts the times the model then asked for that batch again on the same page (#485's
+	// 30 presses of a ref that did nothing).
+	lastKey, lastPage string
+	repeats           int
+	page              string // pageKey of this round's observation
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -477,7 +485,76 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if len(actions) == 0 {
 		return Outcome{}, false
 	}
+	if out, stuck, skip := r.noChange(obs, actions); stuck {
+		return out, true
+	} else if skip {
+		return Outcome{}, false
+	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// maxRepeats is how many times the model may ask again for a batch that left the page as it was
+// before the task fails as stuck: each repeat is sent back unacted, with feedback.
+const maxRepeats = 2
+
+// noChange catches a batch asked for again on the very page it already ran on and changed
+// nothing: it isn't run again; the model hears it did nothing, and after maxRepeats the task ends
+// (stuck) instead of spending the rest of its rounds. Scrolls and waits don't count: the snapshot
+// lists the whole page, so a scroll never changes it.
+func (r *round) noChange(obs Observation, actions []computeruse.Action) (Outcome, bool, bool) {
+	key := batchKey(actions)
+	if key == "" {
+		return Outcome{}, false, false
+	}
+	page := pageKey(obs)
+	r.page = page
+	if key == r.lastKey && page == r.lastPage {
+		r.repeats++
+		what := strings.TrimSpace(actions[0].Intent)
+		if what == "" {
+			what = actions[0].Kind + " " + actions[0].Ref
+		}
+		if r.repeats >= maxRepeats {
+			return Outcome{State: StateFailed,
+				Summary: fmt.Sprintf("I got stuck: %q didn't change anything on the page, so I stopped.", what)}, true, false
+		}
+		r.feedback = fmt.Sprintf("that did nothing: the page is the same as before %q. Don't repeat it: pick a different element (look for the right one by its name; one marked [in dialog] if a dialog is open), or ask.", what)
+		return Outcome{}, false, true
+	}
+	return Outcome{}, false, false
+}
+
+// batchKey is a batch's actions without their intents ("" when it only scrolls or waits).
+func batchKey(actions []computeruse.Action) string {
+	var b strings.Builder
+	counts := false
+	for _, a := range actions {
+		if a.Kind != "scroll" && a.Kind != "wait" {
+			counts = true
+		}
+		a.Intent, a.Approval = "", ""
+		j, _ := json.Marshal(a)
+		b.Write(j)
+		b.WriteByte('\n')
+	}
+	if !counts {
+		return ""
+	}
+	return b.String()
+}
+
+// pageKey is what the model saw of the page: its address, elements and screenshot (on the
+// desktop or a canvas the elements can stay put while the screen changes).
+func pageKey(o Observation) string {
+	var b strings.Builder
+	b.WriteString(o.URL + "\n" + o.App + "\n")
+	if o.Image != nil {
+		fmt.Fprintf(&b, "%x\n", sha256.Sum256(o.Image.Data))
+	}
+	for _, e := range o.Elements {
+		fmt.Fprintf(&b, "%s|%s|%s|%s\n", e.Role, e.Name, e.Value, strings.Join(e.State, ","))
+	}
+	return b.String()
 }
 
 // look observes for the model: new page text that reads like instructions to it ends the call
@@ -766,6 +843,11 @@ func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []d
 	res, err := l.Exec.Act(ctx, b)
 	if err == nil {
 		r.resume = false
+		// Only a batch that ran counts for noChange (not one sent back for a checkout or held).
+		if key := batchKey(b.Actions); key != r.lastKey || r.page != r.lastPage {
+			r.repeats = 0
+		}
+		r.lastKey, r.lastPage = batchKey(b.Actions), r.page
 	}
 	if err != nil {
 		for _, d := range ds {

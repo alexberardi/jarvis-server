@@ -1223,14 +1223,24 @@ function snapCollect(gen, max) {
   };
 
   for (const el of document.querySelectorAll("[data-jarvis-ref]")) el.removeAttribute("data-jarvis-ref");
+  // An open dialog's elements come first and say "in dialog": a page with a long list (a menu,
+  // a feed) used to spend the whole budget before the dialog the last click opened, so the model
+  // saw a dialog it couldn't close or use. The last open one in the document is the topmost.
+  const DIALOG = "dialog[open], [role=dialog], [role=alertdialog], [aria-modal=true]";
+  const dialog = [...document.querySelectorAll(DIALOG)].filter(visible).pop();
+  let candidates = [...document.querySelectorAll(SEL)];
+  if (dialog) {
+    candidates = [...candidates.filter((el) => dialog.contains(el)), ...candidates.filter((el) => !dialog.contains(el))];
+  }
   const pending = [];
   const elements = [];
-  for (const el of document.querySelectorAll(SEL)) {
+  for (const el of candidates) {
     if (pending.length >= max) break;
     const role = roleOf(el);
     if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]")) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
+    if (dialog && dialog.contains(el)) e.state.push("in dialog");
     const v = valueOf(el);
     if (v) e.value = v;
     elements.push(e);
