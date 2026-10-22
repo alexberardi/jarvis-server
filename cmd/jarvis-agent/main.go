@@ -51,6 +51,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
+	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -552,6 +553,7 @@ type runFlags struct {
 	profile            *string
 	vf                 *voiceFlags
 	hf                 *hatFlags
+	mf                 *maintFlags
 }
 
 // voiceByDefault is run's --voice default: a desktop install listens for "Hey Jarvis" out of
@@ -575,6 +577,7 @@ func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 		profile: profileFlag(fs),
 		vf:      addVoiceFlags(fs),
 		hf:      addHatFlags(fs),
+		mf:      addMaintenanceFlags(fs),
 	}
 }
 
@@ -780,7 +783,9 @@ func runAgent(ctx context.Context, args []string) error {
 		if tf.host != nil {
 			audio = tf.host.Audio
 		}
-		nodeConfig = wirePiNode(r, vf, hf, hd, live, audio, sp, log)
+		var state func() pinode.State
+		nodeConfig, state = wirePiNode(r, vf, hf, f.mf, hd, live, audio, sp, log)
+		startMaintenance(ctx, state, quit, log)
 	}
 	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
 	// and are in its settings snapshot; a computer has none.
@@ -816,6 +821,7 @@ func runAgent(ctx context.Context, args []string) error {
 		vs, err := loadVoice(ctx, vf, log)
 		if vs != nil {
 			vs.live = live
+			vs.cfg.Greeting = !p.desktop // a Pi greets the wake word in words (row 6)
 		}
 		return vs, err
 	}

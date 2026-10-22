@@ -74,7 +74,7 @@ Tags:
 | 3 | Capture 48 kHz S16_LE mono, 3840-sample (80 ms) chunks from `dsnoopmic`; 4 s ring buffer | `N:core/audio_bus.py:37-265`, `N:scripts/voice_listener.py:82-83,281` | – | MVS |
 | 4 | Wake: resample 48k→16k (`resample_poly(1,3)`), oww `predict` on 1280-sample chunks; fire at score > `wake_word_threshold` (0.4); 8 s debounce; reset oww after a fire | `N:core/wake_loop.py:107-108,379-385`, `N:core/wake_detector.py:50-190` | – | MVS |
 | 5 | Wake clip: the last ~2 s of consumed chunks (25 × 80 ms), 48 kHz WAV | `N:core/wake_loop.py:253-255,602-608` | – | MVS |
-| 6 | Wake ack: cached greeting WAV, else a bundled `sounds/wake/*.wav`, else TTS "Yes?"; wake paused while it plays | `N:core/wake_response.py:149-248` | – | MVS (a bundled WAV is enough) |
+| 6 | Wake ack: cached greeting WAV, else a bundled `sounds/wake/*.wav`, else TTS "Yes?"; wake paused while it plays | `N:core/wake_response.py:149-248` | – | MVS (a bundled WAV is enough); the Pi plays the prefetched greeting, else the chime (#427) |
 | 7 | `POST /api/v0/conversation/start` on a goroutine: `{conversation_id: uuid4, node_context:{timezone,…}, available_commands:[], client_tools:[]}`. The response only arrives after warmup (≤120 s server side); body ≤1 MiB. | `N:clients/jarvis_command_center_client.py:575-714`, `N:core/wake_loop.py:721-728` | `S:warmup.go:97-174` | MVS |
 | 8 | Record: RMS endpointing. Threshold = clamp(median pre-wake RMS × 2, 200, 1000), else 300. Stop after 0.8 s below threshold; min 2 s, max 7 s. Write a 48 kHz WAV. | `N:scripts/speech_to_text.py:260-404`, `N:core/vad_thresholds.py:99-134`, `N:core/wake_loop.py:761-776` | – | MVS |
 | 9 | STT: `POST /api/v0/media/whisper/transcribe`, multipart: `file` (command WAV), `speaker_audio` (wake clip + command, **must start with the wake audio**), `conversation_id`. Response `{text, segments, speaker{user_id,confidence}, affect}`. | `N:stt_providers/jarvis_whisper_client.py:106-144` | `S:media.go:193-281`, `internal/modules/stt/transcribe.go:22-34` | MVS |
@@ -88,7 +88,7 @@ Tags:
 | 17 | Barge-in: local only. oww score > 0.04 plus an RMS gate, 2 consecutive chunks → cancel playback and close the stream. Nothing is sent to the server. | `N:core/barge_in.py:100-359` | – | **done in the Go agent (§3.13)** |
 | 18 | Client tools: `tool_calls` → run → `POST /voice/command/continue[/stream]` | `N:utils/command_execution_service.py:977-1089` | `S:voice_routes.go:260-339` | **done for the desktop agent (§3.8)**, blocking continue only |
 | 19 | Validation: speak the question (+ "Your options are: …"), re-listen with `listen()`, `POST /voice/command/continue` with `{tool_call_id: "validation-response", output: {answer, parameter_name, question, options}}` | `N:core/wake_transcription.py:204-231`, `N:clients/jarvis_command_center_client.py:362-412` | `S:engine.go:339-366`, `S:continue.go` | **done for the desktop agent (§3.9)** |
-| 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | later |
+| 20 | Processing ack ("One moment."), 3 s delayed ack `/voice/acknowledge`, next-greeting prefetch `/wake-response` | `N:core/wake_response.py:73-80,294-380`, `N:utils/command_execution_service.py:610-620` | `S:voice_routes.go:489-541` | prefetch **done on the Pi** (#427); the acks later |
 | 21 | Pre-wake speech seconds hint (RMS over a 5 s ring) | `N:core/wake_loop.py:113-116,361-367,523-529` | `S:hints/` | **done in the Go agent (§3.16, 17c)** |
 | 22 | Tentative wake (duck music in [0.2, 0.4)), not_for_me cool-down, auto threshold | `N:core/wake_loop.py:224-456`, `N:core/wake_calibration.py` | – | tentative wake **done in the Go agent (§3.16, 17c)**; cool-down and auto threshold **built (§3.20, 17d)** |
 | 23 | Boot warmup that sends a real "hello" LLM turn | `N:scripts/main.py:390-424` | – | drop |
@@ -1324,13 +1324,13 @@ checked on the lab Pi 4 since it was built.
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
 | 5.10 voice-profile takes | built | no |
-| 5.11 music ducking and takeover (17a); echo cancellation during music (17b, loop #424); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; 17b's CPU on a Zero 2 W unmeasured; **open (a)**: 17e the greeting prefetch, maintenance restart and the ACT-LED fallback (#180) |
+| 5.11 music ducking and takeover (17a); echo cancellation during music (17b, loop #424); tentative wake and `pre_wake_speech_seconds` (17c, loop #425); wake auto-calibration and the not_for_me cool-down (17d, §3.20) | built | no; 17b's CPU on a Zero 2 W unmeasured; **open (a)**: 17e (#427) built: the greeting prefetch and the maintenance restart, and the ACT-LED backend (`hat.NewACTLEDs`), which the agent does not open yet (#441) ([decision](../decisions/2026-10-21-pi-node-17e.md)); pending the lab Pi |
 
 What each open gap blocks, if the Python node were retired today:
 
 - **(a)** echo cancellation (17b), the tentative wake (17c), the auto-calibration and the
   not_for_me cool-down (17d) are built, not yet on a Pi; and a
-  Pi without the HAT has no LED at all.
+  Pi without the HAT has no LED at all until the agent opens the ACT-LED backend (#441).
 - **(b)** "turn on the kitchen light", routines and "send me a link" by voice stop working on
   the node. The app's device control still works.
 - **(c)** the app's node settings (and their secrets' Sync) may not reach a Pi; not confirmed.
