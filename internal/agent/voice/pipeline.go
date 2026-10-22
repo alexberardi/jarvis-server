@@ -58,6 +58,8 @@ type Config struct {
 	ToolTimeout   time.Duration // bound on one client tool call (25 s, the MQTT dispatcher's)
 	FollowUp      FollowUpConfig
 	BargeIn       BargeInConfig
+	Tentative     TentativeConfig
+	PreWakeVAD    PreWakeVAD
 	// WakeThresholdAuto calibrates the wake threshold from Pipeline.WakeScores
 	// (wake_word_threshold_auto; off: WakeThreshold as set).
 	WakeThresholdAuto bool
@@ -68,7 +70,8 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{WakeThreshold: 0.4, Debounce: 8 * time.Second, Endpointing: DefaultEndpointing(),
 		JoinWarmup: 10 * time.Second, StreamIdle: 8 * time.Second, Timezone: LocalTimezone(), Chimes: true,
-		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp(), BargeIn: DefaultBargeIn(), NotForMe: DefaultNotForMe()}
+		ToolTimeout: 25 * time.Second, FollowUp: DefaultFollowUp(), BargeIn: DefaultBargeIn(),
+		Tentative: DefaultTentative(), PreWakeVAD: DefaultPreWakeVAD(), NotForMe: DefaultNotForMe()}
 }
 
 // Outcome is how one exchange (an utterance and its reply) ended.
@@ -112,11 +115,15 @@ type Turn struct {
 	WakeScore      float32
 	Threshold      float64 // silence threshold used for endpointing
 	PreRollSecs    float64 // of RecordedSecs, the audio kept from under the wake chime
-	HitMax         bool
-	Exchange                  // the command after the wake word
-	FollowUps      []Exchange // answers in the follow-up window, in order
-	FollowUpEnd    FollowUpEnd
-	Took           time.Duration
+	// PreWakeSpeechSecs is the speech heard in the 5 s before the wake (PreWakeVAD).
+	PreWakeSpeechSecs float64
+	// Tentative: the fire completed a tentative wake (the music was ducked before it).
+	Tentative   bool
+	HitMax      bool
+	Exchange               // the command after the wake word
+	FollowUps   []Exchange // answers in the follow-up window, in order
+	FollowUpEnd FollowUpEnd
+	Took        time.Duration
 }
 
 // Pipeline is one microphone's always-on loop. Run it once.
@@ -168,6 +175,9 @@ type Pipeline struct {
 	bg      serial         // the music steps, in order (music.go)
 	tuned   int            // Live.tunes applied so far
 	gate    wakeGate       // the debounce and the not_for_me cool-down (wakegate.go)
+	// tentativeAt is the last tentative wake (tentative.go): its cool-down outlives a turn, so
+	// a lyric dip can't strobe the music across wakes either.
+	tentativeAt time.Time
 }
 
 // Dropped counts captured chunks discarded because the pipeline was busy.
@@ -333,6 +343,8 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	var pend []int16
 	pre := &ring[float64]{n: preWakeChunks}
 	clip := &ring[[]int16]{n: wakeClipChunks}
+	var tw tentative
+	defer func() { p.tentativeEnd(ctx, &tw, "stopped") }() // the music back if we stop mid-window
 	var measure chan measureReq
 	if p.Live != nil {
 		measure = p.Live.measure
@@ -345,11 +357,13 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 		pre.items, clip.items, pend = pre.items[:0], clip.items[:0], pend[:0]
 		dec = audio.NewDecimator(decimation)
 		p.Detector.Reset()
+		tw = tentative{}
 	}
 	for {
 		var chunk []int16
 		select {
 		case req := <-p.takes():
+			p.tentativeEnd(ctx, &tw, "paused") // listening pauses: the music must not stay ducked
 			pcm, err := p.take(ctx, chunks, req.take)
 			req.done <- takeResult{pcm, err}
 			if ctx.Err() != nil {
@@ -359,6 +373,7 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 			continue
 		case r := <-measure:
 			// Wake detection is paused while the room is measured, then starts afresh.
+			p.tentativeEnd(ctx, &tw, "paused")
 			if err := p.measureRoom(ctx, chunks, r); err != nil {
 				return err
 			}
@@ -373,6 +388,8 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 			return context.Canceled
 		}
 		p.tune()
+		self := p.selfPlaying()
+		clip.n = p.wakeClipLen(self)
 		pre.push(RMS(chunk))
 		clip.push(chunk)
 		pend = dec.Process(chunk, pend)
@@ -382,11 +399,25 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 				return fmt.Errorf("wake word: %w", err)
 			}
 			pend = append(pend[:0], pend[wakeChunk:]...)
+			now := p.Now()
+			p.tentativeExpire(ctx, &tw, now, score)
 			if float64(score) <= p.wakeThreshold() || !p.fire(score) {
+				p.tentativeTrigger(ctx, &tw, now, score, self)
 				continue
 			}
 			p.Detector.Reset() // oww is reset after a fire
-			p.turn(ctx, chunks, score, slices.Concat(clip.items...), slices.Clone(pre.items))
+			// A fire inside a tentative's window completes it: the music is already ducked (the
+			// turn's own duck keeps the first saved volume), and the clip reaches back past the
+			// duck. Any other fire gets the usual 2 s.
+			w := wakeFire{score: score, preRMS: slices.Clone(pre.items), selfPlaying: self,
+				tentativeTriggered: tw.triggered, tentativeCompleted: tw.open}
+			tw.open = false
+			items := clip.items
+			if !w.tentativeCompleted {
+				items = items[max(0, len(items)-wakeClipChunks):]
+			}
+			w.clip = slices.Concat(items...)
+			p.turn(ctx, chunks, w)
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -413,15 +444,31 @@ type pendingStart struct {
 	err  error
 }
 
+// wakeFire is what the wake loop knew when the wake word fired.
+type wakeFire struct {
+	score  float32
+	clip   []int16   // the wake clip, ending in the chunk that fired
+	preRMS []float64 // the pre-wake window's RMS, one per chunk
+	// selfPlaying is the node's own music at the fire: one snapshot for everything this
+	// wake decides and sends (N:core/wake_loop.py).
+	selfPlaying                            bool
+	tentativeTriggered, tentativeCompleted bool // tentative.go
+}
+
 // turn runs one voice turn (go-pi-node.md §1.1 rows 6-19) and reports it.
-func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float32, wakeClip []int16, preRMS []float64) {
+func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) {
 	start := p.Now()
-	t := Turn{ConversationID: p.NewID(), WakeScore: score}
+	score, preRMS := w.score, w.preRMS
+	t := Turn{ConversationID: p.NewID(), WakeScore: score, Tentative: w.tentativeCompleted}
 	log := p.Log.With("conversation_id", t.ConversationID)
-	log.Info("wake", "score", fmt.Sprintf("%.3f", score))
-	selfPlaying := p.Music != nil && p.Music.SelfPlaying() // at the fire, before the duck refreshes it
-	h := p.holdComputer(log)                               // first: the user is about to speak to Jarvis
-	p.duck(ctx)                                            // the music down while the user speaks (music.go)
+	preSecs, vadThreshold, vadSource := p.Cfg.PreWakeVAD.SpeechSecs(preRMS, w.selfPlaying)
+	t.PreWakeSpeechSecs = preSecs
+	log.Info("wake", "score", fmt.Sprintf("%.3f", score), "pre_wake_speech_seconds", preSecs,
+		"vad_threshold", fmt.Sprintf("%.1f", vadThreshold), "vad_threshold_source", vadSource,
+		"buffered_frames", len(preRMS), "self_playback", w.selfPlaying,
+		"tentative_triggered", w.tentativeTriggered, "tentative_completed", w.tentativeCompleted)
+	h := p.holdComputer(log) // first: the user is about to speak to Jarvis
+	p.duck(ctx)              // the music down while the user speaks (music.go)
 
 	// Row 7: warm the conversation up while the user is still talking.
 	st := &pendingStart{done: make(chan struct{})}
@@ -443,7 +490,8 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 		}
 	}()
 
-	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: wakeClip, held: h}
+	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: w.clip, held: h,
+		preWakeSpeech: preSecs, selfPlaying: w.selfPlaying}
 	p.cue(CueListening, 0)
 	defer func() {
 		p.releaseComputer(s)
@@ -461,7 +509,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, score float3
 			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "pre_roll_s", fmt.Sprintf("%.2f", t.PreRollSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
-		p.afterWake(log, &t, selfPlaying)
+		p.afterWake(log, &t, w.selfPlaying)
 		// The music back, then a command's deferred step (music.go). Off the pipeline
 		// goroutine: listening must not wait for it.
 		p.afterTurn(ctx, s)
@@ -548,8 +596,13 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	conf := float64(score)
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	reply, err := p.Server.VoiceStream(sctx, StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id,
-		TurnSource: "wake", WakeConfidence: &conf, SpeechLevel: s.wakeLevel, Affect: tr.Affect, Computer: activity})
+	req := StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id, TurnSource: "wake", WakeConfidence: &conf,
+		SpeechLevel: s.wakeLevel, Affect: tr.Affect, Computer: activity,
+		PreWakeSpeechSecs: &s.preWakeSpeech, SelfPlayback: &s.selfPlaying}
+	if s.selfPlaying {
+		req.SelfPlaybackKind = "music"
+	}
+	reply, err := p.Server.VoiceStream(sctx, req)
 	if err != nil {
 		p.fail(ctx, ex, fmt.Errorf("voice/command/stream: %w", err))
 		return "", false

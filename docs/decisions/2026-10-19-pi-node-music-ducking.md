@@ -12,7 +12,8 @@ five pieces, each its own PR, in this order:
 2. **17b: echo cancellation during music** (`N:core/echo_cancel.py`), needs 17a. It has to decide
    the capture path first: the Go node captures through dsnoop, not Pulse (go-pi-node.md §1.4).
 3. **17c: tentative wake and `pre_wake_speech_seconds`** (`N:core/wake_loop.py:129-261`), needs 17a,
-   and overlaps loop #229's listen pre-roll in `voice/pipeline.go`.
+   and overlaps loop #229's listen pre-roll in `voice/pipeline.go`. **Built 2026-10-21** (loop #425,
+   [decision](2026-10-21-pi-node-tentative-wake.md)).
 4. **17d: wake auto-calibration and the false-wake / not_for_me cool-down**
    (`N:core/wake_calibration.py`, `N:core/false_wake.py`). Built 2026-10-21 (loop #426,
    [decision](2026-10-21-pi-node-wake-calibration-and-cooldown.md); `false_wake.py` not ported).
