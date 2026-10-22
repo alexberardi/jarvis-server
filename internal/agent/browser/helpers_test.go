@@ -77,6 +77,12 @@ func connectExt(t *testing.T, h *Hub, path string, browser string, focused bool,
 // connectExtHello is connectExt with the extension's hello given.
 func connectExtHello(t *testing.T, h *Hub, path string, hello Message, handle func(Message) Message) *fakeExt {
 	t.Helper()
+	return connectExtFrom(t, h, path, "chrome-extension://"+ChromeDevExtensionID+"/", hello, handle)
+}
+
+// connectExtFrom is connectExtHello with the native host's origin given.
+func connectExtFrom(t *testing.T, h *Hub, path, origin string, hello Message, handle func(Message) Message) *fakeExt {
+	t.Helper()
 	before := len(h.Browsers())
 	c, err := Dial(path)
 	if err != nil {
@@ -84,7 +90,7 @@ func connectExtHello(t *testing.T, h *Hub, path string, hello Message, handle fu
 	}
 	f := &fakeExt{c: c, handle: handle}
 	t.Cleanup(func() { _ = c.Close() })
-	f.send(Message{Type: "host", Origin: "chrome-extension://" + ChromeDevExtensionID + "/"})
+	f.send(Message{Type: "host", Origin: origin})
 	f.send(hello)
 	go func() {
 		sc := bufio.NewScanner(c)

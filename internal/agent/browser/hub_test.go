@@ -297,3 +297,50 @@ func TestHubWebsiteAccess(t *testing.T) {
 		t.Fatalf("status reply %s has no website_access", b)
 	}
 }
+
+// A browser whose extension is older than the one this build can give it (Firefox: the signed
+// package; the unpacked Chromium folder: the source) is offered the newer one, once per
+// connection; one that is current, or a store install, is not.
+func TestHubOffersOutdatedExtension(t *testing.T) {
+	h, path := startHub(t)
+	offered := make(chan string, 4)
+	h.OnOutdated = func(b BrowserInfo, available string) {
+		offered <- b.Origin + " " + b.ExtensionVersion + " -> " + available
+	}
+	hello := func(v string) Message {
+		return Message{Type: "hello", Protocol: Protocol, Browser: "Firefox", BrowserVersion: "140", ExtensionVersion: v}
+	}
+	chromeDev := "chrome-extension://" + ChromeDevExtensionID + "/"
+	chromeStore := "chrome-extension://" + ChromeStoreExtensionID + "/"
+
+	connectExtFrom(t, h, path, chromeDev, hello(ExtensionVersion()), nil)
+	connectExtFrom(t, h, path, chromeStore, hello("0.0.1"), nil)
+	if v := SignedXPIVersion(); v != "" {
+		connectExtFrom(t, h, path, FirefoxExtensionID, hello(v), nil)
+	}
+	connectExtFrom(t, h, path, chromeDev, hello("0.0.1"), nil)
+	select {
+	case got := <-offered:
+		if want := chromeDev + " 0.0.1 -> " + ExtensionVersion(); got != want {
+			t.Fatalf("offered %q, want %q", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an outdated unpacked extension was not offered the newer one")
+	}
+	if v := SignedXPIVersion(); v != "" {
+		connectExtFrom(t, h, path, FirefoxExtensionID, hello("0.0.1"), nil)
+		select {
+		case got := <-offered:
+			if want := FirefoxExtensionID + " 0.0.1 -> " + v; got != want {
+				t.Fatalf("offered %q, want %q", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("an outdated Firefox extension was not offered the signed package")
+		}
+	}
+	select {
+	case got := <-offered:
+		t.Fatalf("offered a current or store extension: %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

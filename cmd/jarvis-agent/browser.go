@@ -60,6 +60,10 @@ func startBrowser(ctx context.Context, log *slog.Logger) (*browser.Hub, func()) 
 	if err == nil {
 		var ln net.Listener
 		if ln, err = browser.Listen(path); err == nil {
+			if u := newExtUpgrader(log); u != nil {
+				u.refreshChromium()
+				hub.OnOutdated = u.outdated
+			}
 			ctx, cancel := context.WithCancel(ctx)
 			done := make(chan struct{})
 			go func() {
@@ -349,13 +353,21 @@ func browserStatus(w io.Writer) error {
 		}
 		fmt.Fprintf(w, "  %-26s %s\n", s.Target.Label, line)
 	}
-	if _, ok := browser.SignedXPI(); ok {
-		fmt.Fprintf(w, "Extension %s: signed Firefox package included\n", browser.ExtensionVersion())
-	} else {
-		fmt.Fprintf(w, "Extension %s: no signed Firefox package in this build (temporary install only)\n", browser.ExtensionVersion())
-	}
+	fmt.Fprintln(w, extensionLine(browser.ExtensionVersion(), browser.SignedXPIVersion()))
 	fmt.Fprintln(w, browserLive())
 	return nil
+}
+
+// extensionLine says which extension this build carries: the source's version, and the signed
+// Firefox package's (which can be older: Firefox then runs that one, #449).
+func extensionLine(source, signed string) string {
+	switch {
+	case signed == "":
+		return fmt.Sprintf("Extension %s: no signed Firefox package in this build (temporary install only)", source)
+	case browser.CompareVersions(signed, source) < 0:
+		return fmt.Sprintf("Extension %s (Chromium); signed Firefox package %s, behind the source: Firefox gets %s until it is re-signed", source, signed, signed)
+	}
+	return fmt.Sprintf("Extension %s: signed Firefox package %s included", source, signed)
 }
 
 // queryLive asks the running agent which browsers are connected.
@@ -388,6 +400,9 @@ func liveText(st browser.StatusReply) string {
 	var parts []string
 	for _, b := range st.Browsers {
 		s := fmt.Sprintf("%s %s (extension %s)", b.Browser, b.Version, b.ExtensionVersion)
+		if available, old := browser.Outdated(b); old {
+			s += ", update available: " + available
+		}
 		if b.Focused {
 			s += ", focused"
 		}
