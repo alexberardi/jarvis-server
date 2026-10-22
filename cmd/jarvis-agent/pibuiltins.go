@@ -16,6 +16,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
+	"github.com/alexberardi/jarvis-server/internal/audio/device"
 )
 
 // sayLimit bounds one announcement: waiting for a turn to end, then speaking.
@@ -131,18 +132,38 @@ func alertLED(leds *hat.LEDs) func(announceable int) {
 }
 
 // newPiMusic is the Pi's music ducking and takeover (internal/agent/music) with N:'s defaults;
-// with the HAT, its mic gain follows the music (the codec's PGA). Only on a Pi install (the HAT,
-// or install-pi.sh's marker): a dev box run with --profile pi (node-sim, the voice lane) must
+// with the HAT, its mic gain follows the music (the codec's PGA) and the music is echo-cancelled
+// out of the mic (the voice pipeline reads micSwitch's). Only on a Pi install (the HAT, or
+// install-pi.sh's marker): a dev box run with --profile pi (node-sim, the voice lane) must
 // never SIGSTOP or interrupt the user's own players.
 func newPiMusic(detected func() bool, exists func(string) bool, log *slog.Logger) *music.Ducker {
 	if !detected() && !exists(piMarker) {
 		return nil
 	}
-	var gain music.Gain
-	if detected() {
-		gain = hatGain{}
+	if !detected() {
+		return music.New(nil, log)
 	}
-	return music.New(gain, log)
+	d := music.New(hatGain{}, log)
+	sw := device.NewSwitch(voice.CaptureRate, 1)
+	ec := music.NewEchoCancel(sw, log)
+	sw.OnFallback = func(name, reason string, err error) {
+		if log != nil {
+			log.Warn("voice: echo-cancelled capture failed; back on the plain mic until the music starts again",
+				"device", name, "reason", reason, "err", err)
+		}
+		go ec.GiveUp(context.Background(), reason) // pactl must not hold up the capture loop
+	}
+	d.EC = ec
+	return d
+}
+
+// micSwitch is the voice pipeline's microphone when the echo canceller switches it, else nil.
+func micSwitch(d *music.Ducker) *device.Switch {
+	if d == nil || d.EC == nil {
+		return nil
+	}
+	sw, _ := d.EC.Capture.(*device.Switch)
+	return sw
 }
 
 // hatGain is the HAT codec's mic PGA.
