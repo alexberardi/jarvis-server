@@ -45,6 +45,15 @@ case "$*" in
 esac
 NMCLI
 chmod 0755 "$T/bin/nmcli"
+# ip: the route to an SSH client goes out FAKE_SSH_DEV (default eth0).
+cat >"$T/bin/ip" <<'IP'
+#!/bin/sh
+case "$*" in
+  "-o route get "*) echo "$4 dev ${FAKE_SSH_DEV:-eth0} src 192.0.2.20 uid 0" ;;
+  *) echo "ip $*: not a query" >&2; exit 1 ;;
+esac
+IP
+chmod 0755 "$T/bin/ip"
 
 # A Pi's boot partition and fstab, before the install.
 seed() {
@@ -55,7 +64,8 @@ seed() {
   mkdir -p "$1/etc/bluetooth"
   printf '[General]\n#Name = BlueZ\n#Class = 0x000100\n\n[Policy]\n#AutoEnable=true\n' >"$1/etc/bluetooth/main.conf"
 }
-R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} sh "$SCRIPT" "$@"; }
+R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} \
+  ${SSH_CONNECTION:+"SSH_CONNECTION=$SSH_CONNECTION"} ${FAKE_SSH_DEV:+FAKE_SSH_DEV=$FAKE_SSH_DEV} sh "$SCRIPT" "$@"; }
 
 # Release mode (release.yml's install-pi job, on arm64): the stamped DIST/install-pi.sh, as
 # published, against that run's own files. It must be listed in the signed SHA256SUMS, pinned to
@@ -222,6 +232,30 @@ tail -2 "$ROOT/install-pi-commands.log" | tr '\n' ';' | grep -qx 'systemctl disa
 R --root "$ROOT" --deactivate >/dev/null
 tr '\n' ';' <"$ROOT/install-pi-commands.log" | grep -qx 'systemctl disable --now jarvis-agent.service;systemctl enable --now jarvis-node.service;' ||
   fail "--deactivate: $(cat "$ROOT/install-pi-commands.log")"
+
+echo "--- --activate on a node that isn't enrolled, over SSH on wlan0 (#423)"
+R6=$T/root-unenrolled
+seed "$R6"
+SSH="192.0.2.50 50000 192.0.2.20 22"
+if SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1; then
+  cat "$T/out"; fail "--activate went on over wlan0 with no credentials"
+fi
+grep -q "not activated: this node isn't enrolled, and this SSH session runs over wlan0" "$T/out" || { cat "$T/out"; fail "refused for another reason"; }
+grep -qF "sudo -u pi -H /opt/jarvis-agent/jarvis-agent enroll --server" "$T/out" || { cat "$T/out"; fail "no enroll command"; }
+grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" && fail "the refused --activate enabled jarvis-agent"
+[ -f "$R6/etc/systemd/system/jarvis-agent.service" ] || fail "the refused --activate did not install the unit"
+SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate --setup-mode >"$T/out" 2>&1 ||
+  { cat "$T/out"; fail "--activate --setup-mode was refused"; }
+grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" || fail "--setup-mode did not activate"
+SSH_CONNECTION=$SSH FAKE_SSH_DEV=eth0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
+  { cat "$T/out"; fail "--activate over ethernet was refused"; }
+grep -q "warning: this node isn't enrolled: jarvis-agent starts in setup mode" "$T/out" || { cat "$T/out"; fail "no setup-mode warning over ethernet"; }
+mkdir -p "$R6/home/pi/.config/jarvis-agent"
+echo '{}' >"$R6/home/pi/.config/jarvis-agent/node.json"
+SSH_CONNECTION=$SSH FAKE_SSH_DEV=wlan0 R --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
+  { cat "$T/out"; fail "--activate of an enrolled node over wlan0 was refused"; }
+grep -q "isn't enrolled" "$T/out" && { cat "$T/out"; fail "warned on an enrolled node"; }
+grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" || fail "an enrolled node was not activated"
 
 echo "--- refusals"
 R3=$T/root3

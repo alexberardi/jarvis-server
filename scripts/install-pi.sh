@@ -25,7 +25,10 @@
 #   --from-dir DIR    the same, for a directory (also JARVIS_AGENT_RELEASE_BASE)
 #   --force           reinstall the agent even when this version is installed
 #   --user NAME       the account the node runs as (default pi; it must exist)
-#   --activate        stop and disable jarvis-node, enable and start jarvis-agent
+#   --activate        stop and disable jarvis-node, enable and start jarvis-agent. On a node
+#                     that isn't enrolled yet it refuses when this SSH session runs over wlan0:
+#                     the agent would start in setup mode, and its hotspot can drop the session
+#   --setup-mode      with --activate: activate an unenrolled node anyway (setup from the app)
 #   --deactivate      the reverse (only that: nothing is installed or removed)
 #   --root DIR        write every file under DIR and run no system command, logging each one to
 #                     DIR/install-pi-commands.log instead (tests; also JARVIS_PI_ROOT)
@@ -40,7 +43,7 @@ PUBKEY=RWRyW6ICtU+iyX4p4RnS24ju0gRsWpxvv6B8pI9G+ZS01q8t8oupAQ8L
 # repository (the latest). --version and --base-url win.
 RELEASE_VERSION=""
 ROOT=${JARVIS_PI_ROOT:-}
-VERSION="" FORCE=0 NODE_USER=pi ACTION=install
+VERSION="" FORCE=0 NODE_USER=pi ACTION=install SETUP_MODE=0 REFUSED=0
 ARCH=arm64
 OPT=/opt/jarvis-agent
 SHARE=/usr/local/share/jarvis-agent
@@ -72,10 +75,11 @@ while [ $# -gt 0 ]; do
     --user) [ $# -ge 2 ] || die "--user needs a value"; NODE_USER=$2; shift ;;
     --user=*) NODE_USER=${1#*=} ;;
     --activate) ACTION=activate ;;
+    --setup-mode) SETUP_MODE=1 ;;
     --deactivate) ACTION=deactivate ;;
     --root) [ $# -ge 2 ] || die "--root needs a value"; ROOT=$2; shift ;;
     --root=*) ROOT=${1#*=} ;;
-    -h | --help) sed -n '2,31p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h | --help) sed -n '2,34p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
   shift
@@ -721,6 +725,33 @@ EOF
 }
 
 # --- Which node runs ----------------------------------------------------------------------------
+
+# ssh_link: the interface this SSH session comes in on ("" when not over SSH or unknown).
+ssh_link() {
+  [ -n "${SSH_CONNECTION:-}" ] || return 0
+  # shellcheck disable=SC2086 # the client's address is its first field
+  set -- $SSH_CONNECTION
+  ip -o route get "$1" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1
+}
+
+# may_activate: whether --activate goes on (#423). A node with no credentials starts in setup
+# mode, which brings up its hotspot (jarvis-<id>) on wlan0 when wlan0 is on no network; over an
+# SSH session on wlan0 that can end the session and strand the node, so that one is refused
+# (--setup-mode overrides) with the enroll command. Elsewhere it warns.
+may_activate() {
+  [ ! -f "$(P "$NODE_HOME/.config/jarvis-agent/node.json")" ] || return 0
+  enroll="sudo -u $NODE_USER -H $OPT/jarvis-agent enroll --server <your Jarvis server>"
+  if [ $SETUP_MODE = 0 ] && [ "$(ssh_link)" = "$WIFI" ]; then
+    printf '%s\n' "error: not activated: this node isn't enrolled, and this SSH session runs over $WIFI." \
+      "jarvis-agent would start in setup mode, whose hotspot can take $WIFI off this network and end the session." \
+      "Enroll it first (it prints a code to approve in the app), then activate:" \
+      "  $enroll" \
+      "  sudo sh $0 --activate" \
+      "(--activate --setup-mode activates it anyway, to set it up from the app.)" >&2
+    return 1
+  fi
+  warn "this node isn't enrolled: jarvis-agent starts in setup mode, with its setup hotspot when $WIFI is on no network. To enroll it instead: $enroll"
+}
 
 activate() {
   run systemctl disable --now "$PY_UNIT" 2>/dev/null || true
@@ -1828,5 +1859,12 @@ reconcile_wifi_profiles
 install_net_watchdog
 write_marker
 install_unit
-if [ $ACTION = activate ]; then activate; else say "Installed $UNIT, disabled: --activate makes it the node that runs."; fi
+if [ $ACTION != activate ]; then
+  say "Installed $UNIT, disabled: --activate makes it the node that runs."
+elif may_activate; then
+  activate
+else
+  REFUSED=1
+fi
 [ $NEEDS_REBOOT = 0 ] || say "The HAT's boot settings or the audio stack changed: reboot (sudo reboot) for them to take effect."
+[ $REFUSED = 0 ] || exit 1

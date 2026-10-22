@@ -25,6 +25,7 @@ type setupRadio struct {
 	provisioning.Simulated
 	mu    sync.Mutex
 	calls []string
+	home  string // the network wlan0 is already on ("": none)
 }
 
 func (r *setupRadio) note(s string) { r.mu.Lock(); r.calls = append(r.calls, s); r.mu.Unlock() }
@@ -40,6 +41,12 @@ func (r *setupRadio) ScanAndCache(context.Context) ([]provisioning.NetworkInfo, 
 func (r *setupRadio) StartAPMode(_ context.Context, ssid string) error {
 	r.note("ap " + ssid)
 	return nil
+}
+func (r *setupRadio) CurrentSSID(ctx context.Context) (string, error) {
+	if r.home != "" {
+		return r.home, nil
+	}
+	return r.Simulated.CurrentSSID(ctx)
 }
 func (r *setupRadio) Connect(ctx context.Context, ssid, pw string) error {
 	r.note("connect " + ssid)
@@ -155,6 +162,41 @@ func TestPiRunWithoutCredentialsEntersSetupMode(t *testing.T) {
 				t.Fatal("setup mode didn't stop")
 			}
 		})
+	}
+}
+
+// #423: an unenrolled Pi already on the home Wi-Fi (installed and activated over SSH on wlan0)
+// keeps that network: setup mode serves the provisioning API on its LAN address and starts no
+// hotspot, which used to drop the LAN and strand the node.
+func TestSetupModeKeepsAWorkingWiFi(t *testing.T) {
+	dir := agentHome(t)
+	r := newSetupRig(t, true)
+	r.radio.home = "Home"
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- run(ctx, []string{"--profile", "pi", "--creds", filepath.Join(dir, "node.json"),
+			"--config", filepath.Join(dir, "agent.json")})
+	}()
+	a := r.addr(t, errc)
+	if info := getJSON(t, "http://"+a+"/api/v1/info"); info["node_id"] == nil {
+		t.Errorf("info %v", info)
+	}
+	if got := r.radio.Calls(); strings.Contains(got, "ap ") || strings.Contains(got, "scan") {
+		t.Errorf("radio %q, want the hotspot left down on a connected wlan0", got)
+	}
+	if r.leds.Current() != hat.Setup {
+		t.Errorf("LEDs %q, want %q", r.leds.Current(), hat.Setup)
+	}
+	cancel()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Errorf("stopped in setup mode: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("setup mode didn't stop")
 	}
 }
 
