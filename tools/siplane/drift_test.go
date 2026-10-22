@@ -80,13 +80,13 @@ func TestDriftIgnoresTheInstallsOwnNames(t *testing.T) {
 func TestSameSetting(t *testing.T) {
 	for _, c := range [][2]string{
 		{"yes", "true"}, {"no", "false"}, {"No", "no"}, {"3.0", "3.000000"}, {"ef", "184"},
-		{"ulaw,alaw,gsm", "(ulaw|alaw|gsm)"}, {"", ""},
+		{"ulaw,alaw,gsm", "(ulaw|alaw|gsm)"}, {"", ""}, {"on", "yes"}, {"off", "no"},
 	} {
 		if !sameSetting(c[0], c[1]) {
 			t.Errorf("%q and %q should be the same setting", c[0], c[1])
 		}
 	}
-	for _, c := range [][2]string{{"yes", "false"}, {"30", "60"}, {"ulaw,alaw", "(alaw|ulaw)"}, {"ef", "0"}} {
+	for _, c := range [][2]string{{"yes", "false"}, {"on", "off"}, {"30", "60"}, {"ulaw,alaw", "(alaw|ulaw)"}, {"ef", "0"}} {
 		if sameSetting(c[0], c[1]) {
 			t.Errorf("%q and %q should differ", c[0], c[1])
 		}

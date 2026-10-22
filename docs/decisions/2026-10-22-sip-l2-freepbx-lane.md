@@ -13,9 +13,9 @@ the loop's sandbox cannot reach Sangoma's or Debian's mirrors, and agents cannot
 tests on a captured L1 fixture, the script's guards and `--dry-run` plans in
 `scripts/freepbx-lane-check.sh`) and waits in QA until the user installs qemu with KVM access,
 runs `scripts/freepbx-lane build --dev-box <dev-box>` once and enables the timer
-(`scripts/freepbx-lane timer` prints how). One call each way and the firewall lockout path come
-after the SIP provider (#443) merges, as a follow-up: until then there is no jarvisd SIP client
-to place them.
+(`scripts/freepbx-lane timer` prints how). One call each way and the firewall lockout path were left
+for a follow-up: they need the SIP provider (#443), which merged while this lane was in review,
+so the follow-up drives jarvisd's SIP client against the snapshot.
 
 **qemu/KVM, not Docker or VirtualBox.** FreePBX's installer expects a whole Debian system
 (systemd, its own firewall and fail2ban, kernel modules); in a container the lockout path would
