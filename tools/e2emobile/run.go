@@ -182,6 +182,15 @@ func (c *config) runFlow(ctx context.Context, f Flow) (Record, string) {
 		return r, ""
 	}
 	dir := filepath.Join(c.out, f.Slug)
+	// A retry keeps the earlier try's artifacts (<slug>.try1, ...): they show what the drop did.
+	if _, err := os.Stat(dir); err == nil {
+		for n := 1; ; n++ {
+			if old := fmt.Sprintf("%s.try%d", dir, n); !exists(old) {
+				_ = os.Rename(dir, old)
+				break
+			}
+		}
+	}
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return failed(r, err.Error()), ""
@@ -455,6 +464,11 @@ func hostLoad() string {
 		}
 	}
 	return out
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func readFile(p string) string {

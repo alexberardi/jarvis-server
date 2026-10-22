@@ -397,6 +397,12 @@ func TestRunRecoversTheDeviceAndRetriesWhenItDrops(t *testing.T) {
 	if strings.Contains(runs[0], "reconnect") || strings.Contains(runs[2], "reconnect") {
 		t.Error("kicked a transport that had not dropped")
 	}
+	if _, err := os.Stat(filepath.Join(c.out, "drop", "maestro.log")); err != nil {
+		t.Error("the retry left no maestro.log")
+	}
+	if log, _ := os.ReadFile(filepath.Join(c.out, "drop.try1", "maestro.log")); !strings.Contains(string(log), "DeviceServerDied") {
+		t.Errorf("the first try's maestro.log was not kept: %q", log)
+	}
 	raw, _ := os.ReadFile(filepath.Join(c.out, "results.json"))
 	if !strings.Contains(string(raw), `"note": "retried 1×`) || !strings.Contains(string(raw), `"device_retries": 1`) {
 		t.Errorf("results.json lacks the note or the count:\n%s", raw)
