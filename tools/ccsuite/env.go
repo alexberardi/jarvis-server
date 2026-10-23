@@ -138,6 +138,9 @@ func (e *Env) Up(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := installNotesEntry(e.path("agent-home"), e.notesLauncher()); err != nil {
+		return err
+	}
 	e.logf("building jarvis-agent and ccsites (logs/build.log)")
 	for _, b := range [][2]string{{"jarvis-agent", "./cmd/jarvis-agent"}, {"ccsites", "./tools/ccsites"}} {
 		cmd := exec.CommandContext(ctx, goBin(), "build", "-o", e.path("bin", b[0]), b[1])
@@ -753,7 +756,38 @@ func (e *Env) Login(ctx context.Context, sites []string) error {
 	return nil
 }
 
-// StartNotes (re)starts the notes app in the session with an empty state file.
+// shQuote single-quotes s for sh.
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// notesLauncher is the script the notes app's .desktop entry launches; StartNotes rewrites it
+// per case (the case's state file and layout).
+func (e *Env) notesLauncher() string { return e.path("notes-launch.sh") }
+
+// installNotesEntry writes the fixture notes app's .desktop entry into the agent's own data dir
+// (baseEnv's XDG_DATA_HOME), where the app catalogue (internal/agent/apps) looks, so the model's
+// desktop_open {target: "Jarvis Test Notes"} resolves instead of app_not_found (#528). The agent
+// launches the entry's Exec by path (gio launch), or by id through XDG_DATA_HOME (gtk-launch).
+func installNotesEntry(agentHome, launcher string) error {
+	dir := filepath.Join(agentHome, ".local", "share", "applications")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	body := "[Desktop Entry]\nType=Application\nName=Jarvis Test Notes\nExec=" + launcher + "\nTerminal=false\n"
+	return os.WriteFile(filepath.Join(dir, "jarvis-test-notes.desktop"), []byte(body), 0o644)
+}
+
+// notesLauncherBody is the launcher's script: a no-op while the app is up (StartNotes runs it
+// per case, so a desktop_open of the open app must not start a second one), the start line
+// otherwise. A stale pidfile does not stop the launch.
+func notesLauncherBody(pidfile, start string) string {
+	p := shQuote(pidfile)
+	return "#!/bin/sh\n" +
+		fmt.Sprintf("[ -s %s ] && kill -0 \"$(cat %s)\" 2>/dev/null && exit 0\n", p, p) +
+		start + "\n"
+}
+
+// StartNotes (re)starts the notes app in the session with an empty state file, through the same
+// launcher the app's .desktop entry (installNotesEntry) gives the agent's desktop_open.
 func (e *Env) StartNotes(ctx context.Context, layout string) error {
 	d := e.desk
 	if d == nil {
@@ -773,33 +807,41 @@ func (e *Env) StartNotes(ctx context.Context, layout string) error {
 		return fmt.Errorf("the notes app needs Tk for %s (Arch: sudo pacman -S tk; Debian, Ubuntu: sudo apt install python3-tk): %s", py, lastOutputLine(out))
 	}
 	argv := []string{py, app, "--state", d.notesSt, "--layout", firstNonEmpty(layout, "default")}
-	var cmd *exec.Cmd
+	// notes.sh writes the pidfile and runs the app. A script file: sway expands $ in an exec
+	// line. Both kinds use it, so the launcher can tell a running app from a gone one.
+	pidf, script := filepath.Join(d.rt, "notes.pid"), filepath.Join(d.rt, "notes.sh")
+	os.Remove(pidf)
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = shQuote(a)
+	}
+	body := fmt.Sprintf("echo $$ >%s\nexec %s >>%s 2>&1\n", shQuote(pidf), strings.Join(quoted, " "), shQuote(e.path("logs", "notes.log")))
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		return err
+	}
+	start := "exec sh " + shQuote(script)
 	if d.kind == "wlroots" {
 		// Tk is X11: under sway it runs through Xwayland, whose DISPLAY only sway's children get.
 		_, swaymsg, err := findSway()
 		if err != nil {
 			return err
 		}
-		// A script file: sway expands $ in an exec line.
-		pidf, script := filepath.Join(d.rt, "notes.pid"), filepath.Join(d.rt, "notes.sh")
-		os.Remove(pidf)
-		quoted := make([]string, len(argv))
-		for i, a := range argv {
-			quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-		}
-		body := fmt.Sprintf("echo $$ >'%s'\nexec %s >>'%s' 2>&1\n", pidf, strings.Join(quoted, " "), e.path("logs", "notes.log"))
-		if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-			return err
-		}
-		sm := exec.CommandContext(ctx, swaymsg, "exec", "sh "+script)
-		sm.Env = d.env
-		if out, err := sm.CombinedOutput(); err != nil {
-			return fmt.Errorf("swaymsg exec: %w: %s", err, out)
+		start = "exec " + shQuote(swaymsg) + " exec " + shQuote("sh "+script)
+	}
+	if err := os.WriteFile(e.notesLauncher(), []byte(notesLauncherBody(pidf, start)), 0o755); err != nil {
+		return err
+	}
+	var cmd *exec.Cmd
+	if d.kind == "wlroots" {
+		lc := exec.CommandContext(ctx, "sh", e.notesLauncher())
+		lc.Env = d.env
+		if out, err := lc.CombinedOutput(); err != nil {
+			return fmt.Errorf("notes launcher: %w: %s", err, out)
 		}
 		// Wait for its pid and keep a handle that kills it with the session.
 		cmd = exec.Command("sh", "-c", `while [ ! -s "$0" ]; do sleep 0.1; done; pid=$(cat "$0"); trap 'kill $pid' TERM; while kill -0 $pid 2>/dev/null; do sleep 0.5; done`, pidf)
 	} else {
-		cmd = exec.Command(argv[0], argv[1:]...)
+		cmd = exec.Command("sh", e.notesLauncher())
 		cmd.Env = d.env
 	}
 	var err error

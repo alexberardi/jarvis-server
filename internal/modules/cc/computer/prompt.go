@@ -31,7 +31,7 @@ An action is {"kind": "...", "intent": "<what this action is for, one line>", ..
 - navigate {"url"}: open an http or https address. scroll {"dx", "dy"}. wait {"ms"} (at most 5000). keypress {"keys": ["ctrl", "s"]}. type {"text"}.
 - screenshot: see the screen next turn.
 - click, double_click, move {"x", "y"}; drag {"path": [[x, y], ...]}: only on a screenshot, in its coordinates.
-- In a desktop app: clipboard_write {"text"} puts text on the clipboard, clipboard_read shows you what is on it next turn; keypress chords like ["cmd", "v"] work. Web pages are only for browser tasks.
+- In a desktop app: clipboard_write {"text"} puts text on the clipboard, clipboard_read shows you what is on it next turn; keypress chords like ["cmd", "v"] work. When the app lists no elements, press buttons through their shortcuts or menu, e.g. {"kind": "keypress", "keys": ["ctrl", "s"], "intent": "Save the note"}: a click on a small button can miss, and a missed click gives no error. Web pages are only for browser tasks.
 Send at most 12 actions per turn; you see the result of every action before the next turn. Prefer elements by ref over coordinates.
 
 Rules:
@@ -117,7 +117,17 @@ func renderPrompt(in promptInput) string {
 		fmt.Fprintf(&b, "app: %q\n", defang(o.App))
 	}
 	if len(o.Elements) == 0 {
-		b.WriteString("(no elements found)\n")
+		if in.Desktop && in.Images > 0 {
+			// Tk and other apps without AT-SPI: screenshots only (DESIGN.md §12), so refs
+			// can never resolve and only coordinate actions work.
+			b.WriteString("(this app lists no elements: work from the newest screenshot with coordinate actions; " +
+				"press/set_value/select need a listed element and cannot work here. " +
+				"Click a field x,y first, then type into it — typing goes to whatever is focused. " +
+				"To press a button, prefer the app's keyboard shortcut (keypress [\"ctrl\",\"s\"] to save): " +
+				"a click can miss a small button and gives no error)\n")
+		} else {
+			b.WriteString("(no elements found)\n")
+		}
 	}
 	for _, e := range o.Elements {
 		b.WriteString(renderElement(e) + "\n")

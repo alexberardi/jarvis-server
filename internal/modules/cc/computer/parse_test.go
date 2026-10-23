@@ -75,3 +75,42 @@ func TestParseReply(t *testing.T) {
 		}
 	}
 }
+
+// The house model sometimes stops right before the closing brace, and at temperature 0 the
+// retry is byte-identical, so the run died on "unexpected end of JSON input" (#528). An answer
+// missing only closers is repaired; one cut mid-string stays an error (its content is lost).
+func TestParseReplyTruncated(t *testing.T) {
+	r, err := parseReply(`{"thought": "t", "actions": [{"kind": "keypress", "keys": ["enter"]}]`)
+	if err != nil {
+		t.Fatalf("truncated reply: %v", err)
+	}
+	if len(r.Actions) != 1 || r.Actions[0].Kind != "keypress" {
+		t.Fatalf("truncated reply parsed to %+v", r)
+	}
+	for _, s := range []string{
+		`{"thought": "t", "actions": [{"kind": "type", "text": "mi`, // mid-string
+		`{"done": true, "summary": "s"}}`,                           // over-closed
+	} {
+		if _, err := parseReply(s); err == nil {
+			t.Errorf("parseReply(%q) = nil error, want one", s)
+		}
+	}
+}
+
+// The house model's other deterministic slip (#528): the "y" key dropped from a coordinate pair
+// ("x":170,777). The pair is unambiguous, so it is repaired instead of killing the run.
+func TestParseReplyDroppedY(t *testing.T) {
+	r, err := parseReply(`{"thought":"t","actions":[{"kind":"click","x":170,777,"intent":"save"}]}`)
+	if err != nil {
+		t.Fatalf("dropped-y reply: %v", err)
+	}
+	a := r.Actions[0]
+	if a.X == nil || a.Y == nil || *a.X != 170 || *a.Y != 777 {
+		t.Fatalf("dropped-y reply parsed to %+v", a)
+	}
+	// An intact pair stays as written.
+	r, err = parseReply(`{"thought":"t","actions":[{"kind":"click","x":1,"y":2,"intent":"i"}]}`)
+	if err != nil || *r.Actions[0].X != 1 || *r.Actions[0].Y != 2 {
+		t.Fatalf("intact pair: %+v, %v", r.Actions, err)
+	}
+}
