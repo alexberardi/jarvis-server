@@ -188,6 +188,18 @@ func (m *Module) infer(ctx context.Context, samples []float32, p inferenceParams
 	return text, segs, pathLocal, err
 }
 
+// inferProvider transcribes the clip on the remote provider in its dialect (stt.remote_api):
+// OpenAI-compatible (the default) or ElevenLabs.
+func (m *Module) inferProvider(ctx context.Context, ep Endpoint, samples []float32, p inferenceParams) (string, []Segment, error) {
+	switch ep.API {
+	case APIOpenAI, "":
+		return m.inferOpenAI(ctx, ep, samples, p)
+	case APIElevenLabs:
+		return m.inferElevenLabs(ctx, ep, samples, p)
+	}
+	return "", nil, remoteError(ep, 0, fmt.Sprintf("unsupported stt.remote_api %q", ep.API))
+}
+
 // pathLocal is Result.Engine for a local stt label.
 const pathLocal = "local"
 

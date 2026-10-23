@@ -20,7 +20,7 @@ func (m *Module) inferRemote(ctx context.Context, ep Endpoint, samples []float32
 	}
 	m.fallbackMode.Store(mode)
 	if mode != fallback.ModeCPU || m.FallbackEngine == nil {
-		text, segs, err := m.inferOpenAI(ctx, ep, samples, p)
+		text, segs, err := m.inferProvider(ctx, ep, samples, p)
 		if err != nil {
 			m.fallback.Errored(err)
 		} else {
@@ -37,7 +37,7 @@ func (m *Module) inferRemote(ctx context.Context, ep Endpoint, samples []float32
 		// No fallback to go to: the provider may be back.
 		m.deps.Log.Warn("stt: local CPU fallback failed inside the remote's backoff; asking the remote", "err", err)
 	}
-	text, segs, err := m.inferOpenAI(ctx, ep, samples, p)
+	text, segs, err := m.inferProvider(ctx, ep, samples, p)
 	if err == nil {
 		m.fallback.Succeeded()
 		m.fallback.Served(fallback.PathRemote)

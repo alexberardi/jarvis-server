@@ -13,10 +13,10 @@ import (
 	"time"
 )
 
-// Server is a fake OpenAI-compatible speech provider: what jarvisd's remote stt
-// (internal/modules/stt remote_openai.go) and remote tts (internal/modules/tts remote.go) send,
-// answered with canned text and a tone instead of real speech, and a control API for tests
-// (docs/llm/07-remote-speech.md §5).
+// Server is a fake speech provider, OpenAI-compatible and ElevenLabs: what jarvisd's remote
+// stt (internal/modules/stt remote_openai.go, remote_elevenlabs.go) and remote tts
+// (internal/modules/tts remote.go) send, answered with canned text and a tone instead of real
+// speech, and a control API for tests (docs/llm/07-remote-speech.md §5).
 //
 //	POST /v1/audio/transcriptions  multipart file (a WAV), model, response_format json|text,
 //	                               language?, prompt? → {"text"}
@@ -25,6 +25,14 @@ import (
 //	                               mono at 24 kHz for "pcm", a WAV for "wav" (or always WAV, see
 //	                               /control/wav)
 //	GET  /v1/audio/voices          {"voices": Voices}
+//	POST /v1/speech-to-text        ElevenLabs: multipart file (raw s16le), model_id,
+//	                               file_format=pcm_s16le_16, language_code? → {"text", "words"}
+//	                               (each word 0.3 s, then a 0.05 s spacing)
+//	POST /v1/text-to-speech/{voice}/stream?output_format=pcm_N
+//	                               ElevenLabs: {text, model_id} → the tone at N Hz; a voice not in
+//	                               ElevenVoices is a 404
+//	GET  /v2/voices                ElevenLabs: ElevenVoices, two per page whatever page_size
+//	                               says (next_page_token, has_more)
 //	GET  /control/requests         {"requests": [...]} oldest first, both kinds (see Path)
 //	DELETE /control/requests       forget them
 //	POST /control/text             {"text": "..."}: what every transcription answers from now on
@@ -35,7 +43,8 @@ import (
 //	POST /control/wav              {"rate": 22050, "channels": 2}: speech answers WAV at that rate
 //	                               whatever is asked (a LocalAI-like server); {"rate": 0} back
 //
-// With Key set, an audio request without "Authorization: Bearer <Key>" is a 401.
+// With Key set, an audio request without "Authorization: Bearer <Key>" (OpenAI routes) or
+// "xi-api-key: <Key>" (ElevenLabs routes) is a 401.
 type Server struct {
 	// Key, when set, is the only API key accepted (401 otherwise).
 	Key string
@@ -58,20 +67,32 @@ const DefaultText = "turn off the lights"
 // Voices is what GET /v1/audio/voices lists.
 var Voices = []string{"fake_alto", "fake_tenor"}
 
+// ElevenVoice is one voice of GET /v2/voices: ElevenLabs' requests name the id, people the name.
+type ElevenVoice struct {
+	ID   string `json:"voice_id"`
+	Name string `json:"name"`
+}
+
+// ElevenVoices is what GET /v2/voices lists, over two pages.
+var ElevenVoices = []ElevenVoice{{"fakeVoiceAlto01", "Fake Alto"}, {"fakeVoiceTenor2", "Fake Tenor"}, {"fakeVoiceBass03", "Fake Bass"}}
+
 // Request is one transcription or speech request the fake received. The key itself is never
 // recorded.
 type Request struct {
-	Seq            int       `json:"seq"`
-	Time           time.Time `json:"time"`
-	Path           string    `json:"path"`
-	Model          string    `json:"model"`
-	Language       string    `json:"language,omitempty"`
-	Prompt         string    `json:"prompt,omitempty"`
-	ResponseFormat string    `json:"response_format"`
+	Seq      int       `json:"seq"`
+	Time     time.Time `json:"time"`
+	Path     string    `json:"path"`
+	Query    string    `json:"query,omitempty"`
+	Model    string    `json:"model"`
+	Language string    `json:"language,omitempty"`
+	Prompt   string    `json:"prompt,omitempty"`
+	// ResponseFormat is also ElevenLabs' file_format (stt) or output_format (tts).
+	ResponseFormat string `json:"response_format"`
 	// Fields lists every form field of a transcription other than the file, sorted (a stray
 	// temperature shows).
 	Fields []string `json:"fields,omitempty"`
-	// FileBytes and SampleRate describe a transcription's uploaded WAV (0 = not a WAV).
+	// FileBytes and SampleRate describe a transcription's uploaded WAV (0 = not a WAV), or
+	// ElevenLabs' raw PCM at the rate its file_format names.
 	FileBytes  int `json:"file_bytes,omitempty"`
 	SampleRate int `json:"sample_rate,omitempty"`
 	// Input, Voice and Speed are a speech request's.
@@ -99,6 +120,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"voices": Voices})
+	case r.URL.Path == "/v1/speech-to-text" && r.Method == http.MethodPost:
+		s.elevenTranscribe(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/text-to-speech/") && strings.HasSuffix(r.URL.Path, "/stream") && r.Method == http.MethodPost:
+		s.elevenSpeech(w, r)
+	case r.URL.Path == "/v2/voices" && r.Method == http.MethodGet:
+		s.elevenVoices(w, r)
 	case r.URL.Path == "/control/requests" && r.Method == http.MethodGet:
 		s.mu.Lock()
 		out := append([]Request{}, s.reqs...)
@@ -151,6 +178,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authorized(r *http.Request) bool {
 	key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return s.Key == "" || key == s.Key
+}
+
+func (s *Server) authorizedXI(r *http.Request) bool {
+	return s.Key == "" || r.Header.Get("xi-api-key") == s.Key
 }
 
 // failure takes one of the failures /control/fail asked for, under s.mu: a status to answer, or
@@ -320,7 +351,13 @@ func (s *Server) speech(w http.ResponseWriter, r *http.Request) {
 	if wavRate > 0 {
 		outRate, chans, wav = wavRate, wavChans, true
 	}
-	frames := len([]rune(q.Input)) * outRate * 60 / 1000
+	tone(w, q.Input, outRate, chans, wav)
+}
+
+// tone streams a 440 Hz tone, 60 ms per character of input, in 20 ms pieces: s16le PCM at
+// outRate with chans channels, behind a streaming WAV header when wav.
+func tone(w http.ResponseWriter, input string, outRate, chans int, wav bool) {
+	frames := len([]rune(input)) * outRate * 60 / 1000
 	if wav {
 		w.Header().Set("Content-Type", "audio/wav")
 	} else {

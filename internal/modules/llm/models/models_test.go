@@ -1782,8 +1782,8 @@ func TestUpdateLabelsModelDirectory(t *testing.T) {
 	}
 }
 
-// The stt label can run remote (docs/llm/07-remote-speech.md §2): openai is its only dialect,
-// with no Anthropic auto-detect, a per-request timeout, and a key no read returns.
+// The stt label can run remote (docs/llm/07-remote-speech.md §2): openai or elevenlabs, with
+// no Anthropic auto-detect, a per-request timeout, and a key no read returns.
 func TestSTTRemoteLabel(t *testing.T) {
 	e := newEnv(t)
 	src := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store}
@@ -1801,7 +1801,7 @@ func TestSTTRemoteLabel(t *testing.T) {
 			t.Errorf("missing stt.%s", k)
 		}
 	}
-	if d := keys["stt.remote_api"]; !slices.Equal(d.Options, []any{engine.APIOpenAI}) || d.Default != engine.APIOpenAI {
+	if d := keys["stt.remote_api"]; !slices.Equal(d.Options, []any{engine.APIOpenAI, engine.APIElevenLabs}) || d.Default != engine.APIOpenAI {
 		t.Errorf("remote_api %+v", d)
 	}
 	if d := keys["stt.remote_timeout_ms"]; d.Default != int64(8000) {
@@ -1843,6 +1843,20 @@ func TestSTTRemoteLabel(t *testing.T) {
 	b, _ := json.Marshal(list)
 	if strings.Contains(string(b), "sk-stt-secret") || !strings.Contains(string(b), "stt.remote_api_key") {
 		t.Fatalf("settings read %s", b)
+	}
+
+	// ElevenLabs: its own dialect, chosen by remote_api; the URL is kept as given.
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"stt": {
+		"remote_url": "https://api.elevenlabs.io", "remote_api": "elevenlabs", "remote_model": "scribe_v2",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if ep, err = r.Resolve(e.ctx, engine.LabelSTT); err != nil || ep.API != engine.APIElevenLabs || ep.BaseURL != "https://api.elevenlabs.io" {
+		t.Fatalf("elevenlabs stt %+v %v", ep, err)
+	}
+	// An LLM label has no such dialect.
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"remote_api": "elevenlabs"}}); err == nil {
+		t.Error("an llm label took remote_api=elevenlabs")
 	}
 
 	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"stt": {"remote_url": ""}}); err != nil {

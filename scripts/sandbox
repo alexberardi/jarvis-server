@@ -4,7 +4,7 @@
 # so it costs no GPU memory. Meant for agents and pipeline tests; every worktree can run its own.
 #
 #   scripts/sandbox up [--name N] [--offset N] [--profile minimal|rich|empty] [--llm shared|none|scripted] [--ui]
-#                      [--voice [--stt-model ID]] [--speech local|fake|speaches] [--sip] [--relay fake|none|URL]
+#                      [--voice [--stt-model ID]] [--speech local|fake|speaches [--speech-api openai|elevenlabs]] [--sip] [--relay fake|none|URL]
 #                      [--lan] [--single-port]
 #   scripts/sandbox down [--name N] [--purge]
 #   scripts/sandbox status [--name N]      is it up, its URLs, and what holds the GPU
@@ -53,6 +53,9 @@
 #                    (port 7796 + offset) answers every clip with canned text and records each request
 #                    at $SBX_FAKESPEECH/control/requests (canned text: POST /control/text; failures:
 #                    POST /control/fail). For the contract suite; voice scenarios mishear on purpose
+#   --speech-api elevenlabs  with --speech fake: the fake speaks ElevenLabs' API instead (the
+#                    ElevenLabs preset: URL without /v1, xi-api-key), for STT and TTS both
+#                    (tts.provider=remote, voice fakeVoiceAlto01); default openai (STT only)
 #   --speech speaches  STT is remote on speaches (an OpenAI-compatible server) in Docker (port 7795 +
 #                    offset, the "Other" preset), so pipeline say|run --voice round-trips through a real
 #                    remote; with --voice. Model $SPEACHES_STT_MODEL (default Systran/faster-whisper-small.en,
@@ -111,7 +114,7 @@ CMD=${1:-}
 [ -n "$CMD" ] || { sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0
-VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local
+VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local SPEECH_API=openai
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -122,6 +125,7 @@ while [ $# -gt 0 ]; do
     --voice) VOICE=1; shift ;;
     --sip) SIP=1; shift ;;
     --speech) SPEECH=$2; shift 2 ;;
+    --speech-api) SPEECH_API=$2; shift 2 ;;
     --stt-model) STT_MODEL=$2; shift 2 ;;
     --version) VERSION=$2; shift 2 ;;
     --trust-key) TRUST_KEY=$2; shift 2 ;;
@@ -141,6 +145,8 @@ case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or sc
 case $PROFILE in minimal | rich | empty) ;; *) die "--profile: minimal, rich or empty" ;; esac
 case $RELAY in fake | none | http://* | https://*) ;; *) die "--relay: fake, none or an http(s) URL" ;; esac
 case $SPEECH in local | fake | speaches) ;; *) die "--speech: local, fake or speaches" ;; esac
+case $SPEECH_API in openai) ;; elevenlabs) [ "$SPEECH" = fake ] || die "--speech-api elevenlabs needs --speech fake" ;;
+  *) die "--speech-api: openai or elevenlabs" ;; esac
 
 DIR=$SBX_ROOT/$NAME
 HOME_DIR=$DIR/home
@@ -381,22 +387,37 @@ for e in json.load(open(sys.argv[1])):
 # "Other" preset (docs/llm/07-remote-speech.md): tools/fakespeech (started by up) or speaches in
 # Docker, started here (the first run pulls its image and model into the harness cache).
 setup_remote_stt() {
-  local llm=llm url model key=
+  local llm=llm url model key= api=openai
   case $SPEECH in
     fake)
-      url=http://127.0.0.1:$(port 7796)/v1 model=fake-transcribe key=$(cat "$DIR/fakespeech-key") ;;
+      url=http://127.0.0.1:$(port 7796)/v1 model=fake-transcribe key=$(cat "$DIR/fakespeech-key")
+      # The ElevenLabs preset's shape: the API's root, its paths carry the version.
+      [ "$SPEECH_API" != elevenlabs ] || { url=http://127.0.0.1:$(port 7796) model=scribe_v2 api=elevenlabs; } ;;
     speaches)
       start_speaches
       url=http://127.0.0.1:$(port 7795)/v1 model=$SPEACHES_STT_MODEL ;;
   esac
   set_setting "$llm" stt.remote_url "\"$url\""
-  set_setting "$llm" stt.remote_api '"openai"'
+  set_setting "$llm" stt.remote_api "\"$api\""
   set_setting "$llm" stt.remote_model "\"$model\""
   set_setting "$llm" stt.remote_api_key "\"$key\""
   # The first speaches transcription loads the model: give it longer than a voice turn's 8 s.
   [ "$SPEECH" != speaches ] || set_setting "$llm" stt.remote_timeout_ms 60000
   set_setting "$llm" stt.engine '"remote"'
-  say "stt: remote, $url ($model)"
+  say "stt: remote, $url ($api, $model)"
+  [ "$SPEECH_API" != elevenlabs ] || setup_remote_tts "$url" "$key"
+}
+
+# setup_remote_tts points TTS at the fake's ElevenLabs API, as the ElevenLabs preset would with
+# the fake's first voice.
+setup_remote_tts() {
+  set_setting tts tts.remote_url "\"$1\""
+  set_setting tts tts.remote_api '"elevenlabs"'
+  set_setting tts tts.remote_model '"eleven_flash_v2_5"'
+  set_setting tts tts.remote_voice '"fakeVoiceAlto01"'
+  set_setting tts tts.remote_api_key "\"$2\""
+  set_setting tts tts.provider '"remote"'
+  say "tts: remote, $1 (elevenlabs, fakeVoiceAlto01)"
 }
 
 start_speaches() {
@@ -444,7 +465,7 @@ setup_voice() {
   [ "$SPEECH" != local ] || set_setting "$llm" stt.engine '"local"'
   local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code stt_desc="$STT_MODEL on the CPU; the first start fetches whisper-server"
   case $SPEECH in
-    fake) stt_desc="remote: tools/fakespeech" ;;
+    fake) stt_desc="remote: tools/fakespeech ($SPEECH_API)" ;;
     speaches) stt_desc="remote: speaches, $SPEACHES_STT_MODEL" ;;
   esac
   node_key=$(json "d.get('nodes',{}).get('$node_id','')" <"$HOME_DIR/seed-dev-state.json")

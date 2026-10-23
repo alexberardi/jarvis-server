@@ -186,3 +186,159 @@ func TestSpeech(t *testing.T) {
 		t.Fatalf("requests %+v", got.Requests)
 	}
 }
+
+// elevenTranscription posts what jarvisd's elevenlabs stt sends: raw 16 kHz PCM and its fields.
+func elevenTranscription(t *testing.T, url, key string, pcmBytes int, fields map[string]string) (int, map[string]any) {
+	t.Helper()
+	var b bytes.Buffer
+	mw := multipart.NewWriter(&b)
+	fw, _ := mw.CreateFormFile("file", "audio.pcm")
+	fw.Write(make([]byte, pcmBytes))
+	for k, v := range fields {
+		mw.WriteField(k, v)
+	}
+	mw.Close()
+	req, _ := http.NewRequest(http.MethodPost, url+"/v1/speech-to-text?enable_logging=false", &b)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if key != "" {
+		req.Header.Set("xi-api-key", key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func TestElevenLabsSpeechToText(t *testing.T) {
+	srv := httptest.NewServer(&Server{Key: "xi-fake"})
+	defer srv.Close()
+	ok := map[string]string{"model_id": "scribe_v2", "file_format": "pcm_s16le_16", "language_code": "en"}
+
+	c, out := elevenTranscription(t, srv.URL, "xi-fake", 32000, ok)
+	if c != 200 || out["text"] != DefaultText {
+		t.Fatalf("%d %v", c, out)
+	}
+	// Words and spacings, in seconds, as Scribe answers.
+	words, _ := out["words"].([]any)
+	if len(words) != 7 {
+		t.Fatalf("words %v", words)
+	}
+	first, last := words[0].(map[string]any), words[6].(map[string]any)
+	if first["text"] != "turn" || first["type"] != "word" || first["start"] != 0.0 || last["text"] != "lights" ||
+		words[1].(map[string]any)["type"] != "spacing" {
+		t.Fatalf("words %v", words)
+	}
+	// A bearer token is not ElevenLabs' auth.
+	if c, _ := transcriptionBearerAt(t, srv.URL+"/v1/speech-to-text", "xi-fake"); c != 401 {
+		t.Fatalf("bearer: %d", c)
+	}
+	if c, _ := elevenTranscription(t, srv.URL, "xi-fake", 32000, map[string]string{"model_id": "scribe_v2"}); c != 422 {
+		t.Fatalf("no file_format (a WAV would be decoded, PCM must be named): %d", c)
+	}
+	if c, _ := elevenTranscription(t, srv.URL, "xi-fake", 31, ok); c != 422 {
+		t.Fatalf("odd PCM: %d", c)
+	}
+	post(t, srv.URL+"/control/fail", `{"status":503,"count":1}`, "")
+	if c, _ := elevenTranscription(t, srv.URL, "xi-fake", 32000, ok); c != 503 {
+		t.Fatalf("fail: %d", c)
+	}
+
+	reqs := requests(t, srv.URL)
+	r := reqs[0]
+	if r.Path != "/v1/speech-to-text" || r.Query != "enable_logging=false" || r.Model != "scribe_v2" || r.Language != "en" ||
+		r.ResponseFormat != "pcm_s16le_16" || r.FileBytes != 32000 || r.SampleRate != 16000 || !r.Authorized ||
+		!slices.Equal(r.Fields, []string{"file_format", "language_code", "model_id"}) {
+		t.Errorf("recorded %+v", r)
+	}
+}
+
+func transcriptionBearerAt(t *testing.T, url, key string) (int, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, b
+}
+
+func TestElevenLabsTextToSpeech(t *testing.T) {
+	srv := httptest.NewServer(&Server{Key: "xi-fake"})
+	defer srv.Close()
+	speak := func(path, body, key string) *http.Response {
+		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(body))
+		req.Header.Set("xi-api-key", key)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+	const path = "/v1/text-to-speech/fakeVoiceAlto01/stream?output_format=pcm_24000&enable_logging=false"
+	body := `{"text":"Hello.","model_id":"eleven_flash_v2_5"}`
+	resp := speak(path, body, "xi-fake")
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || len(b) != 2*6*24000*60/1000 {
+		t.Fatalf("pcm: %d, %d bytes", resp.StatusCode, len(b))
+	}
+	if resp := speak(path, body, "wrong"); resp.StatusCode != 401 {
+		t.Fatalf("bad key: %d", resp.StatusCode)
+	}
+	if resp := speak("/v1/text-to-speech/fakeVoiceAlto01/stream?output_format=mp3_44100_128", body, "xi-fake"); resp.StatusCode != 422 {
+		t.Fatalf("mp3: %d", resp.StatusCode)
+	}
+	if resp := speak("/v1/text-to-speech/nobody/stream?output_format=pcm_24000", body, "xi-fake"); resp.StatusCode != 404 {
+		t.Fatalf("unknown voice: %d", resp.StatusCode)
+	}
+	post(t, srv.URL+"/control/fail", `{"status":429,"count":1}`, "")
+	if resp := speak(path, body, "xi-fake"); resp.StatusCode != 429 {
+		t.Fatalf("fail: %d", resp.StatusCode)
+	}
+	reqs := requests(t, srv.URL)
+	r := reqs[0]
+	if r.Path != "/v1/text-to-speech/fakeVoiceAlto01/stream" || r.Query != "output_format=pcm_24000&enable_logging=false" ||
+		r.Voice != "fakeVoiceAlto01" || r.Input != "Hello." || r.Model != "eleven_flash_v2_5" || r.ResponseFormat != "pcm_24000" || !r.Authorized {
+		t.Errorf("recorded %+v", r)
+	}
+}
+
+func TestElevenLabsVoices(t *testing.T) {
+	srv := httptest.NewServer(&Server{Key: "xi-fake"})
+	defer srv.Close()
+	page := func(q string) (int, map[string]any) {
+		req, _ := http.NewRequest("GET", srv.URL+"/v2/voices?"+q, nil)
+		req.Header.Set("xi-api-key", "xi-fake")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	// The fake pages by 2 at most whatever is asked, so a client must follow next_page_token.
+	c, out := page("page_size=100")
+	if c != 200 || out["has_more"] != true || out["next_page_token"] != "2" || len(out["voices"].([]any)) != 2 {
+		t.Fatalf("page 1: %d %v", c, out)
+	}
+	if v := out["voices"].([]any)[0].(map[string]any); v["voice_id"] != ElevenVoices[0].ID || v["name"] != ElevenVoices[0].Name {
+		t.Fatalf("voice %v", v)
+	}
+	c, out = page("page_size=100&next_page_token=2")
+	if c != 200 || out["has_more"] != false || out["next_page_token"] != nil || len(out["voices"].([]any)) != len(ElevenVoices)-2 {
+		t.Fatalf("page 2: %d %v", c, out)
+	}
+	req, _ := http.NewRequest("GET", srv.URL+"/v2/voices", nil)
+	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
+		t.Fatalf("no key: %d", resp.StatusCode)
+	}
+}

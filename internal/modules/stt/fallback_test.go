@@ -118,6 +118,31 @@ func TestNoFallbackOnRequestErrors(t *testing.T) {
 	}
 }
 
+// The fallback wraps every remote dialect: a failing ElevenLabs provider sends the clip to the
+// local CPU whisper too, and the remote ask went down the ElevenLabs path.
+func TestFallbackElevenLabsDialect(t *testing.T) {
+	f := newFakeOpenAI(t)
+	f.status, f.response = 503, `{"detail":"down"}`
+	var resolves atomic.Int32
+	e := setup(t, func(m *Module) {
+		m.Engine = ResolveFunc(func(context.Context, string) (Endpoint, error) {
+			return Endpoint{BaseURL: f.srv.URL, Remote: true, API: APIElevenLabs, APIKey: testKey,
+				Model: "scribe_v2", Fallback: fallback.ModeCPU}, nil
+		})
+	})
+	e.m.FallbackEngine = cpuWhisper(e, &resolves)
+	res, err := e.m.Transcribe(e.ctx, sineWAV(16000, 1, 330), TranscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "turn off  the lights" || res.Engine != fallback.PathLocalCPU {
+		t.Fatalf("result %+v", res)
+	}
+	if q := f.last(t); q.path != "/v1/speech-to-text" {
+		t.Fatalf("remote asked %s, want the ElevenLabs path", q.path)
+	}
+}
+
 // fallback=off fails as before, without touching the local engine.
 func TestFallbackOff(t *testing.T) {
 	f := newFakeOpenAI(t)

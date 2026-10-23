@@ -29,12 +29,12 @@ type fakeOpenAI struct {
 }
 
 type openAIReq struct {
-	method, path, auth, contentType string
-	fields                          map[string]string
-	names                           []string // form part names, in order
-	file                            []byte
-	filename                        string
-	raw                             []byte
+	method, path, query, auth, xiKey, contentType string
+	fields                                        map[string]string
+	names                                         []string // form part names, in order
+	file                                          []byte
+	filename                                      string
+	raw                                           []byte
 }
 
 func newFakeOpenAI(t *testing.T) *fakeOpenAI {
@@ -46,7 +46,8 @@ func newFakeOpenAI(t *testing.T) *fakeOpenAI {
 
 func (f *fakeOpenAI) serve(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
-	q := openAIReq{method: r.Method, path: r.URL.Path, auth: r.Header.Get("Authorization"),
+	q := openAIReq{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, auth: r.Header.Get("Authorization"),
+		xiKey:       r.Header.Get("xi-api-key"),
 		contentType: r.Header.Get("Content-Type"), fields: map[string]string{}, raw: raw}
 	if _, params, err := mime.ParseMediaType(q.contentType); err == nil {
 		mr := multipart.NewReader(bytes.NewReader(raw), params["boundary"])
