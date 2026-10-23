@@ -150,6 +150,18 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			t.NodeID = rc.nodeID
 		}
 	}
+	// The buy mode is the step's, read fresh: the user can change it on the card while it runs.
+	buyMode := func(ctx context.Context) string {
+		if rc.workflowID == "" {
+			return computer.BuyConfirm
+		}
+		w, err := s.loadWorkflow(ctx, rc.workflowID)
+		if err != nil || w == nil || i >= len(w.Steps) {
+			return computer.BuyConfirm
+		}
+		return stepBuyMode(w.Steps[i])
+	}
+	t.BuyMode = buyMode
 	w := rc.wf
 	if w != nil {
 		s.ensureProgressCard(ctx, w, *rc.results)
@@ -159,7 +171,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	out := run(t)
 	var note string // a checkout approved within the spend limit, said on the card
 	for out.State == computer.StateNeedsApproval {
-		limit, ok := s.withinSpendLimit(ctx, rc.householdID, out)
+		limit, ok := s.withinSpendLimit(ctx, rc.householdID, buyMode(ctx), t.Goal, out)
 		if !ok {
 			break
 		}
@@ -280,10 +292,15 @@ func digests(pending []computer.PendingAction) []string {
 	return out
 }
 
-// withinSpendLimit reports whether a held checkout is approved without asking: the household set
-// a spend limit, its price is at most the limit, and everything held is a payment.
-func (s *Service) withinSpendLimit(ctx context.Context, hh string, out computer.Outcome) (int64, bool) {
-	if s.Settings == nil || out.Checkout == nil || len(out.Pending) == 0 {
+// withinSpendLimit reports whether a held checkout is approved without asking: the user told the
+// errand to order by itself (buy mode auto), the household's cap is set, the price is at most the
+// cap, everything held is a payment, and every cart line is something the errand asked for
+// (decision 2026-10-22-computer-buying-asks-up-front).
+func (s *Service) withinSpendLimit(ctx context.Context, hh, mode, goal string, out computer.Outcome) (int64, bool) {
+	if mode != computer.BuyAuto || s.Settings == nil || out.Checkout == nil || len(out.Pending) == 0 {
+		return 0, false
+	}
+	if items := out.Checkout.Items; len(items) > 0 && !computer.AllWanted(goal, items) {
 		return 0, false
 	}
 	limit := s.Settings.Int(ctx, SettingAutoApproveCents, settings.Scope{HouseholdID: hh})
@@ -300,6 +317,18 @@ func (s *Service) withinSpendLimit(ctx context.Context, hh string, out computer.
 		}
 	}
 	return limit, true
+}
+
+// ArgBuyMode is a computer step's buy mode (computer.BuyConfirm when unset).
+const ArgBuyMode = "buy_mode"
+
+// stepBuyMode is st's buy mode.
+func stepBuyMode(st Step) string {
+	switch m := truthyStr(st.Args, ArgBuyMode); m {
+	case computer.BuyAuto, computer.BuyCart:
+		return m
+	}
+	return computer.BuyConfirm
 }
 
 // priceCents reads a price as the model reports it ("$12.99", "12,99 €", "1,299.00") in cents.

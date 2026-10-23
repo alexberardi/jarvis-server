@@ -82,9 +82,11 @@ func computerDefinitions() []settings.Definition {
 		llm.SlotSetting(computer.SettingModel, "computer",
 			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider)."),
-		{Key: computer.SettingAutoApproveCents, Category: "computer", Type: settings.Int, Default: int64(0),
-			Description: "Spend limit in cents: a computer task's checkout at most this much is approved without " +
-				"asking (the progress card says so). 0 = always ask.",
+		{Key: computer.SettingAutoApproveCents, Category: "computer", Type: settings.Int, Default: int64(5000),
+			Description: "The cap in cents for a buying errand you told to order by itself (\"Order it myself\" on its " +
+				"card): a checkout at most this much, holding only what you asked for, is placed without asking; over " +
+				"it, or with anything else in the cart, it asks. 0 = always ask. Errands that check with you first " +
+				"always ask.",
 			Validate: func(v any) error {
 				if n, ok := v.(int64); ok && n < 0 {
 					return errors.New("must be 0 or more")

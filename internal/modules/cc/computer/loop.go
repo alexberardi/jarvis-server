@@ -35,8 +35,12 @@ const (
 	// SettingAutoApproveCents is the spend limit: a checkout at most this many cents is approved
 	// without asking (0 = off). The errand step reads it (piece 11).
 	SettingAutoApproveCents = "computer.auto_approve_cents"
-	// SettingBuyOnAnyModel lets a model that isn't able to buy (Pick.CanBuy) buy anyway.
-	SettingBuyOnAnyModel = "computer.buy_on_any_model"
+	// How far a buying task goes (Task.BuyMode, decision 2026-10-22-computer-buying-asks-up-front):
+	// the purchase waits for the user's confirmation; it is approved within the household's cap
+	// (by the errand runner, withinSpendLimit); or the task stops at the checkout.
+	BuyConfirm = "confirm"
+	BuyAuto    = "auto"
+	BuyCart    = "cart"
 
 	defaultMaxRounds  = 40
 	defaultMaxMinutes = 20
@@ -166,6 +170,9 @@ type Task struct {
 	// StartURL is where the task's window opens on its first look ("" = https://<site>): the web
 	// address the user gave, with its scheme, port and path.
 	StartURL string
+	// BuyMode is how far a task that buys goes, read when it reaches a purchase (the user can
+	// change it on the progress card meanwhile): BuyConfirm (nil, ""), BuyAuto or BuyCart.
+	BuyMode  func(context.Context) string
 	Success  *SuccessCheck
 	Rules    string // the household's rules as one line for the model ("" = the defaults)
 	// Approved are the digests of held actions the user approved: the loop mints their tokens
@@ -504,19 +511,17 @@ var cartWords = map[string]bool{"item": true, "items": true, "basket": true, "ba
 var stopWords = map[string]bool{"a": true, "an": true, "the": true, "to": true, "of": true, "and": true, "with": true,
 	"for": true, "me": true, "my": true, "from": true, "on": true, "in": true, "cart": true, "add": true, "order": true}
 
-// buyGate ends a task at its first purchase when the model isn't able to buy (Pick.CanBuy):
-// the house 9B model invented cart items and "added" things it never added, so it fills the cart
-// and the user places the order (#485; on a large or cloud model the purchase is confirmed on the
-// phone as before). The household can allow it anyway (SettingBuyOnAnyModel).
+// buyGate ends a task at its first purchase when the user chose "just fill the cart" (BuyCart):
+// the cart is ready and the user places the order.
 func (l *Loop) buyGate(ctx context.Context, r *round, pending []PendingAction, co *Checkout) (Outcome, bool) {
-	if r.pick.CanBuy {
+	if r.task.BuyMode == nil || r.task.BuyMode(ctx) != BuyCart {
 		return Outcome{}, false
 	}
 	pays := false
 	for _, p := range pending {
 		pays = pays || p.Category == computeruse.CatPay
 	}
-	if !pays || l.Settings != nil && l.Settings.Bool(ctx, SettingBuyOnAnyModel, settings.Scope{HouseholdID: r.task.HouseholdID}) {
+	if !pays {
 		return Outcome{}, false
 	}
 	total := ""
@@ -525,12 +530,33 @@ func (l *Loop) buyGate(ctx context.Context, r *round, pending []PendingAction, c
 	}
 	for _, p := range pending {
 		r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: p.Action.Kind, Intent: p.Action.Intent,
-			Ref: p.Action.Ref, Result: "not run: buying needs a larger model"})
+			Ref: p.Action.Ref, Result: "not run: you asked me to just fill the cart"})
 	}
-	return Outcome{State: StateDone, Summary: fmt.Sprintf("Your order is ready at checkout%s, but I didn't place it: "+
-		"check the cart and place the order yourself. Ordering for you needs a larger model than this one (%s).",
-		total, firstNonEmptyStr(r.pick.Model, r.pick.Label))}, true
+	return Outcome{State: StateDone, Summary: fmt.Sprintf("Your cart is ready at checkout%s: check it and place the order when you're ready.",
+		total)}, true
 }
+
+// BuysSomething reports a task that buys something ("order me…", "buy…").
+func BuysSomething(goal string) bool { return buyGoal.MatchString(goal) }
+
+// AllWanted reports every cart line names something the task asked for (most of the line's item
+// words are in the task), so an order the user let Jarvis place by itself holds nothing else.
+func AllWanted(goal string, items []string) bool {
+	goalWords := map[string]bool{}
+	for _, w := range wordRe.FindAllString(strings.ToLower(goal), -1) {
+		goalWords[w] = true
+	}
+	for _, it := range items {
+		// "2 × Pulled Pork Sandwich (No Pickles) $28.00": the item, without quantity, options, price.
+		name := cartLineName.ReplaceAllString(it, "")
+		if !wanted(name, goalWords) {
+			return false
+		}
+	}
+	return len(items) > 0
+}
+
+var cartLineName = regexp.MustCompile(`^\s*\d+\s*[×x*]\s*|\s*\([^)]*\)|\s*\$[\d.,]+|\s*[\d.,]+\s*[A-Z]{3}\b`)
 
 func firstNonEmptyStr(ss ...string) string {
 	for _, s := range ss {

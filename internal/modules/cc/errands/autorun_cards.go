@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // The "Ran on its own" card (autonomy PLAN §1; blueprint Interfaces "Card metadata"): what an
@@ -53,6 +55,50 @@ type RanCard struct {
 	// Started: an errand the user started (its progress card, while a computer task runs), not
 	// one the household's rules ran on its own.
 	Started bool
+	// Buy: the errand's computer step buys something; the card says how far it goes and offers
+	// the other choices (nil otherwise).
+	Buy *BuyChoice
+}
+
+// BuyChoice is a buying computer step's mode on the progress card, and the household's cap for
+// "order it myself" (decision 2026-10-22-computer-buying-asks-up-front).
+type BuyChoice struct {
+	Step     int
+	Mode     string
+	CapCents int64
+}
+
+// buyModeLine says how far the errand goes.
+func buyModeLine(b *BuyChoice) string {
+	switch b.Mode {
+	case computer.BuyAuto:
+		if b.CapCents <= 0 {
+			return "I'll ask before paying (no cap is set for ordering by myself)."
+		}
+		return "I'll place the order myself if it's " + dollars(b.CapCents) + " or less and holds only what you asked for; otherwise I'll ask."
+	case computer.BuyCart:
+		return "I'll fill the cart and stop at checkout for you to place the order."
+	}
+	return "I'll check with you before paying."
+}
+
+// buyModeButtons are the choices other than the current one.
+func buyModeButtons(c RanCard) []any {
+	b := c.Buy
+	data := func(mode string) map[string]any {
+		return map[string]any{"workflow_id": c.WorkflowID, "step": b.Step, "mode": mode}
+	}
+	var out []any
+	if b.Mode != computer.BuyAuto && b.CapCents > 0 {
+		out = append(out, element("buy-auto", "Order it myself (up to "+dollars(b.CapCents)+")", CallbackBuyMode, data(computer.BuyAuto)))
+	}
+	if b.Mode != computer.BuyConfirm {
+		out = append(out, element("buy-confirm", "Check with me first", CallbackBuyMode, data(computer.BuyConfirm)))
+	}
+	if b.Mode != computer.BuyCart {
+		out = append(out, element("buy-cart", "Just fill the cart", CallbackBuyMode, data(computer.BuyCart)))
+	}
+	return out
 }
 
 // RanRuleOf is the card's line for the verdict that allowed tool.
@@ -106,9 +152,13 @@ func RanCardMetadata(c RanCard) map[string]any {
 		md["answer"] = c.Answer
 	}
 	if c.State == "running" || c.State == "waiting" {
-		md["interactive_elements"] = []any{
-			element("stop-errand", "Stop", CallbackStop, map[string]any{"workflow_id": c.WorkflowID, "revision": c.Revision}),
+		els := []any{}
+		if c.Buy != nil {
+			md["buy_mode"] = c.Buy.Mode
+			els = append(els, buyModeButtons(c)...)
 		}
+		md["interactive_elements"] = append(els,
+			element("stop-errand", "Stop", CallbackStop, map[string]any{"workflow_id": c.WorkflowID, "revision": c.Revision}))
 	}
 	return md
 }
@@ -132,6 +182,9 @@ func RanCardBody(c RanCard) string {
 		lines = append(lines, line)
 	}
 	if c.Started {
+		if c.Buy != nil && (c.State == "running" || c.State == "waiting") {
+			lines = append(lines, "", buyModeLine(c.Buy))
+		}
 		return strings.Join(lines, "\n")
 	}
 	lines = append(lines, "", "Allowed by:")
@@ -180,6 +233,13 @@ func (s *Service) ranCard(ctx context.Context, w *workflowRow, results []Result,
 			}
 		}
 		c.Steps = append(c.Steps, rs)
+		if c.Buy == nil && c.Started && isComputerStep(cmd) && computer.BuysSomething(firstNonEmpty(truthyStr(st.Args, "goal"), w.Goal)) {
+			var capCents int64
+			if s.Settings != nil {
+				capCents = s.Settings.Int(ctx, SettingAutoApproveCents, settings.Scope{HouseholdID: w.HouseholdID})
+			}
+			c.Buy = &BuyChoice{Step: i, Mode: stepBuyMode(st), CapCents: capCents}
+		}
 	}
 	if c.Started {
 		return c // the user started it: no rule allowed anything

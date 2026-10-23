@@ -9,8 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // Server-plane callbacks: the card taps (command "errand"). POST /callbacks (doc 13) dispatches
@@ -52,7 +55,58 @@ func (s *Service) Callbacks() map[string]CallbackFunc {
 		CallbackStop:        s.handleStop,
 		CallbackApproveStep: s.handleApproveStep,
 		CallbackAnswerStep:  s.handleAnswerStep,
+		CallbackBuyMode:     s.handleBuyMode,
 	}
+}
+
+// CallbackBuyMode is a buying errand's progress card's choice of how far it goes.
+const CallbackBuyMode = "set_errand_buy_mode"
+
+// handleBuyMode sets a running buying errand's mode (order by itself within the cap, check
+// first, or just fill the cart); the computer task reads it when it reaches the purchase.
+func (s *Service) handleBuyMode(ctx context.Context, c CallbackContext) CallbackResult {
+	if s.DB == nil {
+		return fail("Errands are unavailable right now.")
+	}
+	mode := dataStr(c.Data, "mode")
+	if mode != computer.BuyAuto && mode != computer.BuyConfirm && mode != computer.BuyCart {
+		return fail("Unknown choice")
+	}
+	step, ok := dataInt(c.Data, "step")
+	if !ok {
+		return fail("Missing step")
+	}
+	w, err := s.workflowIn(ctx, dataStr(c.Data, "workflow_id"), c.HouseholdID)
+	if err != nil {
+		return fail("Couldn't load the errand.")
+	}
+	if w == nil || step < 0 || step >= len(w.Steps) || !isComputerStep(w.Steps[step].Command) {
+		return fail("Errand not found")
+	}
+	if w.State != "running" && w.State != "waiting" {
+		return handled(c.HouseholdID, "That errand already finished.")
+	}
+	st := &w.Steps[step]
+	if st.Args == nil {
+		st.Args = pyjson.NewObject()
+	}
+	st.Args.Set(ArgBuyMode, mode)
+	if err := s.saveSteps(ctx, w.ID, w.Steps, false); err != nil {
+		return fail("Couldn't save the choice.")
+	}
+	s.updateRanCard(ctx, w, w.Results, w.State, "")
+	title := map[string]string{computer.BuyAuto: "🛒 I'll order it myself", computer.BuyConfirm: "🛒 I'll check with you first",
+		computer.BuyCart: "🛒 I'll just fill the cart"}[mode]
+	return CallbackResult{Success: true, ContextData: inbox(c.HouseholdID, title, buyModeLine(&BuyChoice{Mode: mode,
+		CapCents: s.settingCap(ctx, w.HouseholdID)}))}
+}
+
+// settingCap is the household's cap for ordering by itself, in cents.
+func (s *Service) settingCap(ctx context.Context, hh string) int64 {
+	if s.Settings == nil {
+		return 0
+	}
+	return s.Settings.Int(ctx, SettingAutoApproveCents, settings.Scope{HouseholdID: hh})
 }
 
 func fail(msg string) CallbackResult { return CallbackResult{Error: msg} }

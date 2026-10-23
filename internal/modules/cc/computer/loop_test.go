@@ -1179,53 +1179,56 @@ func TestMisstep(t *testing.T) {
 	}
 }
 
-// A model that isn't able to buy (not large, not cloud) stops at the checkout: nothing is bought,
-// and the user is told to place the order (#485: the 9B model invented cart items).
-func TestBuyGate(t *testing.T) {
-	small := func(e *tenv) {
-		e.loop.Models = Models{Endpoint: func(context.Context, string) (llm.Endpoint, error) {
-			return llm.Endpoint{Model: "qwen3.5-9b", Vision: true}, nil
-		}}
-	}
+// "Just fill the cart" stops at the checkout: nothing is bought, and the user is told to place the
+// order; otherwise the purchase waits for the confirmation as before (decision
+// 2026-10-22-computer-buying-asks-up-front).
+func TestBuyModeCart(t *testing.T) {
 	order := `{"checkout": {"product": "Lavender soap", "price": "$4.99"}, "actions": [` + press("e5", "Place the order") + `]}`
-	t.Run("small model stops", func(t *testing.T) {
+	mode := func(m string) func(context.Context) string { return func(context.Context) string { return m } }
+	t.Run("cart stops", func(t *testing.T) {
 		e := newEnv(t)
-		small(e)
 		e.script(order)
-		out := e.run()
-		if out.State != StateDone || !strings.Contains(out.Summary, "didn't place it") || !strings.Contains(out.Summary, "$4.99") {
+		tk := task()
+		tk.BuyMode = mode(BuyCart)
+		out := e.loop.Run(context.Background(), tk)
+		if out.State != StateDone || !strings.Contains(out.Summary, "ready at checkout") || !strings.Contains(out.Summary, "$4.99") {
 			t.Fatalf("outcome %+v", out)
 		}
 		if len(e.exec.batches) != 0 {
 			t.Fatalf("%d batches sent", len(e.exec.batches))
 		}
 	})
-	t.Run("allowed anyway", func(t *testing.T) {
-		e := newEnv(t)
-		small(e)
-		e.setts[SettingBuyOnAnyModel] = true
-		e.script(order)
-		if out := e.run(); out.State != StateNeedsApproval {
-			t.Fatalf("outcome %+v", out)
+	for _, m := range []string{"", BuyConfirm, BuyAuto} {
+		t.Run("asks "+m, func(t *testing.T) {
+			e := newEnv(t)
+			e.script(order)
+			tk := task()
+			if m != "" {
+				tk.BuyMode = mode(m)
+			}
+			if out := e.loop.Run(context.Background(), tk); out.State != StateNeedsApproval {
+				t.Fatalf("outcome %+v", out)
+			}
+		})
+	}
+}
+
+// AllWanted: an order placed by itself holds only what was asked for.
+func TestAllWanted(t *testing.T) {
+	goal := "Order me one pulled pork sandwich from Smokehouse Kitchen"
+	for _, c := range []struct {
+		items []string
+		want  bool
+	}{
+		{[]string{"1 × Pulled Pork Sandwich $14.00"}, true},
+		{[]string{"1 × Pulled Pork Sandwich (No Pickles) $14.00"}, true},
+		{[]string{"1 × Pulled Pork Sandwich $14.00", "1 × Smokehouse Thick Burger $19.00"}, false},
+		{nil, false},
+	} {
+		if got := AllWanted(goal, c.items); got != c.want {
+			t.Errorf("%v: %v, want %v", c.items, got, c.want)
 		}
-	})
-	t.Run("large model asks", func(t *testing.T) {
-		e := newEnv(t)
-		e.script(order)
-		if out := e.run(); out.State != StateNeedsApproval {
-			t.Fatalf("outcome %+v", out)
-		}
-	})
-	t.Run("cloud asks", func(t *testing.T) {
-		e := newEnv(t)
-		e.loop.Models = Models{Endpoint: func(context.Context, string) (llm.Endpoint, error) {
-			return llm.Endpoint{Model: "some-cloud-model", Remote: true}, nil
-		}}
-		e.script(order)
-		if out := e.run(); out.State != StateNeedsApproval {
-			t.Fatalf("outcome %+v", out)
-		}
-	})
+	}
 }
 
 // A misstep in a batch is dropped and the rest runs; the same all-misstep batch sent again is a

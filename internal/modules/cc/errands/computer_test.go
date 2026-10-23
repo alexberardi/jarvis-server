@@ -160,6 +160,13 @@ func computerStep(goal string) Step {
 	return Step{Command: policy.ToolComputerTask, Args: args, Label: "Order the mug"}
 }
 
+// autoStep is computerStep the user told to order by itself (buy mode auto).
+func autoStep(goal string) Step {
+	st := computerStep(goal)
+	st.Args.Set(ArgBuyMode, computer.BuyAuto)
+	return st
+}
+
 // launchRun inserts a run of kind and queues its first drive, as launch does.
 func (c *cenv) launchRun(id, kind string, steps ...Step) {
 	c.t.Helper()
@@ -418,7 +425,7 @@ func TestSpendLimitAutoApproves(t *testing.T) {
 	c := newComputerEnv(t)
 	c.s.Settings = withInts{c.set, map[string]int64{SettingAutoApproveCents: 2000}}
 	c.llm.say("computer", checkoutReply, doneReply)
-	c.launchRun("wf_c", "errand", computerStep("order a blue mug"))
+	c.launchRun("wf_c", "errand", autoStep("order a blue mug"))
 	c.idle()
 	if _, ok := c.cardTitled(stepTitlePrefix); ok {
 		t.Fatalf("asked within the spend limit: %v", c.cards.titles())
@@ -451,6 +458,17 @@ func TestSpendLimitAutoApproves(t *testing.T) {
 		t.Fatal("over the limit, something was approved")
 	}
 
+	// Within the limit, but the user didn't tell it to order by itself: it asks (decision
+	// 2026-10-22-computer-buying-asks-up-front; the cap applies to "order it myself" only).
+	c4 := newComputerEnv(t)
+	c4.s.Settings = withInts{c4.set, map[string]int64{SettingAutoApproveCents: 2000}}
+	c4.llm.say("computer", checkoutReply, doneReply)
+	c4.launchRun("wf_c", "errand", computerStep("order a blue mug"))
+	c4.idle()
+	if _, ok := c4.cardTitled(stepTitlePrefix); !ok || len(c4.comp.acted()) != 0 {
+		t.Fatalf("checked-first errand approved by the cap: %v, acted %+v", c4.cards.titles(), c4.comp.acted())
+	}
+
 	// Within the limit, but the batch also sends a message: it asks, and nothing runs.
 	c3 := newComputerEnv(t)
 	c3.s.Settings = withInts{c3.set, map[string]int64{SettingAutoApproveCents: 2000}}
@@ -458,7 +476,7 @@ func TestSpendLimitAutoApproves(t *testing.T) {
 	c3.policy.set(policy.ToolComputerTask+"|"+policy.TargetAction+computeruse.CatSend, policy.Verdict{Effect: policy.Ask, Reason: "computer task default (action:send)"})
 	c3.llm.say("computer", `{"checkout": {"product": "Blue mug", "price": "$12.99", "currency": "USD"}, `+
 		`"actions": [{"kind": "press", "ref": "e1", "intent": "Place the order"}, {"kind": "press", "ref": "e6", "intent": "Message the seller"}]}`, doneReply)
-	c3.launchRun("wf_c", "errand", computerStep("order a blue mug"))
+	c3.launchRun("wf_c", "errand", autoStep("order a blue mug"))
 	c3.idle()
 	card, ok := c3.cardTitled(stepTitlePrefix)
 	if !ok || strings.Join(elementLabels(card.Metadata), ",") != "Approve,Cancel" {
@@ -508,7 +526,7 @@ func TestPriceCents(t *testing.T) {
 	// "$1.2k" is not approved under a $20 limit.
 	c := newComputerEnv(t)
 	c.s.Settings = withInts{c.set, map[string]int64{SettingAutoApproveCents: 2000}}
-	if _, ok := c.s.withinSpendLimit(context.Background(), hh, computer.Outcome{
+	if _, ok := c.s.withinSpendLimit(context.Background(), hh, computer.BuyAuto, "order a blue mug", computer.Outcome{
 		Checkout: &computer.Checkout{Product: "Blue mug", Price: "$1.2k"},
 		Pending:  []computer.PendingAction{{Category: computeruse.CatPay, Digest: "d"}},
 	}); ok {
@@ -988,5 +1006,43 @@ func TestConfirmCardListsCartItems(t *testing.T) {
 	}
 	if body, co := ComputerConfirmCard(&computer.Checkout{Product: "Soap", Price: "4.99"}, nil); strings.Contains(body, "In the cart") || co["items"] != nil {
 		t.Fatalf("no items, yet %q %+v", body, co)
+	}
+}
+
+// A buying errand's progress card says how far it goes and offers the other choices; a tap saves
+// the choice on the step, and the card follows (decision 2026-10-22-computer-buying-asks-up-front).
+func TestBuyModeCard(t *testing.T) {
+	c := newComputerEnv(t)
+	c.s.Settings = withInts{c.set, map[string]int64{SettingAutoApproveCents: 5000}}
+	c.parkOnCheckout("errand")
+	prog, ok := c.cardTitled(progressTitlePrefix)
+	if !ok {
+		t.Fatalf("no progress card: %v", c.cards.titles())
+	}
+	idx := slices.IndexFunc(c.cards.all(), func(cd Card) bool { return cd.Title == prog.Title })
+	cur, _ := c.cards.update(c.cards.ids[idx])
+	if cur.Title == "" {
+		cur = prog
+	}
+	if got := strings.Join(elementLabels(cur.Metadata), ","); got != "Order it myself (up to $50.00),Just fill the cart,Stop" ||
+		!strings.Contains(cur.Body, "I'll check with you before paying.") {
+		t.Fatalf("buttons %q body:\n%s", got, cur.Body)
+	}
+
+	res := c.tap(CallbackBuyMode, map[string]any{"workflow_id": "wf_c", "step": 0, "mode": computer.BuyCart})
+	if !res.Success {
+		t.Fatalf("tap: %+v", res)
+	}
+	w := c.wf("wf_c")
+	if got := stepBuyMode(w.Steps[0]); got != computer.BuyCart {
+		t.Fatalf("mode = %s", got)
+	}
+	up, _ := c.cards.update(c.cards.ids[idx])
+	if got := strings.Join(elementLabels(up.Metadata), ","); got != "Order it myself (up to $50.00),Check with me first,Stop" ||
+		!strings.Contains(up.Body, "stop at checkout") {
+		t.Fatalf("after the tap: buttons %q body:\n%s", got, up.Body)
+	}
+	if res := c.tap(CallbackBuyMode, map[string]any{"workflow_id": "wf_c", "step": 0, "mode": "yolo"}); res.Success {
+		t.Fatal("an unknown mode was accepted")
 	}
 }
