@@ -167,7 +167,7 @@ boot() {
   [ -f "$DIR/seed.iso" ] && seed=(-drive "file=$DIR/seed.iso,if=virtio,format=raw,readonly=on")
   [ "$DRY" = 1 ] || ! running || die "the VM is already running (scripts/freepbx-lane stop)"
   x qemu-system-x86_64 -name jarvis-freepbx-l2 -enable-kvm -cpu host -m "$MEM" -smp "$CPUS" \
-    -drive "file=$DISK,if=virtio,format=qcow2" "${seed[@]}" \
+    -drive "file=$DISK,if=virtio,format=qcow2" ${seed[@]+"${seed[@]}"} \
     -netdev "$net" -device virtio-net-pci,netdev=n0 \
     -display none -serial "file:$DIR/serial.log" -daemonize -pidfile "$PIDFILE"
   wait_ssh
