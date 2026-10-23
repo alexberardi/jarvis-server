@@ -25,9 +25,11 @@ above the tentative band's 0.20 floor, so a window needs a second, stronger fram
 - The echo canceller's webrtc noise suppression (`module-echo-cancel` loads with
   `analog_gain_control=0 digital_gain_control=0`; `noise_suppression` and `high_pass_filter`
   default on and may cost wake score). Changing it needs a measurement on the Pi: score the same
-  phrase on the raw `jarvis_mic_raw` and the cancelled `jarvis_ec` capture. Follow-up.
+  phrase on the raw `jarvis_mic_raw` and the cancelled `jarvis_ec` capture. Follow-up: loop
+  item #514.
 - A recorded fixture of the wake word over the node's music through the canceller needs a
   capture on the Pi (`arecord -D jarvis_ec` while music plays); none exists in the repo yet.
+  Follow-up: loop item #513.
   The offline stand-in, `TestWakeOverLowMusicClearsTheTentativeFireBar` (internal/voice/oww),
   mixes `hey_jarvis_emma.wav` with synthetic music from 10 dB under the speech to as loud as it:
   it peaks at 0.998 (music alone 0.000). Synthetic music masks the phrase far less than the
