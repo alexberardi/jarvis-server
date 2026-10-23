@@ -23,7 +23,7 @@ tested), not a stored setting: what's stored is URL, dialect, model, key, voice.
 |---|---|---|---|---|
 | OpenAI | `gpt-transcribe` | `gpt-4o-mini-tts`, voice `marin` | openai | `whisper-1`, `gpt-4o-*-transcribe` sunset 2027-02-26; `tts-1(-hd)` 2027-01-06. Fixed voice list |
 | Groq | `whisper-large-v3-turbo` at `https://api.groq.com/openai/v1` | — (its TTS models are in flux; add later) | openai | Bills each request as ≥10 s: short turns cost more than they look |
-| ElevenLabs | `scribe_v2` | `eleven_flash_v2_5` (~75 ms) | elevenlabs | `xi-api-key`; voices from `GET /v2/voices`; we send `enable_logging=false` |
+| ElevenLabs | `scribe_v2` at `https://api.elevenlabs.io` | `eleven_flash_v2_5` (~75 ms), no default voice | elevenlabs | `xi-api-key`; voices from `GET /v2/voices`; we send `enable_logging=false` |
 | Other | any `/v1/audio/transcriptions` | any `/v1/audio/speech` | openai | speaches, LocalAI, Kokoro-FastAPI, a GPU box on the LAN; voices from `GET /v1/audio/voices` if served, else free text |
 
 Later dialects, same seam: Deepgram (`/v1/listen`, `/v1/speak`), Cartesia. Not in v1.
@@ -138,7 +138,9 @@ No cloud keys in CI.
    (choices: [../decisions/2026-10-22-remote-stt-openai-dialect.md](../decisions/2026-10-22-remote-stt-openai-dialect.md));
    harness: `scripts/sandbox up --speech fake|speaches`.
 2. TTS remote, openai dialect, stable 24 kHz format, voices for OpenAI and Other.
-3. ElevenLabs dialect for both.
+3. ElevenLabs dialect for both. **Built** (URL convention, voice ids and names, word timings:
+   [../decisions/2026-10-22-remote-speech-elevenlabs.md](../decisions/2026-10-22-remote-speech-elevenlabs.md));
+   harness: `scripts/sandbox up --speech fake --speech-api elevenlabs`.
 4. Fallback for both.
 5. Admin Speech section + wizard + test buttons (UI rules in `web/admin/CLAUDE.md`).
 
