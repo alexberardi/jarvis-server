@@ -70,7 +70,7 @@ Risks and what we do about them:
 
 | Gotcha | Impact | Mitigation |
 |---|---|---|
-| **Responsive Firewall + Intrusion Detection (fail2ban)**: ~3 failed REGISTERs → dropped; repeated → banned 30 min to 24 h+ | A wrong password plus a retry loop locks the Jarvis host out of the PBX (and possibly its web UI) | Stop after 3 auth failures and say so ("check password; the PBX may have blocked this host, unblock under Firewall → Status"). Exponential backoff always. Setup guide: put the Jarvis IP in Firewall **Trusted** and the IDS whitelist |
+| **Intrusion Detection (fail2ban)**, and the **Responsive Firewall** once an admin enables it (off on a fresh install). Seen on FreePBX 17.0.33 (L2, 2026-10-22): fail2ban's `asterisk-iptables` jail bans at 5 matches in 10 min, for 30 min, on every port; Asterisk logs 2 matches per refused REGISTER, so the 3rd refused REGISTER bans; `recidive`: 20 matches in a day → 1 week | A wrong password locks the Jarvis host out of the PBX entirely, SIP, SSH and the web UI, for 30 min, even though jarvisd stops after 3 | Stop after 3 auth failures and say so (`HintBlocked`). Exponential backoff always. Unblock: Admin → System Admin → Intrusion Detection (`fail2ban-client unban`) on a default install, Firewall → Status where the Responsive Firewall is on. Setup guide: put the Jarvis IP in the IDS whitelist (and Firewall **Trusted** if it is on). jarvisd's 3 alone bans, and its hint names only Firewall → Status: open questions for the user ([decision](../decisions/2026-10-22-sip-l2-calls-and-lockout.md)) |
 | `max_contacts=1`, `remove_existing=no` (FreePBX 17 defaults Remove Existing to yes, where a new contact replaces the old; no is an older install's or an admin's setting) | Where it is no: after a restart on a new port/IP, the new REGISTER is rejected until the old one expires; rejections feed the firewall | Stable local SIP port and Contact across restarts; `Expires: 0` on clean shutdown; guide says set Remove Existing = yes |
 | `qualify_frequency=60` (OPTIONS) | Unanswered OPTIONS marks us unavailable → inbound calls go to voicemail | Answer OPTIONS 200 |
 | Inbound needs the PBX to reach us | INVITE and RTP to jarvisd on the LAN | Listen on a configured port (not 5060 by default, in case the PBX shares the host) and a pinned RTP range; Docker installs need host networking; macOS firewall prompt; Windows firewall rule |
@@ -224,23 +224,32 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
   afterwards, since `max_contacts=1` lets one of them in.
 
 **L2 as built** (2026-10-22; choices in
-[../decisions/2026-10-22-sip-l2-freepbx-lane.md](../decisions/2026-10-22-sip-l2-freepbx-lane.md)):
+[../decisions/2026-10-22-sip-l2-freepbx-lane.md](../decisions/2026-10-22-sip-l2-freepbx-lane.md)
+and, for the calls, [../decisions/2026-10-22-sip-l2-calls-and-lockout.md](../decisions/2026-10-22-sip-l2-calls-and-lockout.md)):
 
 ```sh
 scripts/freepbx-lane build --dev-box <dev-box>   # once: Debian 12 VM, FreePBX 17, snapshots installed + provisioned
-scripts/freepbx-lane weekly [--no-update]        # update, provision 100 afresh, diff against L1; exit 1 on drift
+scripts/freepbx-lane weekly [--no-update] [--no-calls]  # update, provision 100 afresh, capture it, the calls; diff against L1; exit 1 on drift or a failed call
+scripts/freepbx-lane calls [--sandbox N]         # the calls alone, on "provisioned"
 scripts/freepbx-lane timer                       # the weekly systemd user units, and how to enable them (not enabled; see below)
 go run ./tools/siplane drift FILE                # the diff alone, on a saved `pjsip show endpoint/aor 100`
+go run ./tools/siplane l2 --sandbox N            # the calls' scenarios against a VM that is up and fitted (calls.sh)
 ```
 
-- qemu/KVM with user-mode networking (SSH and HTTP forwarded on loopback only), files in
+- qemu/KVM with user-mode networking, forwarded on loopback only: SSH, HTTP, SIP (UDP and TCP,
+  127.0.0.1:5260) and RTP (127.0.0.1:30800-30819, the same ports inside). Files in
   `~/.cache/jarvis-harness/freepbx`; `scripts/freepbx-lane.d/` holds the provisioning
-  (bulkimport CSVs, `routes.sql`, `provision.sh`) and the timer's units.
+  (bulkimport CSVs, `routes.sql`, `provision.sh`), `calls.sh` and the timer's units.
 - Drift: every setting pjsip.conf spells out for 100, plus everything else L1's Asterisk shows
   (`tools/siplane/testdata/l1-show-100.txt`), against the real FreePBX.
-- Not yet: one call each way and the firewall lockout path (loop item #490).
+- Calls (`siplane l2`, with an L1 sandbox's carrier and voice): jarvisd's SIP provider registers
+  as 100, unregisters and registers again; dials a 10-digit number through the outbound route
+  to the carrier; answers the carrier's call to DID 5551230000 after the answer delay; both
+  directions of each call transcribed, max WER 0.25. Then a wrong password: jarvisd stops after
+  exactly 3, those 3 get the host banned by fail2ban on every port (§3.1), and after
+  `fail2ban-client unban` SSH answers and the right password registers.
 - Built and first run 2026-10-22 (FreePBX 17.0.33.2, Asterisk 22.11.0; 9 settings drifted, #489).
-  **Run by hand on Thursdays**, not by the timer
+  **Run by hand on Thursdays** (`weekly`, calls included), not by the timer
   ([../decisions/2026-10-22-freepbx-lane-run-by-hand.md](../decisions/2026-10-22-freepbx-lane-run-by-hand.md)).
 
 No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio account could front

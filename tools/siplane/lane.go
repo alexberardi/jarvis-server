@@ -108,6 +108,9 @@ type lane struct {
 	root  string
 	voice *voice
 	out   string // --out: heard audio, transcripts and PBX dumps go here; "" = nowhere
+	// vm is set for `siplane l2`: the PBX is the L2 lane's FreePBX VM, reached over the lane's
+	// SSH, and nobody else holds 100 there.
+	vm *l2VM
 }
 
 // docker runs a docker command; its combined output is in the error when it fails.
@@ -126,6 +129,9 @@ func (l *lane) docker(ctx context.Context, args ...string) (string, error) {
 
 // cli is an Asterisk CLI command on the lane's PBX.
 func (l *lane) cli(ctx context.Context, command string) (string, error) {
+	if l.vm != nil {
+		return l.vmRun(ctx, "sudo asterisk -rx "+shellQuote(command))
+	}
 	return l.docker(ctx, "exec", l.env["SIP_LANE_ASTERISK"], "asterisk", "-rx", command)
 }
 

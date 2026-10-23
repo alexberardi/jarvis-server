@@ -71,6 +71,9 @@ func splitHostPort(hp string) (string, int, error) {
 // baresip deletes its account (unregistering, Expires: 0) and creates it again from the
 // lane's accounts file.
 func (l *lane) release(ctx context.Context) (func(), error) {
+	if l.vm != nil {
+		return func() {}, nil // no stand-in on the FreePBX VM
+	}
 	acct, err := os.ReadFile(filepath.Join(l.party("jarvis").dir, "accounts"))
 	if err != nil {
 		return nil, err
