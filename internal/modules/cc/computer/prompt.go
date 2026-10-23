@@ -121,7 +121,8 @@ func renderPrompt(in promptInput) string {
 			// Tk and other apps without AT-SPI: screenshots only (DESIGN.md §12), so refs
 			// can never resolve and only coordinate actions work.
 			b.WriteString("(this app lists no elements: work from the newest screenshot with coordinate actions — " +
-				"click/double_click x,y, then type or keypress; press/set_value/select need a listed element and cannot work here)\n")
+				"click/double_click x,y, then type or keypress; press/set_value/select need a listed element and cannot work here. " +
+				"The app's keyboard shortcuts and menus work: keypress [\"ctrl\",\"s\"] saves more reliably than a click on a small button)\n")
 		} else {
 			b.WriteString("(no elements found)\n")
 		}

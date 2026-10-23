@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -52,11 +53,14 @@ func parseReply(s string) (Reply, error) {
 	}
 	var r Reply
 	if err := json.Unmarshal([]byte(s[i:j+1]), &r); err != nil {
-		// The house model sometimes stops right before the closing brace, and at temperature 0
-		// the retry is byte-identical (#528): an answer missing only closers is repaired.
-		fixed, ok := closeTruncated(strings.TrimRight(s[i:], " \t\r\n"))
-		if !ok || json.Unmarshal([]byte(fixed), &r) != nil {
-			return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
+		// The loop runs at temperature 0, so a retry reproduces the model's slip byte for byte
+		// (#528): the two deterministic ones seen — a dropped "y" key in a coordinate pair and
+		// an answer missing only its closing braces — are repaired instead of killing the run.
+		if json.Unmarshal([]byte(droppedY.ReplaceAllString(s[i:j+1], `$1,"y":$2`)), &r) != nil {
+			fixed, ok := closeTruncated(droppedY.ReplaceAllString(strings.TrimRight(s[i:], " \t\r\n"), `$1,"y":$2`))
+			if !ok || json.Unmarshal([]byte(fixed), &r) != nil {
+				return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
+			}
 		}
 	}
 	switch {
@@ -98,6 +102,10 @@ func parseReply(s string) (Reply, error) {
 	}
 	return r, nil
 }
+
+// droppedY is a coordinate pair whose "y" key the model dropped: "x":170,777. The bare second
+// number can only be the y, so the key is put back.
+var droppedY = regexp.MustCompile(`("x"\s*:\s*-?\d+)\s*,\s*(-?\d+)`)
 
 // closeTruncated appends the closers a truncated JSON object is missing. Only unclosed objects
 // and arrays are repaired: an answer cut mid-string stays broken, rather than guessing at its

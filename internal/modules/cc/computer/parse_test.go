@@ -96,3 +96,21 @@ func TestParseReplyTruncated(t *testing.T) {
 		}
 	}
 }
+
+// The house model's other deterministic slip (#528): the "y" key dropped from a coordinate pair
+// ("x":170,777). The pair is unambiguous, so it is repaired instead of killing the run.
+func TestParseReplyDroppedY(t *testing.T) {
+	r, err := parseReply(`{"thought":"t","actions":[{"kind":"click","x":170,777,"intent":"save"}]}`)
+	if err != nil {
+		t.Fatalf("dropped-y reply: %v", err)
+	}
+	a := r.Actions[0]
+	if a.X == nil || a.Y == nil || *a.X != 170 || *a.Y != 777 {
+		t.Fatalf("dropped-y reply parsed to %+v", a)
+	}
+	// An intact pair stays as written.
+	r, err = parseReply(`{"thought":"t","actions":[{"kind":"click","x":1,"y":2,"intent":"i"}]}`)
+	if err != nil || *r.Actions[0].X != 1 || *r.Actions[0].Y != 2 {
+		t.Fatalf("intact pair: %+v, %v", r.Actions, err)
+	}
+}
