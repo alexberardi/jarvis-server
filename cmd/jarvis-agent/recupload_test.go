@@ -27,6 +27,7 @@ type fakeJarvisd struct {
 	images    bool // an upload carried image_attachments
 	putStatus map[string]int
 	puts      []string
+	refused   map[string]int // PUTs answered with putStatus, by path
 }
 
 func (j *fakeJarvisd) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -42,6 +43,10 @@ func (j *fakeJarvisd) RoundTrip(req *http.Request) (*http.Response, error) {
 	status := j.status
 	if s := j.putStatus[req.URL.Path]; s != 0 && req.Method == http.MethodPut {
 		status = s
+		if j.refused == nil {
+			j.refused = map[string]int{}
+		}
+		j.refused[req.URL.Path]++
 	}
 	if status == 0 {
 		status = http.StatusOK
@@ -77,6 +82,14 @@ func (j *fakeJarvisd) keyframes() []string {
 	defer j.mu.Unlock()
 	return slices.Clone(j.puts)
 }
+
+// refusals is how many PUTs to path got its putStatus.
+func (j *fakeJarvisd) refusals(path string) int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.refused[path]
+}
+
 func (j *fakeJarvisd) attachments() bool { j.mu.Lock(); defer j.mu.Unlock(); return j.images }
 
 func (j *fakeJarvisd) uploads() map[string]int {
