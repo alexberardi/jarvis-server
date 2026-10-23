@@ -63,7 +63,8 @@ class NotesApp:
 
         tk.Label(right, text="Title").pack(side=tk.TOP, anchor=tk.W)
         self.title_entry = tk.Entry(right)
-        self.title_entry.pack(side=tk.TOP, fill=tk.X)
+        # Field-height targets like a real app's (a default Tk entry is a 16px sliver).
+        self.title_entry.pack(side=tk.TOP, fill=tk.X, ipady=6, pady=(0, 4))
         tk.Label(right, text="Body").pack(side=tk.TOP, anchor=tk.W)
         bottom_right = tk.Frame(right, name="bottom_right")
         bottom_right.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
@@ -74,9 +75,9 @@ class NotesApp:
         if layout == "moved":
             new_parent, save_parent = bottom_right, top_left
         self.new_button = tk.Button(new_parent, text="New note (Ctrl+N)", command=self.new_note)
-        self.new_button.pack(side=tk.LEFT, pady=(0, 8))
+        self.new_button.pack(side=tk.LEFT, pady=(0, 8), ipadx=6, ipady=4)
         self.save_button = tk.Button(save_parent, text="Save (Ctrl+S)", command=self.save)
-        self.save_button.pack(side=tk.LEFT, pady=(0, 8))
+        self.save_button.pack(side=tk.LEFT, pady=(0, 8), ipadx=6, ipady=4)
 
         self.title_entry.focus_set()
 
