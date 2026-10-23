@@ -442,6 +442,18 @@ func itemWords(s string) []string {
 	return out
 }
 
+// wanted reports an item the task names: most of its words are in the task.
+func wanted(item string, goalWords map[string]bool) bool {
+	words := itemWords(item)
+	n := 0
+	for _, w := range words {
+		if goalWords[w] {
+			n++
+		}
+	}
+	return len(words) > 0 && n*2 > len(words)
+}
+
 // upsell reports an add button that sells something more next to the cart: a "+ X" button, or an
 // add inside a dialog that offers Checkout. A product page's own "Add to cart" isn't one: a task
 // like "the best-rated watch under $300" names no product, and its add is the point (#485's guard
@@ -574,6 +586,12 @@ func misstep(goal string, obs Observation, actions []computeruse.Action) (feedba
 		e, ok := byRef[a.Ref]
 		if !ok || (a.Kind != "press" && a.Kind != "click") {
 			continue
+		}
+		if m := removedItem.FindStringSubmatch(e.Name); m != nil && buyGoal.MatchString(goal) && wanted(m[1], goalWords) {
+			// The 9B "removed one" sandwich with the line's Remove and emptied the cart of the very
+			// item it was sent for (#485). Once per item: it may have a reason.
+			return fmt.Sprintf("%q (%s) takes out %q, which the task asks for: to change how many, use its decrease or quantity control; remove it only if the cart has it under the wrong options.",
+				e.Name, e.Ref, m[1]), "remove:" + strings.ToLower(m[1])
 		}
 		if m := removedItem.FindStringSubmatch(e.Name); m != nil && removeIntent.MatchString(a.Intent) {
 			// "Remove Chopped Brisket Sandwich from the cart" on "Remove Pulled Pork Sandwich".

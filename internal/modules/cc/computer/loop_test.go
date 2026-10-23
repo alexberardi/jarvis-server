@@ -1147,9 +1147,8 @@ func TestMisstep(t *testing.T) {
 		{"e2", "Add a burger", false, false}, // a menu's own add, not an upsell
 		{"e3", "Add potato salad", true, true},
 		{"e6", "Remove the burger", false, false},
-		{"e7", "Remove Chopped Brisket Sandwich from cart", true, false},
-		{"e7", "Remove the pulled pork sandwich", false, false},
-		{"e7", "Remove it", false, false},
+		{"e7", "Remove Chopped Brisket Sandwich from cart", true, true}, // the item the task wants
+		{"e7", "Remove one pulled pork sandwich", true, true},
 	} {
 		fb, key := misstep(goal, page, []computeruse.Action{{Kind: "press", Ref: c.ref, Intent: c.intent}})
 		if (fb != "") != c.sent || (key != "") != c.once {
@@ -1300,7 +1299,7 @@ func TestMisstepItemGone(t *testing.T) {
 		{Ref: "e3", Role: "button", Name: "+ Smokehouse Thick Burger $19.00"},
 	}}
 	for _, ref := range []string{"e2", "e3"} {
-		fb, _ := misstep("Order one pulled pork sandwich", page, []computeruse.Action{{Kind: "press", Ref: ref, Intent: "Remove the Smokehouse Thick Burger from the cart"}})
+		fb, _ := misstep("Order lunch from the kitchen", page, []computeruse.Action{{Kind: "press", Ref: ref, Intent: "Remove the Smokehouse Thick Burger from the cart"}})
 		if !strings.Contains(fb, "isn't in the cart any more") {
 			t.Errorf("%s: %q", ref, fb)
 		}

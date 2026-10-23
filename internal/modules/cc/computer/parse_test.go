@@ -1,6 +1,9 @@
 package computer
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A click on a listed element (a ref, no coordinates) is a press: the house model writes it so.
 func TestParseClickOnRefIsPress(t *testing.T) {
@@ -44,6 +47,8 @@ func TestParseReply(t *testing.T) {
 		{`{"ask": "Which size?", "reason": "unclear"}`, "ask"},
 		{`{"ask": "Log in?", "reason": "whatever"}`, "ask"},
 		{`{"checkout": {"product": "Soap", "price": "4.99"}, "actions": [{"kind": "press", "ref": "e5", "intent": "Pay"}]}`, "actions"},
+		// More than MaxBatch actions: the first MaxBatch run (#485).
+		{`{"actions": [` + strings.Repeat(`{"kind": "scroll", "dy": 100, "intent": "Down"}, `, 14) + `{"kind": "scroll", "dy": 100, "intent": "Down"}]}`, "actions"},
 		// The question sent as an action (#485).
 		{`{"thought": "which?", "actions": [{"kind": "ask", "intent": "Which Mutiny BBQ location?"}]}`, "ask"},
 	}

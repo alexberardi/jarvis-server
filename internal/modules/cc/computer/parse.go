@@ -98,6 +98,11 @@ func parseReply(s string) (Reply, error) {
 				}
 			}
 		}
+		if len(r.Actions) > computeruse.MaxBatch {
+			// The first MaxBatch run and the model plans the rest from the page they lead to: a
+			// long batch failed the whole step as unreadable (#485).
+			r.Actions = r.Actions[:computeruse.MaxBatch]
+		}
 		if err := computeruse.ValidateBatch(r.Actions); err != nil {
 			return Reply{}, fmt.Errorf(`"actions": %v`, err)
 		}
