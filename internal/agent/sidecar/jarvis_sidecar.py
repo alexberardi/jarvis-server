@@ -713,7 +713,7 @@ def _num(v) -> int:
 
 
 def _normalize_light(raw: dict) -> dict:
-    out = {"state": str(raw.get("state", "off")).lower()}
+    out = {"state": str(raw.get("state", "unknown")).lower()}
     if raw.get("brightness") is not None:
         b = float(raw["brightness"])
         if b > 100:  # HA's 0-255
@@ -738,7 +738,8 @@ def _normalize_light(raw: dict) -> dict:
 
 def _normalize_climate(raw: dict, unit: str) -> dict:
     out = {"unit": unit, "online": raw.get("online", True)}
-    out["state"] = str(raw.get("hvac_action") or raw.get("state") or "off").lower()
+    # An unreadable state is "unknown"; the mode stays a real enum ("off" is a valid hvac mode).
+    out["state"] = str(raw.get("hvac_action") or raw.get("state") or "unknown").lower()
     mode = raw.get("hvac_mode") or raw.get("mode") or "off"
     out["mode"] = str(mode).lower()
     current = raw.get("current_temperature")
@@ -767,7 +768,7 @@ def _normalize_climate(raw: dict, unit: str) -> dict:
 
 
 def _normalize_kettle(raw: dict) -> dict:
-    out = {"online": raw.get("online", True), "state": str(raw.get("state", "off")).lower()}
+    out = {"online": raw.get("online", True), "state": str(raw.get("state", "unknown")).lower()}
     for key in ("current_temperature", "target_temperature"):
         if raw.get(key) is not None:
             out[key] = _num(raw[key])
@@ -787,7 +788,7 @@ def _normalize_cover(raw: dict) -> dict:
 
 
 def _normalize_media(raw: dict) -> dict:
-    out = {"state": str(raw.get("state", "off")).lower()}
+    out = {"state": str(raw.get("state", "unknown")).lower()}
     if raw.get("volume_level") is not None:
         out["volume"] = round(float(raw["volume_level"]) * 100)
     for key in ("media_title", "media_artist", "source"):
@@ -821,7 +822,7 @@ def _domain(domain: str, raw: dict, features):
         return _normalize_climate(raw, unit), _hints("thermostat", features, ("heat", "cool", "off"),
                                                      50 if unit == "F" else 10, 90 if unit == "F" else 32, 1, unit)
     if domain == "switch":
-        return {"state": str(raw.get("state", "off")).lower()}, _hints("toggle", features)
+        return {"state": str(raw.get("state", "unknown")).lower()}, _hints("toggle", features)
     if domain == "lock":
         return _normalize_lock(raw), _hints("lock", features)
     if domain == "camera":
@@ -854,14 +855,20 @@ def device_state(params: dict) -> dict:
             try:
                 raw = _run(fam.get_state(ip=details.get("local_ip") or "", entity_id=entity_id,
                                          cloud_id=details.get("cloud_id") or "",
-                                         mac_address=details.get("mac_address") or ""))
+                                         mac_address=details.get("mac_address") or "",
+                                         model=details.get("model") or ""))
             except Exception as exc:
                 print(f"sidecar: device state query failed for {entity_id}: {exc}", file=sys.stderr)
     if raw is None:
-        return {"entity_id": entity_id, "domain": domain, "error": "Failed to query device state"}
+        return {"entity_id": entity_id, "domain": domain, "state": {"state": "unknown"},
+                "error": "Failed to query device state"}
     if raw.get("needs_pairing"):
         return {"entity_id": entity_id, "domain": domain, "state": {"needs_pairing": True},
                 "ui_hints": {"control_type": "pairing"}}
+    if raw.get("error"):
+        # The family answered but couldn't read the device: "unknown", never "off".
+        return {"entity_id": entity_id, "domain": domain, "state": {"state": "unknown"},
+                "error": str(raw["error"])}
     available = [str(m).lower() for m in raw.get("available_features", raw.get("available_modes", []))]
     handled = _domain(domain, raw, available or None)
     state, hints = handled if handled else (raw, _hints("toggle", None))

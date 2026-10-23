@@ -164,8 +164,8 @@ func (m *Module) handleDeviceState(w http.ResponseWriter, r *http.Request, a pro
 	res, ok := m.awaitNode(ctx, node.nodeID, rid, stateWait, func() error {
 		return m.bus.Publish(node.nodeID, "device-state", map[string]any{
 			"request_id": rid, "entity_id": d.entityID, "domain": domain, "protocol": nullable(d.protocol),
-			"source": d.sourceOr(), "cloud_id": nullable(d.cloudID), "local_ip": nullable(d.localIP),
-			"mac_address": nullable(d.mac),
+			"source": d.sourceOr(), "cloud_id": nullable(d.cloudID), "model": nullable(d.model),
+			"local_ip": nullable(d.localIP), "mac_address": nullable(d.mac),
 		})
 	})
 	if !ok {

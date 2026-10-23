@@ -295,7 +295,7 @@ func TestDeviceControlAndState(t *testing.T) {
 	c := e.dialNode(n)
 	c.subscribe("jarvis/nodes/n1/#")
 	e.importDevices(tok,
-		map[string]any{"entity_id": "switch.plug", "name": "Plug", "domain": "switch", "source": "direct", "protocol": "kasa", "local_ip": "10.0.0.5"},
+		map[string]any{"entity_id": "switch.plug", "name": "Plug", "domain": "switch", "source": "direct", "protocol": "kasa", "local_ip": "10.0.0.5", "model": "KP115"},
 		map[string]any{"entity_id": "sensor.t", "name": "T", "domain": "sensor"},
 	)
 	c.next() // invalidate
@@ -345,7 +345,7 @@ func TestDeviceControlAndState(t *testing.T) {
 	go func() { ch <- e.do("GET", hhPath+"/devices/"+plug+"/state", nil, bearer(tok)) }()
 	pk := c.next()
 	p := payload(t, pk)
-	if pk.TopicName != "jarvis/nodes/n1/device-state" || p["entity_id"] != "switch.plug" || p["domain"] != "switch" || p["protocol"] != "kasa" {
+	if pk.TopicName != "jarvis/nodes/n1/device-state" || p["entity_id"] != "switch.plug" || p["domain"] != "switch" || p["protocol"] != "kasa" || p["model"] != "KP115" {
 		t.Fatal(pk.TopicName, p)
 	}
 	e.do("POST", "/api/v0/device-state-results/"+p["request_id"].(string), map[string]any{"state": map[string]any{"on": true}, "ui_hints": map[string]any{"x": 1}}, n.h()).want(200)
@@ -358,6 +358,28 @@ func TestDeviceControlAndState(t *testing.T) {
 		t.Fatal(r)
 	}
 	c.next()
+
+	// An unknown state (unreadable device) is forwarded as-is, and the user's turn_off after
+	// it still goes to the node unchanged: no "already off" shortcut.
+	go func() { ch <- e.do("GET", hhPath+"/devices/"+plug+"/state", nil, bearer(tok)) }()
+	p = payload(t, c.next())
+	e.do("POST", "/api/v0/device-state-results/"+p["request_id"].(string), map[string]any{"state": map[string]any{"state": "unknown"}}, n.h()).want(200)
+	r = (<-ch).want(200).json()
+	if r["state"].(map[string]any)["state"] != "unknown" || r["error"] != nil {
+		t.Fatal(r)
+	}
+	go func() { ch <- e.do("POST", ctl, map[string]any{"action": "turn_off"}, bearer(tok)) }()
+	verb, d = command(t, c.next())
+	actx = d["context"].(map[string]any)
+	if verb != "action" || d["command_name"] != "control_device" || d["action_name"] != "turn_off" ||
+		actx["entity_id"] != "switch.plug" || actx["model"] != "KP115" {
+		t.Fatal(verb, d)
+	}
+	e.do("POST", "/api/v0/device-control-results/"+d["request_id"].(string), map[string]any{"success": true}, n.h()).want(200)
+	r = (<-ch).want(200).json()
+	if r["success"] != true || r["action"] != "turn_off" || r["error"] != nil {
+		t.Fatal(r)
+	}
 
 	// M9: no online node with the protocol fails fast.
 	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ?`, dbTime(e.now.Add(-time.Hour)))

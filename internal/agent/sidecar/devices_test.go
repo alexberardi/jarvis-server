@@ -191,7 +191,7 @@ func TestSidecarListsDevices(t *testing.T) {
 // device_state: the family's state normalized for the device's domain, with UI hints (as the
 // Python node's domain handlers do, Python's rounding included); pairing; failures.
 func TestSidecarReadsDeviceState(t *testing.T) {
-	sc, _ := startLights(t)
+	sc, st := startLights(t)
 	state := func(details map[string]any) map[string]any {
 		t.Helper()
 		res, err := sc.DeviceCall("device_state", map[string]any{"details": details})
@@ -203,7 +203,7 @@ func TestSidecarReadsDeviceState(t *testing.T) {
 		_ = json.Unmarshal(b, &out)
 		return out
 	}
-	lamp := state(map[string]any{"entity_id": "light.lamp", "protocol": "fakelight", "source": "direct", "local_ip": "10.0.0.5"})
+	lamp := state(map[string]any{"entity_id": "light.lamp", "protocol": "fakelight", "source": "direct", "local_ip": "10.0.0.5", "model": "F1"})
 	want := map[string]any{"entity_id": "light.lamp", "domain": "light",
 		"state": map[string]any{"state": "on", "brightness": 100.0, "rgb": []any{255.0, 128.0, 0.0}},
 		"ui_hints": map[string]any{"control_type": "light", "features": []any{"brightness", "color", "color_temp"},
@@ -211,9 +211,17 @@ func TestSidecarReadsDeviceState(t *testing.T) {
 	if !reflect.DeepEqual(lamp, want) {
 		t.Fatalf("lamp = %v", lamp)
 	}
+	if rec, ok := st.Data("fakelight", "state_queried", time.Now()); !ok || rec.Value("model") != "F1" {
+		t.Fatalf("get_state saw model %v (%v)", rec.Value("model"), rec)
+	}
+	// Climate: no hvac_action/state from the family means "unknown" (not "off"); the mode
+	// stays a real enum. Without a model in the details the family receives "".
 	hall := state(map[string]any{"entity_id": "climate.hall", "domain": "climate", "protocol": "fakelight", "cloud_id": "t-1"})
+	if rec, ok := st.Data("fakelight", "state_queried", time.Now()); !ok || rec.Value("model") != "" {
+		t.Fatalf("get_state saw model %v (%v)", rec.Value("model"), rec)
+	}
 	want = map[string]any{"entity_id": "climate.hall", "domain": "climate",
-		"state": map[string]any{"unit": "F", "online": true, "state": "off", "mode": "heat",
+		"state": map[string]any{"unit": "F", "online": true, "state": "unknown", "mode": "heat",
 			"current_temperature": 20.0, "target_temperature": 22.0},
 		"ui_hints": map[string]any{"control_type": "thermostat", "features": []any{"heat", "off"},
 			"min_value": 50.0, "max_value": 90.0, "step": 1.0, "unit": "F"}}
@@ -229,13 +237,25 @@ func TestSidecarReadsDeviceState(t *testing.T) {
 	if !reflect.DeepEqual(odd["state"], map[string]any{"state": "on", "level": 3.0}) || odd["ui_hints"].(map[string]any)["control_type"] != "toggle" {
 		t.Fatalf("no domain handler = %v", odd)
 	}
+	// A family reporting state "unknown" (as Govee does for an unreadable state) stays
+	// "unknown"; one reporting an error comes out "unknown" with the error, never "off".
+	unknown := state(map[string]any{"entity_id": "light.unknowable", "protocol": "fakelight"})
+	if !reflect.DeepEqual(unknown["state"], map[string]any{"state": "unknown"}) || unknown["error"] != nil {
+		t.Fatalf("unknowable = %v", unknown)
+	}
+	erring := state(map[string]any{"entity_id": "light.erroring", "protocol": "fakelight"})
+	if !reflect.DeepEqual(erring["state"], map[string]any{"state": "unknown"}) || erring["error"] != "device unreachable" {
+		t.Fatalf("erroring = %v", erring)
+	}
 	for _, d := range []map[string]any{
 		{"entity_id": "light.gone", "protocol": "fakelight"},                  // the family raises
 		{"entity_id": "light.lamp", "protocol": "nope"},                       // no such family
 		{"entity_id": "light.lamp", "protocol": "cloudy"},                     // not configured
 		{"entity_id": "light.ha", "protocol": "", "source": "home_assistant"}, // HA isn't on this node
 	} {
-		if got := state(d); got["error"] != "Failed to query device state" || got["entity_id"] != d["entity_id"] || got["domain"] != "light" {
+		got := state(d)
+		if got["error"] != "Failed to query device state" || got["entity_id"] != d["entity_id"] || got["domain"] != "light" ||
+			!reflect.DeepEqual(got["state"], map[string]any{"state": "unknown"}) {
 			t.Fatalf("%v = %v", d, got)
 		}
 	}
