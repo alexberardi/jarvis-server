@@ -94,12 +94,28 @@ func FindInstalledApp(dirs []string, running Copy, version func(exe string) stri
 		if _, err := os.Stat(exe); err != nil {
 			continue
 		}
-		if bundle == running.Bundle {
-			return Copy{Bundle: bundle, Version: running.Version}
+		if sameBundle(bundle, running.Bundle) {
+			return running
 		}
 		return Copy{Bundle: bundle, Version: version(exe)}
 	}
 	return Copy{}
+}
+
+// sameBundle reports whether a and b are the same .app: by file identity, not path, since the
+// running copy's path is resolved (symlinks followed) and the AppDirs come from $HOME, which
+// may go through a symlink (/var → /private/var); a copy taken for another would hand over to
+// itself, forever.
+func sameBundle(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
 }
 
 // BinaryVersion asks exe for its version (`jarvis-agent version`), "" when it can't say.

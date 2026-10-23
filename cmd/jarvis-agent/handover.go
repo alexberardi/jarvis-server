@@ -26,6 +26,12 @@ func handoverDecision(e install.Env) (install.Handover, string) {
 	if e.GOOS != "darwin" {
 		return install.RunHere, ""
 	}
+	if os.Getenv(handedOverEnv) != "" {
+		// This copy was started by a handover: it runs, whatever it finds, so a mistake in
+		// telling the copies apart can't make them hand the start around forever.
+		os.Unsetenv(handedOverEnv)
+		return install.RunHere, ""
+	}
 	running := install.Copy{Bundle: install.BundleOf(e.Exe), Version: version}
 	if running.Bundle == "" {
 		return install.RunHere, "" // a bare binary (dev build, Pi profile) stays put
@@ -37,10 +43,16 @@ func handoverDecision(e install.Env) (install.Handover, string) {
 	return install.DecideHandover(running, installed, launchdJob()), install.BundleExe(installed.Bundle)
 }
 
-// scrubLaunchdEnv drops launchd's job marker before the installed copy is spawned: inherited,
-// the spawned copy would think launchd started *it*, skip adopting the login item, and pick the
-// wrong log target.
-func scrubLaunchdEnv() { os.Unsetenv("XPC_SERVICE_NAME") }
+// handedOverEnv marks the installed copy a handover spawns: it runs and never hands over again.
+const handedOverEnv = "JARVIS_AGENT_HANDED_OVER"
+
+// handoverEnv is the environment the installed copy is spawned with. launchd's job marker is
+// dropped: inherited, the spawned copy would think launchd started *it*, skip adopting the
+// login item, and pick the wrong log target. And handedOverEnv is set.
+func handoverEnv() {
+	os.Unsetenv("XPC_SERVICE_NAME")
+	os.Setenv(handedOverEnv, "1")
+}
 
 // adoptLoginItem re-points the login item (or the plain LaunchAgent's program path) at this
 // copy of the app.
@@ -68,7 +80,7 @@ func runHandover(log *slog.Logger) (done, adopt bool) {
 		log.Info("an equal-or-newer copy is installed; handing over to it", "to", exe, "running", e.Exe)
 		s, err := installSys(io.Discard)
 		if err == nil {
-			scrubLaunchdEnv()
+			handoverEnv()
 			err = s.Spawn(exe, "run")
 		}
 		if err != nil {

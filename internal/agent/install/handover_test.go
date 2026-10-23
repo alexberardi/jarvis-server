@@ -82,3 +82,34 @@ func TestFindInstalledApp(t *testing.T) {
 		t.Fatalf("got %+v, want the running copy's own version", got)
 	}
 }
+
+// The running copy's path is resolved (agentExe follows symlinks) while AppDirs are built from
+// $HOME, which may go through one (/var → /private/var on macOS, where the agent-upgrade E2E
+// installs the app under a temp home): the same bundle under two paths is still the running
+// copy, never a copy to hand over to (it would hand over to itself, forever).
+func TestFindInstalledAppSameBundleThroughASymlink(t *testing.T) {
+	real := t.TempDir()
+	bundle := filepath.Join(real, displayName+".app")
+	exe := BundleExe(bundle)
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("#!"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	running := Copy{Bundle: bundle, Version: "v0.1.0-rc19"}
+	got := FindInstalledApp([]string{link}, running, func(string) string {
+		t.Fatal("asked the running copy for its own version")
+		return ""
+	})
+	if got != running {
+		t.Fatalf("got %+v, want the running copy %+v", got, running)
+	}
+	if d := DecideHandover(running, got, false); d == HandOverToInstalled {
+		t.Fatal("the running copy hands over to itself")
+	}
+}

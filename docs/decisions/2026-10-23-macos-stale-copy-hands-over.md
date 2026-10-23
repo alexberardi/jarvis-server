@@ -21,3 +21,10 @@ CFBundleShortVersionString is useless here, as the build strips the rc suffix.
 Why spawn `run` directly instead of kickstarting: if adopting ever fails to re-point BTM's
 record, a kickstart would start the stale copy again and ping-pong forever; a directly spawned
 `run` ends the chain with the right copy running.
+
+Two copies are told apart by file identity (`os.SameFile`), not path: the running copy's path
+has its symlinks resolved, while the install dirs come from `$HOME`, which may go through one
+(`/var` → `/private/var`). Compared as strings, the agent-upgrade E2E's app under a temp home
+took itself for another copy at the same version and handed over to itself forever. And a copy
+started by a handover (`JARVIS_AGENT_HANDED_OVER`) runs whatever it finds, so no such mistake
+can loop again.

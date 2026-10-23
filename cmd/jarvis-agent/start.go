@@ -179,7 +179,7 @@ func (st starter) start(ctx context.Context, login bool) error {
 		case install.HandOverToInstalled:
 			// An equal-or-newer copy is installed in /Applications (#483): it owns setup and
 			// the login item, so it gets the start and this copy does nothing else.
-			scrubLaunchdEnv()
+			handoverEnv()
 			args := []string{exe, "start"}
 			if login {
 				args = append(args, "--login")

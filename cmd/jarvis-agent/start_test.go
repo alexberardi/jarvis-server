@@ -202,6 +202,8 @@ func darwinEnv(t *testing.T, exe string) install.Env {
 // does nothing else here (no install, no setup page, no kickstart of the stale login item).
 func TestStartHandsOverToTheInstalledCopy(t *testing.T) {
 	const installed = "/Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent"
+	t.Setenv(handedOverEnv, "") // the handover sets it for the spawned copy
+	t.Setenv("XPC_SERVICE_NAME", "")
 	f := &fakeStart{setUp: true}
 	st := f.starter(darwinEnv(t, "/Users/u/Downloads/old/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent"))
 	st.handover = func() (install.Handover, string) { return install.HandOverToInstalled, installed }
@@ -221,6 +223,22 @@ func TestStartHandsOverToTheInstalledCopy(t *testing.T) {
 	want = []string{"send ping", "spawn " + installed + " start --login"}
 	if !slices.Equal(f.log, want) {
 		t.Fatalf("did %q\nwant %q", f.log, want)
+	}
+}
+
+// The copy a handover started runs, whatever it finds installed: two copies taken for each
+// other (a path through a symlink) must not hand the start around forever.
+func TestHandoverDecisionRunsAfterAHandover(t *testing.T) {
+	old := version
+	version = "v9.0.0"
+	t.Cleanup(func() { version = old })
+	t.Setenv(handedOverEnv, "1")
+	e := darwinEnv(t, filepath.Join(t.TempDir(), "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent"))
+	if d, exe := handoverDecision(e); d != install.RunHere || exe != "" {
+		t.Fatalf("handed over again: %v %q", d, exe)
+	}
+	if v, ok := os.LookupEnv(handedOverEnv); ok {
+		t.Fatalf("%s=%q is left for this copy's own children", handedOverEnv, v)
 	}
 }
 
