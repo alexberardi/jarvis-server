@@ -49,6 +49,28 @@ export function computerControlState(n: NodeLiveness | undefined): 'on' | 'off' 
   return n.capabilities?.computer_control === 'on' ? 'on' : 'off'
 }
 
+export type LedMode = 'always' | 'responding' | 'off'
+
+/**
+ * ledModeState is a voice node's LED mode as it reported it (the ReSpeaker HAT's LEDs on a Pi):
+ * always on, lit only while responding, or off. Null for a node without LEDs or an older agent.
+ */
+export function ledModeState(n: NodeLiveness | undefined): LedMode | null {
+  const v = n?.capabilities?.led_mode
+  return v === 'always' || v === 'responding' || v === 'off' ? v : null
+}
+
+/**
+ * setLedMode sends one node its LED mode through cc's node-config relay (the app's own path):
+ * led_enabled turns them on or off, and led_idle_enabled says whether the dim idle glow shows.
+ * Choosing off leaves the idle choice as it was, so turning them back on restores it.
+ */
+export async function setLedMode(nodeId: string, mode: LedMode): Promise<void> {
+  const settings: Record<string, boolean> = { led_enabled: mode !== 'off' }
+  if (mode !== 'off') settings.led_idle_enabled = mode === 'always'
+  await apiClient.post(`/api/cc/api/v0/nodes/${encodeURIComponent(nodeId)}/node-config`, { settings, restart: false })
+}
+
 /**
  * signOutDevice signs a device out (decision 2026-10-14): cc removes the node and revokes its
  * credentials. Only the member who paired it, or a household admin, may; cc checks. A desktop

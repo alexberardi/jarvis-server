@@ -47,6 +47,7 @@ type Settings struct {
 	FollowUp        *float64 `json:"follow_up,omitempty"`
 	FollowUpSilence *float64 `json:"follow_up_silence,omitempty"`
 	LEDs            *bool    `json:"leds,omitempty"`
+	LEDIdle         *bool    `json:"led_idle,omitempty"`
 	LEDBrightness   *int     `json:"led_brightness,omitempty"`
 	// The voice pipeline's endpointing (#295).
 	SilenceThreshold      *float64 `json:"silence_threshold,omitempty"`
@@ -89,6 +90,7 @@ var Keys = []Key{
 	{"follow_up", "follow-up", false, "after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3)", func(s *Settings) any { return &s.FollowUp }},
 	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},
 	{"leds", "no-leds", true, "light the ReSpeaker HAT's LEDs (a Pi)", func(s *Settings) any { return &s.LEDs }},
+	{"led_idle", "no-led-idle", true, "light the HAT's LEDs while idle (off: only while the node responds)", func(s *Settings) any { return &s.LEDIdle }},
 	{"led_brightness", "led-brightness", false, "HAT LED brightness, percent (0 to 100)", func(s *Settings) any { return &s.LEDBrightness }},
 	{"silence_threshold", "silence-threshold", false, "RMS below which a command counts as silence, when the room's level before the wake word isn't known",
 		func(s *Settings) any { return &s.SilenceThreshold }},

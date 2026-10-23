@@ -791,6 +791,10 @@ func runAgent(ctx context.Context, args []string) error {
 		var state func() pinode.State
 		nodeConfig, state = wirePiNode(r, vf, hf, f.mf, hd, live, audio, sp, log)
 		startMaintenance(ctx, state, quit, log)
+		if hd != nil && hd.leds != nil {
+			// The admin's Nodes page shows and sets this node's LED mode.
+			r.Capabilities = func() map[string]any { return map[string]any{"led_mode": state().LEDMode()} }
+		}
 	}
 	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
 	// and are in its settings snapshot; a computer has none.
