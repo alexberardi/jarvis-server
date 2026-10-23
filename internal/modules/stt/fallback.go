@@ -21,6 +21,11 @@ func (m *Module) inferRemote(ctx context.Context, ep Endpoint, samples []float32
 	m.fallbackMode.Store(mode)
 	if mode != fallback.ModeCPU || m.FallbackEngine == nil {
 		text, segs, err := m.inferOpenAI(ctx, ep, samples, p)
+		if err != nil {
+			m.fallback.Errored(err)
+		} else {
+			m.fallback.Served(fallback.PathRemote)
+		}
 		return text, segs, fallback.PathRemote, err
 	}
 	if !m.fallback.TryRemote() {
@@ -40,6 +45,7 @@ func (m *Module) inferRemote(ctx context.Context, ep Endpoint, samples []float32
 	}
 	var ee *EngineError
 	if !errors.As(err, &ee) || !ee.Remote || !fallback.FallsBackOn(ee.Status) || ctx.Err() != nil {
+		m.fallback.Errored(err)
 		return "", nil, fallback.PathRemote, err
 	}
 	m.fallback.Failed(err)

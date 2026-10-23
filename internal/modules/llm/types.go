@@ -49,6 +49,8 @@ type Endpoint struct {
 	NoReasoningBudget bool
 	// Timeout bounds one request to a remote endpoint (remote_timeout_ms, stt); 0 = none.
 	Timeout time.Duration
+	// Fallback is a remote stt label's fallback setting (off, cpu: Module.ResolveCPU).
+	Fallback string
 }
 
 // Endpoint dialects (engine.APIOpenAI, engine.APIAnthropic).

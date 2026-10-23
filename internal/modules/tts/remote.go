@@ -16,6 +16,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/audio"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 // Remote TTS (docs/llm/07-remote-speech.md §3): tts.provider=remote sends each sentence to an
@@ -86,6 +87,7 @@ func (m *Module) speakRemote(ctx context.Context, sentences []string, opts Speak
 	if c.url == "" {
 		return nil, ErrRemoteNotConfigured
 	}
+	cpu := m.fallbackMode(ctx) == fallback.ModeCPU
 	select { // cap concurrent streams
 	case m.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -107,12 +109,27 @@ func (m *Module) speakRemote(ctx context.Context, sentences []string, opts Speak
 				return sctx.Err()
 			}
 		}
+		if cpu && !m.fallback.TryRemote() {
+			// The provider failed moments ago: the whole reply is Kokoro's.
+			err := m.speakLocal(sctx, sentences, opts, emit)
+			if err == nil || sctx.Err() != nil {
+				m.fallback.Served(fallback.PathLocalCPU)
+				return
+			}
+			// No fallback to go to: the provider may be back.
+			m.log().Warn("tts: local fallback failed inside the remote's backoff; asking the remote", "err", err)
+		}
+		ok := false
 		for i, sentence := range sentences {
 			if sctx.Err() != nil {
 				return
 			}
 			err := c.speak(sctx, m.httpClient(), sentence, emit)
 			if err == nil {
+				if !ok {
+					ok = true
+					m.fallback.Succeeded()
+				}
 				continue
 			}
 			if sctx.Err() != nil {
@@ -128,9 +145,15 @@ func (m *Module) speakRemote(ctx context.Context, sentences []string, opts Speak
 			}
 			// Down, slow, or refusing us (key, quota): the next sentence would only wait for
 			// the same answer.
+			if cpu {
+				m.fallBack(sctx, st, err, i, sentences, opts, emit)
+				return
+			}
+			m.fallback.Errored(err)
 			m.log().Error("tts: remote provider failed", "index", i, "url", c.url, "err", err)
 			return
 		}
+		m.fallback.Served(fallback.PathRemote)
 	}()
 	return st, nil
 }

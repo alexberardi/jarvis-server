@@ -39,6 +39,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/scheduler"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 //go:embed migrations/*.sql
@@ -87,6 +88,9 @@ type Module struct {
 	// OnEngineReady, if set, runs after a local engine became healthy and was warmed, with the
 	// labels it serves (command-center re-warms its prompts there).
 	OnEngineReady func(labels []string)
+	// SpeechFallback, if set, reports a remote speech label's fallback ("stt", "tts": its counts,
+	// last path and remote error) for the labels API.
+	SpeechFallback func(label string) (fallback.Status, bool)
 	// AppID/AppKey are jarvisd's own app credentials, sent on queue callbacks.
 	AppID, AppKey string
 	// AppCreds supplies them when AppID is empty (jarvisd's self-issued app client, auth

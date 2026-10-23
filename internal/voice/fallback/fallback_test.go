@@ -68,4 +68,9 @@ func TestGateStatus(t *testing.T) {
 	if st := g.Status(); st.LastPath != PathRemote || st.Fallbacks != 2 {
 		t.Fatalf("%+v", st)
 	}
+	g.Succeeded()
+	g.Errored(errors.New("400 bad clip"))
+	if st := g.Status(); st.LastRemoteError != "400 bad clip" || !st.BackoffUntil.IsZero() || !g.TryRemote() {
+		t.Fatalf("Errored opened a window: %+v", st)
+	}
 }

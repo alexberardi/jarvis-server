@@ -110,6 +110,14 @@ func (g *Gate) Failed(err error) {
 	g.lastErr, g.lastErrAt = err.Error(), now
 }
 
+// Errored records a remote failure that doesn't fall back (fallback=off, or a 400/413/422)
+// for the status, without opening a backoff window.
+func (g *Gate) Errored(err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.lastErr, g.lastErrAt = err.Error(), g.now()
+}
+
 // Succeeded records a remote success: the window closes and the next failure starts at Base.
 func (g *Gate) Succeeded() {
 	g.mu.Lock()

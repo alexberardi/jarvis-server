@@ -23,6 +23,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/engines"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 // InstallJobType is the queue job that downloads a model (and its projector and engine).
@@ -64,6 +65,9 @@ type Manager struct {
 	ModelsDir string // <home>/models
 	Client    *http.Client
 	Log       *slog.Logger
+	// SpeechFallback, if set, reports a voice label's remote fallback (the tts module's) for
+	// VoiceStatus; false = it speaks locally.
+	SpeechFallback func(label string) (fallback.Status, bool)
 	// SliceDuration bounds one install job run. A longer download continues in a follow-up
 	// job, so the job lease stays short and a crash resumes within a lease (default 8m;
 	// the lease is SliceDuration + 2m).
