@@ -442,6 +442,14 @@ func TestFollowThroughDeviceNotDone(t *testing.T) {
 			t.Fatalf("%q -> %q: %q", c.utt, c.reply, nag)
 		}
 	}
+	// Stacked articles: "all the lights" is the same #512 shape — control_node ran, the reply
+	// says the lights are off, no control_device — so the nudge fires (review of #512).
+	all := []chatMsg{{Role: "user", Content: "turn off all the lights"},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "a1", Function: parse.FunctionCall{Name: "control_node", Arguments: `{"action": "mute"}`}}}},
+		{Role: "tool", ToolCallID: "a1", Content: `{"success": true}`}}
+	if nag := followThroughNag(conv, "turn off all the lights", "All the lights are off.", all); nag != deviceNotDoneRetry {
+		t.Fatalf("all the lights: %q", nag)
+	}
 	// Without a device tool offered, nothing to nudge toward.
 	if nag := followThroughNag(&conversation{}, utt, reply, msgs); nag != "" {
 		t.Fatalf("no tool: %q", nag)

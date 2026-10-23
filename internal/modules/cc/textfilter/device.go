@@ -23,10 +23,13 @@ var (
 
 	// deviceChangeRequestRE: an utterance asking to change a named device's state: "turn off
 	// the office light bar", "turn the office light bars off", "switch the fan on", "power off
-	// the TV", "lock the front door", "dim the bedroom lights".
+	// the TV", "lock the front door", "dim the bedroom lights". The articles repeat (`*`, not
+	// `?`) because "all the lights" stacks two of them; an excluded target stays excluded
+	// through every way of splitting them, since the articles are in deviceTargetExcl too
+	// ("turn off all the timers": "all the"/"all"/"" all hit the lookahead).
 	deviceChangeRequestRE = mustPyI(
-		`\b(?:turn|switch|power|shut)\s+(?:on|off)\s+(?:the\s+|my\s+|all\s+)?(?!` + deviceTargetExcl + `\b)[\w'’-]+` +
-			`|\b(?:turn|switch|power|shut)\s+(?:the\s+|my\s+|all\s+)?(?!` + deviceTargetExcl + `\b)[\w'’-][\w'’ -]*?\s+(?:on|off)\b` +
+		`\b(?:turn|switch|power|shut)\s+(?:on|off)\s+(?:(?:the|my|all)\s+)*(?!` + deviceTargetExcl + `\b)[\w'’-]+` +
+			`|\b(?:turn|switch|power|shut)\s+(?:(?:the|my|all)\s+)*(?!` + deviceTargetExcl + `\b)[\w'’-][\w'’ -]*?\s+(?:on|off)\b` +
 			`|\b(?:lock|unlock)\s+(?:the\s+|my\s+)?[\w'’-]+` +
 			`|\b(?:dim|brighten)\s+(?:the\s+|my\s+)?[\w'’-]+`)
 

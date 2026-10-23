@@ -16,6 +16,11 @@ func TestIsDeviceChangeRequest(t *testing.T) {
 		"lock the front door",
 		"Unlock the back door",
 		"dim the bedroom lights",
+		// Stacked articles: "all the" is two of them (review of #512).
+		"turn off all the lights",
+		"turn all the lights off",
+		"turn off all my lights",
+		"Turn on all the lamps",
 	}
 	no := []string{
 		"",
@@ -48,6 +53,11 @@ func TestIsDeviceChangeRequest(t *testing.T) {
 		"turn off the news",
 		"turn off the podcast",
 		"turn off my alarm",
+		// Stacked articles don't smuggle an excluded target past the lookahead.
+		"turn off all the timers",
+		"turn all the timers off",
+		"turn off all the music",
+		"turn off all my alarms",
 	}
 	for _, s := range yes {
 		if !IsDeviceChangeRequest(s) {
