@@ -105,25 +105,39 @@ func TestSameDeviceHint(t *testing.T) {
 }
 
 func TestTypedAppNamed(t *testing.T) {
-	for _, c := range []struct{ utt, text, want string }{
-		{"type into omawrite that I need to walk the dogs", "I need to walk the dogs", "omawrite"},
-		{"type buy more coffee filters into omawrite", "buy more coffee filters", "omawrite"},
-		{"write running ten minutes late in slack", "running ten minutes late", "slack"},
-		{"Type hello into the terminal.", "hello", "the terminal"},
-		{"type hi into google chrome please", "hi", "google chrome"},
-		{"type hi into visual studio code", "hi", ""}, // three words after "into"
-		{"type into Visual Studio, fix the build", "fix the build", "Visual Studio"},
-		{"type I'm going to the store", "I'm going to the store", ""}, // "to" is not an app
-		{"type hello world", "hello world", ""},
-		{"type I live in Boston", "I live in Boston", ""}, // the place is part of the text
-		{"type hello in all caps", "HELLO", ""},
-		{"write hola in spanish", "hola", ""},
-		{"type it in here", "it", ""},
-		{"open slack and type hi in it", "hi", ""},
-		{"I left my keys in the car", "", ""}, // no typing verb before "in"
+	for _, c := range []struct{ utt, text, want, cleaned string }{
+		{"type into omawrite that I need to walk the dogs", "I need to walk the dogs", "omawrite", ""},
+		{"type buy more coffee filters into omawrite", "buy more coffee filters", "omawrite", ""},
+		{"write running ten minutes late in slack", "running ten minutes late", "slack", ""},
+		{"Type hello into the terminal.", "hello", "the terminal", ""},
+		{"type hi into google chrome please", "hi", "google chrome", ""},
+		{"type hi into visual studio code", "hi", "", ""}, // three words after "into"
+		{"type into Visual Studio, fix the build", "fix the build", "Visual Studio", ""},
+		{"type I'm going to the store", "I'm going to the store", "", ""}, // "to" is not an app
+		{"type hello world", "hello world", "", ""},
+		{"type I live in Boston", "I live in Boston", "", ""}, // the place is part of the text
+		{"type hello in all caps", "HELLO", "", ""},
+		{"write hola in spanish", "hola", "", ""},
+		{"type it in here", "it", "", ""},
+		{"open slack and type hi in it", "hi", "", ""},
+		{"I left my keys in the car", "", "", ""}, // no typing verb before "in"
+		// The 9B echoing a trailing "into <app>" inside text (#519): the tail comes off the
+		// text and the app fills.
+		{"type buy more coffee filters into omawrite", "buy more coffee filters into omawrite", "omawrite", "buy more coffee filters"},
+		{"type buy more coffee filters into omawrite", "Buy more coffee filters into omawrite.", "omawrite", "Buy more coffee filters"},
+		{"Type hello into the terminal.", "hello into the terminal", "the terminal", "hello"},
+		{"type omawrite needs an update into omawrite", "omawrite needs an update into omawrite", "omawrite", "omawrite needs an update"},
+		{"type buy more coffee filters into omawrite", "omawrite: buy more coffee filters", "", ""}, // not a trailing echo
+		{"type into omawrite", "into omawrite", "", ""},                                             // nothing would be left to type
+		{"write running ten minutes late in slack", "running ten minutes late in slack", "", ""},    // bare "in" stays text ("I live in Boston")
 	} {
-		if got := typedAppNamed(c.utt, c.text); got != c.want {
-			t.Errorf("%q (text %q) -> %q, want %q", c.utt, c.text, got, c.want)
+		gotApp, gotText := typedAppNamed(c.utt, c.text)
+		wantText := c.text
+		if c.cleaned != "" {
+			wantText = c.cleaned
+		}
+		if gotApp != c.want || gotText != wantText {
+			t.Errorf("%q (text %q) -> %q, %q, want %q, %q", c.utt, c.text, gotApp, gotText, c.want, wantText)
 		}
 	}
 }
@@ -134,16 +148,25 @@ func TestFillTypedApp(t *testing.T) {
 		return parse.ToolCall{Function: parse.FunctionCall{Name: name, Arguments: args}}
 	}
 	for _, c := range []struct {
+		utt  string // "" = the default above
 		call parse.ToolCall
 		want string // "" = unchanged
 	}{
-		{call(desktopTypeTool, `{"text": "I need to walk the dogs"}`), `{"text": "I need to walk the dogs", "app": "omawrite"}`},
-		{call(desktopTypeTool, `{"text": "I need to walk the dogs", "app": ""}`), `{"text": "I need to walk the dogs", "app": "omawrite"}`},
-		{call(desktopTypeTool, `{"text": "I need to walk the dogs", "app": "quillpad"}`), ""}, // the model's own app stands
-		{call("desktop_press_key", `{"key": "enter"}`), ""},
-		{call(desktopTypeTool, `not json`), ""},
+		{"", call(desktopTypeTool, `{"text": "I need to walk the dogs"}`), `{"text": "I need to walk the dogs", "app": "omawrite"}`},
+		{"", call(desktopTypeTool, `{"text": "I need to walk the dogs", "app": ""}`), `{"text": "I need to walk the dogs", "app": "omawrite"}`},
+		{"", call(desktopTypeTool, `{"text": "I need to walk the dogs", "app": "quillpad"}`), ""}, // the model's own app stands
+		{"", call("desktop_press_key", `{"key": "enter"}`), ""},
+		{"", call(desktopTypeTool, `not json`), ""},
+		// The echoed tail (#519): app fills and the echo comes off the text.
+		{"type buy more coffee filters into omawrite",
+			call(desktopTypeTool, `{"text": "buy more coffee filters into omawrite"}`),
+			`{"text": "buy more coffee filters", "app": "omawrite"}`},
 	} {
-		got, ok := fillTypedApp(utt, c.call)
+		cu := c.utt
+		if cu == "" {
+			cu = utt
+		}
+		got, ok := fillTypedApp(cu, c.call)
 		if ok != (c.want != "") || (ok && got != c.want) {
 			t.Errorf("%s %s -> %q %v, want %q", c.call.Function.Name, c.call.Function.Arguments, got, ok, c.want)
 		}
