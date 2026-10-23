@@ -26,5 +26,6 @@ Two copies are told apart by file identity (`os.SameFile`), not path: the runnin
 has its symlinks resolved, while the install dirs come from `$HOME`, which may go through one
 (`/var` → `/private/var`). Compared as strings, the agent-upgrade E2E's app under a temp home
 took itself for another copy at the same version and handed over to itself forever. And a copy
-started by a handover (`JARVIS_AGENT_HANDED_OVER`) runs whatever it finds, so no such mistake
-can loop again.
+started by a handover (`JARVIS_AGENT_HANDED_OVER`) never hands over again, so no such mistake
+can loop — but it still adopts the login item: the installed copy a stale one spawns must
+re-point the login item at itself, or the stale bundle would own it forever.

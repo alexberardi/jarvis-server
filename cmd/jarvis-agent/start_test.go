@@ -226,19 +226,46 @@ func TestStartHandsOverToTheInstalledCopy(t *testing.T) {
 	}
 }
 
-// The copy a handover started runs, whatever it finds installed: two copies taken for each
-// other (a path through a symlink) must not hand the start around forever.
-func TestHandoverDecisionRunsAfterAHandover(t *testing.T) {
+// The copy a handover started never hands over again, so two copies taken for each other (a
+// path through a symlink) can't hand the start around forever. But only the second handover is
+// suppressed: the installed copy a stale one spawns still adopts the login item, or the stale
+// bundle would own it forever (#483). The dirs and version func are fakes: the test never reads
+// the real /Applications or execs a binary.
+func TestHandoverDecisionAfterAHandover(t *testing.T) {
 	old := version
-	version = "v9.0.0"
+	version = "v1.0.0"
 	t.Cleanup(func() { version = old })
-	t.Setenv(handedOverEnv, "1")
-	e := darwinEnv(t, filepath.Join(t.TempDir(), "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent"))
-	if d, exe := handoverDecision(e); d != install.RunHere || exe != "" {
-		t.Fatalf("handed over again: %v %q", d, exe)
+	apps := t.TempDir()
+	installedExe := filepath.Join(apps, "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent")
+	if err := os.MkdirAll(filepath.Dir(installedExe), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if v, ok := os.LookupEnv(handedOverEnv); ok {
-		t.Fatalf("%s=%q is left for this copy's own children", handedOverEnv, v)
+	if err := os.WriteFile(installedExe, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(t.TempDir(), "Downloads", "old", "Jarvis Automation Agent.app", "Contents", "MacOS", "jarvis-agent")
+	for _, c := range []struct {
+		name    string
+		exe     string
+		want    install.Handover
+		wantExe string
+	}{
+		// The spawned installed copy, not started by launchd, re-points the login item.
+		{"the installed copy still adopts the login item", installedExe, install.AdoptLoginItem, installedExe},
+		// A stale copy that would hand over (a newer copy is installed) runs here instead.
+		{"a stale copy never hands over twice", stale, install.RunHere, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv(handedOverEnv, "1")
+			t.Setenv("XPC_SERVICE_NAME", "")
+			d, exe := handoverDecision(darwinEnv(t, c.exe), []string{apps}, func(string) string { return "v2.0.0" })
+			if d != c.want || exe != c.wantExe {
+				t.Fatalf("decided %v %q, want %v %q", d, exe, c.want, c.wantExe)
+			}
+			if v, ok := os.LookupEnv(handedOverEnv); ok {
+				t.Fatalf("%s=%q is left for this copy's own children", handedOverEnv, v)
+			}
+		})
 	}
 }
 

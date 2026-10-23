@@ -152,7 +152,9 @@ func newStarter(e install.Env, s install.Sys) starter {
 		window:   openSetupPage(logger()),
 	}
 	if e.GOOS == "darwin" {
-		st.handover = func() (install.Handover, string) { return handoverDecision(e) }
+		st.handover = func() (install.Handover, string) {
+			return handoverDecision(e, install.AppDirs(e), install.BinaryVersion)
+		}
 		st.adopt = func() error { return adoptLoginItem(context.Background(), e, s) }
 	}
 	return st

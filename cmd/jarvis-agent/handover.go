@@ -21,29 +21,36 @@ import (
 func launchdJob() bool { return os.Getenv("XPC_SERVICE_NAME") == appid.ID }
 
 // handoverDecision is install.DecideHandover for this process; installedExe is the agent
-// binary inside the installed app ("" when there is none).
-func handoverDecision(e install.Env) (install.Handover, string) {
+// binary inside the installed app ("" when there is none). dirs and versionOf are
+// install.AppDirs(e) and install.BinaryVersion, passed in so a test never reads the real
+// /Applications or execs an installed binary.
+func handoverDecision(e install.Env, dirs []string, versionOf func(exe string) string) (install.Handover, string) {
 	if e.GOOS != "darwin" {
 		return install.RunHere, ""
 	}
-	if os.Getenv(handedOverEnv) != "" {
-		// This copy was started by a handover: it runs, whatever it finds, so a mistake in
-		// telling the copies apart can't make them hand the start around forever.
-		os.Unsetenv(handedOverEnv)
-		return install.RunHere, ""
-	}
+	handedOver := os.Getenv(handedOverEnv) != ""
+	os.Unsetenv(handedOverEnv)
 	running := install.Copy{Bundle: install.BundleOf(e.Exe), Version: version}
 	if running.Bundle == "" {
 		return install.RunHere, "" // a bare binary (dev build, Pi profile) stays put
 	}
-	installed := install.FindInstalledApp(install.AppDirs(e), running, install.BinaryVersion)
+	installed := install.FindInstalledApp(dirs, running, versionOf)
 	if installed.Bundle == "" {
 		return install.RunHere, ""
 	}
-	return install.DecideHandover(running, installed, launchdJob()), install.BundleExe(installed.Bundle)
+	d := install.DecideHandover(running, installed, launchdJob())
+	if handedOver && d == install.HandOverToInstalled {
+		// This copy was started by a handover: it never hands over again, so a mistake in
+		// telling the copies apart can't make them hand the start around forever. Only the
+		// second handover is suppressed: the installed copy a stale one spawns still adopts
+		// the login item, or the stale bundle would own it forever (#483).
+		return install.RunHere, ""
+	}
+	return d, install.BundleExe(installed.Bundle)
 }
 
-// handedOverEnv marks the installed copy a handover spawns: it runs and never hands over again.
+// handedOverEnv marks the installed copy a handover spawns: it runs where it is (never hands
+// over again), but still adopts the login item.
 const handedOverEnv = "JARVIS_AGENT_HANDED_OVER"
 
 // handoverEnv is the environment the installed copy is spawned with. launchd's job marker is
@@ -74,7 +81,7 @@ func runHandover(log *slog.Logger) (done, adopt bool) {
 	if err != nil {
 		return false, false
 	}
-	d, exe := handoverDecision(e)
+	d, exe := handoverDecision(e, install.AppDirs(e), install.BinaryVersion)
 	switch d {
 	case install.HandOverToInstalled:
 		log.Info("an equal-or-newer copy is installed; handing over to it", "to", exe, "running", e.Exe)
