@@ -75,7 +75,8 @@ remote STT sees two requests per wake turn. Accepted; documented in the setting.
 `kokoro` (default) | `remote`. New keys: `tts.remote_url`, `tts.remote_api`
 (`openai|elevenlabs`), `tts.remote_model`, `tts.remote_api_key` (secret), `tts.remote_voice`,
 `tts.remote_timeout_ms` (default 8000), `tts.fallback` (`off` default | `cpu` = local Kokoro,
-which is CPU already). `tts.kokoro_*` keep applying to Kokoro; `tts.kokoro_gain` applies to both.
+which is CPU already). `tts.kokoro_*` keep applying to Kokoro only, gain included (built 2026-10-22:
+remote audio passes at gain 1 and speed 1, [decision](../decisions/2026-10-22-remote-tts.md)).
 
 **Format stays stable.** Callers read `AudioFormat()` before `Speak` to set
 `X-Audio-Sample-Rate` (`cc/voice_routes.go:448-451`, `cc/media.go:90,115-123`). So a remote
@@ -148,5 +149,5 @@ OpenAI: developers.openai.com/api/docs/guides/speech-to-text, …/text-to-speech
 …/reference/resources/audio/subresources/speech/methods/create. Groq:
 console.groq.com/docs/speech-to-text. ElevenLabs: elevenlabs.io/docs/api-reference/speech-to-text/convert,
 …/text-to-speech/stream, …/voices/search. speaches.ai/usage/*. github.com/remsky/Kokoro-FastAPI.
-localai.io/docs/features/text-to-audio. Unconfirmed at writing: provider rate limits, speaches'
-PCM sample rate, Groq's current TTS models.
+localai.io/docs/features/text-to-audio. Unconfirmed at writing: provider rate limits, Groq's current
+TTS models. speaches' PCM is 24 kHz mono (checked 2026-10-22, [decision](../decisions/2026-10-22-remote-tts.md)).
