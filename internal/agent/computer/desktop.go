@@ -45,6 +45,9 @@ type Desktop struct {
 	// isn't running can't be used).
 	Apps Apps
 	Now  func() time.Time // nil: time.Now
+	// Sleep pauses a batch between a click and the keys that follow it (nil: time.Sleep, bounded
+	// by the context).
+	Sleep func(ctx context.Context, d time.Duration)
 }
 
 // Apps is desktop_open's catalogue (desktop.Tools): FindApp takes an app's name only, never a
@@ -507,12 +510,42 @@ func (t *Tools) actDesktop(ctx context.Context, a actArgs) map[string]any {
 			}
 			break
 		}
+		if i+1 < len(a.Actions) && focusSettleNeeded(action, a.Actions[i+1]) {
+			t.sleep(ctx, focusSettle)
+		}
 	}
 	out["results"] = results
 	if len(newApps) > 0 {
 		out["new_apps"] = newApps
 	}
 	return out
+}
+
+// focusSettle is the pause between a click and the type or keypress that follows it in the same
+// batch: the click's focus change reaches the app after the click returns (a Tk field under
+// Xwayland takes keys into whichever widget holds focus when they arrive), so keys sent on the
+// click's heels land in the old field (#528).
+const focusSettle = 250 * time.Millisecond
+
+// focusSettleNeeded: done may have moved the focus and next sends keys to it.
+func focusSettleNeeded(done, next computeruse.Action) bool {
+	switch done.Kind {
+	case "click", "double_click", "triple_click":
+	default:
+		return false
+	}
+	return (next.Kind == "type" || next.Kind == "keypress") && next.Ref == ""
+}
+
+func (t *Tools) sleep(ctx context.Context, d time.Duration) {
+	if t.Desktop != nil && t.Desktop.Sleep != nil {
+		t.Desktop.Sleep(ctx, d)
+		return
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
 }
 
 // desktopStep runs action i of a desktop batch, after every check.

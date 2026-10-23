@@ -266,7 +266,8 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	}
 	out := map[string]any{"launched": app.Name, "matched_app": app.Name,
 		"note": "requested; launch is not confirmed. For work inside the app (make, edit or save something), " +
-			"call run_errand with the whole request: desktop_type_text only types into the focused window and cannot work the app's controls"}
+			"call run_errand with the whole request, the app named in the goal (\"in " + app.Name + ", …\"): " +
+			"desktop_type_text only types into the focused window and cannot work the app's controls"}
 	if p.Fuzzy {
 		out["fuzzy_match"], out["heard_as"] = true, p.HeardAs
 	}
