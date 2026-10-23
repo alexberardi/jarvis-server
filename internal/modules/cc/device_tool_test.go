@@ -22,15 +22,15 @@ func TestResolveDevice(t *testing.T) {
 		entity, name, want, errPart string
 	}{
 		{"rgbic_tv_light_bars", "", "rgbic_tv_light_bars", ""},
-		{"", "office light bars", "rgbic_tv_light_bars", ""},         // case-insensitive exact
-		{"", "the office  Light Bars", "rgbic_tv_light_bars", ""},    // whitespace collapsed... (not exact: "the")
-		{"", "office light bar", "rgbic_tv_light_bars", ""},          // singular, substring
-		{"", "kitchen light", "light.kitchen", ""},                   // exact beats the substring sibling
-		{"", "kitchen", "", "Several devices match"},                 // ambiguous
-		{"", "garage door", "", "No device called"},                  // unknown
-		{"wrong.entity", "front door", "lock.front", ""},             // bad entity falls back to the name
-		{"wrong.entity", "", "", "No device with entity id"},         // bad entity, no name
-		{"", "", "", "No device named"},                              // nothing given
+		{"", "office light bars", "rgbic_tv_light_bars", ""},      // case-insensitive exact
+		{"", "the office  Light Bars", "rgbic_tv_light_bars", ""}, // whitespace collapsed... (not exact: "the")
+		{"", "office light bar", "rgbic_tv_light_bars", ""},       // singular, substring
+		{"", "kitchen light", "light.kitchen", ""},                // exact beats the substring sibling
+		{"", "kitchen", "", "Several devices match"},              // ambiguous
+		{"", "garage door", "", "No device called"},               // unknown
+		{"wrong.entity", "front door", "lock.front", ""},          // bad entity falls back to the name
+		{"wrong.entity", "", "", "No device with entity id"},      // bad entity, no name
+		{"", "", "", "No device named"},                           // nothing given
 	}
 	for _, c := range cases {
 		d, msg := resolveDevice(devs, c.entity, c.name)
