@@ -141,7 +141,8 @@ No cloud keys in CI.
 3. ElevenLabs dialect for both. **Built** (URL convention, voice ids and names, word timings:
    [../decisions/2026-10-22-remote-speech-elevenlabs.md](../decisions/2026-10-22-remote-speech-elevenlabs.md));
    harness: `scripts/sandbox up --speech fake --speech-api elevenlabs`.
-4. Fallback for both.
+4. Fallback for both. **Built** (`llm.stt.fallback`, `tts.fallback`; choices:
+   [../decisions/2026-10-22-remote-speech-fallback.md](../decisions/2026-10-22-remote-speech-fallback.md)).
 5. Admin Speech section + wizard + test buttons (UI rules in `web/admin/CLAUDE.md`).
 
 Independent of the phone SIP work ([../cc/phone-sip.md](../cc/phone-sip.md)); can run in

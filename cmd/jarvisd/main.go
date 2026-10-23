@@ -42,6 +42,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 	"github.com/alexberardi/jarvis-server/internal/update"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 var version = "dev"
@@ -142,8 +143,21 @@ func modules(env config.Env) []module.Module {
 	sttm.Engine = sttmod.ResolveFunc(func(ctx context.Context, label string) (sttmod.Endpoint, error) {
 		ep, err := llm.Resolver.Resolve(ctx, label)
 		return sttmod.Endpoint{BaseURL: ep.BaseURL, Remote: ep.Remote, API: ep.API, APIKey: ep.APIKey, Model: ep.Model,
-			Timeout: ep.Timeout}, err
+			Timeout: ep.Timeout, Fallback: ep.Fallback}, err
 	})
+	sttm.FallbackEngine = sttmod.ResolveFunc(func(ctx context.Context, label string) (sttmod.Endpoint, error) {
+		ep, err := llm.ResolveCPU(ctx, label)
+		return sttmod.Endpoint{BaseURL: ep.BaseURL}, err
+	})
+	llm.SpeechFallback = func(label string) (fallback.Status, bool) {
+		switch label {
+		case "stt":
+			return sttm.FallbackStatus(), true
+		case "tts":
+			return ttsm.FallbackStatus()
+		}
+		return fallback.Status{}, false
+	}
 	sttm.Models = sttmod.ModelPathFunc(llm.ModelPath)
 	auth.OnUserDeleted(sttm.PurgeUser)
 	auth.OnMemberRemoved(sttm.PurgeUserHousehold)

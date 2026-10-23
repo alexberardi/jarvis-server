@@ -31,6 +31,9 @@ type Result struct {
 	Segments []Segment `json:"segments"`
 	Speaker  Speaker   `json:"speaker"`
 	Affect   any       `json:"affect"`
+	// Engine is the path that transcribed: local (the label's whisper-server), remote, or
+	// local-cpu (the remote failed and fallback=cpu answered). Logged, not on the wire.
+	Engine string `json:"-"`
 }
 
 // TranscribeOptions are the knobs of one transcription. Zero values take the settings.
@@ -55,6 +58,10 @@ type TranscribeOptions struct {
 type EngineError struct {
 	Msg    string
 	Stderr string
+	// Remote: a remote provider failed; Status is its HTTP status (0: transport error or
+	// timeout), which decides whether fallback=cpu applies.
+	Remote bool
+	Status int
 }
 
 func (e *EngineError) Error() string { return e.Msg }
@@ -121,7 +128,7 @@ func (m *Module) transcribe(ctx context.Context, samples, speakerSamples []float
 		}
 		speaker = sp
 	}()
-	text, segs, err := m.infer(ctx, whisperIn, p)
+	text, segs, path, err := m.infer(ctx, whisperIn, p)
 	<-done
 	if err != nil {
 		return Result{}, err
@@ -129,9 +136,9 @@ func (m *Module) transcribe(ctx context.Context, samples, speakerSamples []float
 	if speaker.Outcome != OutcomeMatched {
 		speaker.UserID = nil
 	}
-	m.deps.Log.Info("stt: transcribed", "chars", len(text), "segments", len(segs),
+	m.deps.Log.Info("stt: transcribed", "engine", path, "chars", len(text), "segments", len(segs),
 		"speaker_outcome", speaker.Outcome, "ms", m.now().Sub(start).Milliseconds())
-	return Result{Text: text, Segments: segs, Speaker: speaker, Affect: nil}, nil
+	return Result{Text: text, Segments: segs, Speaker: speaker, Affect: nil, Engine: path}, nil
 }
 
 // logRecognitionOff makes a disabled flag visible (at most once a minute), so it isn't
@@ -164,26 +171,41 @@ type verboseJSON struct {
 	Error string `json:"error"`
 }
 
-// infer transcribes the clip on the "stt" label's engine: a remote provider, or
-// whisper-server's /inference with the legacy decode parameters.
-func (m *Module) infer(ctx context.Context, samples []float32, p inferenceParams) (string, []Segment, error) {
+// infer transcribes the clip on the "stt" label's engine: a remote provider (with its
+// fallback, fallback.go), or whisper-server's /inference. It returns the path that answered.
+func (m *Module) infer(ctx context.Context, samples []float32, p inferenceParams) (string, []Segment, string, error) {
 	if m.Engine == nil {
-		return "", nil, fmt.Errorf("%w: no engine resolver", ErrEngineUnavailable)
+		return "", nil, "", fmt.Errorf("%w: no engine resolver", ErrEngineUnavailable)
 	}
 	ep, err := m.Engine.Resolve(ctx, "stt")
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %v", ErrEngineUnavailable, err)
+		return "", nil, "", fmt.Errorf("%w: %v", ErrEngineUnavailable, err)
 	}
 	if ep.Remote {
-		switch ep.API {
-		case APIOpenAI, "":
-			return m.inferOpenAI(ctx, ep, samples, p)
-		case APIElevenLabs:
-			return m.inferElevenLabs(ctx, ep, samples, p)
-		}
-		return "", nil, remoteError(ep, fmt.Sprintf("unsupported stt.remote_api %q", ep.API))
+		return m.inferRemote(ctx, ep, samples, p)
 	}
-	base := ep.BaseURL
+	text, segs, err := m.inferLocal(ctx, ep.BaseURL, samples, p)
+	return text, segs, pathLocal, err
+}
+
+// inferProvider transcribes the clip on the remote provider in its dialect (stt.remote_api):
+// OpenAI-compatible (the default) or ElevenLabs.
+func (m *Module) inferProvider(ctx context.Context, ep Endpoint, samples []float32, p inferenceParams) (string, []Segment, error) {
+	switch ep.API {
+	case APIOpenAI, "":
+		return m.inferOpenAI(ctx, ep, samples, p)
+	case APIElevenLabs:
+		return m.inferElevenLabs(ctx, ep, samples, p)
+	}
+	return "", nil, remoteError(ep, 0, fmt.Sprintf("unsupported stt.remote_api %q", ep.API))
+}
+
+// pathLocal is Result.Engine for a local stt label.
+const pathLocal = "local"
+
+// inferLocal transcribes the clip on whisper-server's /inference at base with the legacy
+// decode parameters.
+func (m *Module) inferLocal(ctx context.Context, base string, samples []float32, p inferenceParams) (string, []Segment, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	fw, _ := mw.CreateFormFile("file", "audio.wav")

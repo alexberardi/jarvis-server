@@ -216,3 +216,73 @@ func TestTentativeWakeRestoredWhenThePipelineStops(t *testing.T) {
 		t.Fatalf("music steps %v, want %v", got, want)
 	}
 }
+
+// autoAt050 settles the calibrated threshold at its 0.50 ceiling, as on jarvis-pi4 (#503).
+func autoAt050(r *rig) {
+	r.p.Cfg.WakeThresholdAuto, r.p.WakeScores = true, &WakeScores{}
+	for range 5 {
+		r.p.WakeScores.Record(0.95)
+	}
+}
+
+// #503, the jarvis-pi4 log of 2026-10-22 21:56:36: the threshold settled at 0.50 and the node's
+// own music through the echo canceller, a tentative opens at 0.413 and peaks at 0.469. Once the
+// music is ducked, a later score above the self-playback bar (0.35) fires and completes it.
+func TestTentativeCompletedBelowTheWakeThreshold(t *testing.T) {
+	mic := script(rep(noise, 36), rep(speech, 12))
+	r, m := tentativeRig(t, mic, true, map[int]float32{30: 0.413, 33: 0.45, 35: 0.469})
+	autoAt050(r)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if !tr.Tentative || tr.WakeScore != 0.45 {
+		t.Fatalf("turn %+v: want the 0.45 after the duck to complete the tentative", tr)
+	}
+	if got, want := m.list(), []string{"duck", "duck", "restore"}; !slices.Equal(got, want) {
+		t.Fatalf("music steps %v, want %v", got, want)
+	}
+}
+
+// The lower bar is only for a tentative's window: the same scores with no music never open one,
+// and stay below the wake threshold.
+func TestBelowThresholdScoresWithoutMusicDoNotFire(t *testing.T) {
+	mic := script(rep(noise, 60))
+	r, m := tentativeRig(t, mic, false, map[int]float32{30: 0.413, 33: 0.45, 35: 0.469})
+	autoAt050(r)
+	stop := r.run(t)
+	r.noTurnBy(t, mic, 55)
+	_ = stop()
+	if len(m.list()) != 0 {
+		t.Fatalf("music steps %v, want none", m.list())
+	}
+}
+
+// A window whose later scores stay below the self-playback bar still only ducks and restores.
+func TestTentativeBelowTheSelfPlaybackBarExpires(t *testing.T) {
+	mic := script(rep(noise, 60))
+	r, m := tentativeRig(t, mic, true, map[int]float32{10: 0.3, 13: 0.34, 15: 0.35})
+	autoAt050(r)
+	stop := r.run(t)
+	r.noTurnBy(t, mic, 50)
+	_ = stop()
+	if got, want := m.list(), []string{"duck", "restore"}; !slices.Equal(got, want) {
+		t.Fatalf("music steps %v, want %v", got, want)
+	}
+}
+
+// The bar never rises above the wake threshold: with a static 0.30, a 0.32 in the window fires.
+func TestSelfPlaybackBarCappedAtTheWakeThreshold(t *testing.T) {
+	r, _ := tentativeRig(t, script(), true, nil)
+	r.p.Cfg.WakeThreshold = 0.30
+	open, closed := tentative{open: true}, tentative{}
+	if got := r.p.fireThreshold(&open); got != 0.30 {
+		t.Fatalf("open tentative: %v, want 0.30", got)
+	}
+	r.p.Cfg.WakeThreshold = 0.50
+	if got := r.p.fireThreshold(&open); got != 0.35 {
+		t.Fatalf("open tentative: %v, want 0.35", got)
+	}
+	if got := r.p.fireThreshold(&closed); got != 0.50 {
+		t.Fatalf("no tentative: %v, want 0.50", got)
+	}
+}

@@ -46,7 +46,7 @@ func (m *Module) inferOpenAI(ctx context.Context, ep Endpoint, samples []float32
 		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", nil, remoteError(ep, "unreadable response: "+clip(strings.TrimSpace(string(raw)), 300))
+		return "", nil, remoteError(ep, http.StatusOK, "unreadable response: "+clip(strings.TrimSpace(string(raw)), 300))
 	}
 	text := strings.TrimSpace(out.Text)
 	segs := []Segment{}
@@ -68,7 +68,7 @@ func (m *Module) postRemote(ctx context.Context, ep Endpoint, url, contentType s
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
-		return nil, remoteError(ep, "bad URL")
+		return nil, remoteError(ep, 0, "bad URL")
 	}
 	req.Header.Set("Content-Type", contentType)
 	if ep.APIKey != "" {
@@ -77,30 +77,31 @@ func (m *Module) postRemote(ctx context.Context, ep Endpoint, url, contentType s
 	resp, err := m.httpClient().Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, remoteError(ep, fmt.Sprintf("no answer within %s", ep.Timeout))
+			return nil, remoteError(ep, 0, fmt.Sprintf("no answer within %s", ep.Timeout))
 		}
-		return nil, remoteError(ep, err.Error())
+		return nil, remoteError(ep, 0, err.Error())
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		return nil, remoteError(ep, err.Error())
+		return nil, remoteError(ep, 0, err.Error())
 	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return nil, remoteError(ep, fmt.Sprintf("%d: the provider refused the API key", resp.StatusCode))
+		return nil, remoteError(ep, resp.StatusCode, fmt.Sprintf("%d: the provider refused the API key", resp.StatusCode))
 	case resp.StatusCode != http.StatusOK:
-		return nil, remoteError(ep, fmt.Sprintf("%d: %s", resp.StatusCode, clip(strings.TrimSpace(string(raw)), 300)))
+		return nil, remoteError(ep, resp.StatusCode, fmt.Sprintf("%d: %s", resp.StatusCode, clip(strings.TrimSpace(string(raw)), 300)))
 	}
 	return raw, nil
 }
 
-// remoteError is a failed remote transcription, with the key scrubbed from the detail.
-func remoteError(ep Endpoint, detail string) *EngineError {
+// remoteError is a failed remote transcription, with the key scrubbed from the detail. status
+// is the provider's HTTP status, 0 for a transport error or timeout.
+func remoteError(ep Endpoint, status int, detail string) *EngineError {
 	if ep.APIKey != "" {
 		detail = strings.ReplaceAll(detail, ep.APIKey, "***")
 	}
-	return &EngineError{Msg: "Remote transcription failed: " + detail, Stderr: detail}
+	return &EngineError{Msg: "Remote transcription failed: " + detail, Stderr: detail, Remote: true, Status: status}
 }
 
 func clip(s string, n int) string {

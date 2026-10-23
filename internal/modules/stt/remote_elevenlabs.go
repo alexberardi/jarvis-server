@@ -49,7 +49,7 @@ func (m *Module) inferElevenLabs(ctx context.Context, ep Endpoint, samples []flo
 		Words []elevenLabsWord `json:"words"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", nil, remoteError(ep, "unreadable response: "+clip(strings.TrimSpace(string(raw)), 300))
+		return "", nil, remoteError(ep, http.StatusOK, "unreadable response: "+clip(strings.TrimSpace(string(raw)), 300))
 	}
 	text := strings.TrimSpace(out.Text)
 	if text == "" {

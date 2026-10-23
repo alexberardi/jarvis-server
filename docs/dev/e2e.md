@@ -362,6 +362,11 @@ sudo ufw delete allow from <mac-ip> to any port 11884,17030:17031,17700:17798 pr
 - The app is a Release build for the simulator, unsigned, with the sandbox's config URL baked in,
   cached per mobile commit and config URL in `~/.cache/jarvis-harness/mobile/ios/` (the first
   build takes a while; its log is `build.log` there).
+- The build runs with Xcode's own sandboxes off (`OTHER_SWIFT_FLAGS=-disable-sandbox` for macro
+  plugins, `ENABLE_USER_SCRIPT_SANDBOXING=NO` for script phases): the loop runner fences it in
+  Seatbelt, and macOS refuses a nested `sandbox-exec` (`sandbox_apply: Operation not permitted`,
+  then `external macro implementation type PreviewsMacros.SwiftUIView could not be found`).
+  `scripts/ios-nested-sandbox-check.sh` checks the Swift flag with the command-line tools alone.
 - On a failure, `.e2e/<run>/ios/<flow>/` keeps `screenshot.png`, `hierarchy.json`,
   `device.log`, `maestro.log` and `maestro/`.
 - After a failed flow the runner reboots the simulator before the next one (the flow's

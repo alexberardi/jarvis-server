@@ -41,6 +41,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 //go:embed migrations/*.sql
@@ -79,6 +80,9 @@ var Definitions = []settings.Definition{
 		Description: "Remote TTS voice, used for everything including phone calls (e.g. marin for OpenAI; a voice id for ElevenLabs, which needs one)"},
 	{Key: "tts.remote_timeout_ms", Category: "tts", Type: settings.Int, Default: 8000,
 		Description: "How long to wait for the remote TTS to answer a sentence, or to send more of it, before giving up (ms)"},
+	{Key: "tts.fallback", Category: "tts", Type: settings.String, Default: fallback.ModeOff,
+		Description: "When the remote TTS fails (down, timeout, rate limit, refused key): off (the reply stops) or cpu (the rest of the reply is spoken by local Kokoro in tts.kokoro_voice; install Kokoro from the Models page, nothing is downloaded for you)",
+		Options:     []any{fallback.ModeOff, fallback.ModeCPU}},
 	{Key: "tts.kokoro_voice", Category: "tts", Type: settings.String, Default: DefaultVoice,
 		Description: "Kokoro voice ID (e.g., bm_george, bm_fable, af_heart)"},
 	{Key: "tts.kokoro_speed", Category: "tts", Type: settings.Float, Default: 1.25,
@@ -135,6 +139,9 @@ type Module struct {
 	once     sync.Once
 	eng      *engines
 	sem      chan struct{}
+
+	// fallback is the remote provider's fallback state (fallback.go).
+	fallback fallback.Gate
 }
 
 func (m *Module) Name() string      { return "tts" }

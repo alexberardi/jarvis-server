@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -30,6 +31,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/module"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 //go:embed migrations/*.sql
@@ -63,6 +65,9 @@ type Endpoint struct {
 	Model string
 	// Timeout bounds one remote request; 0 = the HTTP client's.
 	Timeout time.Duration
+	// Fallback is a remote label's fallback setting: fallback.ModeCPU sends the clip to
+	// Module.FallbackEngine when the provider fails; "" or off fails as is.
+	Fallback string
 }
 
 // Remote dialects.
@@ -138,8 +143,11 @@ type Module struct {
 	// Version is what /health reports.
 	Version string
 
-	// Engine resolves the "stt" label to whisper-server.
+	// Engine resolves the "stt" label to whisper-server or a remote provider.
 	Engine STTEngine
+	// FallbackEngine resolves the "stt" label to a local whisper-server forced to CPU,
+	// whatever its engine setting, for a remote label with fallback=cpu. Nil: no fallback.
+	FallbackEngine STTEngine
 	// Models resolves the "speaker" model path.
 	Models ModelPaths
 	// Speaker, when set, replaces the model loaded through Models (tests).
@@ -161,6 +169,10 @@ type Module struct {
 
 	offLogMu sync.Mutex
 	offLogAt time.Time
+
+	// fallback is the remote label's fallback state (fallback.go).
+	fallback     fallback.Gate
+	fallbackMode atomic.Value // string: the latest request's fallback setting
 }
 
 func (m *Module) Name() string      { return "stt" }
@@ -198,6 +210,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	if m.now == nil {
 		m.now = time.Now
 	}
+	m.fallback.Now = func() time.Time { return m.now() }
 	if m.Version == "" {
 		m.Version = "dev"
 	}

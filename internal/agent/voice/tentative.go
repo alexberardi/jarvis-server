@@ -12,14 +12,18 @@ import (
 // "hey Jarvis" arrives over quieter music and can complete a fire the loud music held below the
 // wake threshold. It is not a fire: no debounce, chime, indicator or turn.
 type TentativeConfig struct {
-	Threshold float64       // wake_word_tentative_threshold, 0.20 (0 disables)
-	Window    time.Duration // tentative_wake_window_seconds, 1.6 s: how long the duck waits for a fire
-	Cooldown  time.Duration // tentative_wake_cooldown_seconds, 10 s: one tentative at most this often
+	Threshold float64 // wake_word_tentative_threshold, 0.20 (0 disables)
+	// FireThreshold is the bar a later frame in an open tentative's window fires at, when the
+	// wake threshold is higher (#503): through the echo canceller the node's own music holds
+	// "hey Jarvis" to 0.33-0.51, so a calibrated 0.50 was rarely reached after the duck.
+	FireThreshold float64       // 0.35
+	Window        time.Duration // tentative_wake_window_seconds, 1.6 s: how long the duck waits for a fire
+	Cooldown      time.Duration // tentative_wake_cooldown_seconds, 10 s: one tentative at most this often
 }
 
-// DefaultTentative is the Python node's configuration out of the box.
+// DefaultTentative is the Python node's configuration out of the box, plus FireThreshold (#503).
 func DefaultTentative() TentativeConfig {
-	return TentativeConfig{Threshold: 0.20, Window: 1600 * time.Millisecond, Cooldown: 10 * time.Second}
+	return TentativeConfig{Threshold: 0.20, FireThreshold: 0.35, Window: 1600 * time.Millisecond, Cooldown: 10 * time.Second}
 }
 
 // tentative is the wake loop's tentative state since it last (re)started listening.
@@ -69,7 +73,7 @@ func (p *Pipeline) tentativeTrigger(ctx context.Context, tw *tentative, now time
 	p.tentativeAt = now
 	p.duck(ctx)
 	p.Log.Info("tentative wake triggered", "score", fmt.Sprintf("%.3f", score), "tentative_threshold", c.Threshold,
-		"threshold_used", p.wakeThreshold(), "window", c.Window)
+		"threshold_used", p.wakeThreshold(), "fire_threshold", p.fireThreshold(tw), "window", c.Window)
 }
 
 // tentativeEnd closes an open tentative without a fire and puts the music back.
@@ -81,4 +85,15 @@ func (p *Pipeline) tentativeEnd(ctx context.Context, tw *tentative, reason strin
 	p.restore(ctx)
 	p.Log.Info("tentative wake expired", "score_peak", fmt.Sprintf("%.3f", tw.peak), "window", p.Cfg.Tentative.Window,
 		"threshold_used", p.wakeThreshold(), "tentative_threshold", p.Cfg.Tentative.Threshold, "reason", reason)
+}
+
+// fireThreshold is the score a frame must clear to fire: the wake threshold, or inside an open
+// tentative's window (the music already ducked) the lower self-playback bar. The frame that
+// opens a tentative is scored before it is open, so it alone never fires below the threshold.
+func (p *Pipeline) fireThreshold(tw *tentative) float64 {
+	t := p.wakeThreshold()
+	if tw.open && p.Cfg.Tentative.FireThreshold > 0 {
+		return min(t, p.Cfg.Tentative.FireThreshold)
+	}
+	return t
 }
