@@ -426,7 +426,11 @@ func newTenv(t *testing.T, start bool) *tenv {
 	if start {
 		qctx, cancel := context.WithCancel(ctx)
 		e.cancel = cancel
-		t.Cleanup(cancel)
+		// Cancel then wait for the workers, reaper and purger to return before d.Close()
+		// (registered above, so it runs after this cleanup): a worker still polling SQLite
+		// would recreate the -shm/-wal files by path as TempDir is removed, failing the
+		// cleanup with "directory not empty" (same ordering as the module runner's drain).
+		t.Cleanup(func() { cancel(); q.Wait() })
 		q.Start(qctx)
 	}
 	return e
