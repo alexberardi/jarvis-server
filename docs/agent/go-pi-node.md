@@ -1107,6 +1107,25 @@ top -b -n 1 | grep pulseaudio                             # the canceller's CPU 
 # a wake right after a turn during music: the command still transcribes across the switch
 ```
 
+Raw vs cancelled wake score (#514): does the canceller — or its webrtc `noise_suppression` /
+`high_pass_filter`, both on by default — attenuate "hey Jarvis"? On the lab Pi, with music
+playing at low volume and the log showing "music: echo cancel engaged":
+
+```bash
+jarvis-agent wake-compare   # records jarvis_mic_raw and jarvis_ec_source side by side for 8 s;
+                            # say "hey Jarvis" once while it runs, then compare the two maxima
+                            # (the node answers too; the wake frames score before the duck)
+# the A/B: a webrtc filter off, restart, play music again (re-engages), compare again
+sudo systemctl edit jarvis-agent.service   # [Service] Environment=JARVIS_AGENT_EC_NOISE_SUPPRESSION=0
+                                           # and/or Environment=JARVIS_AGENT_EC_HIGH_PASS_FILTER=0
+sudo systemctl restart jarvis-agent.service
+```
+
+If the cancelled max trails the raw one with a filter on and recovers with it off, set that
+filter to 0 in `echocancel.go`'s `aecArgs` (a one-line follow-up); the shipped default stays
+webrtc's until the measurement says otherwise. The engage is best-effort as ever: a Pulse
+that refuses the extra aec_args keys falls back to the plain mic ("echo cancel not engaged").
+
 ### 3.17 Parity 5.9a: the smart-home device registry (2026-10-19, loop #176)
 
 The Pi profile answers the app's device requests over the household's device families, which

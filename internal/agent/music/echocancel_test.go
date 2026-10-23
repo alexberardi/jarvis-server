@@ -180,6 +180,41 @@ func TestEchoCancelEngageLoadsMovesAndSwitchesCapture(t *testing.T) {
 	}
 }
 
+// #514: noise_suppression and high_pass_filter (webrtc defaults: both on) are settable in
+// aec_args without a rebuild, so the person at the Pi can A/B their wake score cost. The
+// default engage (TestEchoCancelEngageLoadsMovesAndSwitchesCapture's loadEC) stays unchanged.
+func TestEchoCancelAECFiltersConfigurable(t *testing.T) {
+	cases := []struct {
+		ns, hpf string
+		want    string
+	}{
+		{"0", "", `aec_args="analog_gain_control=0 digital_gain_control=0 noise_suppression=0"`},
+		{"", "0", `aec_args="analog_gain_control=0 digital_gain_control=0 high_pass_filter=0"`},
+		{"0", "1", `aec_args="analog_gain_control=0 digital_gain_control=0 noise_suppression=0 high_pass_filter=1"`},
+	}
+	for _, c := range cases {
+		p := newECPulse(ecStream{7, "mpv", "jarvis_output"})
+		ec, _ := newEC(p)
+		ec.NoiseSuppression, ec.HighPassFilter = c.ns, c.hpf
+		if !ec.Engage(context.Background(), "deferred_play") {
+			t.Fatalf("ns=%q hpf=%q: not engaged", c.ns, c.hpf)
+		}
+		got := p.changes()[1]
+		if !strings.Contains(got, c.want) || !strings.HasPrefix(got, "pactl load-module module-echo-cancel aec_method=webrtc aec_args=") {
+			t.Fatalf("ns=%q hpf=%q loaded\n%s\nwant aec_args %s", c.ns, c.hpf, got, c.want)
+		}
+	}
+}
+
+func TestNewEchoCancelReadsAECFiltersFromEnv(t *testing.T) {
+	t.Setenv(EnvNoiseSuppression, "0")
+	t.Setenv(EnvHighPassFilter, "banana")
+	ec := NewEchoCancel(&fakeCapture{base: DefaultMic}, nil)
+	if ec.NoiseSuppression != "0" || ec.HighPassFilter != "" {
+		t.Fatalf("ns=%q hpf=%q; want 0 and the invalid value ignored", ec.NoiseSuppression, ec.HighPassFilter)
+	}
+}
+
 func TestEchoCancelDisengageUndoesExactlyItsEngage(t *testing.T) {
 	p := newECPulse(ecStream{7, "mpv", "jarvis_output"})
 	p.modules["3"] = "module-null-sink sink_name=" + NullSink // not ours

@@ -188,6 +188,8 @@ func main() {
 		err = try(ctx, os.Args[2:])
 	case "listen":
 		err = listen(ctx, os.Args[2:])
+	case "wake-compare":
+		err = wakeCompareCmd(ctx, os.Args[2:])
 	case "apps":
 		err = appsCmd(os.Args[2:])
 	case "browser":
@@ -255,6 +257,9 @@ func usage(w io.Writer) {
            [--captive-listen :80] [--ap-ssid SSID] [--creds PATH]
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
+  wake-compare  record Pulse sources side by side and score each for "hey Jarvis" (debug; on a
+           Pi with music playing it compares the raw mic with the echo-cancelled one)
+           [--seconds 8] [--sources jarvis_mic_raw,jarvis_ec_source] [--floor 0.1]
   install  set the agent up for this user: start at login, the app menu entry (and desktop
            shortcut), the jarvis-agent:// link, browser control's native host; then start it
            [--no-start] [--no-browser] [--desktop-shortcut] [--login-item auto|smappservice|launchagent]
