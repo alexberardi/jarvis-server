@@ -357,7 +357,11 @@ cmd_weekly() {
   if [ "$UPDATE" = 1 ]; then
     boot 0
     step "update Debian and FreePBX to this week's release; log in $out/update.log"
-    xto "$out/update.log" vssh "sudo apt-get -q update && sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y full-upgrade && sudo fwconsole ma upgradeall && sudo fwconsole reload"
+    # The boot from "installed" can leave Asterisk down (fwconsole reload then dies on
+    # /var/run/asterisk, loop #520), so wait for it as the capture step does, fwconsole start if
+    # the wait ran out, and wait again after the upgrade: apt can restart Asterisk.
+    local wait_ast="for _ in \$(seq 90); do sudo asterisk -rx 'core waitfullybooted' >/dev/null 2>&1 && break; sleep 2; done"
+    xto "$out/update.log" vssh "$wait_ast; sudo asterisk -rx 'core waitfullybooted' >/dev/null 2>&1 || { sudo fwconsole start; $wait_ast; }; sudo asterisk -rx 'core waitfullybooted' && sudo apt-get -q update && sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y full-upgrade && sudo fwconsole ma upgradeall && { $wait_ast; } && sudo asterisk -rx 'core waitfullybooted' && sudo fwconsole reload"
     provision
   else
     # Offline (restrict=on) unless the calls run: restrict=on also drops the VM's replies on the
