@@ -175,6 +175,8 @@ type Module struct {
 	resets   *resetStore
 	ambient  *ambientStore
 	releases *releaseCache
+	// serverReleases is jarvis-server's release list, which Go nodes follow (updates.go).
+	serverReleases *serverReleaseCache
 	// lastInputs is each node's latest warmup prompt inputs (household_prompt.go).
 	lastInputs lastInputs
 
@@ -293,6 +295,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.ambient = newAmbientStore()
 	m.wakes = newWakeArbiter(func() time.Time { return m.now() }, m.wakeAfter)
 	m.releases = &releaseCache{}
+	m.serverReleases = &serverReleaseCache{}
 	m.convs = newConvCache(m.now)
 	m.signals = newConvSignals(m.now)
 	m.wakeSem = make(chan struct{}, wakeVerifyLimit)

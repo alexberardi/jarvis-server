@@ -82,7 +82,7 @@ Auth: **N** = node `X-API-Key: node_id:node_key` (`deps.py:162-217`); **J** = us
 | POST | `/node/send-link` | N | node `send_link` command | `api/node_commands.py:507` |
 | POST | `/node/inbox-item` | N | packages and SDK (public plugin API) | `api/node_commands.py:629` |
 | POST | `/device-control-results/{rid}` | **–** | node `_post_action_result` (`:290`), `_post_tool_call_result` (`:991`) | `api/smart_home.py:1200` (the shared result sink; see §3.6) |
-| GET | `/releases/latest` | **–** | mobile `nodeUpdateApi.ts:36` | `api/node_updates.py:100` |
+| GET | `/releases/latest` | **–** (user with `?node_id=`) | mobile `nodeUpdateApi.ts:36` | `api/node_updates.py:100` |
 | POST | `/nodes/{id}/update` | J (member) | mobile `nodeUpdateApi.ts:51` | `api/node_updates.py:117` |
 | POST | `/nodes/tasks/{tid}/status` | N (owner) | node `update_service._report_task_refused` (`services/update_service.py:69`) | `api/node_updates.py:171` |
 | GET | `/tasks/{tid}` | J (member) | mobile `nodeUpdateApi.ts:60` | `api/node_updates.py:224` |
@@ -336,6 +336,8 @@ The update request (`node_updates.py:117-168`):
 - 409 if an update task is already open.
 - `resolve_target_version` (`services/github_releases.py:498-513`): `"latest"` or None → GitHub `/repos/alexberardi/jarvis-node-setup/releases/latest`, gated by `updates.allow_check` (default **false**, fail-closed, `:429-452`), cached 300 s. An explicit `vX.Y.Z` is used as-is with the `v` stripped and no egress. If the result is None → 503.
 
+`GET /releases/latest` (#487, Go port): without `node_id` it is the above jarvis-node-setup release (`kind: "python"`), unauthenticated, as before. With `?node_id=` it needs a member of the node's household and answers for the node's kind: a node that follows this server (Go Pi node, desktop agent) gets `kind: "go"` and the newest jarvis-server release by semver precedence, on the server's channel (prereleases only when jarvisd is one) and never past jarvisd's own version, since that is what "Update" moves it to; a Python node gets jarvis-node-setup's (`kind: "python"`). A release not newer than the node's `last_seen_version` is `null`, as is a development jarvisd for Go nodes.
+
 The node (`jarvis-node-setup/services/update_service.py:210-290`):
 
 - If `allow_updates` is false → POST `/nodes/tasks/{tid}/status {state:"failed", error_message}`.
@@ -393,7 +395,7 @@ All four resolve `household_id` from the authenticated node, never the body.
 
 | Key | Default | Effect |
 |---|---|---|
-| `updates.allow_check` | `false` (`settings_definitions.py:396`) | Gates the GitHub lookup. Read per household for `/nodes/{id}/update` and **globally** (household None) for `/releases/latest`. |
+| `updates.allow_check` | `false` (`settings_definitions.py:396`) | Gates the GitHub lookup. Read per household for `/nodes/{id}/update` and `/releases/latest?node_id=`, and **globally** (household None) for `/releases/latest` without a node. |
 | `tracing.retention_days` | 7 (fallback `main.py:342`) | Trace TTL. **Not declared in `settings_definitions.py`**, so it is not settable from the UI. |
 
 Env: `MQTT_USERNAME`, `MQTT_PASSWORD`, `JARVIS_MQTT_BROKER_URL`, `NODE_AUTH_CACHE_TTL`, `ADMIN_API_KEY`, `JARVIS_APP_ID`/`JARVIS_APP_KEY`, `JARVIS_AUTH_BASE_URL`. These constants are hard-coded:

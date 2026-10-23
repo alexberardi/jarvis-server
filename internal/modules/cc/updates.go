@@ -87,13 +87,100 @@ func (m *Module) latestRelease(ctx context.Context, householdID string) *release
 	return c.info
 }
 
+// serverReleaseCache holds jarvis-server's recent releases for 5 minutes.
+type serverReleaseCache struct {
+	mu   sync.Mutex
+	at   time.Time
+	list []update.Release
+}
+
+// serverRelease is the release a node following this server is offered: the newest jarvis-server
+// release by semver precedence on this server's channel (prereleases only when it runs one), and
+// never past this server's own version, since that is what the node updates to (heartbeat
+// server_version, requestServerVersionUpdate). Gated like latestRelease; nil on a development
+// build or when GitHub can't be read.
+func (m *Module) serverRelease(ctx context.Context, householdID string) *releaseInfo {
+	if !m.updatesAllowed(ctx, householdID) {
+		return nil
+	}
+	srv, ok := update.ParseVersion(m.Version)
+	if !ok {
+		return nil
+	}
+	c := m.serverReleases
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.list == nil || m.now().Sub(c.at) >= releaseCacheTTL {
+		list, err := update.Source{APIBase: m.GitHubAPI, Client: m.HTTPClient, UserAgent: "jarvisd/" + m.Version}.List(ctx)
+		if err != nil {
+			return nil
+		}
+		c.list, c.at = list, m.now()
+	}
+	var upTo []update.Release
+	for _, r := range c.list {
+		if v, ok := update.ParseVersion(r.Tag); ok && v.Compare(srv) <= 0 {
+			upTo = append(upTo, r)
+		}
+	}
+	best := update.Newest(upTo, m.Version)
+	if best == nil {
+		return nil
+	}
+	var published any
+	if best.PublishedAt != "" {
+		published = best.PublishedAt
+	}
+	return &releaseInfo{Tag: best.Tag, Version: strings.TrimPrefix(best.Tag, "v"), PublishedAt: published}
+}
+
+// handleLatestRelease answers the release a node is offered. With ?node_id= (a member's token
+// required) it is that node's kind's: a Go node (kind "go") follows this server's jarvis-server
+// releases, the Python node (kind "python") jarvis-node-setup's, and a version the node already
+// runs or passed is null. Without one it is jarvis-node-setup's latest, as before.
 func (m *Module) handleLatestRelease(w http.ResponseWriter, r *http.Request) {
-	info := m.latestRelease(r.Context(), "")
+	ctx := r.Context()
+	id := r.URL.Query().Get("node_id")
+	if id == "" {
+		writeRelease(w, m.latestRelease(ctx, ""), "python")
+		return
+	}
+	u, ok := m.authUser(w, r)
+	if !ok {
+		return
+	}
+	node, err := m.requireNodeAccess(ctx, u, id, authn.RoleMember, "Not authorized")
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	hh := node.householdID.String
+	if node.followsServer() {
+		info := m.serverRelease(ctx, hh)
+		if info != nil && node.lastSeenVersion.Valid {
+			tv, _ := update.ParseVersion(info.Tag)
+			if cv, ok := update.ParseVersion(node.lastSeenVersion.String); ok && tv.Compare(cv) <= 0 {
+				info = nil
+			}
+		}
+		writeRelease(w, info, "go")
+		return
+	}
+	info := m.latestRelease(ctx, hh)
+	if info != nil && node.lastSeenVersion.Valid {
+		if c, ok := compareVersions(info.Version, node.lastSeenVersion.String); ok && c <= 0 {
+			info = nil
+		}
+	}
+	writeRelease(w, info, "python")
+}
+
+func writeRelease(w http.ResponseWriter, info *releaseInfo, kind string) {
 	if info == nil {
 		httpx.WriteJSON(w, http.StatusOK, nil)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tag": info.Tag, "version": info.Version, "published_at": info.PublishedAt})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tag": info.Tag, "version": info.Version, "published_at": info.PublishedAt, "kind": kind})
 }
 
 // compareVersions compares dotted numeric versions ("0.3.10" > "0.3.9"); ok=false if either
