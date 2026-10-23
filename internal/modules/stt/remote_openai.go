@@ -37,40 +37,13 @@ func (m *Module) inferOpenAI(ctx context.Context, ep Endpoint, samples []float32
 	}
 	mw.Close()
 
-	if ep.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, ep.Timeout)
-		defer cancel()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ep.BaseURL, "/")+"/audio/transcriptions", &body)
+	raw, err := m.postRemote(ctx, ep, strings.TrimRight(ep.BaseURL, "/")+"/audio/transcriptions", mw.FormDataContentType(), &body,
+		func(h http.Header) { h.Set("Authorization", "Bearer "+ep.APIKey) })
 	if err != nil {
-		return "", nil, remoteError(ep, "bad URL")
-	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	if ep.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+ep.APIKey)
-	}
-	resp, err := m.httpClient().Do(req)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return "", nil, remoteError(ep, fmt.Sprintf("no answer within %s", ep.Timeout))
-		}
-		return "", nil, remoteError(ep, err.Error())
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return "", nil, remoteError(ep, err.Error())
+		return "", nil, err
 	}
 	var out struct {
 		Text string `json:"text"`
-	}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		// A provider may echo part of the key in its message: say only what happened.
-		return "", nil, remoteError(ep, fmt.Sprintf("%d: the provider refused the API key", resp.StatusCode))
-	case resp.StatusCode != http.StatusOK:
-		return "", nil, remoteError(ep, fmt.Sprintf("%d: %s", resp.StatusCode, clip(strings.TrimSpace(string(raw)), 300)))
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", nil, remoteError(ep, "unreadable response: "+clip(strings.TrimSpace(string(raw)), 300))
@@ -81,6 +54,45 @@ func (m *Module) inferOpenAI(ctx context.Context, ep Endpoint, samples []float32
 		segs = append(segs, Segment{T0Ms: 0, T1Ms: len(samples) * 1000 / SampleRate, Text: text})
 	}
 	return text, segs, nil
+}
+
+// postRemote sends one remote transcription request and returns the 200 answer's body. auth
+// sets the key's header (only when there is a key). Every failure is a remoteError: a 401/403
+// says only that the key was refused (a provider may echo part of it), any other body is cut at
+// 300 characters, and the timeout names itself.
+func (m *Module) postRemote(ctx context.Context, ep Endpoint, url, contentType string, body io.Reader, auth func(http.Header)) ([]byte, error) {
+	if ep.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, ep.Timeout)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return nil, remoteError(ep, "bad URL")
+	}
+	req.Header.Set("Content-Type", contentType)
+	if ep.APIKey != "" {
+		auth(req.Header)
+	}
+	resp, err := m.httpClient().Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, remoteError(ep, fmt.Sprintf("no answer within %s", ep.Timeout))
+		}
+		return nil, remoteError(ep, err.Error())
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, remoteError(ep, err.Error())
+	}
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return nil, remoteError(ep, fmt.Sprintf("%d: the provider refused the API key", resp.StatusCode))
+	case resp.StatusCode != http.StatusOK:
+		return nil, remoteError(ep, fmt.Sprintf("%d: %s", resp.StatusCode, clip(strings.TrimSpace(string(raw)), 300)))
+	}
+	return raw, nil
 }
 
 // remoteError is a failed remote transcription, with the key scrubbed from the detail.

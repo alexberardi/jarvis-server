@@ -31,6 +31,7 @@ type recorded struct {
 	method, path, auth, ctype string
 	raw                       string
 	body                      map[string]any
+	query, xiKey              string
 }
 
 // pcmFor is a recognisable s16le body for text: 50 samples per character, valued len(text).
@@ -50,7 +51,8 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		_ = json.Unmarshal(raw, &body)
 		f.mu.Lock()
 		i := len(f.reqs)
-		f.reqs = append(f.reqs, recorded{r.Method, r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), string(raw), body})
+		f.reqs = append(f.reqs, recorded{r.Method, r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), string(raw), body,
+			r.URL.RawQuery, r.Header.Get("xi-api-key")})
 		reply := f.reply
 		f.mu.Unlock()
 		if reply != nil {

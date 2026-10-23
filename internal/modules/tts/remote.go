@@ -19,8 +19,9 @@ import (
 )
 
 // Remote TTS (docs/llm/07-remote-speech.md §3): tts.provider=remote sends each sentence to an
-// OpenAI-compatible POST {tts.remote_url}/audio/speech and delivers what comes back as the
-// same stream Kokoro produces, always 24 kHz s16le mono, so /audio/format and the X-Audio-*
+// OpenAI-compatible POST {tts.remote_url}/audio/speech, or to ElevenLabs' POST
+// {tts.remote_url}/v1/text-to-speech/{voice}/stream (tts.remote_api=elevenlabs), and delivers
+// what comes back as the same stream Kokoro produces, always 24 kHz s16le mono, so /audio/format and the X-Audio-*
 // headers callers set before the first chunk stay true whatever the provider sends.
 
 // RemoteProvider is the tts.provider value (and the Format provider) for a remote service.
@@ -32,6 +33,16 @@ const remoteSampleRate = kokoroSampleRate
 // ErrRemoteNotConfigured is Speak's error for tts.provider=remote with no tts.remote_url. It
 // is an ErrNotInstalled (503 on /speak, 409 on the admin sample): no voice is set up yet.
 var ErrRemoteNotConfigured = fmt.Errorf("%w: tts.provider is remote but tts.remote_url is empty", ErrNotInstalled)
+
+// ErrRemoteNoVoice is Speak's error for the elevenlabs dialect with no tts.remote_voice: its
+// voice is part of the path, and it has no default.
+var ErrRemoteNoVoice = fmt.Errorf("%w: tts.remote_api is elevenlabs but tts.remote_voice is empty", ErrNotInstalled)
+
+// Remote dialects (tts.remote_api).
+const (
+	APIOpenAI     = "openai"
+	APIElevenLabs = "elevenlabs"
+)
 
 // remoteConfig is one call's remote settings.
 type remoteConfig struct {
@@ -53,7 +64,7 @@ func (m *Module) provider(ctx context.Context) string {
 // remote reads the remote settings. tts.kokoro_* do not apply (docs/decisions/2026-10-22-remote-tts.md):
 // speed and gain are 1 unless the call sets them.
 func (m *Module) remote(ctx context.Context, opts SpeakOptions) remoteConfig {
-	c := remoteConfig{voice: opts.Voice, speed: opts.Speed, gain: opts.Gain, api: "openai"}
+	c := remoteConfig{voice: opts.Voice, speed: opts.Speed, gain: opts.Gain, api: APIOpenAI}
 	if s := m.settings; s != nil {
 		sc := settings.Scope{}
 		c.url = strings.TrimRight(strings.TrimSpace(s.String(ctx, "tts.remote_url", sc)), "/")
@@ -85,6 +96,9 @@ func (m *Module) speakRemote(ctx context.Context, sentences []string, opts Speak
 	c := m.remote(ctx, opts)
 	if c.url == "" {
 		return nil, ErrRemoteNotConfigured
+	}
+	if c.api == APIElevenLabs && c.voice == "" {
+		return nil, ErrRemoteNoVoice
 	}
 	select { // cap concurrent streams
 	case m.sem <- struct{}{}:
@@ -163,36 +177,76 @@ func (e *statusError) perSentence() bool {
 		e.code == http.StatusUnprocessableEntity
 }
 
-// speak renders one sentence (openai dialect) and passes its PCM to emit in whole samples,
-// 24 kHz s16le mono. timeout bounds the wait for the answer and each silence in its body
-// after, not the whole body: a long sentence may stream for longer than that.
-func (c remoteConfig) speak(ctx context.Context, client *http.Client, text string, emit func([]byte) error) error {
-	if c.api != "openai" {
-		return fmt.Errorf("remote tts: unsupported tts.remote_api %q", c.api)
+// speechRequest is one sentence's request in the configured dialect, without its context.
+//   - openai: POST {url}/audio/speech {model, input, voice, response_format: pcm, speed}
+//   - elevenlabs: POST {base}/v1/text-to-speech/{voice}/stream?output_format=pcm_24000&enable_logging=false
+//     {text, model_id}, the key in xi-api-key. Its speed (voice_settings, 0.7-1.2) is left at the
+//     voice's own: a remote voice is spoken at speed 1 anyway (docs/decisions/2026-10-22-remote-tts.md).
+func (c remoteConfig) speechRequest(text string) (*http.Request, error) {
+	var u string
+	var body []byte
+	switch c.api {
+	case APIOpenAI:
+		u = c.url + "/audio/speech"
+		body, _ = json.Marshal(map[string]any{
+			"model": c.model, "input": text, "voice": c.voice, "response_format": "pcm", "speed": c.speed,
+		})
+	case APIElevenLabs:
+		u = ElevenLabsBase(c.url) + "/v1/text-to-speech/" + url.PathEscape(c.voice) + "/stream?output_format=pcm_24000&enable_logging=false"
+		body, _ = json.Marshal(map[string]any{"text": text, "model_id": c.model})
+	default:
+		return nil, fmt.Errorf("remote tts: unsupported tts.remote_api %q", c.api)
 	}
-	body, _ := json.Marshal(map[string]any{
-		"model": c.model, "input": text, "voice": c.voice, "response_format": "pcm", "speed": c.speed,
-	})
+	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req.Header)
+	return req, nil
+}
+
+// authorize sets the key's header for the dialect: a bearer token, or ElevenLabs' xi-api-key.
+func (c remoteConfig) authorize(h http.Header) {
+	switch {
+	case c.key == "":
+	case c.api == APIElevenLabs:
+		h.Set("xi-api-key", c.key)
+	default:
+		h.Set("Authorization", "Bearer "+c.key)
+	}
+}
+
+// ElevenLabsBase is ElevenLabs' API root for a configured URL: its paths carry their own
+// version (/v1/text-to-speech, /v2/voices), so a pasted trailing /v1 or /v2 is dropped.
+func ElevenLabsBase(u string) string {
+	u = strings.TrimRight(strings.TrimSpace(u), "/")
+	for _, v := range []string{"/v1", "/v2"} {
+		u = strings.TrimSuffix(u, v)
+	}
+	return u
+}
+
+// speak renders one sentence and passes its PCM to emit in whole samples, 24 kHz s16le mono.
+// timeout bounds the wait for the answer and each silence in its body after, not the whole
+// body: a long sentence may stream for longer than that.
+func (c remoteConfig) speak(ctx context.Context, client *http.Client, text string, emit func([]byte) error) error {
+	req, err := c.speechRequest(text)
+	if err != nil {
+		return err
+	}
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	idle := time.AfterFunc(c.timeout, cancel)
 	defer idle.Stop()
-	req, err := http.NewRequestWithContext(rctx, http.MethodPost, c.url+"/audio/speech", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.key != "" {
-		req.Header.Set("Authorization", "Bearer "+c.key)
-	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req.WithContext(rctx))
 	if err != nil {
 		return c.timedOut(ctx, rctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return &statusError{code: resp.StatusCode, body: strings.TrimSpace(string(b))}
+		return &statusError{code: resp.StatusCode, body: c.scrub(strings.TrimSpace(string(b)))}
 	}
 	idle.Reset(c.timeout)
 	// The clock stops while the caller hasn't taken the last chunk yet: a slow reader is not
@@ -213,6 +267,14 @@ func (c remoteConfig) speak(ctx context.Context, client *http.Client, text strin
 		return c.timedOut(ctx, rctx, err)
 	}
 	return nil
+}
+
+// scrub replaces the key in a provider's answer (an error may echo it) by ***.
+func (c remoteConfig) scrub(s string) string {
+	if c.key == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, c.key, "***")
 }
 
 // timedOut names a timeout (the idle timer cancelled rctx, not the caller) as one.
@@ -351,21 +413,24 @@ const openAIDefaultVoice = "marin"
 // VoiceChoices is what GET /api/tts/voices offers: the active provider's voices, the one in
 // use, the default, and the setting a choice is written to ("tts/<key>"). FreeText is true
 // when the provider has no list we can read (an "Other" server without GET /audio/voices):
-// any name is accepted.
+// any name is accepted. Names maps a voice to its display name where the provider's voices are
+// ids (ElevenLabs): Voices stay what the setting stores.
 type VoiceChoices struct {
-	Provider string   `json:"provider"`
-	Voices   []string `json:"voices"`
-	Current  string   `json:"current"`
-	Default  string   `json:"default"`
-	Setting  string   `json:"setting"`
-	FreeText bool     `json:"free_text"`
+	Provider string            `json:"provider"`
+	Voices   []string          `json:"voices"`
+	Names    map[string]string `json:"names,omitempty"`
+	Current  string            `json:"current"`
+	Default  string            `json:"default"`
+	Setting  string            `json:"setting"`
+	FreeText bool              `json:"free_text"`
 }
 
 // voicesTimeout bounds asking an "Other" server for its voices.
 const voicesTimeout = 5 * time.Second
 
 // VoiceChoices lists the voices of the active provider: Kokoro's, OpenAI's fixed list when
-// tts.remote_url is OpenAI's, else what GET {url}/audio/voices answers.
+// tts.remote_url is OpenAI's, ElevenLabs' GET /v2/voices for that dialect, else what
+// GET {url}/audio/voices answers.
 func (m *Module) VoiceChoices(ctx context.Context) VoiceChoices {
 	if m.provider(ctx) != RemoteProvider {
 		v := VoiceChoices{Provider: ProviderName, Voices: Voices(), Current: DefaultVoice, Default: DefaultVoice,
@@ -381,6 +446,13 @@ func (m *Module) VoiceChoices(ctx context.Context) VoiceChoices {
 	v := VoiceChoices{Provider: RemoteProvider, Voices: []string{}, Current: c.voice, Setting: "tts/tts.remote_voice"}
 	if u, err := url.Parse(c.url); err == nil && u.Hostname() == "api.openai.com" {
 		v.Voices, v.Default = append([]string(nil), openAIVoices...), openAIDefaultVoice
+	} else if c.url != "" && c.api == APIElevenLabs {
+		ids, names, err := c.elevenLabsVoices(ctx, m.httpClient())
+		if err != nil {
+			m.log().Info("tts: ElevenLabs lists no voices; the voice is free text", "url", c.url, "err", err)
+		} else {
+			v.Voices, v.Names = ids, names
+		}
 	} else if c.url != "" {
 		names, err := c.listVoices(ctx, m.httpClient())
 		if err != nil {
@@ -407,9 +479,7 @@ func (c remoteConfig) listVoices(ctx context.Context, client *http.Client) ([]st
 	if err != nil {
 		return nil, err
 	}
-	if c.key != "" {
-		req.Header.Set("Authorization", "Bearer "+c.key)
-	}
+	c.authorize(req.Header)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -450,4 +520,61 @@ func (c remoteConfig) listVoices(ctx context.Context, client *http.Client) ([]st
 		}
 	}
 	return names, nil
+}
+
+// elevenLabsVoicePages caps how many pages of 100 voices are read (a library of 2000 is far
+// more than anyone picks from).
+const elevenLabsVoicePages = 20
+
+// elevenLabsVoices is ElevenLabs' GET {base}/v2/voices, every page: the voice ids in its order
+// and each id's name. The request's path takes the id; the admin shows the name.
+func (c remoteConfig) elevenLabsVoices(ctx context.Context, client *http.Client) ([]string, map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, voicesTimeout)
+	defer cancel()
+	ids, names := []string{}, map[string]string{}
+	token := ""
+	for range elevenLabsVoicePages {
+		q := url.Values{"page_size": {"100"}}
+		if token != "" {
+			q.Set("next_page_token", token)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ElevenLabsBase(c.url)+"/v2/voices?"+q.Encode(), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		c.authorize(req.Header)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, nil, err
+		}
+		var page struct {
+			Voices []struct {
+				VoiceID string `json:"voice_id"`
+				Name    string `json:"name"`
+			} `json:"voices"`
+			HasMore       bool   `json:"has_more"`
+			NextPageToken string `json:"next_page_token"`
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, nil, &statusError{code: resp.StatusCode}
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&page)
+		resp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("voices: %w", err)
+		}
+		for _, v := range page.Voices {
+			if _, seen := names[v.VoiceID]; v.VoiceID == "" || seen {
+				continue
+			}
+			ids = append(ids, v.VoiceID)
+			names[v.VoiceID] = v.Name
+		}
+		if !page.HasMore || page.NextPageToken == "" {
+			break
+		}
+		token = page.NextPageToken
+	}
+	return ids, names, nil
 }

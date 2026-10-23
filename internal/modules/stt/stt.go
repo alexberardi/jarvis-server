@@ -51,11 +51,13 @@ const ServiceName = "jarvis-whisper-api"
 // /inference), or a remote provider (docs/llm/07-remote-speech.md §2).
 type Endpoint struct {
 	BaseURL string
-	// Remote: BaseURL is a provider's OpenAI-compatible base (POST {BaseURL}/audio/transcriptions).
+	// Remote: BaseURL is a provider's base, for the dialect in API.
 	Remote bool
-	// API is a remote endpoint's dialect (APIOpenAI).
+	// API is a remote endpoint's dialect: APIOpenAI (POST {BaseURL}/audio/transcriptions) or
+	// APIElevenLabs (POST {BaseURL}/v1/speech-to-text).
 	API string
-	// APIKey goes in "Authorization: Bearer"; never logged or put in an error.
+	// APIKey goes in "Authorization: Bearer" (openai) or "xi-api-key" (elevenlabs); never logged
+	// or put in an error.
 	APIKey string
 	// Model is the remote request's "model".
 	Model string
@@ -64,7 +66,10 @@ type Endpoint struct {
 }
 
 // Remote dialects.
-const APIOpenAI = "openai"
+const (
+	APIOpenAI     = "openai"
+	APIElevenLabs = "elevenlabs"
+)
 
 // STTEngine resolves an engine label to its endpoint. The llm module's engine.Resolver
 // satisfies it through a small adapter.

@@ -175,7 +175,13 @@ func (m *Module) infer(ctx context.Context, samples []float32, p inferenceParams
 		return "", nil, fmt.Errorf("%w: %v", ErrEngineUnavailable, err)
 	}
 	if ep.Remote {
-		return m.inferOpenAI(ctx, ep, samples, p)
+		switch ep.API {
+		case APIOpenAI, "":
+			return m.inferOpenAI(ctx, ep, samples, p)
+		case APIElevenLabs:
+			return m.inferElevenLabs(ctx, ep, samples, p)
+		}
+		return "", nil, remoteError(ep, fmt.Sprintf("unsupported stt.remote_api %q", ep.API))
 	}
 	base := ep.BaseURL
 	var body bytes.Buffer

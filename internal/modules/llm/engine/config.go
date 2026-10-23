@@ -144,15 +144,16 @@ var fields = []field{
 // sttFields overrides a field's description, options and default on the stt label, whose
 // remote endpoint transcribes audio rather than chatting (docs/llm/07-remote-speech.md §2).
 var sttFields = map[string]field{
-	"engine": {desc: "local (supervised whisper-server), remote (an OpenAI-compatible speech-to-text API: every voice turn's audio leaves the house, " +
+	"engine": {desc: "local (supervised whisper-server), remote (a speech-to-text API, OpenAI-compatible or ElevenLabs: every voice turn's audio leaves the house, " +
 		"twice for a wake turn; speaker recognition stays local) or off",
 		opts: []any{ModeLocal, ModeRemote, ModeOff}},
 	"remote_url": {desc: "Remote speech-to-text base URL: https://api.openai.com/v1 (OpenAI), https://api.groq.com/openai/v1 (Groq), " +
-		"or any server with /audio/transcriptions (speaches, LocalAI)"},
+		"https://api.elevenlabs.io (ElevenLabs, with remote_api elevenlabs), or any server with /audio/transcriptions (speaches, LocalAI)"},
 	// No auto-detect for stt: the Anthropic API has no speech-to-text.
-	"remote_api": {desc: "API the remote speech-to-text endpoint speaks: openai (multipart /audio/transcriptions)",
-		opts: []any{APIOpenAI}, def: APIOpenAI},
-	"remote_model": {desc: "Transcription model sent to the remote endpoint, e.g. gpt-transcribe (OpenAI) or whisper-large-v3-turbo (Groq)"},
+	"remote_api": {desc: "API the remote speech-to-text endpoint speaks: openai (multipart /audio/transcriptions) or " +
+		"elevenlabs (multipart /v1/speech-to-text, key in xi-api-key)",
+		opts: []any{APIOpenAI, APIElevenLabs}, def: APIOpenAI},
+	"remote_model": {desc: "Transcription model sent to the remote endpoint, e.g. gpt-transcribe (OpenAI), whisper-large-v3-turbo (Groq) or scribe_v2 (ElevenLabs)"},
 }
 
 func (f field) appliesTo(d LabelDef) bool {
@@ -185,6 +186,8 @@ const (
 	APIAuto      = "auto"
 	APIOpenAI    = "openai"
 	APIAnthropic = "anthropic"
+	// APIElevenLabs is the stt label's only: ElevenLabs' own speech-to-text API.
+	APIElevenLabs = "elevenlabs"
 )
 
 // anthropicHost is the Anthropic API's host; remote_api=auto picks the Messages API for it.
@@ -448,8 +451,11 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	c.RemoteAPIMode = strings.ToLower(str("remote_api"))
 	c.RemoteAPI = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
 	if d.Kind == KindWhisper {
-		// stt speaks openai only (no auto-detect: the Anthropic API has no speech-to-text).
+		// stt speaks openai or elevenlabs (no auto-detect: the Anthropic API has no speech-to-text).
 		c.RemoteAPI = APIOpenAI
+		if c.RemoteAPIMode == APIElevenLabs {
+			c.RemoteAPI = APIElevenLabs
+		}
 	}
 	c.RemoteTimeoutMS = num("remote_timeout_ms")
 	if has("remote_vision") {
