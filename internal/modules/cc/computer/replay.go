@@ -48,7 +48,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	run.Model = pick.Model
 	// A replay's direct steps have no model to read a checkout from the page: a purchase holds
 	// for the user as recorded, without sending the step back for one.
-	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, checkoutAsked: true}
+	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, checkoutAsked: 2}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 

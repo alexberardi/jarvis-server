@@ -844,7 +844,7 @@ func TestLoopObservesWithStartURL(t *testing.T) {
 
 // A batch that buys something without a checkout goes back to the model once for one, so the
 // confirmation shows what is bought and for how much; a second one without is asked as it is.
-func TestPayWithoutCheckoutAsksOnce(t *testing.T) {
+func TestPayWithoutCheckoutAsksTwice(t *testing.T) {
 	e := newEnv(t)
 	e.script(actions(press("e5", "Place the order")),
 		`{"checkout": {"product": "Lavender soap", "price": "4.99"}, "actions": [`+press("e5", "Place the order")+`]}`)
@@ -859,9 +859,10 @@ func TestPayWithoutCheckoutAsksOnce(t *testing.T) {
 		t.Fatalf("events %+v", ev)
 	}
 
+	// Asked twice (the 9B dropped it again after the first): the third time it holds without one.
 	e = newEnv(t)
-	e.script(actions(press("e5", "Place the order")), actions(press("e5", "Place the order")))
-	if out := e.run(); out.State != StateNeedsApproval || out.Checkout != nil || len(e.llm.reqs) != 2 {
+	e.script(actions(press("e5", "Place the order")), actions(press("e5", "Place the order")), actions(press("e5", "Place the order")))
+	if out := e.run(); out.State != StateNeedsApproval || out.Checkout != nil || len(e.llm.reqs) != 3 {
 		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
 	}
 }

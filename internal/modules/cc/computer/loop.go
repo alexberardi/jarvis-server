@@ -290,8 +290,9 @@ type round struct {
 	downloadsBefore map[string]bool
 	// fresh: the run began in this Run call, so downloadsBefore are all from before the task.
 	fresh bool
-	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
-	checkoutAsked bool
+	// checkoutAsked counts the batches that bought something without a checkout, sent back (at
+	// most 2: the 9B dropped it once more after the first, and the card went out without the product).
+	checkoutAsked int
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
 	sendAsked int
 	// acted are the batches run so far, each with the page it ran on; repeats counts the
@@ -1224,11 +1225,11 @@ func (l *Loop) decideAndAct(ctx context.Context, r *round, obs Observation, acti
 	if out, stop := l.buyGate(ctx, r, pending, co); stop {
 		return out, true
 	}
-	if len(pending) > 0 && co == nil && !r.checkoutAsked {
+	if len(pending) > 0 && co == nil && r.checkoutAsked < 2 {
 		for _, p := range pending {
 			if p.Category == computeruse.CatPay {
 				// The confirmation shows what is bought and for how much: ask the model once.
-				r.checkoutAsked = true
+				r.checkoutAsked++
 				r.feedback = `these actions buy something, so the user confirms them first: answer again with the same actions and a "checkout" read from the page (product, price, currency, seller, ship_to, card)`
 				return Outcome{}, false
 			}
