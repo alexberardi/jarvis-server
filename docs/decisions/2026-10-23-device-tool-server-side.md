@@ -42,5 +42,9 @@ tool for households with imported devices. **(b) was chosen**:
 - **Never report an unconfirmed device change:** a reply claiming a device change with no
   successful `control_device` result this turn gets one `[DEVICE_NOT_DONE]` nudge
   (`followthrough.go`; `textfilter.IsDeviceChangeRequest` / `ClaimsDeviceChanged`). A failed
-  result is not done. Requests about the node's own audio ("turn down the volume", "mute")
-  are excluded — those are `control_node`'s.
+  result is not done. The guard only fires on a *named device*: targets with a tool of their
+  own are excluded — the node's own audio and playback ("turn down the volume", "mute",
+  "turn off the radio") and its timers, alarms, reminders and notifications ("turn off the
+  timer", answered by `cancel_timer`). Nagging those would be the mirror of this bug: the
+  model would call `control_device {device_name: "timer"}`, get "No device called 'timer'
+  here" and deny a change that did happen (found in review, `deviceTargetExcl`).

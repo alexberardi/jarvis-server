@@ -84,6 +84,11 @@ func TestWarmupDeviceToolClientWins(t *testing.T) {
 	if len(descs) != 1 || descs[0] != "NODE OWN COPY" {
 		t.Fatalf("control_device definitions %v, want only the node's", descs)
 	}
+	// The reason for the drop: routing (engine.go) reads serverNames, so the name must be
+	// gone from it or the server would intercept the node's own calls.
+	if conv := ve.m.convs.get("d2"); conv.serverNames["control_device"] {
+		t.Fatalf("control_device still routes server-side: %v", conv.serverNames)
+	}
 }
 
 // With no devices in the registry, the tool and the list stay out of the conversation.

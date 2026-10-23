@@ -11,10 +11,15 @@ import (
 // — the model had muted the node instead (control_node) and nothing checked the claim.
 
 var (
-	// deviceTargetExcl: targets that are the node's own audio, music or a bare pronoun — those
-	// requests are control_node's or a playback tool's, and nagging them would be wrong. The
-	// articles are in it so "turn off the music" can't backtrack into article "" + target "the".
-	deviceTargetExcl = `(?:it|that|this|them|everything|volume|sound|music|song|audio|mic(?:rophone)?|yourself|the|my|all)`
+	// deviceTargetExcl: targets that are not a smart-home device, so nagging them would be
+	// wrong — the right tool has already run. Three families: the node's own audio and
+	// playback (control_node's or a playback tool's job), the node's own timers, alarms,
+	// reminders and notifications (set_timer/cancel_timer/reminder answer those), and a bare
+	// pronoun. The articles are in it so "turn off the music" can't backtrack into article
+	// "" + target "the".
+	deviceTargetExcl = `(?:it|that|this|them|everything|volume|sound|music|song|audio|mic(?:rophone)?|yourself|the|my|all` +
+		`|radio|news|podcasts?` +
+		`|timers?|alarms?|reminders?|notifications?|alerts?)`
 
 	// deviceChangeRequestRE: an utterance asking to change a named device's state: "turn off
 	// the office light bar", "turn the office light bars off", "switch the fan on", "power off

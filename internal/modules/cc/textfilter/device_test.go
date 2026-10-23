@@ -29,6 +29,25 @@ func TestIsDeviceChangeRequest(t *testing.T) {
 		"set a timer for ten minutes",
 		"what's the weather",
 		"turn off the sound",
+		// Not devices either: the node's own timers, alarms, reminders and notifications,
+		// and its playback — their own tools answer these, so a nag would deny a change
+		// that did happen (review of #512).
+		"turn off the timer",
+		"Turn off the timers",
+		"turn the timer off",
+		"turn off the alarm",
+		"Turn off the alarms",
+		"turn the alarm off",
+		"turn off the reminder",
+		"turn off the reminders",
+		"turn off the notification",
+		"turn off the notifications",
+		"turn off the alerts",
+		"turn off the radio",
+		"turn the radio off",
+		"turn off the news",
+		"turn off the podcast",
+		"turn off my alarm",
 	}
 	for _, s := range yes {
 		if !IsDeviceChangeRequest(s) {

@@ -413,9 +413,34 @@ func TestFollowThroughDeviceNotDone(t *testing.T) {
 	if nag := followThroughNag(conv, utt, reply, nagged); nag != "" {
 		t.Fatalf("second nag %q", nag)
 	}
+	// A node's own control_device writes its own result: success is read leniently, as the
+	// rest of the module reads node results (laxBool), so "true" is done.
+	lax := append(slices.Clone(msgs),
+		chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c4", Function: parse.FunctionCall{Name: "control_device", Arguments: `{"device_name": "office light bars", "action": "turn_off"}`}}}},
+		chatMsg{Role: "tool", ToolCallID: "c4", Content: `{"success": "true", "entity_id": "rgbic_tv_light_bars"}`})
+	if nag := followThroughNag(conv, utt, reply, lax); nag != "" {
+		t.Fatalf("lax success: %q", nag)
+	}
 	// The node's own audio is control_node's job: no nudge.
 	if nag := followThroughNag(conv, "turn down the volume", "Volume's down.", msgs); nag != "" {
 		t.Fatalf("volume request: %q", nag)
+	}
+	// Nor are the node's own timers, alarms, reminders and playback devices: cancel_timer
+	// answered the request and the reply is true, so the nudge must stay out of it —
+	// control_device would answer "No device called 'timer' here" and the model would then
+	// deny a change that did happen (review of #512).
+	timer := []chatMsg{{Role: "user", Content: "turn off the timer"},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "t1", Function: parse.FunctionCall{Name: "cancel_timer", Arguments: `{"label": "five minutes"}`}}}},
+		{Role: "tool", ToolCallID: "t1", Content: `{"success": true}`}}
+	for _, c := range []struct{ utt, reply string }{
+		{"turn off the timer", "The timer is off."},
+		{"turn off the alarm", "The alarm is off."},
+		{"turn off the reminder", "That reminder is off."},
+		{"turn off the radio", "The radio is off."},
+	} {
+		if nag := followThroughNag(conv, c.utt, c.reply, timer); nag != "" {
+			t.Fatalf("%q -> %q: %q", c.utt, c.reply, nag)
+		}
 	}
 	// Without a device tool offered, nothing to nudge toward.
 	if nag := followThroughNag(&conversation{}, utt, reply, msgs); nag != "" {

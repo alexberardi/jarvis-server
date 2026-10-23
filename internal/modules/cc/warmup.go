@@ -299,8 +299,8 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		}
 		kept := serverDefs[:0]
 		for _, d := range serverDefs {
-			if n := toolName(d); client[n] {
-				delete(conv.serverNames, n)
+			if name := toolName(d); client[name] {
+				delete(conv.serverNames, name)
 				continue
 			}
 			kept = append(kept, d)

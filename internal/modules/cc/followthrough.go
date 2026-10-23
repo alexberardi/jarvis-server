@@ -137,8 +137,12 @@ func deviceDoneThisTurn(msgs []chatMsg) bool {
 			continue
 		}
 		var o map[string]any
-		if json.Unmarshal([]byte(m.Content), &o) == nil {
-			if s, ok := o["success"].(bool); ok && s {
+		// A node's own control_device answers with whatever its client wrote, so success is
+		// read leniently ("true", 1) as the rest of the module reads node results.
+		dec := json.NewDecoder(strings.NewReader(m.Content))
+		dec.UseNumber()
+		if dec.Decode(&o) == nil {
+			if s, ok := laxBool(o["success"]); ok && s {
 				return true
 			}
 		}
