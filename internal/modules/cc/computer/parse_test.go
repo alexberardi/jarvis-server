@@ -75,3 +75,24 @@ func TestParseReply(t *testing.T) {
 		}
 	}
 }
+
+// The house model sometimes stops right before the closing brace, and at temperature 0 the
+// retry is byte-identical, so the run died on "unexpected end of JSON input" (#528). An answer
+// missing only closers is repaired; one cut mid-string stays an error (its content is lost).
+func TestParseReplyTruncated(t *testing.T) {
+	r, err := parseReply(`{"thought": "t", "actions": [{"kind": "keypress", "keys": ["enter"]}]`)
+	if err != nil {
+		t.Fatalf("truncated reply: %v", err)
+	}
+	if len(r.Actions) != 1 || r.Actions[0].Kind != "keypress" {
+		t.Fatalf("truncated reply parsed to %+v", r)
+	}
+	for _, s := range []string{
+		`{"thought": "t", "actions": [{"kind": "type", "text": "mi`, // mid-string
+		`{"done": true, "summary": "s"}}`,                           // over-closed
+	} {
+		if _, err := parseReply(s); err == nil {
+			t.Errorf("parseReply(%q) = nil error, want one", s)
+		}
+	}
+}
