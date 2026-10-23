@@ -620,6 +620,24 @@ func TestResolveCPUForRemoteSTT(t *testing.T) {
 	}
 }
 
+// The CPU engine stops once the label's model is gone.
+func TestResolveCPUStopsWithoutModel(t *testing.T) {
+	g := newRig(t)
+	c := LabelConfig{Label: LabelSTT, Kind: KindWhisper, ModelKind: ModelSTT, Engine: ModeRemote, Model: "whisper-base",
+		ModelPath: g.model("ggml-base.en.bin"), GPUBackend: "auto", RemoteURL: "https://x/v1", Fallback: FallbackCPU}
+	g.src.set(c)
+	ctx := context.Background()
+	if _, err := g.r.ResolveCPU(ctx, LabelSTT); err != nil {
+		t.Fatal(err)
+	}
+	c.Model, c.ModelPath = "", ""
+	g.src.set(c)
+	g.r.Reconcile(ctx)
+	if n := len(g.r.Instances()); n != 0 {
+		t.Fatalf("%d engines left without a model", n)
+	}
+}
+
 // The CPU engine stops once it hasn't been asked for CPUIdle.
 func TestResolveCPUIdleStop(t *testing.T) {
 	g := newRig(t)

@@ -104,8 +104,8 @@ func (r *Resolver) cpuConfig(ctx context.Context, label string) (LabelConfig, er
 	return c, nil
 }
 
-// dropCPU unbinds the CPU fallbacks unused for CPUIdle or no longer configured, for gc to
-// stop. r.mu is held.
+// dropCPU unbinds the CPU fallbacks unused for CPUIdle or no longer possible (the label isn't
+// remote with fallback=cpu, or its model is gone), for gc to stop. r.mu is held.
 func (r *Resolver) dropCPU(ctx context.Context) {
 	idle := r.CPUIdle
 	if idle <= 0 {
@@ -116,9 +116,9 @@ func (r *Resolver) dropCPU(ctx context.Context) {
 		if !ok {
 			continue
 		}
-		c, err := r.Source.Label(ctx, label)
+		_, err := r.cpuConfig(ctx, label)
 		stale := time.Since(r.cpuUsed[label]) > idle
-		if stale || err != nil || c.Engine != ModeRemote || c.Fallback != FallbackCPU {
+		if stale || err != nil {
 			r.Log.Info("stopping the local CPU fallback", "label", label, "idle", stale)
 			delete(r.bound, bind)
 			delete(r.last, bind)
