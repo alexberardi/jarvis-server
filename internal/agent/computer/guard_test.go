@@ -3,6 +3,7 @@ package computer
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -120,7 +121,7 @@ func newGuard(t *testing.T) *guardFixture {
 	return &guardFixture{clock, in, mon, act, g}
 }
 
-// TestOwnInputIgnored: HID activity inside our injection windows (and up to 250 ms after one)
+// TestOwnInputIgnored: HID activity inside our injection windows (and up to 500 ms after one)
 // and the pointer where our last action left it are not the user's.
 func TestOwnInputIgnored(t *testing.T) {
 	ctx := context.Background()
@@ -137,15 +138,15 @@ func TestOwnInputIgnored(t *testing.T) {
 	// Two actions between polls: the earlier one's events are ours too.
 	in.Click(ctx, 310, 210, "left", 1)
 	f.clock.Advance(30 * time.Millisecond)
-	f.mon.set(f.clock.Now()) // 30 ms after the click: within its end+250ms
+	f.mon.set(f.clock.Now()) // 30 ms after the click: within its end+500ms
 	f.clock.Advance(10 * time.Millisecond)
 	in.Keys(ctx, []string{"cmd", "a"})
 	f.clock.Advance(100 * time.Millisecond)
 	f.g.poll(ctx)
 
-	// An action left in progress: its window has no end yet (and the earlier ones' 250 ms are
+	// An action left in progress: its window has no end yet (and the earlier ones' 500 ms are
 	// long over).
-	f.clock.Advance(300 * time.Millisecond)
+	f.clock.Advance(600 * time.Millisecond)
 	f.in.mu.Lock()
 	f.in.start, f.in.end = f.clock.Now(), time.Time{}
 	f.in.mu.Unlock()
@@ -361,5 +362,99 @@ func TestActionDuringCursorReadIgnored(t *testing.T) {
 	f.g.poll(ctx)
 	if err := f.g.Check(); err != nil {
 		t.Fatalf("our own move paused the task: %v", err)
+	}
+}
+
+// lagInput is a pointer that lags our moves, as on macOS: CGEventPost is asynchronous, so the
+// cursor read straight after one of our moves still returns where it was before.
+type lagInput struct {
+	*fakeInput
+	stale  bool
+	sx, sy int
+}
+
+func (l *lagInput) Move(ctx context.Context, x, y int) error {
+	l.sx, l.sy, l.stale = l.fakeInput.x, l.fakeInput.y, true
+	return l.fakeInput.Move(ctx, x, y)
+}
+
+func (l *lagInput) Cursor(ctx context.Context) (int, int, error) {
+	if l.stale {
+		l.stale = false
+		return l.sx, l.sy, nil
+	}
+	return l.fakeInput.Cursor(ctx)
+}
+
+// TestLaggingCursorIgnored: the pointer read straight after our move is still where it was;
+// when the move lands where we sent it, that is not the user's drift. A user's move after it
+// still pauses.
+func TestLaggingCursorIgnored(t *testing.T) {
+	ctx := context.Background()
+	f := newGuard(t)
+	li := &lagInput{fakeInput: f.in}
+	f.g.Input = li
+	f.g.Begin(ctx)
+	for _, p := range [][2]int{{200, 150}, {321, 243}, {260, 300}} {
+		if err := f.g.Guarded().Move(ctx, p[0], p[1]); err != nil {
+			t.Fatalf("our own move to %v refused: %v (%s)", p, err, f.g.Reason())
+		}
+		f.clock.Advance(100 * time.Millisecond)
+		f.g.poll(ctx)
+	}
+	f.clock.Advance(time.Second)
+	f.g.poll(ctx)
+	if err := f.g.Check(); err != nil {
+		t.Fatalf("our own moves paused the task: %v (%s)", err, f.g.Reason())
+	}
+
+	f.in.user(400, 400)
+	f.g.poll(ctx)
+	if !errors.Is(f.g.Check(), ErrPaused) {
+		t.Fatal("the user's move after ours didn't pause the task")
+	}
+	if r := f.g.Reason(); !strings.HasPrefix(r, "pointer") {
+		t.Fatalf("reason %q, want the pointer", r)
+	}
+}
+
+// TestLateHIDStampIgnored: the HID state may stamp our event up to 400 ms after we posted it;
+// that is ours, not the user's.
+func TestLateHIDStampIgnored(t *testing.T) {
+	ctx := context.Background()
+	f := newGuard(t)
+	if err := f.g.Guarded().Move(ctx, 200, 150); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(400 * time.Millisecond)
+	f.mon.set(f.clock.Now())
+	f.g.poll(ctx)
+	if err := f.g.Guarded().Move(ctx, 321, 243); err != nil {
+		t.Fatalf("second own move refused: %v (%s)", err, f.g.Reason())
+	}
+
+	f.clock.Advance(time.Second)
+	f.mon.set(f.clock.Now())
+	f.g.poll(ctx)
+	if !errors.Is(f.g.Check(), ErrPaused) {
+		t.Fatal("HID activity a second after our move didn't pause the task")
+	}
+	if r := f.g.Reason(); !strings.HasPrefix(r, "hid") {
+		t.Fatalf("reason %q, want hid", r)
+	}
+}
+
+// TestBeginAfterInjectionIgnoresItsLateStamp: a task that begins (or resumes) straight after
+// one of our injections does not take that injection's late HID stamp for the user's.
+func TestBeginAfterInjectionIgnoresItsLateStamp(t *testing.T) {
+	ctx := context.Background()
+	f := newGuard(t)
+	f.in.Move(ctx, 200, 150) // not guarded: before the task began
+	f.g.Begin(ctx)
+	f.clock.Advance(100 * time.Millisecond)
+	f.mon.set(f.clock.Now())
+	f.g.poll(ctx)
+	if err := f.g.Check(); err != nil {
+		t.Fatalf("the injection before Begin paused the task: %v (%s)", err, f.g.Reason())
 	}
 }

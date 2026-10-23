@@ -8,7 +8,8 @@ import (
 )
 
 // NativeMonitor is the HID system state's last input event (CGEventSourceSecondsSinceLastEventType):
-// the user's mouse and keyboard, apart from our own events, which post from a private source.
+// the user's mouse and keyboard. On macOS 26 it counts our own private-source events too; the
+// guard tells them apart by its injection windows (computer.Guard).
 func NativeMonitor() Monitor { return hidMonitor{} }
 
 type hidMonitor struct{}

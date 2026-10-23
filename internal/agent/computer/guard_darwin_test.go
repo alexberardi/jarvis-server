@@ -45,16 +45,18 @@ func TestGuardMacLive(t *testing.T) {
 	go g.Run(runCtx)
 	for _, p := range [][2]int{{200, 150}, {321, 243}, {260, 300}, {200, 150}} {
 		if err := g.Guarded().Move(ctx, p[0], p[1]); err != nil {
-			t.Fatal(err)
+			t.Fatalf("move to %v: %v (%s)", p, err, g.Reason())
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
 	time.Sleep(400 * time.Millisecond)
 	after, _ := mon.Since(ctx)
-	t.Logf("HID activity: %s before, %s after our moves (unchanged: the private source keeps ours out)",
-		before.Format(time.StampMilli), after.Format(time.StampMilli))
+	start, end := in.Injecting()
+	t.Logf("HID activity: %s before, %s after our moves; our last window %s to %s",
+		before.Format(time.StampMilli), after.Format(time.StampMilli),
+		start.Format(time.StampMilli), end.Format(time.StampMilli))
 	if err := g.Check(); err != nil {
-		t.Fatalf("our own moves paused the task: %v", err)
+		t.Fatalf("our own moves paused the task: %v (%s)", err, g.Reason())
 	}
 
 	if os.Getenv("JARVIS_GUARD_MAC_LIVE_USER") != "1" {
@@ -68,6 +70,7 @@ func TestGuardMacLive(t *testing.T) {
 	if g.Check() == nil {
 		t.Fatal("the user's mouse didn't pause the task")
 	}
+	t.Logf("paused: %s", g.Reason())
 	if k, _ := act.Status(); k != Paused {
 		t.Fatalf("activity is %q, want paused", k)
 	}
