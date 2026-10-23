@@ -193,6 +193,39 @@
   }
 }
 
+/*
+ * The chat's "thinking" indicator: five small bars breathing while Jarvis works. A loading
+ * indicator, so it may loop (like the spinner); reduced motion swaps the stretch for a slow
+ * opacity pulse, keeping B's "transforms off" rule.
+ */
+@utility chat-wave-bar {
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  transform-origin: center;
+  animation: chat-wave 0.9s ease-in-out calc(var(--wave-i, 0) * -120ms) infinite alternate;
+  @media (prefers-reduced-motion: reduce) {
+    animation: chat-wave-fade 1.6s ease-in-out infinite alternate;
+  }
+}
+@keyframes chat-wave {
+  from {
+    transform: scaleY(0.35);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes chat-wave-fade {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
