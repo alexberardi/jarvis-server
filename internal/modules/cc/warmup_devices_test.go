@@ -101,3 +101,23 @@ func TestWarmupNoDevicesNoDeviceTool(t *testing.T) {
 		t.Fatalf("prompt mentions control_device with no devices:\n%s", sys)
 	}
 }
+
+// A node-sent device payload gates the tool too: the prompt's device sections render from it
+// and tell the model to call control_device, so the tool must be offered with them — no
+// registry rows needed (the pipeline's home payloads run this way).
+func TestWarmupDeviceToolFromNodePayload(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	body := `{"conversation_id":"d4","node_context":{"timezone":"America/New_York","agents":{"device_agent":{"device_controls":{"light":[{"entity_id":"rgbic_tv_light_bars","name":"Office Light Bars","state":"off","area":"Office"}]}}}},"client_tools":` + goNodeTools + `}`
+	ve.do("POST", "/api/v0/conversation/start", body, ve.node.h()).want(200)
+	reqs := ve.eng.requests()
+	req := reqs[len(reqs)-1]
+	names := reqToolNames(req)
+	found := false
+	for _, n := range names {
+		found = found || n == "control_device"
+	}
+	sys, _ := messagesOf(req)[0]["content"].(string)
+	if !found || !strings.Contains(sys, "rgbic_tv_light_bars: Office Light Bars") {
+		t.Fatalf("control_device offered: %v (tools %v); prompt:\n%s", found, names, sys)
+	}
+}

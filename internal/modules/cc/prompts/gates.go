@@ -20,10 +20,10 @@ type ToolGates struct {
 	// could only say so, and one more tool next to the recording ones makes the small live model
 	// call those less.
 	Workflows bool
-	// Devices: the household has an active device in its registry (cc_devices). Gates
-	// control_device, the server-side device tool for conversations whose node offers no
-	// control_device client tool of its own (#512); warmup drops the server copy when the
-	// node sends one.
+	// Devices: the conversation's device list has devices — the node's agents payload, or the
+	// one warmup builds from cc_devices when the node sends none. Gates control_device, the
+	// server-side device tool, so it is offered exactly when the prompt's device sections tell
+	// the model to call it (#512); warmup drops the server copy when the node offers its own.
 	Devices bool
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
 	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.

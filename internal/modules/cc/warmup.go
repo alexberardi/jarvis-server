@@ -262,7 +262,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		Watches:       m.householdBool(ctx, settingWatchesEnabled, hh),
 		Computers:     m.hasComputer(ctx, hh),
 		Workflows:     m.hasWorkflows(ctx, hh),
-		Devices:       m.householdHasDevices(ctx, hh),
+		Devices:       agentsHaveDevices(conv.agents),
 		ChatPhotos:    photosPossible,
 		PhotoTools:    make(map[string]bool, len(serverPhoto)),
 	}

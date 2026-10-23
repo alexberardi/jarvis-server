@@ -24,8 +24,10 @@ tool for households with imported devices. **(b) was chosen**:
 
 **The rules.**
 
-- Offered behind `prompts.ToolGates.Devices`: the household has an active device in
-  `cc_devices`. No devices, no tool and no device list (small models call what they see).
+- Offered behind `prompts.ToolGates.Devices`: the conversation's device list has devices —
+  the node's `agents` payload, or the one warmup builds from `cc_devices` when the node sends
+  none. The tool is offered exactly when the prompt's device sections tell the model to call
+  it; with no devices there is no tool and no list (small models call what they see).
 - **A node offering its own `control_device` client tool keeps it**: warmup drops the server
   copy (the Python node's resolver runs on the node, against its live registry — parity
   unchanged). Same rule for any future name collision; `answer_question` stays unregistered

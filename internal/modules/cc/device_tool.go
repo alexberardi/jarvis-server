@@ -8,11 +8,12 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 )
 
-// control_device as a server tool (#512, decision 2026-10-22-device-tool-server-side.md):
+// control_device as a server tool (#512, decision 2026-10-23-device-tool-server-side.md):
 // chat and voice device control for conversations whose node offers no control_device client
 // tool of its own — the Go Pi node (packages.PiBuiltins skips the Python builtin) and the
-// desktop agents. Offered when the household has imported devices (prompts.ToolGates.Devices);
-// a node that reports its own control_device keeps it (warmup drops the server copy, so the
+// desktop agents. Offered exactly when the conversation's device list renders
+// (prompts.ToolGates.Devices over the agents payload, after warmup's cc_devices fallback); a
+// node that reports its own control_device keeps it (warmup drops the server copy, so the
 // Python node's resolver still runs on the node). Execute resolves the device in the
 // household registry and drives the chosen node exactly as the app's
 // POST …/devices/{id}/control does (smarthome_control.go).
@@ -137,13 +138,31 @@ func resolveDevice(devs []*deviceRow, entityID, name string) (*deviceRow, string
 // normName lowercases and collapses whitespace for name matching.
 func normName(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
 
-// householdHasDevices reports an active device in the household's registry: the Devices gate
-// (prompts.ToolGates) at warmup.
-func (m *Module) householdHasDevices(ctx context.Context, hh string) bool {
-	var one int
-	err := m.deps.DB.Read.QueryRowContext(ctx,
-		`SELECT 1 FROM cc_devices WHERE household_id = ? AND COALESCE(is_active, 1) = 1 LIMIT 1`, hh).Scan(&one)
-	return err == nil
+// agentsHaveDevices reports whether the agents payload lists anything the prompt's device
+// sections render (home_assistant wins over device_agent, as the renderers read it): the
+// Devices gate, so control_device is offered exactly when the prompt tells the model to call
+// it. After warmup's registry fallback the payload also stands for cc_devices.
+func agentsHaveDevices(agents *pyjson.Object) bool {
+	if agents == nil {
+		return false
+	}
+	var ha *pyjson.Object
+	if v, ok := agents.Get("home_assistant"); ok {
+		ha, _ = v.(*pyjson.Object)
+	} else if v, ok := agents.Get("device_agent"); ok {
+		ha, _ = v.(*pyjson.Object)
+	}
+	if ha == nil {
+		return false
+	}
+	for _, k := range []string{"light_controls", "device_controls"} {
+		if v, ok := ha.Get(k); ok {
+			if o, _ := v.(*pyjson.Object); o != nil && o.Len() > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // registryAgents is the `agents` payload a node would have sent, built from cc_devices in the
