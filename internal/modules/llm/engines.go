@@ -87,7 +87,8 @@ func (m *Module) ResolveCPU(ctx context.Context, label string) (Endpoint, error)
 	}
 	ep, err := m.stack.Resolver.ResolveCPU(ctx, label)
 	if err != nil {
-		return Endpoint{}, notReady(err)
+		// Said as is: it ends up in the remote error's "(local CPU fallback unavailable: …)".
+		return Endpoint{}, err
 	}
 	return Endpoint{BaseURL: ep.BaseURL, Model: ep.Model}, nil
 }

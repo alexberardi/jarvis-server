@@ -27,7 +27,7 @@ var cpuPoll = 50 * time.Millisecond
 // ResolveCPU returns the endpoint of label's local CPU fallback (a remote stt label with
 // fallback=cpu), starting it if needed and waiting up to CPUWait while it loads. It ignores
 // engine=remote and the gpu settings: the label's model runs with gpu_layers=0 on a CPU build.
-// With no model it returns an ErrNotConfigured saying to install one; nothing is downloaded.
+// With no model the error says to install one; nothing is downloaded.
 func (r *Resolver) ResolveCPU(ctx context.Context, label string) (Endpoint, error) {
 	wait := r.CPUWait
 	if wait <= 0 {
@@ -81,10 +81,10 @@ func (r *Resolver) cpuConfig(ctx context.Context, label string) (LabelConfig, er
 		return cur, err
 	}
 	if cur.Kind != KindWhisper || cur.Engine != ModeRemote {
-		return cur, fmt.Errorf("%w: %s has no CPU fallback (only a remote stt label has one)", ErrNotConfigured, label)
+		return cur, fmt.Errorf("%s has no CPU fallback (only a remote stt label has one)", label)
 	}
 	if cur.Fallback != FallbackCPU {
-		return cur, fmt.Errorf("%w: %s.fallback is %q, not cpu", ErrNotConfigured, label, cur.Fallback)
+		return cur, fmt.Errorf("%s.fallback is %q, not cpu", label, cur.Fallback)
 	}
 	c := cur
 	c.Engine = ModeLocal
@@ -97,8 +97,7 @@ func (r *Resolver) cpuConfig(ctx context.Context, label string) (LabelConfig, er
 	case c.Problem != "":
 		return c, &NotReadyError{Label: label, State: "misconfigured", Reason: "local CPU fallback: " + c.Problem}
 	case c.ModelPath == "":
-		return c, fmt.Errorf("%w: no whisper model for the local CPU fallback; install one on the Models page and pick it as the stt model",
-			ErrNotConfigured)
+		return c, errors.New("no whisper model for the local CPU fallback; install one on the Models page and pick it as the stt model")
 	}
 	c.Engine, c.GPUBackend, c.GPULayers, c.GPUDevices = ModeLocal, string(FlavourCPU), 0, ""
 	return c, nil
