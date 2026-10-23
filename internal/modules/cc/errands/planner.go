@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -864,6 +865,19 @@ func summarizeProgress(done []Step, results []Result) string {
 			r = results[i]
 		}
 		detail := firstNonEmpty(r.Message, r.Summary, compactResultData(r.Data, 320), r.Error)
+		if files := downloadsOf(r); len(files) > 0 {
+			// The replan plans its reads with the real paths, not guesses (Message wins
+			// firstNonEmpty over Data, and may not name the files).
+			var missing []string
+			for _, f := range files {
+				if !strings.Contains(detail, f) {
+					missing = append(missing, computer.DownloadsDir+"/"+f)
+				}
+			}
+			if len(missing) > 0 {
+				detail = strings.TrimSpace(detail + " Downloaded files: " + strings.Join(missing, ", ") + ".")
+			}
+		}
 		if text := truthyStr(r.Data, "text"); r.Success && r.Command == cmdReadFile && text != "" {
 			// A statement read for the replan to categorise: its text, not just "Read it".
 			detail += "\n  " + strings.ReplaceAll(strings.TrimRight(truncRunes(text, replanFileText), "\n"), "\n", "\n  ")
