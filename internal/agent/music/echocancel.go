@@ -3,6 +3,7 @@ package music
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,13 @@ const (
 	DefaultSink = "jarvis_output"
 )
 
+// EnvNoiseSuppression and EnvHighPassFilter set the matching EchoCancel fields ("0" or "1")
+// without a rebuild, for the raw-vs-cancelled wake score comparison (#514).
+const (
+	EnvNoiseSuppression = "JARVIS_AGENT_EC_NOISE_SUPPRESSION"
+	EnvHighPassFilter   = "JARVIS_AGENT_EC_HIGH_PASS_FILTER"
+)
+
 // Capture is the voice pipeline's microphone (device.Switch): Use moves it to another ALSA
 // device between reads, "" back to Base.
 type Capture interface {
@@ -50,6 +58,10 @@ type EchoCancel struct {
 	Mic, Sink string
 	// Capture is switched to ECCapture while engaged; nil: no echo cancellation.
 	Capture Capture
+	// NoiseSuppression and HighPassFilter set the webrtc canceller's own filters in aec_args
+	// ("0" off, "1" on; "": left out, webrtc defaults both on). They may attenuate the wake
+	// word (#514); EnvNoiseSuppression and EnvHighPassFilter set them without a rebuild.
+	NoiseSuppression, HighPassFilter string
 
 	mu          sync.Mutex
 	engaged     bool
@@ -60,7 +72,33 @@ type EchoCancel struct {
 
 // NewEchoCancel is the Pi's canceller over the real pactl, switching capture.
 func NewEchoCancel(capture Capture, log *slog.Logger) *EchoCancel {
-	return &EchoCancel{Run: ExecRun, Log: log, Mic: DefaultMic, Sink: DefaultSink, Capture: capture}
+	e := &EchoCancel{Run: ExecRun, Log: log, Mic: DefaultMic, Sink: DefaultSink, Capture: capture}
+	e.NoiseSuppression = aecToggle(EnvNoiseSuppression, os.Getenv(EnvNoiseSuppression), e.log())
+	e.HighPassFilter = aecToggle(EnvHighPassFilter, os.Getenv(EnvHighPassFilter), e.log())
+	return e
+}
+
+// aecToggle is one webrtc filter's setting from the environment: "0", "1" or "" (unset).
+func aecToggle(name, v string, log *slog.Logger) string {
+	switch v {
+	case "", "0", "1":
+		return v
+	}
+	log.Warn("music: echo cancel: ignoring invalid setting (want 0 or 1)", "env", name, "value", v)
+	return ""
+}
+
+// aecArgs is module-echo-cancel's aec_args: the canceller's own gain controls stay off (the
+// HAT's PGA is the music profile's), and the configured filter overrides follow.
+func (e *EchoCancel) aecArgs() string {
+	args := "analog_gain_control=0 digital_gain_control=0"
+	if e.NoiseSuppression != "" {
+		args += " noise_suppression=" + e.NoiseSuppression
+	}
+	if e.HighPassFilter != "" {
+		args += " high_pass_filter=" + e.HighPassFilter
+	}
+	return `aec_args="` + args + `"`
 }
 
 func (e *EchoCancel) log() *slog.Logger { return logger(e.Log) }
@@ -115,9 +153,7 @@ func (e *EchoCancel) Engage(ctx context.Context, trigger string) bool {
 		return fail("load_mic_source", err)
 	}
 	e.modules = append(e.modules, idx)
-	// The webrtc canceller's own gain controls stay off: the HAT's PGA is the music profile's.
-	idx, err = e.load(ctx, "module-echo-cancel", "aec_method=webrtc",
-		`aec_args="analog_gain_control=0 digital_gain_control=0"`,
+	idx, err = e.load(ctx, "module-echo-cancel", "aec_method=webrtc", e.aecArgs(),
 		"source_master="+MicSource, "sink_master="+master, "source_name="+ECSource, "sink_name="+ECSink)
 	if err != nil {
 		return fail("load_echo_cancel", err)
