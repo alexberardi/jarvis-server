@@ -116,6 +116,9 @@ func (m *Module) mountBFF(mux *http.ServeMux, _ module.Deps) {
 	// AD3b: the wizard's Voice step.
 	su("GET /api/tts/voices", m.handleVoices)
 	su("POST /api/tts/sample", m.handleVoiceSample)
+	// The Models page's Speech section (07 §4): the remote provider presets, and the STT test.
+	su("GET /api/speech/presets", m.handleSpeechPresets)
+	su("POST /api/speech/stt-test", m.handleSTTTest)
 	// The Phone page (docs/cc/phone-sip.md §6): SIP status, self-tests, the SIP trace.
 	su("GET /api/phone/sip", m.handleSIPStatus)
 	su("POST /api/phone/sip/{port}/tests/{test}", m.handleSIPTest)

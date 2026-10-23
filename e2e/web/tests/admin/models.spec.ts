@@ -170,3 +170,138 @@ test.describe('admin models', () => {
     test.skip(true, 'an install downloads from huggingface.co; there is no fake Hugging Face for the sandbox yet (E2E 7/9 fakes HA and pairing only)')
   })
 })
+
+// The Speech section (docs/llm/07-remote-speech.md §4): presets fill the fields, the TTS card
+// saves through /api/settings with the key write-only, and the test buttons round-trip through
+// a fake OpenAI-compatible provider on a local port — never a real one.
+test.describe('admin speech section', () => {
+  test('an stt preset fills URL, API and model, which stay editable', async ({ page }) => {
+    await page.goto('/admin/models')
+    const card = page.getByTestId('label-stt')
+    await card.getByLabel('Runs').selectOption('remote')
+    await card.getByLabel('Provider', { exact: true }).selectOption('groq')
+    await expect(card.getByLabel('Base URL')).toHaveValue('https://api.groq.com/openai/v1')
+    await expect(card.getByLabel('Model name')).toHaveValue('whisper-large-v3-turbo')
+    await expect(card.getByLabel('API', { exact: true })).toHaveValue('openai')
+    await expect(card.getByText(/Groq bills each request/)).toBeVisible()
+    await card.getByLabel('Base URL').fill('http://127.0.0.1:9/v1')
+    await expect(card.getByLabel('Base URL')).toHaveValue('http://127.0.0.1:9/v1')
+    // Never saved: the next test starts from the server's state.
+  })
+
+  test('speaking saves a remote provider through settings, and no read gives its key back', async ({ page }) => {
+    const superuser = { token: tokenOf('superuser') }
+    const key = `sk-e2e-${Date.now().toString(36)}`
+    const settingsOf = async () => {
+      const res = await must('GET', `${env('SBX_ADMIN')}/api/settings/?service=tts`, superuser)
+      return { res, all: res.services.flatMap((s: any) => s.settings) }
+    }
+    const kokoroVoiceBefore = (await settingsOf()).all.find((s: any) => s.key === 'tts.kokoro_voice')?.value
+    try {
+      await page.goto('/admin/models')
+      const card = page.getByTestId('speech-card')
+      await card.getByLabel('Runs').selectOption('remote')
+      await expect(card.getByText(/Everything Jarvis says leaves this machine/)).toBeVisible()
+      await card.getByLabel('Provider', { exact: true }).selectOption('openai')
+      await expect(card.getByLabel('Base URL')).toHaveValue('https://api.openai.com/v1')
+      await expect(card.getByLabel('Model name')).toHaveValue('gpt-4o-mini-tts')
+      await card.getByLabel('API key').fill(key)
+      await card.getByRole('button', { name: 'Save' }).click()
+      await expect(page.getByText('Speaking saved')).toBeVisible()
+
+      const { res: settings, all } = await settingsOf()
+      expect(all.find((s: any) => s.key === 'tts.provider')?.value).toBe('remote')
+      expect(all.find((s: any) => s.key === 'tts.remote_model')?.value).toBe('gpt-4o-mini-tts')
+      // The preset's voice lands on the provider being saved; Kokoro's voice is untouched.
+      expect(all.find((s: any) => s.key === 'tts.remote_voice')?.value).toBe('marin')
+      expect(all.find((s: any) => s.key === 'tts.kokoro_voice')?.value).toBe(kokoroVoiceBefore)
+      expect(JSON.stringify(settings)).not.toContain(key)
+      expect(all.find((s: any) => s.key === 'tts.remote_api_key')?.value).toBe('********')
+
+      await page.reload()
+      const after = page.getByTestId('speech-card')
+      await expect(after.getByLabel('Runs')).toHaveValue('remote')
+      await expect(after.getByLabel('API key')).toHaveValue('')
+    } finally {
+      for (const [k, v] of [
+        ['tts.provider', 'kokoro'],
+        ['tts.remote_url', ''],
+        ['tts.remote_model', ''],
+        ['tts.remote_api_key', ''],
+        ['tts.remote_voice', ''],
+      ] as const) {
+        await must('PUT', `${env('SBX_ADMIN')}/api/settings/tts/${k}`, { ...superuser, body: { value: v } })
+      }
+    }
+  })
+
+  test('the test buttons round-trip through a fake provider and say which engine answered', async ({ page }) => {
+    const superuser = { token: tokenOf('superuser') }
+    const sttOf = (b: any) => b.labels.find((l: { label: string }) => l.label === 'stt')
+    const before = sttOf(await get('/labels')).config
+    // A fake OpenAI-compatible speech server on a local port (doc §5: never a real provider).
+    const http = await import('node:http')
+    const fake = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url?.endsWith('/audio/transcriptions')) {
+        req.resume()
+        req.on('end', () => {
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ text: 'tell me a joke' }))
+        })
+      } else if (req.method === 'POST' && req.url?.endsWith('/audio/speech')) {
+        req.resume()
+        req.on('end', () => {
+          res.setHeader('Content-Type', 'audio/pcm')
+          res.end(Buffer.alloc(24000)) // half a second of 24 kHz s16le silence
+        })
+      } else {
+        res.statusCode = 404
+        res.end()
+      }
+    })
+    await new Promise<void>((ok) => fake.listen(0, '127.0.0.1', ok))
+    const url = `http://127.0.0.1:${(fake.address() as import('node:net').AddressInfo).port}`
+    try {
+      await must('PUT', `${LLM()}/labels`, {
+        ...superuser,
+        body: { stt: { engine: 'remote', remote_url: url, remote_model: 'whisper-1', remote_api: 'openai', remote_api_key: 'k' } },
+      })
+      for (const [k, v] of [
+        ['tts.provider', 'remote'],
+        ['tts.remote_url', url],
+        ['tts.remote_model', 'tts-fake'],
+        ['tts.remote_voice', 'alloy'],
+      ] as const) {
+        await must('PUT', `${env('SBX_ADMIN')}/api/settings/tts/${k}`, { ...superuser, body: { value: v } })
+      }
+
+      await page.goto('/admin/models')
+      const stt = page.getByTestId('label-stt')
+      await stt.getByRole('button', { name: 'Test transcription' }).click()
+      await expect(stt.getByTestId('stt-test').getByRole('status')).toHaveText(
+        /Heard “tell me a joke” in .*, by the remote provider\. The clip says “tell me a joke”\./,
+      )
+
+      const speech = page.getByTestId('speech-card')
+      await speech.getByRole('button', { name: 'Play test sentence' }).click()
+      await expect(speech.getByTestId('tts-test').getByRole('status')).toHaveText(
+        /Rendered in .*, by the remote provider\./,
+      )
+    } finally {
+      await new Promise<void>((ok) => fake.close(() => ok()))
+      await must('PUT', `${LLM()}/labels`, {
+        ...superuser,
+        body: { stt: { engine: before.engine, remote_url: '', remote_model: '', remote_api_key: '' } },
+      })
+      for (const [k, v] of [
+        ['tts.provider', 'kokoro'],
+        ['tts.remote_url', ''],
+        ['tts.remote_model', ''],
+        ['tts.remote_api_key', ''],
+        ['tts.remote_voice', ''],
+      ] as const) {
+        await must('PUT', `${env('SBX_ADMIN')}/api/settings/tts/${k}`, { ...superuser, body: { value: v } })
+      }
+    }
+  })
+})

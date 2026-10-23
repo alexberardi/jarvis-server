@@ -146,6 +146,10 @@ var wantTiers = map[string]tier{
 	// The setup wizard's voice step.
 	"GET /api/tts/voices":  tierSuperuser,
 	"POST /api/tts/sample": tierSuperuser,
+	// The Models page's Speech section: the remote speech provider presets (a static catalog)
+	// and a test that transcribes a bundled clip through the configured stt engine.
+	"GET /api/speech/presets":   tierSuperuser,
+	"POST /api/speech/stt-test": tierSuperuser,
 	// The Phone page (SIP support): every household's SIP accounts, self-tests that dial out
 	// through the PBX, and the SIP trace (numbers and caller IDs of every household's calls).
 	"GET /api/phone/sip":                      tierSuperuser,
@@ -278,7 +282,7 @@ func TestNoMemberReachesInstallWideRoutes(t *testing.T) {
 		_, path := requestFor(rt.pattern)
 		for _, prefix := range []string{
 			"/api/settings", "/api/traces", "/api/logs", "/api/connections", "/api/update",
-			"/api/system", "/api/llm/", "/api/admin/", "/api/config/", "/api/prompt-provider", "/api/tts/",
+			"/api/system", "/api/llm/", "/api/admin/", "/api/config/", "/api/prompt-provider", "/api/tts/", "/api/speech/",
 		} {
 			if strings.HasPrefix(path, prefix) && rt.tier != tierSuperuser {
 				t.Errorf("%q is %s; everything under %s must be superuser", rt.pattern, rt.tier, prefix)
