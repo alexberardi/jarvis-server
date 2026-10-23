@@ -45,7 +45,7 @@ const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarv
 // NodeCommandsRequirement is the Pi's built-in commands: jarvis-node-setup pinned to a commit
 // (its pyproject packages commands*, core*, services*, …, and needs only the SDK >= 0.13.0).
 // JARVIS_AGENT_NODE_COMMANDS overrides it, e.g. with a local checkout's path.
-const NodeCommandsRequirement = "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/962bb56f256208cf029c16565a7ce5df0709ea8d.tar.gz"
+const NodeCommandsRequirement = "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/550f3a95bbfb5864cb602329b182f8c88d281949.tar.gz"
 
 // PiBuiltins are the built-in commands the Pi profile loads: every module of jarvis-node-setup's
 // commands package but those that still call the Python node's own code
