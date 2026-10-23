@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/provisioning"
 	"github.com/alexberardi/jarvis-server/internal/agent/reset"
+	"github.com/alexberardi/jarvis-server/internal/platform/mdns"
 )
 
 // setupRadio is a Wi-Fi that records what setup mode does with the radio.
@@ -72,6 +74,17 @@ type setupRig struct {
 	leds   *hat.LEDs // nil: no HAT
 	closed chan struct{}
 	ready  chan string
+
+	mu  sync.Mutex
+	ads []mdns.Options // what setup mode advertised
+	// withdrawn counts the advertisements stopped.
+	withdrawn int
+}
+
+func (r *setupRig) advertised() ([]mdns.Options, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]mdns.Options(nil), r.ads...), r.withdrawn
 }
 
 func newSetupRig(t *testing.T, withHAT bool) *setupRig {
@@ -93,6 +106,13 @@ func newSetupRig(t *testing.T, withHAT bool) *setupRig {
 		listen:  "127.0.0.1:0",
 		captive: "",
 		ready:   func(a net.Addr) { r.ready <- a.String() },
+		advertise: func(_ context.Context, o mdns.Options) (func(), error) {
+			r.mu.Lock()
+			r.ads = append(r.ads, o)
+			r.mu.Unlock()
+			var once sync.Once
+			return func() { once.Do(func() { r.mu.Lock(); r.withdrawn++; r.mu.Unlock() }) }, nil
+		},
 	}
 	return r
 }
@@ -272,6 +292,9 @@ func TestResetThenBootSetupModeThenProvisioned(t *testing.T) {
 			errc := make(chan error, 1)
 			go func() { errc <- piSetupMode(t.Context(), slog.New(slog.DiscardHandler), path, &hatFlags{}) }()
 			a := r.addr(t, errc)
+			if ads, _ := r.advertised(); len(ads) != 0 {
+				t.Errorf("advertised %+v on the hotspot, want only the LAN setup advertised", ads)
+			}
 			body, _ := json.Marshal(map[string]any{
 				"wifi_ssid": "HomeNetwork", "wifi_password": "hunter22", "room": "kitchen",
 				"command_center_url": cc.URL, "config_service_url": "http://192.0.2.10:7700",
@@ -305,6 +328,55 @@ func TestResetThenBootSetupModeThenProvisioned(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// #508: a Pi in setup mode on its Wi-Fi (after a factory reset) advertises _jarvis-setup._tcp
+// with its node id, hardware and the API's port, so the app's Add node flow finds it without the
+// hotspot; the advertisement is withdrawn once the node is provisioned.
+func TestSetupModeOnWiFiAdvertisesUntilProvisioned(t *testing.T) {
+	dir := agentHome(t)
+	path := filepath.Join(dir, "jarvis-agent", "node.json")
+	cc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"node_id":"cc-node-1","room":"kitchen","node_key":"secret-key"}`)
+	}))
+	defer cc.Close()
+	r := newSetupRig(t, false)
+	r.radio.home = "Home"
+	errc := make(chan error, 1)
+	go func() { errc <- piSetupMode(t.Context(), slog.New(slog.DiscardHandler), path, &hatFlags{}) }()
+	a := r.addr(t, errc)
+	_, port, _ := net.SplitHostPort(a)
+	info := getJSON(t, "http://"+a+"/api/v1/info")
+	ads, withdrawn := r.advertised()
+	if len(ads) != 1 || withdrawn != 0 {
+		t.Fatalf("advertised %+v (withdrawn %d), want one live advertisement", ads, withdrawn)
+	}
+	ad := ads[0]
+	if ad.Service != "_jarvis-setup._tcp" || strconv.Itoa(ad.Port) != port || ad.Instance != info["node_id"] ||
+		ad.TXT["node_id"] != info["node_id"] || ad.TXT["hardware"] != info["hardware"] {
+		t.Errorf("advertised %+v, want _jarvis-setup._tcp on port %s for %v", ad, port, info)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"wifi_ssid": "HomeNetwork", "wifi_password": "hunter22", "room": "kitchen",
+		"command_center_url": cc.URL, "config_service_url": "http://192.0.2.10:7700",
+		"household_id": "hh-1", "node_id": "cc-node-1", "provisioning_token": "tok-1",
+	})
+	resp, err := http.Post("http://"+a+"/api/v1/provision", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatalf("setup mode: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("setup mode didn't end once provisioned")
+	}
+	if ads, withdrawn := r.advertised(); len(ads) != 1 || withdrawn != 1 {
+		t.Errorf("advertised %d, withdrawn %d after provisioning; want the one advertisement withdrawn", len(ads), withdrawn)
 	}
 }
 

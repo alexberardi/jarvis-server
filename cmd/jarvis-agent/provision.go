@@ -62,8 +62,10 @@ type setupServer struct {
 	apSSID          string
 	listen, captive string // captive "": none
 	hotspot         bool   // start the hotspot (not on a simulated radio)
-	log             *slog.Logger
-	ready           func(api net.Addr) // the API is listening (nil: nothing)
+	// advertise announces the API on its port until the returned stop (nil: nothing).
+	advertise func(ctx context.Context, port int) (stop func())
+	log       *slog.Logger
+	ready     func(api net.Addr) // the API is listening (nil: nothing)
 }
 
 // serveSetup serves the provisioning API (and starts the hotspot) until the node is provisioned
@@ -100,6 +102,10 @@ func serveSetup(ctx context.Context, s setupServer) error {
 		}
 	}
 	log.Info("provisioning: serving", "listen", ln.Addr().String(), "captive", s.captive, "hotspot", s.apSSID)
+	if s.advertise != nil {
+		// Withdrawn as soon as the node is provisioned (ctx) or setup mode ends.
+		defer s.advertise(ctx, ln.Addr().(*net.TCPAddr).Port)()
+	}
 	if s.ready != nil {
 		s.ready(ln.Addr())
 	}
