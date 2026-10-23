@@ -39,8 +39,9 @@ type SpeakOptions struct {
 
 // Stream is synthesized speech, rendered sentence by sentence in the background: the next
 // sentence renders while the caller consumes the current one. Read it as an io.Reader of raw
-// PCM, or chunk by chunk with Next (one chunk per sentence). Close it when done (it stops the
-// rendering if the caller gives up early).
+// PCM, or chunk by chunk with Next (one chunk per sentence for Kokoro, a few per sentence as a
+// remote provider's body arrives). Close it when done (it stops the rendering if the caller
+// gives up early).
 type Stream struct {
 	Format Format
 
@@ -51,7 +52,7 @@ type Stream struct {
 	got    bool
 }
 
-// Next returns the next sentence's PCM, or io.EOF at the end. If every sentence failed to
+// Next returns the next chunk of PCM, or io.EOF at the end. If every sentence failed to
 // render, the end is the last render error instead of io.EOF.
 func (s *Stream) Next() ([]byte, error) {
 	b, ok := <-s.ch
@@ -87,6 +88,9 @@ func (s *Stream) Close() error {
 
 // AudioFormat is the format Speak produces, without synthesizing (GET /audio/format).
 func (m *Module) AudioFormat() Format {
+	if m.provider(context.Background()) == RemoteProvider {
+		return remoteFormat()
+	}
 	rate := kokoroSampleRate
 	if m.eng != nil {
 		if r := m.eng.sampleRate(); r > 0 {
@@ -132,7 +136,8 @@ func (m *Module) resolve(ctx context.Context, opts SpeakOptions) speakConfig {
 }
 
 // Speak renders text as streamed PCM (the in-process form of POST /speak/stream, for
-// command-center). The engine loads on first use from the model manager's "tts" model. It
+// command-center). With tts.provider=remote each sentence comes from the remote service
+// instead (remote.go), always at 24 kHz. The engine loads on first use from the model manager's "tts" model. It
 // returns ErrNoText for empty text, ErrNotInstalled when no model is available, or ctx's error
 // while waiting for a synthesis slot. Rendering stops when ctx ends or the stream is closed.
 func (m *Module) Speak(ctx context.Context, text string, opts SpeakOptions) (*Stream, error) {
@@ -143,6 +148,9 @@ func (m *Module) Speak(ctx context.Context, text string, opts SpeakOptions) (*St
 	sentences := splitSentences(text)
 	if len(sentences) == 0 {
 		sentences = []string{text}
+	}
+	if m.provider(ctx) == RemoteProvider {
+		return m.speakRemote(ctx, sentences, opts)
 	}
 	cfg := m.resolve(ctx, opts)
 
