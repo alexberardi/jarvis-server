@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"encoding/xml"
 	"image/png"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 )
@@ -221,5 +225,84 @@ func TestCAProfile(t *testing.T) {
 		if !strings.HasPrefix(link.url, "https://") {
 			t.Errorf("%s = %q, want an https URL", link.field, link.url)
 		}
+	}
+}
+
+// The <Project> and <WebPage> links are the only ones a CA reviewer or an Unraid user clicks
+// without the container running, so they must point at a page that resolves. The apex
+// jarvisautomation.io has no A record (checked 2026-10-22), so pin the hosts to the known-live
+// ones; TestProjectLinksLive re-checks the full URLs against the network.
+func TestProjectLinkHosts(t *testing.T) {
+	allowed := map[string]bool{"docs.jarvisautomation.dev": true, "github.com": true}
+	raw, err := os.ReadFile("jarvis.xml")
+	if err != nil {
+		t.Fatalf("read jarvis.xml: %v", err)
+	}
+	var c container
+	if err := xml.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("unmarshal jarvis.xml: %v", err)
+	}
+	raw, err = os.ReadFile("ca_profile.xml")
+	if err != nil {
+		t.Fatalf("read ca_profile.xml: %v", err)
+	}
+	var m maintainer
+	if err := xml.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal ca_profile.xml: %v", err)
+	}
+	for _, link := range []struct{ field, url string }{{"Project", c.Project}, {"WebPage", m.WebPage}} {
+		u, err := url.Parse(link.url)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			t.Errorf("%s = %q, want an https URL", link.field, link.url)
+			continue
+		}
+		if !allowed[u.Hostname()] {
+			t.Errorf("%s = %q, host %q is not in %v (the apex jarvisautomation.io does not resolve)",
+				link.field, link.url, u.Hostname(), allowed)
+		}
+	}
+}
+
+// TestProjectLinksLive GETs the <Project> and <WebPage> URLs and expects a 200:
+//
+//	JARVIS_UNRAID_LIVE=1 go test -run Live ./scripts/packaging/unraid/
+//
+// It needs open network access, so it is skipped unless JARVIS_UNRAID_LIVE=1.
+func TestProjectLinksLive(t *testing.T) {
+	if os.Getenv("JARVIS_UNRAID_LIVE") != "1" {
+		t.Skip("set JARVIS_UNRAID_LIVE=1 to check the project links are reachable")
+	}
+	raw, err := os.ReadFile("jarvis.xml")
+	if err != nil {
+		t.Fatalf("read jarvis.xml: %v", err)
+	}
+	var c container
+	if err := xml.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("unmarshal jarvis.xml: %v", err)
+	}
+	raw, err = os.ReadFile("ca_profile.xml")
+	if err != nil {
+		t.Fatalf("read ca_profile.xml: %v", err)
+	}
+	var m maintainer
+	if err := xml.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal ca_profile.xml: %v", err)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	for _, link := range []struct{ field, url string }{{"Project", c.Project}, {"WebPage", m.WebPage}} {
+		req, err := http.NewRequest(http.MethodGet, link.url, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", link.field, err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Errorf("%s %s: %v", link.field, link.url, err)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s %s: status %d, want 200", link.field, link.url, resp.StatusCode)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 	}
 }
