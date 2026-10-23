@@ -888,6 +888,7 @@ to agent.json in one serialized write (`settings.Update`, shared with the voice 
 | Python key | agent.json key / flag | Live |
 |---|---|---|
 | `led_enabled` | `leds` / `--no-leds` | `LEDs.SetEnabled` |
+| `led_idle_enabled` | `led_idle` / `--no-led-idle` | `LEDs.SetIdleDark`: false keeps the dim idle glow off, so the LEDs light only while the node responds (wake, listening, thinking, speaking, errors, alerts); the admin's Nodes page shows `led_enabled` and this as one LED mode (always on, only when responding, off) per node, from the `led_mode` capability the node reports |
 | `led_brightness_percent` | `led_brightness` / `--led-brightness` | `LEDs.SetBrightness` |
 | `wake_word_threshold` | `wake_threshold` / `--wake-threshold` | the running pipeline, from its next chunk (`voice.Live.Tune`) |
 | `wake_ack_audio_enabled` | `chimes` / `--no-chimes` | same |

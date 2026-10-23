@@ -29,6 +29,7 @@ func runFlags() (*flag.FlagSet, map[string]any) {
 		"follow-up":                  fs.Float64("follow-up", 4, ""),
 		"follow-up-silence":          fs.Float64("follow-up-silence", 1, ""),
 		"no-leds":                    fs.Bool("no-leds", false, ""),
+		"no-led-idle":                fs.Bool("no-led-idle", false, ""),
 		"led-brightness":             fs.Int("led-brightness", 100, ""),
 		"computer-control":           fs.Bool("computer-control", false, ""),
 		"silence-threshold":          fs.Float64("silence-threshold", 300, ""),
