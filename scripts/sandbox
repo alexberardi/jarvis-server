@@ -54,9 +54,10 @@
 #                    at $SBX_FAKESPEECH/control/requests (canned text: POST /control/text; failures:
 #                    POST /control/fail). For the contract suite; voice scenarios mishear on purpose
 #   --speech speaches  STT is remote on speaches (an OpenAI-compatible server) in Docker (port 7795 +
-#                    offset, the "Other" preset, model $SPEACHES_STT_MODEL, default
-#                    Systran/faster-distil-whisper-small.en, cached in ~/.cache/jarvis-harness/speaches),
-#                    so pipeline say|run --voice round-trips through a real remote; with --voice. down removes it
+#                    offset, the "Other" preset), so pipeline say|run --voice round-trips through a real
+#                    remote; with --voice. Model $SPEACHES_STT_MODEL (default Systran/faster-whisper-small.en,
+#                    local's size; a distil model copies a desktop node's vocabulary prompt into the
+#                    transcript), cached in ~/.cache/jarvis-harness/speaches. down removes it
 #   --sip            the L1 SIP lane beside it (scripts/sip-lane, docs/cc/phone-sip.md §5): Asterisk 22
 #                    in Docker configured like FreePBX 17, baresip far ends, ports offset like the
 #                    sandbox's; sandbox.env gets SBX_SIP_LANE (its lane.env). Its scenarios:
@@ -107,7 +108,7 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,99p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local
@@ -130,7 +131,7 @@ while [ $# -gt 0 ]; do
     --purge) PURGE=1; shift ;;
     --node-name) NODE_NAME=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,99p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -154,7 +155,7 @@ RELAYPID=$DIR/fakerelay.pid
 SPEECHPID=$DIR/fakespeech.pid
 SPEACHES=jarvis-sbx-$NAME-speaches
 SPEACHES_IMAGE=${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu}
-SPEACHES_STT_MODEL=${SPEACHES_STT_MODEL:-Systran/faster-distil-whisper-small.en}
+SPEACHES_STT_MODEL=${SPEACHES_STT_MODEL:-Systran/faster-whisper-small.en}
 LLMF=$DIR/llm-mode
 SINGLEF=$DIR/single-port
 
