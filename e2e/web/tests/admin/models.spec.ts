@@ -192,6 +192,11 @@ test.describe('admin speech section', () => {
   test('speaking saves a remote provider through settings, and no read gives its key back', async ({ page }) => {
     const superuser = { token: tokenOf('superuser') }
     const key = `sk-e2e-${Date.now().toString(36)}`
+    const settingsOf = async () => {
+      const res = await must('GET', `${env('SBX_ADMIN')}/api/settings/?service=tts`, superuser)
+      return { res, all: res.services.flatMap((s: any) => s.settings) }
+    }
+    const kokoroVoiceBefore = (await settingsOf()).all.find((s: any) => s.key === 'tts.kokoro_voice')?.value
     try {
       await page.goto('/admin/models')
       const card = page.getByTestId('speech-card')
@@ -204,10 +209,12 @@ test.describe('admin speech section', () => {
       await card.getByRole('button', { name: 'Save' }).click()
       await expect(page.getByText('Speaking saved')).toBeVisible()
 
-      const settings = await must('GET', `${env('SBX_ADMIN')}/api/settings/?service=tts`, superuser)
-      const all = settings.services.flatMap((s: any) => s.settings)
+      const { res: settings, all } = await settingsOf()
       expect(all.find((s: any) => s.key === 'tts.provider')?.value).toBe('remote')
       expect(all.find((s: any) => s.key === 'tts.remote_model')?.value).toBe('gpt-4o-mini-tts')
+      // The preset's voice lands on the provider being saved; Kokoro's voice is untouched.
+      expect(all.find((s: any) => s.key === 'tts.remote_voice')?.value).toBe('marin')
+      expect(all.find((s: any) => s.key === 'tts.kokoro_voice')?.value).toBe(kokoroVoiceBefore)
       expect(JSON.stringify(settings)).not.toContain(key)
       expect(all.find((s: any) => s.key === 'tts.remote_api_key')?.value).toBe('********')
 

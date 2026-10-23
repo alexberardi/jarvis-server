@@ -132,10 +132,32 @@ describe('SpeechCard (docs/llm/07-remote-speech.md §4)', () => {
     expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.remote_url', 'https://api.openai.com/v1')
     expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.remote_model', 'gpt-4o-mini-tts')
     expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.remote_api_key', 'sk-test')
-    // The voice goes to the setting the server names (still Kokoro's until the save lands).
-    expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.kokoro_voice', 'marin')
+    // The preset's voice goes to the provider this save switches to, not the stale
+    // pre-save key the voices response names: the Kokoro voice stays untouched.
+    expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.remote_voice', 'marin')
+    expect(settings.updateSetting).not.toHaveBeenCalledWith('tts', 'tts.kokoro_voice', expect.anything())
     // Unchanged settings are not rewritten.
     expect(settings.updateSetting).not.toHaveBeenCalledWith('tts', 'tts.remote_timeout_ms', expect.anything())
+  })
+
+  it('writes a voice-only change to the Kokoro key while Kokoro is the saved provider', async () => {
+    renderCard()
+    const card = await screen.findByTestId('speech-card')
+    fireEvent.change(await within(card).findByLabelText('Voice'), { target: { value: 'af_heart' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.kokoro_voice', 'af_heart'))
+    expect(settings.updateSetting).not.toHaveBeenCalledWith('tts', 'tts.remote_voice', expect.anything())
+  })
+
+  it('writes the voice to the Kokoro key when the same save switches remote back to Kokoro', async () => {
+    settings.getServiceSettings.mockResolvedValue(ttsSettings({ 'tts.provider': 'remote' }))
+    renderCard()
+    const card = await screen.findByTestId('speech-card')
+    fireEvent.change(await within(card).findByLabelText('Runs'), { target: { value: 'kokoro' } })
+    fireEvent.change(within(card).getByLabelText('Voice'), { target: { value: 'af_heart' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('tts', 'tts.kokoro_voice', 'af_heart'))
+    expect(settings.updateSetting).not.toHaveBeenCalledWith('tts', 'tts.remote_voice', expect.anything())
   })
 
   it('leaves the stored key alone when the field stays empty', async () => {

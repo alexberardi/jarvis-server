@@ -41,6 +41,11 @@ existing `/admin/models` entry covers it):
   setting and the test button are added there rather than duplicating the form elsewhere.
 - TTS gets a card of its own (`SpeechCard`) on the Jobs tab, because remote TTS is settings
   (`tts.provider`, `tts.remote_*`), not an engine label. Voice comes from `GET /api/tts/voices`
-  (provider-aware; free text when the provider lists none) and is written to the `setting` that
-  response names — which also fixes `web/admin/src/api/tts.ts`, which hardcoded
-  `tts.kokoro_voice` and would have written the wrong key with `tts.provider=remote`.
+  (provider-aware; free text when the provider lists none). The wizard writes it to the
+  `setting` that response names — which also fixes `web/admin/src/api/tts.ts`, which hardcoded
+  `tts.kokoro_voice` and would have written the wrong key with `tts.provider=remote`. The card
+  itself derives the key from the provider its save makes effective (`tts.remote_voice` for
+  remote, else `tts.kokoro_voice`, the same mapping `VoiceChoices` uses server-side): the voices
+  response names only the pre-save provider's key, so a save that also switches the provider
+  (picking a preset on a Kokoro install) would write the preset's voice to `tts.kokoro_voice`
+  and leave `tts.remote_voice` unset until a second save (review of PR #466).

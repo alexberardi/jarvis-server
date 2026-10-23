@@ -89,15 +89,16 @@ export default function SpeechCard() {
 
   const save = useMutation({
     mutationFn: async (d: Draft) => {
-      // The voice goes to the key the voices response names (tts.kokoro_voice or
-      // tts.remote_voice, per the saved provider); everything else to its tts.* key.
+      // The voice goes to the provider's key; everything else to its tts.* key. The key is
+      // derived from the provider this save makes effective (the server's own mapping, see
+      // VoiceChoices in internal/modules/tts/remote.go) — the voices response names only the
+      // pre-save provider's key, which is stale when this save switches the provider.
       const writes: Array<[string, unknown]> = []
       for (const k of ['provider', 'remote_url', 'remote_api', 'remote_model', 'remote_api_key', 'remote_timeout_ms', 'fallback'] as const) {
         if (d[k] !== undefined) writes.push([`tts.${k}`, d[k]])
       }
       if (d.voice !== undefined) {
-        const setting = voices.data?.setting ?? 'tts/tts.kokoro_voice'
-        writes.push([setting.slice(setting.indexOf('/') + 1), d.voice])
+        writes.push([(d.provider ?? saved.provider) === 'remote' ? 'tts.remote_voice' : 'tts.kokoro_voice', d.voice])
       }
       for (const [key, value] of writes) await updateSetting('tts', key, value)
     },
