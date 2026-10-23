@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/engines"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 // Endpoint is how a caller reaches a label's model.
@@ -62,6 +63,8 @@ type Endpoint struct {
 	API string `json:"api,omitempty"`
 	// TimeoutMS bounds one request to a remote endpoint (remote_timeout_ms; 0 = the caller's).
 	TimeoutMS int `json:"timeout_ms,omitempty"`
+	// Fallback is a remote stt label's fallback setting (FallbackOff, FallbackCPU: ResolveCPU).
+	Fallback string `json:"fallback,omitempty"`
 	// NoReasoningBudget: the engine refuses a request with reasoning_budget (Transformers).
 	NoReasoningBudget bool `json:"-"`
 }
@@ -138,6 +141,12 @@ type Resolver struct {
 	// with the labels it serves, sorted: the llm layer warms it then (decision
 	// 2026-10-20-prompt-diet). It runs in its own goroutine.
 	OnReady func(labels []string)
+	// SpeechFallback, if set, reports a remote speech label's fallback counts (the stt module's)
+	// for Status; false = none recorded.
+	SpeechFallback func(label string) (fallback.Status, bool)
+	// CPUIdle stops a CPU fallback engine nobody asked for in that long (default 10 min); CPUWait
+	// is how long ResolveCPU waits for one that is still loading (default 30 s).
+	CPUIdle, CPUWait time.Duration
 	// Memory persists where each label last ran healthy on a GPU, so a GPU that disappears
 	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
 	Memory GPUMemory
@@ -162,6 +171,8 @@ type Resolver struct {
 	lastGood map[string]Placement
 	// gpuDown remembers labels refused for a lost GPU, to log each loss once.
 	gpuDown map[string]string
+	// cpuUsed is when each label's CPU fallback was last asked for (ResolveCPU), for CPUIdle.
+	cpuUsed map[string]time.Time
 }
 
 type instance struct {
@@ -194,6 +205,7 @@ func (r *Resolver) init() {
 		r.wake = make(chan struct{}, 1)
 		r.stopping = map[*instance]chan struct{}{}
 		r.last = map[string]error{}
+		r.cpuUsed = map[string]time.Time{}
 		// Before any engine starts, so only a previous jarvisd's are in the dir.
 		if n := engines.Sweep(r.PIDDir, r.Log); n > 0 {
 			r.Log.Warn("killed engines left running by a previous jarvisd", "count", n)
@@ -216,10 +228,16 @@ func (r *Resolver) init() {
 // ErrNotConfigured, a *NotReadyError (errors.Is ErrNotReady) while the engine loads or is
 // down, or ErrUnknownLabel.
 func (r *Resolver) Resolve(ctx context.Context, label string) (Endpoint, error) {
+	return r.resolveWith(ctx, func() (Endpoint, *instance, error) { return r.ensure(ctx, label) })
+}
+
+// resolveWith runs ensure (under r.mu) until no engine it needs is still stopping, and reports
+// the endpoint by its engine's state.
+func (r *Resolver) resolveWith(ctx context.Context, ensure func() (Endpoint, *instance, error)) (Endpoint, error) {
 	for {
 		r.mu.Lock()
 		r.init()
-		ep, inst, err := r.ensure(ctx, label)
+		ep, inst, err := ensure()
 		r.gc()
 		var p parked
 		if inst != nil {
@@ -344,6 +362,7 @@ func describe(c LabelConfig) (ep Endpoint, local bool, err error) {
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
 		ep.Vision, ep.FoldSystemMessages, ep.API = c.RemoteVision, c.FoldSystemMessages, api
 		ep.TimeoutMS = c.RemoteTimeoutMS
+		ep.Fallback = c.Fallback
 		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
 		// cc compaction needs it (docs/cc/chat-images.md §7).
 		ep.ContextLength, ep.Parallel = c.Context, 1
@@ -363,6 +382,12 @@ func (r *Resolver) apply(ctx context.Context, label string) (Endpoint, *instance
 	if err != nil {
 		return Endpoint{}, nil, err
 	}
+	return r.applyConfig(ctx, label, c)
+}
+
+// applyConfig brings the engine bound to label (a label, or a label's CPU fallback binding)
+// into line with c. r.mu is held.
+func (r *Resolver) applyConfig(ctx context.Context, label string, c LabelConfig) (Endpoint, *instance, error) {
 	ep, local, err := describe(c)
 	if !local {
 		delete(r.bound, label)
@@ -687,6 +712,7 @@ func (r *Resolver) Reconcile(ctx context.Context) {
 				r.Log.Debug("label not ready", "label", d.Name, "err", err)
 			}
 		}
+		r.dropCPU(ctx)
 		r.gc()
 		r.recordGPU(ctx)
 		r.retryFailed()
@@ -835,6 +861,9 @@ type LabelStatus struct {
 	State    string    `json:"state"`
 	Reason   string    `json:"reason,omitempty"`
 	Endpoint *Endpoint `json:"endpoint,omitempty"`
+	// Fallback is a remote stt label's fallback: its setting, which path served lately, the
+	// fallback count and last remote error (SpeechFallback), and a warning when it can't work.
+	Fallback *fallback.Status `json:"fallback,omitempty"`
 }
 
 // InstanceStatus is one supervised engine.
@@ -874,6 +903,7 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 		}
 		c.RemoteAPIKey = ""
 		ls.Config = c
+		ls.Fallback = r.fallbackStatus(ctx, c)
 		ep, err := r.peek(c)
 		var nr *NotReadyError
 		switch {

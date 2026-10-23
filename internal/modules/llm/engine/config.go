@@ -138,6 +138,10 @@ var fields = []field{
 		only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
 	{name: "remote_timeout_ms", typ: settings.Int, def: int64(8000),
 		desc: "How long one remote transcription may take, in milliseconds (a voice turn can't wait long)", only: []string{ModelSTT}},
+	{name: "fallback", typ: settings.String, def: FallbackOff,
+		desc: "When the remote speech-to-text fails (down, timeout, rate limit, refused key): off (the turn fails) or cpu (the same clip goes to a local whisper-server on CPU, " +
+			"with the model set here: install one from the Models page; nothing is downloaded for you)",
+		opts: []any{FallbackOff, FallbackCPU}, only: []string{ModelSTT}},
 	{name: "remote_vision", typ: settings.Bool, def: false, desc: "Whether the remote model accepts images", only: []string{ModelLLM}, remote: true},
 }
 
@@ -185,6 +189,12 @@ const (
 	APIAuto      = "auto"
 	APIOpenAI    = "openai"
 	APIAnthropic = "anthropic"
+)
+
+// Values of llm.stt.fallback (the same as fallback.ModeOff, fallback.ModeCPU).
+const (
+	FallbackOff = "off"
+	FallbackCPU = "cpu"
 )
 
 // anthropicHost is the Anthropic API's host; remote_api=auto picks the Messages API for it.
@@ -349,6 +359,9 @@ type LabelConfig struct {
 	RemoteAPI     string `json:"remote_api_effective"`
 	// RemoteTimeoutMS bounds one remote request (remote_timeout_ms, stt only; 0 = none).
 	RemoteTimeoutMS int `json:"remote_timeout_ms"`
+	// Fallback is what a remote stt label does when the provider fails (fallback, stt only):
+	// FallbackOff or FallbackCPU (ResolveCPU).
+	Fallback string `json:"fallback,omitempty"`
 
 	// Problem says why the label can't run as configured (missing model file, …).
 	Problem string `json:"problem,omitempty"`
@@ -410,8 +423,24 @@ func (s SettingsSource) num(ctx context.Context, k string) int {
 	return int(s.Settings.Int(ctx, k, settings.Scope{}))
 }
 
+// LocalSource is an optional ConfigSource extension: a label's configuration as if its engine
+// were local (its model resolved), whatever the engine setting says. ResolveCPU reads it for a
+// remote stt label's CPU fallback; without it, Label's config is used with engine=local.
+type LocalSource interface {
+	LocalLabel(ctx context.Context, label string) (LabelConfig, error)
+}
+
 // Label resolves one label.
 func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, error) {
+	return s.label(ctx, label, false)
+}
+
+// LocalLabel resolves one label as if engine=local (LocalSource).
+func (s SettingsSource) LocalLabel(ctx context.Context, label string) (LabelConfig, error) {
+	return s.label(ctx, label, true)
+}
+
+func (s SettingsSource) label(ctx context.Context, label string, forceLocal bool) (LabelConfig, error) {
 	d, ok := LabelDefFor(label)
 	if !ok {
 		return LabelConfig{}, fmt.Errorf("%w %q", ErrUnknownLabel, label)
@@ -452,6 +481,7 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 		c.RemoteAPI = APIOpenAI
 	}
 	c.RemoteTimeoutMS = num("remote_timeout_ms")
+	c.Fallback = strings.ToLower(str("fallback"))
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}
@@ -462,6 +492,9 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	}
 	if d.RemoteOnly && c.Engine != ModeOff {
 		c.Engine = ModeRemote
+	}
+	if forceLocal {
+		c.Engine = ModeLocal
 	}
 	if c.Engine == ModeShared {
 		if label != LabelBackground {

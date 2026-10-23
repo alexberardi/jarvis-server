@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/engines"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 type mapSource struct {
@@ -556,6 +557,138 @@ func TestOnReadyReportsLabels(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatalf("reported %v, want live and background", seen)
+		}
+	}
+}
+
+// A remote stt label with fallback=cpu gets a separate local whisper-server forced to CPU
+// (--no-gpu), whatever its gpu settings, bound apart from the label; the label stays remote.
+func TestResolveCPUForRemoteSTT(t *testing.T) {
+	g := newRig(t)
+	stt := LabelConfig{Label: LabelSTT, Kind: KindWhisper, ModelKind: ModelSTT, Engine: ModeRemote, Model: "whisper-base",
+		ModelPath: g.model("ggml-base.en.bin"), GPULayers: 999, GPUBackend: "cuda", GPUDevices: "1",
+		RemoteURL: "https://api.openai.com/v1", RemoteModel: "gpt-transcribe", Fallback: FallbackCPU}
+	g.src.set(stt)
+	ctx := context.Background()
+	if ep, err := g.r.Resolve(ctx, LabelSTT); err != nil || !ep.Remote || ep.Fallback != FallbackCPU {
+		t.Fatalf("remote %+v %v", ep, err)
+	}
+	if len(g.starts()) != 0 {
+		t.Fatal("a remote label started an engine")
+	}
+	ep, err := g.r.ResolveCPU(ctx, LabelSTT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.Remote || ep.Kind != KindWhisper || !strings.HasPrefix(ep.BaseURL, "http://127.0.0.1:") || !strings.HasPrefix(ep.Engine, "whisper-") {
+		t.Fatalf("cpu %+v", ep)
+	}
+	if code, body := post(t, ep, "/inference", ""); code != 200 || !strings.Contains(body, "hello world") {
+		t.Fatalf("%d %s", code, body)
+	}
+	st := g.starts()
+	if len(st) != 1 || !strings.Contains(strings.Join(st[0].Args, " "), "ggml-base.en.bin") || !strings.Contains(strings.Join(st[0].Args, " "), "--no-gpu") {
+		t.Fatalf("argv %+v", st)
+	}
+	inst := instanceFor(g.r, ep.Engine)
+	if inst.Flavour != FlavourCPU || len(inst.Labels) != 1 || inst.Labels[0] != LabelSTT+CPUSuffix {
+		t.Fatalf("instance %+v", inst)
+	}
+	// Asked again, the same engine answers; the remote label still resolves remote.
+	if again, err := g.r.ResolveCPU(ctx, LabelSTT); err != nil || again.Engine != ep.Engine {
+		t.Fatalf("again %+v %v", again, err)
+	}
+	g.r.Reconcile(ctx)
+	if len(g.r.Instances()) != 1 {
+		t.Fatalf("reconcile stopped a fallback in use: %+v", g.r.Instances())
+	}
+	for _, s := range g.r.Status(ctx) {
+		if s.Label == LabelSTT && (s.State != "remote" || s.Fallback == nil || s.Fallback.Mode != FallbackCPU || s.Fallback.Warning != "") {
+			t.Fatalf("status %+v %+v", s, s.Fallback)
+		}
+	}
+
+	// Fallback turned off: the next reconcile stops the CPU engine.
+	stt.Fallback = FallbackOff
+	g.src.set(stt)
+	g.r.Reconcile(ctx)
+	if n := len(g.r.Instances()); n != 0 {
+		t.Fatalf("%d engines left after fallback=off", n)
+	}
+	if _, err := g.r.ResolveCPU(ctx, LabelSTT); err == nil {
+		t.Fatal("fallback=off resolved a CPU engine")
+	}
+}
+
+// The CPU engine stops once the label's model is gone.
+func TestResolveCPUStopsWithoutModel(t *testing.T) {
+	g := newRig(t)
+	c := LabelConfig{Label: LabelSTT, Kind: KindWhisper, ModelKind: ModelSTT, Engine: ModeRemote, Model: "whisper-base",
+		ModelPath: g.model("ggml-base.en.bin"), GPUBackend: "auto", RemoteURL: "https://x/v1", Fallback: FallbackCPU}
+	g.src.set(c)
+	ctx := context.Background()
+	if _, err := g.r.ResolveCPU(ctx, LabelSTT); err != nil {
+		t.Fatal(err)
+	}
+	c.Model, c.ModelPath = "", ""
+	g.src.set(c)
+	g.r.Reconcile(ctx)
+	if n := len(g.r.Instances()); n != 0 {
+		t.Fatalf("%d engines left without a model", n)
+	}
+}
+
+// The CPU engine stops once it hasn't been asked for CPUIdle.
+func TestResolveCPUIdleStop(t *testing.T) {
+	g := newRig(t)
+	g.src.set(LabelConfig{Label: LabelSTT, Kind: KindWhisper, ModelKind: ModelSTT, Engine: ModeRemote, Model: "whisper-base",
+		ModelPath: g.model("ggml-base.en.bin"), GPUBackend: "auto", RemoteURL: "https://x/v1", Fallback: FallbackCPU})
+	g.r.CPUIdle = 50 * time.Millisecond
+	ctx := context.Background()
+	if _, err := g.r.ResolveCPU(ctx, LabelSTT); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	g.r.Reconcile(ctx)
+	if n := len(g.r.Instances()); n != 0 {
+		t.Fatalf("%d engines left after idling", n)
+	}
+}
+
+// fallback=cpu with no whisper model: ResolveCPU says so, and the label status warns.
+func TestResolveCPUWithoutModel(t *testing.T) {
+	g := newRig(t)
+	g.src.set(LabelConfig{Label: LabelSTT, Kind: KindWhisper, ModelKind: ModelSTT, Engine: ModeRemote, GPUBackend: "auto",
+		RemoteURL: "https://x/v1", Fallback: FallbackCPU})
+	ctx := context.Background()
+	_, err := g.r.ResolveCPU(ctx, LabelSTT)
+	if err == nil || !strings.Contains(err.Error(), "no whisper model") {
+		t.Fatalf("%v", err)
+	}
+	for _, s := range g.r.Status(ctx) {
+		if s.Label == LabelSTT && (s.State != "remote" || s.Fallback == nil || !strings.Contains(s.Fallback.Warning, "Models page")) {
+			t.Fatalf("status %+v %+v", s, s.Fallback)
+		}
+	}
+	if len(g.starts()) != 0 {
+		t.Fatal("started an engine without a model")
+	}
+}
+
+// The stt module's counts show on the label status through SpeechFallback.
+func TestStatusShowsSpeechFallback(t *testing.T) {
+	g := newRig(t)
+	g.src.set(LabelConfig{Label: LabelSTT, Kind: KindWhisper, ModelKind: ModelSTT, Engine: ModeRemote, Model: "whisper-base",
+		ModelPath: g.model("ggml-base.en.bin"), RemoteURL: "https://x/v1", Fallback: FallbackCPU})
+	g.r.SpeechFallback = func(label string) (fallback.Status, bool) {
+		return fallback.Status{Fallbacks: 3, LastPath: fallback.PathLocalCPU, LastRemoteError: "503"}, label == LabelSTT
+	}
+	for _, s := range g.r.Status(context.Background()) {
+		if s.Label == LabelSTT && (s.Fallback == nil || s.Fallback.Fallbacks != 3 || s.Fallback.Mode != FallbackCPU || s.Fallback.LastRemoteError != "503") {
+			t.Fatalf("status %+v", s.Fallback)
+		}
+		if s.Label == LabelLive && s.Fallback != nil {
+			t.Fatalf("live has a fallback %+v", s.Fallback)
 		}
 	}
 }

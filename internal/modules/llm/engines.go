@@ -33,7 +33,7 @@ func (s stackResolver) Resolve(ctx context.Context, label string) (Endpoint, err
 		BaseURL: ep.BaseURL, APIKey: ep.APIKey, Model: ep.Model,
 		Vision: ep.Vision, Embeddings: ep.Embeddings, ContextLength: per, Remote: ep.Remote,
 		FoldSystemMessages: ep.FoldSystemMessages, API: ep.API, NoReasoningBudget: ep.NoReasoningBudget,
-		Timeout: time.Duration(ep.TimeoutMS) * time.Millisecond,
+		Timeout: time.Duration(ep.TimeoutMS) * time.Millisecond, Fallback: ep.Fallback,
 	}, nil
 }
 
@@ -68,6 +68,8 @@ func (m *Module) attachStack() {
 	}
 	m.stack = st
 	m.Resolver = stackResolver{st.Resolver}
+	st.Resolver.SpeechFallback = m.SpeechFallback
+	st.Manager.SpeechFallback = m.SpeechFallback
 	st.Resolver.OnReady = func(labels []string) {
 		chat := func(ctx context.Context, r ChatRequest) error {
 			_, err := m.Service().Chat(ctx, r)
@@ -75,6 +77,20 @@ func (m *Module) attachStack() {
 		}
 		warmEngine(context.Background(), chat, labels, m.OnEngineReady, m.log())
 	}
+}
+
+// ResolveCPU resolves a remote stt label to its local CPU fallback engine
+// (engine.Resolver.ResolveCPU), for the stt module's fallback=cpu.
+func (m *Module) ResolveCPU(ctx context.Context, label string) (Endpoint, error) {
+	if m.stack == nil || m.stack.Resolver == nil {
+		return Endpoint{}, &NotReadyError{State: StateNotConfigured, Reason: "no local engine stack"}
+	}
+	ep, err := m.stack.Resolver.ResolveCPU(ctx, label)
+	if err != nil {
+		// Said as is: it ends up in the remote error's "(local CPU fallback unavailable: …)".
+		return Endpoint{}, err
+	}
+	return Endpoint{BaseURL: ep.BaseURL, Model: ep.Model}, nil
 }
 
 // ModelPath reports where the model assigned to a voice label ("tts", "speaker") is

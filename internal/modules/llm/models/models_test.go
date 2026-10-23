@@ -1853,6 +1853,61 @@ func TestSTTRemoteLabel(t *testing.T) {
 	}
 }
 
+// stt.fallback (docs/llm/07-remote-speech.md §2): off by default, cpu runs the label's own
+// installed model on a local CPU engine when the remote fails; stt only.
+func TestSTTFallbackSetting(t *testing.T) {
+	e := newEnv(t)
+	e.testCatalog()
+	e.start()
+	src := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store}
+	r := &engine.Resolver{Source: src, Log: quiet()}
+	var def settings.Definition
+	for _, d := range engine.SettingDefinitions() {
+		if d.Key == "stt.fallback" {
+			def = d
+		}
+	}
+	if def.Default != engine.FallbackOff || !slices.Equal(def.Options, []any{engine.FallbackOff, engine.FallbackCPU}) {
+		t.Fatalf("stt.fallback %+v", def)
+	}
+	for _, bad := range []map[string]map[string]any{{"stt": {"fallback": "gpu"}}, {"live": {"fallback": "cpu"}}} {
+		if err := e.mgr.UpdateLabels(e.ctx, bad); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"stt": {"engine": "remote", "remote_url": "https://api.groq.com/openai/v1",
+		"remote_model": "whisper-large-v3-turbo", "fallback": "cpu"}}); err != nil {
+		t.Fatal(err)
+	}
+	ep, err := r.Resolve(e.ctx, engine.LabelSTT)
+	if err != nil || !ep.Remote || ep.Fallback != engine.FallbackCPU {
+		t.Fatalf("%+v %v", ep, err)
+	}
+	// No whisper installed: the label warns.
+	for _, s := range r.Status(e.ctx) {
+		if s.Label == engine.LabelSTT && (s.Fallback == nil || !strings.Contains(s.Fallback.Warning, "no whisper model")) {
+			t.Fatalf("status %+v", s.Fallback)
+		}
+	}
+	inst, _, _ := e.mgr.Install(e.ctx, InstallRequest{CatalogID: "whisper-tiny"})
+	e.waitInstall(inst.ID, InstallDone)
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"stt": {"model": "whisper-tiny"}}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := src.LocalLabel(e.ctx, engine.LabelSTT)
+	if err != nil || c.Engine != engine.ModeLocal || c.ModelPath == "" || c.Fallback != engine.FallbackCPU {
+		t.Fatalf("local view %+v %v", c, err)
+	}
+	if c, _ := src.Label(e.ctx, engine.LabelSTT); c.Engine != engine.ModeRemote || c.ModelPath != "" {
+		t.Fatalf("Label changed: %+v", c)
+	}
+	for _, s := range r.Status(e.ctx) {
+		if s.Label == engine.LabelSTT && (s.State != "remote" || s.Fallback == nil || s.Fallback.Warning != "" || s.Fallback.Mode != engine.FallbackCPU) {
+			t.Fatalf("status %s %+v", s.State, s.Fallback)
+		}
+	}
+}
+
 // The cloud label (2026-10-22-cloud-model-slot.md) is remote only and empty by default: nothing
 // leaves the network until a superuser gives it a URL; then it resolves like any remote.
 func TestCloudLabel(t *testing.T) {

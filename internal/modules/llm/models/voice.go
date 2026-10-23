@@ -8,6 +8,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 // In-binary model kinds: run by sherpa-onnx inside jarvisd (PLAN §3.3), so they get no engine
@@ -82,6 +83,9 @@ type VoiceModel struct {
 	// Path is the .onnx file (speaker) or the model directory (tts).
 	Path    string `json:"path"`
 	Problem string `json:"problem,omitempty"`
+	// Fallback is a remote tts voice's fallback to local Kokoro (Manager.SpeechFallback); nil
+	// when the label speaks locally.
+	Fallback *fallback.Status `json:"fallback,omitempty"`
 }
 
 // ModelPath resolves a voice label ("tts" or "speaker") to the model to load: the configured
@@ -140,6 +144,11 @@ func (m *Manager) VoiceStatus(ctx context.Context) []VoiceModel {
 		vm, ok := m.ModelPath(ctx, v.Name)
 		if !ok && vm.Problem == "" {
 			vm.Problem = "not configured"
+		}
+		if m.SpeechFallback != nil {
+			if st, ok := m.SpeechFallback(v.Name); ok {
+				vm.Fallback = &st
+			}
 		}
 		out = append(out, vm)
 	}
