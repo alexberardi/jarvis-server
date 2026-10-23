@@ -20,3 +20,4 @@ HOSTS.local.md
 /e2e/web/node_modules/
 /e2e/web/test-results/
 /.e2e/
+/.lane-check.*/

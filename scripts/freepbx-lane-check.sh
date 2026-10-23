@@ -6,12 +6,16 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LANE=$ROOT/scripts/freepbx-lane
-T=$(mktemp -d)
+# In the checkout, not TMPDIR: a noexec tmp silently skips the stand-in and the lane's
+# dev-box guard then refuses with the real hostname, failing every plan check at once.
+T=$(mktemp -d "$ROOT/.lane-check.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin"
 printf '#!/bin/sh\necho devbox\n' >"$T/bin/hostname"
 chmod +x "$T/bin/hostname"
 export PATH="$T/bin:$PATH" JARVIS_FREEPBX_DIR="$T/lane"
+[ "$(hostname)" = devbox ] ||
+  { echo "freepbx-lane-check: the stand-in hostname did not take effect (noexec tmp?): hostname says $(hostname)" >&2; exit 1; }
 fail=0
 err() { echo "freepbx-lane-check: $*" >&2; fail=1; }
 
@@ -55,7 +59,7 @@ lacks 'hostfwd=tcp:0\.0\.0\.0|hostfwd=tcp::' "$plan"
 # Every forward is on loopback: SSH, HTTP, SIP over UDP and TCP, and each RTP port at its own number.
 loopback_only() {
   local fwds
-  fwds=$(grep -oE 'hostfwd=[^, ]*' <<<"$1")
+  fwds=$(grep -oE 'hostfwd=[^, ]*' <<<"$1" || true)
   for want in 'hostfwd=tcp:127\.0\.0\.1:2247-:22' 'hostfwd=tcp:127\.0\.0\.1:8447-:80' 'hostfwd=udp:127\.0\.0\.1:5260-:5060' \
     'hostfwd=tcp:127\.0\.0\.1:5260-:5060' 'hostfwd=udp:127\.0\.0\.1:30800-:30800' 'hostfwd=udp:127\.0\.0\.1:30819-:30819'; do
     grep -qE -- "^$want\$" <<<"$fwds" || err "$2: no forward /$want/"
@@ -88,7 +92,7 @@ lacks 'restrict=on' "$plan"
 for want in 'sandbox up --name freepbx-l2 --voice --sip' 'calls\.sh 5260 30800 30819' 'siplane l2 --sandbox freepbx-l2 --sip 127\.0\.0\.1:5260 --ssh 127\.0\.0\.1:2247'; do
   grep -qE -- "$want" <<<"$plan" || err "weekly plan lacks /$want/"
 done
-order=$(grep -E '^\+ ' <<<"$plan" | grep -oE 'pjsip show aor 100|calls\.sh [0-9]|siplane l2|sudo poweroff|siplane drift' | tr '\n' '|')
+order=$(grep -E '^\+ ' <<<"$plan" | grep -oE 'pjsip show aor 100|calls\.sh [0-9]|siplane l2|sudo poweroff|siplane drift' | tr '\n' '|' || true)
 [ "$order" = "pjsip show aor 100|calls.sh 5|siplane l2|sudo poweroff|siplane drift|" ] || err "weekly runs the calls out of order: $order"
 plan=$(expect 0 'siplane drift' weekly --no-calls --dry-run)
 lacks 'calls\.sh|siplane l2|sandbox up' "$plan"
