@@ -613,6 +613,17 @@ func runAgent(ctx context.Context, args []string) error {
 		// A Pi is headless: no status icon, no island, nothing that opens a browser.
 		*f.noTray, *f.noOverlay = true, true
 	}
+	var adoptLogin bool
+	if p.desktop && runtime.GOOS == "darwin" {
+		// A stale copy steps aside for the one installed in /Applications (#483); the
+		// installed copy re-points the login item at itself further down, once it holds the
+		// control socket.
+		done, adopt := runHandover(log)
+		if done {
+			return nil
+		}
+		adoptLogin = adopt
+	}
 	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
 	vf.clampFollowUp(log)
 	tf.pi = !p.desktop
@@ -657,6 +668,9 @@ func runAgent(ctx context.Context, args []string) error {
 		return notSetUp(err)
 	}
 	migrateLegacyID(log)
+	if adoptLogin {
+		adoptIfInstalled(ctx, log)
+	}
 	ctx, quit := context.WithCancel(ctx)
 	defer quit()
 	pill := &runningPill{}

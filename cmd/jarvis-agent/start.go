@@ -125,13 +125,15 @@ type starter struct {
 	send     func(cmd string) error // to the running agent
 	waitSend func(cmd string) error // to an agent that is starting
 	enrolled func() bool
-	install  func() error                    // this user's first launch of a packaged copy
-	firstRun func(ctx context.Context) error // nothing set up yet: the setup page
-	window   func()                          // an agent already running: its setup page, which says so (nil: none)
+	install  func() error                      // this user's first launch of a packaged copy
+	firstRun func(ctx context.Context) error   // nothing set up yet: the setup page
+	window   func()                            // an agent already running: its setup page, which says so (nil: none)
+	handover func() (install.Handover, string) // macOS: what to do about the installed copy, and its binary (nil: none)
+	adopt    func() error                      // macOS: re-point the login item at this copy (#483)
 }
 
 func newStarter(e install.Env, s install.Sys) starter {
-	return starter{
+	st := starter{
 		env:  e,
 		sys:  s,
 		send: func(cmd string) error { return control.Send(controlDial, cmd) },
@@ -149,12 +151,18 @@ func newStarter(e install.Env, s install.Sys) starter {
 		firstRun: firstRun,
 		window:   openSetupPage(logger()),
 	}
+	if e.GOOS == "darwin" {
+		st.handover = func() (install.Handover, string) { return handoverDecision(e) }
+		st.adopt = func() error { return adoptLoginItem(context.Background(), e, s) }
+	}
+	return st
 }
 
 // start: an agent already running flashes its pill and opens the setup page, which says it is
-// running (opening the app again must show something); otherwise a packaged copy sets this
-// user up on its first launch, a computer that isn't set up goes to the first-run page, and the
-// agent starts the way its login item would, then shows the pill.
+// running (opening the app again must show something); otherwise a stale copy hands the start
+// to the one installed in /Applications (macOS, #483), a packaged copy sets this user up on
+// its first launch, a computer that isn't set up goes to the first-run page, and the agent
+// starts the way its login item would, then shows the pill.
 func (st starter) start(ctx context.Context, login bool) error {
 	probe := control.ShowRunning
 	if login {
@@ -165,6 +173,26 @@ func (st starter) start(ctx context.Context, login bool) error {
 			st.window()
 		}
 		return nil
+	}
+	if st.handover != nil {
+		switch d, exe := st.handover(); d {
+		case install.HandOverToInstalled:
+			// An equal-or-newer copy is installed in /Applications (#483): it owns setup and
+			// the login item, so it gets the start and this copy does nothing else.
+			scrubLaunchdEnv()
+			args := []string{exe, "start"}
+			if login {
+				args = append(args, "--login")
+			}
+			return st.sys.Spawn(args...)
+		case install.AdoptLoginItem:
+			if st.adopt != nil && install.Installed(st.env, st.sys) {
+				// Another bundle may hold the login item: make it follow this copy. Best
+				// effort: a refusal must not stop the start. (Not installed yet: the
+				// first-launch install below registers from this bundle anyway.)
+				_ = st.adopt()
+			}
+		}
 	}
 	if !install.Installed(st.env, st.sys) && install.SetsUpOnFirstLaunch(st.env) {
 		if err := st.install(); err != nil {

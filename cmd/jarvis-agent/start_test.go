@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -188,5 +189,79 @@ func TestStopSaysWhatHappened(t *testing.T) {
 	stuck := errors.New("the running agent didn't stop")
 	if err := stopAgent(&out, func() bool { return true }, func() error { return stuck }); !errors.Is(err, stuck) {
 		t.Fatal(err)
+	}
+}
+
+func darwinEnv(t *testing.T, exe string) install.Env {
+	return install.Env{GOOS: "darwin", Home: t.TempDir(), UID: 501, Exe: exe,
+		SMAppService: true, Getenv: func(string) string { return "" }}
+}
+
+// #483: the old Downloads copy kept launching after an update was installed in /Applications.
+// Started while an equal-or-newer copy is installed there, it hands the start to that copy and
+// does nothing else here (no install, no setup page, no kickstart of the stale login item).
+func TestStartHandsOverToTheInstalledCopy(t *testing.T) {
+	const installed = "/Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent"
+	f := &fakeStart{setUp: true}
+	st := f.starter(darwinEnv(t, "/Users/u/Downloads/old/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent"))
+	st.handover = func() (install.Handover, string) { return install.HandOverToInstalled, installed }
+	st.adopt = func() error { t.Fatal("adopted the login item from the stale copy"); return nil }
+	if err := st.start(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"send show-running", "spawn " + installed + " start"}
+	if !slices.Equal(f.log, want) {
+		t.Fatalf("did %q\nwant %q", f.log, want)
+	}
+	// At login the spawned copy is told it is a login start.
+	f.log = nil
+	if err := st.start(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"send ping", "spawn " + installed + " start --login"}
+	if !slices.Equal(f.log, want) {
+		t.Fatalf("did %q\nwant %q", f.log, want)
+	}
+}
+
+// The installed copy opened by hand takes the login item over from whatever bundle holds it,
+// then starts as usual.
+func TestStartFromApplicationsAdoptsTheLoginItem(t *testing.T) {
+	f := &fakeStart{setUp: true, comesUp: true}
+	e := darwinEnv(t, "/Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent")
+	// Installed for this user: the LaunchAgent plist exists.
+	plist := filepath.Join(e.Home, "Library", "LaunchAgents", "net.jarvisautomation.agent.plist")
+	if err := os.MkdirAll(filepath.Dir(plist), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plist, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := f.starter(e)
+	st.handover = func() (install.Handover, string) { return install.AdoptLoginItem, e.Exe }
+	st.adopt = func() error { f.log = append(f.log, "adopt"); return nil }
+	if err := st.start(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"send show-running", "adopt",
+		"run launchctl kickstart gui/501/net.jarvisautomation.agent", "spawn " + e.Exe + " run", "wait show-running"}
+	if !slices.Equal(f.log, want) {
+		t.Fatalf("did %q\nwant %q", f.log, want)
+	}
+}
+
+// A copy that would adopt but was never installed for this user installs instead (the
+// first-launch flow registers the login item from this bundle anyway).
+func TestStartNotInstalledInstallsInsteadOfAdopting(t *testing.T) {
+	f := &fakeStart{setUp: true, comesUp: true}
+	e := darwinEnv(t, "/Applications/Jarvis Automation Agent.app/Contents/MacOS/jarvis-agent")
+	st := f.starter(e)
+	st.handover = func() (install.Handover, string) { return install.AdoptLoginItem, e.Exe }
+	st.adopt = func() error { f.log = append(f.log, "adopt"); return nil }
+	if err := st.start(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(f.log, "adopt") || !f.installed {
+		t.Fatalf("did %q, want install and no adopt", f.log)
 	}
 }

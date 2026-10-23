@@ -116,6 +116,10 @@ type Options struct {
 	Start           bool   // start the agent afterwards
 	FilesOnly       bool   // skip Activate steps: no service manager, LaunchServices or processes
 	LoginItem       string // macOS: "auto" (SMAppService when run from the app, else a LaunchAgent), "smappservice", "launchagent"
+	// Adopt (macOS): take the login item over from another copy of the app. SMAppService's
+	// register returns early on "already enabled", keeping whichever bundle registered first
+	// (#483), so the login item is unregistered first and re-registered from this bundle.
+	Adopt bool
 }
 
 // UninstallOptions are uninstall's.
