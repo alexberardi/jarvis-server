@@ -681,3 +681,16 @@ func TestWindowByTitle(t *testing.T) {
 		t.Errorf("a terminal titled Notes = %v, want denied", out)
 	}
 }
+
+// A ref action on an app whose snapshot lists no elements (Tk: screenshots only) must say to
+// act by coordinates — "take a new one" sent the model into a snapshot → press loop (#528).
+func TestNoElementsRefSaysCoordinates(t *testing.T) {
+	f := newDesktop(t)
+	f.ax.snap = computeruse.Snapshot{Gen: 4, Title: "Groceries"}
+	f.observe(t, "Notes")
+	res := f.act(t, "Notes", map[string]any{"kind": "press", "intent": "new note", "ref": "New note"})
+	r := firstResult(t, res)
+	if r["code"] != "stale_ref" || !strings.Contains(r["error"].(string), "coordinates") {
+		t.Errorf("press with no elements = %v, want stale_ref pointing at coordinates", r)
+	}
+}

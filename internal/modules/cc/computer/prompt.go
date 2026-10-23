@@ -117,7 +117,14 @@ func renderPrompt(in promptInput) string {
 		fmt.Fprintf(&b, "app: %q\n", defang(o.App))
 	}
 	if len(o.Elements) == 0 {
-		b.WriteString("(no elements found)\n")
+		if in.Desktop && in.Images > 0 {
+			// Tk and other apps without AT-SPI: screenshots only (DESIGN.md §12), so refs
+			// can never resolve and only coordinate actions work.
+			b.WriteString("(this app lists no elements: work from the newest screenshot with coordinate actions — " +
+				"click/double_click x,y, then type or keypress; press/set_value/select need a listed element and cannot work here)\n")
+		} else {
+			b.WriteString("(no elements found)\n")
+		}
 	}
 	for _, e := range o.Elements {
 		b.WriteString(renderElement(e) + "\n")

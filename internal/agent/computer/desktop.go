@@ -588,6 +588,10 @@ func (t *Tools) desktopStep(ctx context.Context, a actArgs, i int, action comput
 			snapEl = run.Snap.Find(action.Ref)
 		}
 		if snapEl == nil {
+			if run.Snap == nil || len(run.Snap.Elements) == 0 {
+				return fail("stale_ref", "%q names an element, but this app lists none (screenshots only): "+
+					"act by coordinates on the capture (click x,y, then type or keypress)", action.Ref)
+			}
 			return fail("stale_ref", "%s isn't in the last snapshot: take a new one", action.Ref)
 		}
 		el = snapEl.Element()
