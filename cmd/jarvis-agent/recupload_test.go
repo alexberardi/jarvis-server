@@ -27,6 +27,7 @@ type fakeJarvisd struct {
 	images    bool // an upload carried image_attachments
 	putStatus map[string]int
 	puts      []string
+	tried     map[string]int // every PUT, whatever it answered
 }
 
 func (j *fakeJarvisd) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -40,6 +41,12 @@ func (j *fakeJarvisd) RoundTrip(req *http.Request) (*http.Response, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	status := j.status
+	if req.Method == http.MethodPut {
+		if j.tried == nil {
+			j.tried = map[string]int{}
+		}
+		j.tried[req.URL.Path]++
+	}
 	if s := j.putStatus[req.URL.Path]; s != 0 && req.Method == http.MethodPut {
 		status = s
 	}
@@ -241,4 +248,10 @@ func TestRecordingUploadedOnce(t *testing.T) {
 			t.Fatalf("uploads %v", got)
 		}
 	}
+}
+
+func (j *fakeJarvisd) attempts(path string) int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.tried[path]
 }
