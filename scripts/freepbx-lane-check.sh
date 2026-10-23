@@ -86,6 +86,14 @@ for want in 'qemu-img snapshot -a installed' 'fwconsole ma upgradeall' 'provisio
   "pjsip show endpoint 100" "pjsip show aor 100" 'freepbx-show-100\.txt'; do
   grep -qE -- "$want" <<<"$plan" || err "weekly plan lacks /$want/"
 done
+# The update step waits for Asterisk first (the boot from "installed" can leave it down, and
+# fwconsole reload then dies on /var/run/asterisk, loop #520), starts it if the wait ran out,
+# and waits again after the upgrade (apt can restart Asterisk) before fwconsole reload.
+upd=$(grep -F 'update.log' <<<"$plan" || true)
+grep -qE "waitfullybooted.*fwconsole start.*apt-get -q update" <<<"$upd" ||
+  err "the update step does not wait for Asterisk (with fwconsole start as the fallback) before updating"
+grep -qE "fwconsole ma upgradeall.*waitfullybooted.*fwconsole reload" <<<"$upd" ||
+  err "the update step does not wait for Asterisk again between upgradeall and fwconsole reload"
 lacks 'restrict=on' "$plan"
 # Then the calls (loop #490), after the capture and before the VM goes down: they change SIP
 # Settings and the trunk, never extension 100.
