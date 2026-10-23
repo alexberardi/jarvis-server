@@ -1,12 +1,13 @@
-// Command fakespeech is a fake OpenAI-compatible speech provider for the harness: POST
-// /v1/audio/speech answers a tone as 24 kHz s16le PCM (or WAV), records every request, and can
-// be told to fail or to answer WAV at another rate, so the remote TTS path
-// (internal/modules/tts/remote.go, docs/llm/07-remote-speech.md §5) runs end to end without a
-// paid provider. API: server.go.
+// Command fakespeech is a fake OpenAI-compatible speech provider for the harness: it answers
+// POST /v1/audio/transcriptions with canned text and POST /v1/audio/speech with a tone (24 kHz
+// s16le PCM or WAV), records every request (never the key) and can be told to fail, so jarvisd's
+// remote stt and tts run end to end without a paid provider (docs/llm/07-remote-speech.md §5).
+// scripts/sandbox up --speech fake starts one (port 7796 + offset) and points stt.remote_url at
+// it; tests read $SBX_FAKESPEECH/control/requests. API: server.go.
 //
 //	fakespeech [--listen ADDR] [--key KEY] [--log FILE]
 //
-// Point a sandbox at it: tts.provider=remote, tts.remote_url=http://ADDR/v1.
+// Point tts at it by hand: tts.provider=remote, tts.remote_url=http://ADDR/v1.
 package main
 
 import (
@@ -33,8 +34,8 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("fakespeech", flag.ContinueOnError)
 	listen := fs.String("listen", "127.0.0.1:17796", "address to serve on")
-	key := fs.String("key", "", "the API key callers must send as a bearer token (empty: any)")
-	logPath := fs.String("log", "", "append every request here, one JSON object per line")
+	key := fs.String("key", os.Getenv("FAKESPEECH_KEY"), "the only API key accepted (default $FAKESPEECH_KEY; empty = any)")
+	logPath := fs.String("log", "", "append every recorded request here, one JSON object per line")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

@@ -447,6 +447,8 @@ export interface LabelConfig {
   remote_api?: string
   /** What remote_api resolves to for remote_url: openai or anthropic. */
   remote_api_effective?: string
+  /** stt only: how long one remote transcription may take, in milliseconds. */
+  remote_timeout_ms?: number
   problem?: string
   /** Something to know that isn't a problem (a Python engine runs the model text-only). */
   note?: string
@@ -518,6 +520,7 @@ export type LabelUpdate = Partial<{
   remote_api_key: string
   remote_vision: boolean
   remote_api: string
+  remote_timeout_ms: number
 }>
 
 /** putLabels validates the whole body before writing anything (422 otherwise; I4). */

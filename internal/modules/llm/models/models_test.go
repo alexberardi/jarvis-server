@@ -1079,6 +1079,9 @@ func TestUpdateLabelsValidation(t *testing.T) {
 		{"live": {"remote_api": "anthropic"}},
 		{"live": {"remote_api": "auto"}},
 		{"stt": {"model": "whisper-tiny", "gpu_layers": float64(0)}},
+		{"stt": {"engine": "remote", "remote_url": "https://api.groq.com/openai/v1", "remote_api": "openai",
+			"remote_model": "whisper-large-v3-turbo", "remote_api_key": "gsk", "remote_timeout_ms": float64(5000)}},
+		{"stt": {"engine": "local"}},
 		{"live": {"mmproj": "none"}},
 		{"live": {"dir_engine": "transformers", "dtype": "bfloat16", "quantization": "bnb-4bit"}},
 		{"background": {"dir_engine": "auto", "dtype": "auto", "quantization": "none"}},
@@ -1102,9 +1105,12 @@ func TestUpdateLabelsValidation(t *testing.T) {
 		{"live": {"mmproj": "whisper-tiny"}},
 		{"live": {"extra_args": "'open"}},
 		{"live": {"split_mode": "diagonal"}},
-		{"stt": {"remote_url": "http://x"}},
+		{"stt": {"remote_vision": true}},
 		{"live": {"remote_api": "gemini"}},
-		{"stt": {"remote_api": "openai"}},
+		{"stt": {"remote_api": "anthropic"}},
+		{"stt": {"remote_api": "auto"}},
+		{"stt": {"engine": "shared"}},
+		{"live": {"remote_timeout_ms": float64(1000)}},
 		{"live": {"dir_engine": "llama"}},
 		{"live": {"dtype": "int8"}},
 		{"live": {"quantization": "awq"}},
@@ -1166,7 +1172,7 @@ func TestSettingsSourceDefaults(t *testing.T) {
 			t.Errorf("missing %s", k)
 		}
 	}
-	if keys["stt.mmproj"] || keys["stt.remote_url"] || keys["llm.embeddings.mmproj"] {
+	if keys["stt.mmproj"] || keys["stt.remote_vision"] || keys["llm.embeddings.mmproj"] {
 		t.Error("label got fields that don't apply")
 	}
 }
@@ -1773,6 +1779,77 @@ func TestUpdateLabelsModelDirectory(t *testing.T) {
 	e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"dir_engine": "auto"}})
 	if c, _ := src.Label(e.ctx, "live"); c.Kind != engine.KindTransformers || c.Problem != "" {
 		t.Fatalf("windows, auto: %s %q", c.Kind, c.Problem)
+	}
+}
+
+// The stt label can run remote (docs/llm/07-remote-speech.md §2): openai is its only dialect,
+// with no Anthropic auto-detect, a per-request timeout, and a key no read returns.
+func TestSTTRemoteLabel(t *testing.T) {
+	e := newEnv(t)
+	src := engine.SettingsSource{Settings: e.set, Models: e.mgr.Store}
+	r := &engine.Resolver{Source: src, Log: quiet()}
+
+	keys := map[string]settings.Definition{}
+	for _, d := range engine.SettingDefinitions() {
+		keys[d.Key] = d
+	}
+	if d := keys["stt.engine"]; !slices.Equal(d.Options, []any{engine.ModeLocal, engine.ModeRemote, engine.ModeOff}) || d.Default != engine.ModeLocal {
+		t.Errorf("engine %+v", d)
+	}
+	for _, k := range []string{"remote_url", "remote_api", "remote_model", "remote_api_key", "remote_timeout_ms"} {
+		if _, ok := keys["stt."+k]; !ok {
+			t.Errorf("missing stt.%s", k)
+		}
+	}
+	if d := keys["stt.remote_api"]; !slices.Equal(d.Options, []any{engine.APIOpenAI}) || d.Default != engine.APIOpenAI {
+		t.Errorf("remote_api %+v", d)
+	}
+	if d := keys["stt.remote_timeout_ms"]; d.Default != int64(8000) {
+		t.Errorf("remote_timeout_ms %+v", d)
+	}
+	if !keys["stt.remote_api_key"].IsSecret {
+		t.Error("the stt key is not secret")
+	}
+	if strings.Contains(keys["stt.remote_url"].Description, "anthropic") {
+		t.Errorf("stt remote_url reads like an LLM's: %q", keys["stt.remote_url"].Description)
+	}
+
+	// A URL on api.anthropic.com still speaks openai: stt has no auto-detect.
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"stt": {
+		"engine": "remote", "remote_url": "https://api.anthropic.com/v1/audio/transcriptions", "remote_model": "m", "remote_api_key": "sk-stt-secret",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ep, err := r.Resolve(e.ctx, engine.LabelSTT)
+	if err != nil || !ep.Remote || ep.API != engine.APIOpenAI || ep.BaseURL != "https://api.anthropic.com/v1" ||
+		ep.Model != "m" || ep.APIKey != "sk-stt-secret" || ep.TimeoutMS != 8000 {
+		t.Fatalf("remote stt %+v %v", ep, err)
+	}
+
+	// No read gives the key back: not the label status, not the settings list.
+	for _, s := range r.Status(e.ctx) {
+		if s.Label != engine.LabelSTT {
+			continue
+		}
+		b, _ := json.Marshal(s)
+		if s.State != "remote" || strings.Contains(string(b), "sk-stt-secret") {
+			t.Fatalf("status %s", b)
+		}
+	}
+	list, err := e.set.List(e.ctx, settings.Scope{}, "engine.stt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(list)
+	if strings.Contains(string(b), "sk-stt-secret") || !strings.Contains(string(b), "stt.remote_api_key") {
+		t.Fatalf("settings read %s", b)
+	}
+
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"stt": {"remote_url": ""}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Resolve(e.ctx, engine.LabelSTT); !errors.Is(err, engine.ErrNotConfigured) {
+		t.Fatalf("remote stt without a URL: %v", err)
 	}
 }
 

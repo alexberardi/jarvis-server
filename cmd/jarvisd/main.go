@@ -139,9 +139,10 @@ func modules(env config.Env) []module.Module {
 	sttm.SettingsRead = settingsRead()
 	sttm.SettingsWrite = superuser
 	sttm.Version = version
-	sttm.Engine = sttmod.ResolveFunc(func(ctx context.Context, label string) (string, error) {
+	sttm.Engine = sttmod.ResolveFunc(func(ctx context.Context, label string) (sttmod.Endpoint, error) {
 		ep, err := llm.Resolver.Resolve(ctx, label)
-		return ep.BaseURL, err
+		return sttmod.Endpoint{BaseURL: ep.BaseURL, Remote: ep.Remote, API: ep.API, APIKey: ep.APIKey, Model: ep.Model,
+			Timeout: ep.Timeout}, err
 	})
 	sttm.Models = sttmod.ModelPathFunc(llm.ModelPath)
 	auth.OnUserDeleted(sttm.PurgeUser)

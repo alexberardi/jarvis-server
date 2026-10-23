@@ -134,7 +134,9 @@ No cloud keys in CI.
 
 ## 6. Build order
 
-1. STT remote, openai dialect (OpenAI, Groq, Other presets), contract via the fake.
+1. STT remote, openai dialect (OpenAI, Groq, Other presets), contract via the fake. **Built**
+   (choices: [../decisions/2026-10-22-remote-stt-openai-dialect.md](../decisions/2026-10-22-remote-stt-openai-dialect.md));
+   harness: `scripts/sandbox up --speech fake|speaches`.
 2. TTS remote, openai dialect, stable 24 kHz format, voices for OpenAI and Other.
 3. ElevenLabs dialect for both.
 4. Fallback for both.

@@ -163,7 +163,7 @@ func TestRealWhisperServer(t *testing.T) {
 		t.Skip("no speech clips")
 	}
 	e := setup(t, func(m *Module) {
-		m.Engine = ResolveFunc(func(context.Context, string) (string, error) { return url, nil })
+		m.Engine = LocalURL(url)
 	})
 	clip, _ := os.ReadFile(files[0])
 	// Upsample to 44.1 kHz first, to prove the resample path end to end.

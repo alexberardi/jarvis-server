@@ -129,14 +129,30 @@ var fields = []field{
 		opts: []any{FoldAuto, FoldOn, FoldOff}, only: []string{ModelLLM}, remote: true},
 	{name: "extra_args", typ: settings.String, def: "", desc: "Extra engine flags (shell-quoted); a --chat-template-file here overrides the model's pinned template"},
 	{name: "remote_url", typ: settings.String, def: "", desc: "Remote base URL, e.g. https://api.openai.com/v1 (OpenAI-compatible) or https://api.anthropic.com",
-		only: []string{ModelLLM, ModelEmbedding}, remote: true},
+		only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
 	{name: "remote_api", typ: settings.String, def: APIAuto,
 		desc: "API the remote endpoint speaks: auto (anthropic for api.anthropic.com, else openai), openai (/chat/completions) or anthropic (the Messages API; chat only, no embeddings)",
-		opts: []any{APIAuto, APIOpenAI, APIAnthropic}, only: []string{ModelLLM, ModelEmbedding}, remote: true},
-	{name: "remote_model", typ: settings.String, def: "", desc: "Model name sent to the remote endpoint", only: []string{ModelLLM, ModelEmbedding}, remote: true},
+		opts: []any{APIAuto, APIOpenAI, APIAnthropic}, only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
+	{name: "remote_model", typ: settings.String, def: "", desc: "Model name sent to the remote endpoint", only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
 	{name: "remote_api_key", typ: settings.String, def: "", desc: "API key for the remote endpoint", secret: true,
-		only: []string{ModelLLM, ModelEmbedding}, remote: true},
+		only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
+	{name: "remote_timeout_ms", typ: settings.Int, def: int64(8000),
+		desc: "How long one remote transcription may take, in milliseconds (a voice turn can't wait long)", only: []string{ModelSTT}},
 	{name: "remote_vision", typ: settings.Bool, def: false, desc: "Whether the remote model accepts images", only: []string{ModelLLM}, remote: true},
+}
+
+// sttFields overrides a field's description, options and default on the stt label, whose
+// remote endpoint transcribes audio rather than chatting (docs/llm/07-remote-speech.md §2).
+var sttFields = map[string]field{
+	"engine": {desc: "local (supervised whisper-server), remote (an OpenAI-compatible speech-to-text API: every voice turn's audio leaves the house, " +
+		"twice for a wake turn; speaker recognition stays local) or off",
+		opts: []any{ModeLocal, ModeRemote, ModeOff}},
+	"remote_url": {desc: "Remote speech-to-text base URL: https://api.openai.com/v1 (OpenAI), https://api.groq.com/openai/v1 (Groq), " +
+		"or any server with /audio/transcriptions (speaches, LocalAI)"},
+	// No auto-detect for stt: the Anthropic API has no speech-to-text.
+	"remote_api": {desc: "API the remote speech-to-text endpoint speaks: openai (multipart /audio/transcriptions)",
+		opts: []any{APIOpenAI}, def: APIOpenAI},
+	"remote_model": {desc: "Transcription model sent to the remote endpoint, e.g. gpt-transcribe (OpenAI) or whisper-large-v3-turbo (Groq)"},
 }
 
 func (f field) appliesTo(d LabelDef) bool {
@@ -243,16 +259,25 @@ func SettingDefinitions() []settings.Definition {
 			opts := f.opts
 			if f.name == "engine" && d.Name != LabelBackground {
 				opts = []any{ModeLocal, ModeRemote, ModeOff}
-				switch {
-				case d.RemoteOnly:
+				if d.RemoteOnly {
 					opts = []any{ModeRemote, ModeOff}
-				case d.Kind == KindWhisper:
-					opts = []any{ModeLocal, ModeOff}
+				}
+			}
+			desc := f.desc
+			if o, ok := sttFields[f.name]; ok && d.Kind == KindWhisper {
+				if o.desc != "" {
+					desc = o.desc
+				}
+				if o.opts != nil {
+					opts = o.opts
+				}
+				if o.def != nil {
+					def = o.def
 				}
 			}
 			out = append(out, settings.Definition{
 				Key: d.Prefix + "." + f.name, Category: cat, Type: f.typ, Default: def,
-				Description: f.desc, RequiresReload: true, IsSecret: f.secret, Options: opts,
+				Description: desc, RequiresReload: true, IsSecret: f.secret, Options: opts,
 			})
 		}
 	}
@@ -322,6 +347,8 @@ type LabelConfig struct {
 	// effect for RemoteURL (openai or anthropic).
 	RemoteAPIMode string `json:"remote_api"`
 	RemoteAPI     string `json:"remote_api_effective"`
+	// RemoteTimeoutMS bounds one remote request (remote_timeout_ms, stt only; 0 = none).
+	RemoteTimeoutMS int `json:"remote_timeout_ms"`
 
 	// Problem says why the label can't run as configured (missing model file, …).
 	Problem string `json:"problem,omitempty"`
@@ -420,6 +447,11 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	}
 	c.RemoteAPIMode = strings.ToLower(str("remote_api"))
 	c.RemoteAPI = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
+	if d.Kind == KindWhisper {
+		// stt speaks openai only (no auto-detect: the Anthropic API has no speech-to-text).
+		c.RemoteAPI = APIOpenAI
+	}
+	c.RemoteTimeoutMS = num("remote_timeout_ms")
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}
