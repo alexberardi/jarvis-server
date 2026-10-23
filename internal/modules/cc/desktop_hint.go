@@ -135,6 +135,10 @@ func sameDeviceHint(conv *conversation, in turnInput) string {
 // 9B sometimes calls desktop_type_text without app for "type into omawrite that …", and the
 // text lands in the window in front. When the call has no app and the utterance says "into X"
 // or "in X" after a typing verb, X (one or two words, not part of the text) goes in app.
+// For an app it doesn't know the 9B also echoes the whole utterance into text ("type buy more
+// coffee filters into omawrite" → text "buy more coffee filters into omawrite", app null,
+// #519): a trailing "into X" echoed at the end of text comes off it and X goes in app. Only
+// "into" — a trailing "in X" ("type I live in Boston") stays text.
 
 // typeVerbs start a typing request.
 var typeVerbs = map[string]bool{"type": true, "write": true, "enter": true, "put": true, "paste": true, "dictate": true}
@@ -148,14 +152,15 @@ var notApps = map[string]bool{"caps": true, "capitals": true, "uppercase": true,
 	"there": true, "it": true, "this": true, "window": true, "field": true, "box": true}
 
 // typedAppNamed is the app the typing request utterance names for text, as the user said it,
-// or "".
-func typedAppNamed(utterance, text string) string {
+// or "", and the text to type: text as given, or with a trailing "into <app>" the model
+// echoed stripped off.
+func typedAppNamed(utterance, text string) (string, string) {
 	ws := strings.Fields(utterance)
 	verb := -1
 	for i, w := range ws {
 		c := compactName(w)
 		if openVerbs[c] {
-			return "" // "open X and type Y": typing follows the launch (LaunchImplicit)
+			return "", text // "open X and type Y": typing follows the launch (LaunchImplicit)
 		}
 		if typeVerbs[c] {
 			verb = i
@@ -163,14 +168,15 @@ func typedAppNamed(utterance, text string) string {
 		}
 	}
 	if verb < 0 {
-		return ""
+		return "", text
 	}
 	inText := map[string]bool{}
 	for _, w := range strings.Fields(text) {
 		inText[compactName(w)] = true
 	}
 	for i := verb + 1; i < len(ws); i++ {
-		if c := compactName(ws[i]); c != "in" && c != "into" {
+		into := compactName(ws[i]) == "into"
+		if !into && compactName(ws[i]) != "in" {
 			continue
 		}
 		j := i + 1
@@ -195,17 +201,52 @@ func typedAppNamed(utterance, text string) string {
 		if !ended || k == j || k-j > 2 {
 			continue
 		}
-		ok := true
+		ok, echoOnly := true, true
 		for _, w := range ws[j:k] {
-			if c := compactName(w); c == "" || notApps[c] || inText[c] {
+			switch c := compactName(w); {
+			case c == "" || notApps[c]:
+				ok, echoOnly = false, false
+			case inText[c]:
 				ok = false
 			}
 		}
+		app := strings.TrimRight(strings.Join(ws[i+1:k], " "), ",.:;!?")
 		if ok {
-			return strings.TrimRight(strings.Join(ws[i+1:k], " "), ",.:;!?")
+			return app, text
+		}
+		if echoOnly && into {
+			if cleaned, stripped := stripEchoedTail(text, ws[i:k]); stripped {
+				return app, cleaned
+			}
 		}
 	}
-	return ""
+	return "", text
+}
+
+// stripEchoedTail is text without its trailing words tail (compared word by word, ignoring
+// case and punctuation), when text ends with them and something is left, and whether it did.
+func stripEchoedTail(text string, tail []string) (string, bool) {
+	var starts []int
+	inField := false
+	for i, r := range text {
+		if unicode.IsSpace(r) {
+			inField = false
+		} else if !inField {
+			starts = append(starts, i)
+			inField = true
+		}
+	}
+	tf := strings.Fields(text)
+	if len(tail) == 0 || len(tf) <= len(tail) {
+		return text, false
+	}
+	off := len(tf) - len(tail)
+	for x, w := range tail {
+		if compactName(tf[off+x]) != compactName(w) {
+			return text, false
+		}
+	}
+	return strings.TrimRight(text[:starts[off]], " \t,;:"), true
 }
 
 // fillTypedApp is call's arguments with the app the utterance names, when call is a
@@ -224,9 +265,12 @@ func fillTypedApp(utterance string, call parse.ToolCall) (string, bool) {
 	}
 	text, _ := o.Get("text")
 	ts, _ := text.(string)
-	app := typedAppNamed(utterance, ts)
+	app, cleaned := typedAppNamed(utterance, ts)
 	if app == "" {
 		return "", false
+	}
+	if cleaned != ts {
+		o.Set("text", cleaned)
 	}
 	o.Set("app", app)
 	return pyjson.Dumps(o, true), true
