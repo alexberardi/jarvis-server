@@ -31,27 +31,40 @@ func addStepsOf(st Step) []Step {
 	return out
 }
 
-// readDownloads continues a checkpoint that directly follows a computer task that downloaded
+// downloadsOf is a successful computer task result's downloaded file names (Data.downloads).
+func downloadsOf(r Result) []string {
+	if r.Command != cmdComputer || !r.Success || r.Data == nil {
+		return nil
+	}
+	v, _ := r.Data.Get("downloads")
+	files, _ := v.([]any)
+	var out []string
+	for _, f := range files {
+		if name, _ := f.(string); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// readDownloads continues a checkpoint that directly follows computer tasks that downloaded
 // files: read each of them, then a checkpoint to finish with what they say (budgetRule). Nil
 // otherwise. The planner is not asked: the house model guessed the names, or wrote the reads
-// and the spreadsheet at once in JSON it couldn't close.
+// and the spreadsheet at once in JSON it couldn't close. budgetRule plans one task per site,
+// so walk back over every consecutive successful computer task, and read oldest first.
 func readDownloads(results []Result, checkpoint int) []Step {
 	if checkpoint < 1 || checkpoint > len(results) {
 		return nil
 	}
-	prev := results[checkpoint-1]
-	if prev.Command != cmdComputer || !prev.Success || prev.Data == nil {
-		return nil
+	first := checkpoint
+	for first > 0 && results[first-1].Command == cmdComputer && results[first-1].Success {
+		first--
 	}
-	v, _ := prev.Data.Get("downloads")
-	files, _ := v.([]any)
 	var out []Step
-	for _, f := range files {
-		name, _ := f.(string)
-		if name == "" {
-			continue
+	for _, r := range results[first:checkpoint] {
+		for _, name := range downloadsOf(r) {
+			out = append(out, Step{Command: cmdReadFile, Label: "Read " + name, Args: servertools.Obj("path", computer.DownloadsDir+"/"+name)})
 		}
-		out = append(out, Step{Command: cmdReadFile, Label: "Read " + name, Args: servertools.Obj("path", computer.DownloadsDir+"/"+name)})
 	}
 	if len(out) == 0 {
 		return nil
