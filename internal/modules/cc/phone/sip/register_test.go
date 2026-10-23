@@ -189,12 +189,12 @@ func TestAnswersOptionsAndRefusesAnyoneButTheRegistrar(t *testing.T) {
 		t.Fatalf("OPTIONS from the PBX: %d, want 200", code)
 	}
 	// A scanner elsewhere gets nothing useful.
-	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname("127.0.0.66"))
+	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname(otherLoopback(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ua.Close()
-	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr("127.0.0.66:0"))
+	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr(otherLoopback(t)+":0"))
 	if err != nil {
 		t.Fatal(err)
 	}

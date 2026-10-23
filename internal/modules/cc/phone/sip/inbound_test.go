@@ -319,12 +319,12 @@ func TestOurHangupOfAnInboundCallSendsBye(t *testing.T) {
 func TestAScannerCannotReachTheInboundHandler(t *testing.T) {
 	called := make(chan struct{}, 1)
 	_, u := inboundUA(t, func(Incoming) Admission { called <- struct{}{}; return Admission{Refuse: 480} })
-	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname("127.0.0.66"))
+	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname(otherLoopback(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ua.Close()
-	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr("127.0.0.66:0"))
+	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr(otherLoopback(t)+":0"))
 	if err != nil {
 		t.Fatal(err)
 	}
