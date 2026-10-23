@@ -1047,6 +1047,7 @@ Ports `N:core/wake_loop.py:143-261,403-530` (`voice/tentative.go`, `voice/endpoi
 |---|---|
 | The node's own music plays (`Music.SelfPlaying`, the cached flag) and a chunk scores in [0.20, the wake threshold] without firing | Tentative wake: `Duck` in the background and keep scoring ("tentative wake triggered"). Not a fire: no debounce, chime, indicator or turn. At most one per 10 s (the cool-down is the pipeline's, so it outlives a turn) |
 | 1.6 s pass with no fire, or listening pauses (a voice take, a room measure) or stops | `Restore` ("tentative wake expired", with the peak score and the reason) |
+| A later chunk inside the window scores above 0.35 (`FireThreshold`, or the wake threshold if lower; loop #503, [decision](../decisions/2026-10-22-pi-node-wake-over-own-music.md)) and passes the wake gate | It fires: through the canceller the music holds "hey Jarvis" to ~0.33-0.51, under a calibrated 0.50. The chunk that opens the tentative never fires below the threshold on its own |
 | The wake word fires inside the window | The fire completes it (`Turn.Tentative`; "wake" logs `tentative_triggered` / `tentative_completed`). The turn's own duck is a no-op on the levels: `Ducker.Duck` keeps the first saved volume |
 | While the band is armed | The wake clip's ring holds 2 s + 1.6 s; a fire that completes a tentative sends all of it (the phrase from before the duck), any other fire the usual 2 s |
 | Every wake turn | `/voice/command/stream` carries `pre_wake_speech_seconds` (chunks of the 5 s pre-wake window above clamp(median × 3, 300, 2500), × 80 ms; the static 2500 with no floor or during the node's own music) and `self_playback` (+ `self_playback_kind: "music"`), snapshotted at the fire. "wake" logs the threshold and its source (`auto`, `static`, `static_self_playback`) |
@@ -1057,7 +1058,8 @@ verification transcribes the leading 2.2 s of `speaker_audio`; a tentative-compl
 (up to 3.6 s) puts the oldest audio there, as N:'s does.
 
 **Verified** with unit tests (`voice/tentative_test.go`: the duck-then-expire, the completing
-fire and its clip, the cool-down, no music, stopping mid-window, the pre-wake seconds table and
+fire and its clip, the jarvis-pi4 scores of #503 completing below the 0.50 threshold, the lower
+bar only inside a window, the cool-down, no music, stopping mid-window, the pre-wake seconds table and
 the JSON). **Not yet on a Pi.** On the lab Pi 4, with music playing through a music package:
 "Hey Jarvis" over it; the log has "tentative wake triggered", then "wake ...
 tentative_completed=true", the music ducking before the chime. A lyric that scores in the band

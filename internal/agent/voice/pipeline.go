@@ -426,7 +426,7 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 			pend = append(pend[:0], pend[wakeChunk:]...)
 			now := p.Now()
 			p.tentativeExpire(ctx, &tw, now, score)
-			if float64(score) <= p.wakeThreshold() || !p.fire(score) {
+			if float64(score) <= p.fireThreshold(&tw) || !p.fire(score) {
 				p.tentativeTrigger(ctx, &tw, now, score, self)
 				continue
 			}
