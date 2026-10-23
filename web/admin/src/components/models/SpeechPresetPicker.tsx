@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getSpeechPresets, type SpeechPreset } from '@/api/speech'
 import { fieldControl } from '@/components/ui/fieldStyles'
 
-export const presetsKey = ['speech', 'presets'] as const
+const presetsKey = ['speech', 'presets'] as const
 
 /**
  * SpeechPresetPicker offers the remote speech providers (OpenAI, Groq, ElevenLabs, Other;
