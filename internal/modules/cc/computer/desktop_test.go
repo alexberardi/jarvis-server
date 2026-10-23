@@ -202,3 +202,50 @@ func TestBrowserRepeatedClickGetsNoNudge(t *testing.T) {
 		t.Errorf("a browser batch got the desktop nudge:\n%s", txt)
 	}
 }
+
+func typeText(text, intent string) string {
+	b, _ := json.Marshal(map[string]any{"kind": "type", "text": text, "intent": intent})
+	return string(b)
+}
+
+// Everything a desktop batch types goes to the focused field: two type actions with nothing
+// moving the focus between them land in the same field (#528: the title got the body's text).
+// The batch is sent back unrun, with feedback.
+func TestDesktopTwoTypesOneFocusSentBack(t *testing.T) {
+	e := newEnv(t, notesWindow())
+	e.script(
+		actions(typeText("Groceries", "Title it"), typeText("milk, eggs and bread", "Fill the body")),
+		actions(typeText("Groceries", "Title it"), click(600, 300, "Focus the body"), typeText("milk, eggs and bread", "Fill the body")),
+		`{"done": true, "summary": "Saved.", "verify": {"text_present": ["Body"]}}`)
+	out := e.loop.Run(context.Background(), desktopTask())
+	if out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, "moves the focus") {
+		t.Errorf("no feedback about the second type:\n%s", txt)
+	}
+	if len(e.exec.batches) != 1 {
+		t.Fatalf("batches %d, want only the corrected batch acted on", len(e.exec.batches))
+	}
+	if b := e.exec.batches[0]; len(b.Actions) != 3 {
+		t.Errorf("acted batch %+v, want the corrected one", b.Actions)
+	}
+}
+
+// A type after a click (or any focus move) is fine, as is one type: no feedback, the batch runs.
+func TestDesktopTypeAfterFocusMoveRuns(t *testing.T) {
+	e := newEnv(t, notesWindow())
+	e.script(
+		actions(typeText("Groceries", "Title it"), chord("Next field", "tab"), typeText("milk", "Fill the body")),
+		`{"done": true, "summary": "Saved.", "verify": {"text_present": ["Body"]}}`)
+	out := e.loop.Run(context.Background(), desktopTask())
+	if out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.exec.batches) != 1 {
+		t.Errorf("batches %d, want the batch acted on", len(e.exec.batches))
+	}
+	if txt := userText(e.llm.reqs[1]); strings.Contains(txt, "moves the focus") {
+		t.Errorf("a fine batch got the feedback:\n%s", txt)
+	}
+}

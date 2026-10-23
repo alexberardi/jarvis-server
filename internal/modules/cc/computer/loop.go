@@ -460,7 +460,38 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if len(actions) == 0 {
 		return Outcome{}, false
 	}
+	if r.task.Target.Kind == "desktop" {
+		if a, b := blindSecondType(actions); b != nil {
+			// The house model plans "type the title, then the body" and sends two types with
+			// nothing moving the focus between them: both land in the focused field (#528).
+			r.feedback = fmt.Sprintf(`%q and %q both type into the same field: everything typed goes to the focused field, and nothing between them moves the focus. Click the field each text is for, right before typing it.`,
+				a.Intent, b.Intent)
+			return Outcome{}, false
+		}
+	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// blindSecondType finds a pair of type actions into the same focus: nothing between them (a
+// click, a press, keys, an element's own set) moves it, so both texts land in one field.
+func blindSecondType(actions []computeruse.Action) (a, b *computeruse.Action) {
+	var last *computeruse.Action
+	for i := range actions {
+		switch actions[i].Kind {
+		case "type":
+			if actions[i].Ref != "" {
+				last = nil // typed into a named element: the focus is explicit
+				continue
+			}
+			if last != nil {
+				return last, &actions[i]
+			}
+			last = &actions[i]
+		case "click", "double_click", "triple_click", "press", "keypress", "navigate", "set_value", "select":
+			last = nil
+		}
+	}
+	return nil, nil
 }
 
 // look observes for the model: new page text that reads like instructions to it ends the call
