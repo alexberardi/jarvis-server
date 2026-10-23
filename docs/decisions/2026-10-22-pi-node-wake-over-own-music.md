@@ -28,6 +28,10 @@ above the tentative band's 0.20 floor, so a window needs a second, stronger fram
   phrase on the raw `jarvis_mic_raw` and the cancelled `jarvis_ec` capture. Follow-up.
 - A recorded fixture of the wake word over the node's music through the canceller needs a
   capture on the Pi (`arecord -D jarvis_ec` while music plays); none exists in the repo yet.
+  The offline stand-in, `TestWakeOverLowMusicClearsTheTentativeFireBar` (internal/voice/oww),
+  mixes `hey_jarvis_emma.wav` with synthetic music from 10 dB under the speech to as loud as it:
+  it peaks at 0.998 (music alone 0.000). Synthetic music masks the phrase far less than the
+  Pi's capture did, so it checks the model side only, not the canceller.
 
 Builds on [17c](../agent/go-pi-node.md) (§3.16) and
 [the echo-cancel decision](2026-10-22-pi-node-echo-cancel.md).
