@@ -45,10 +45,10 @@ func (m *Module) registerVoice(mux *http.ServeMux) {
 
 // registerServerTools registers the server tools whose dependencies exist in this phase.
 // 5c registers its own (remember/recall/forget, run_errand/schedule_errand/
-// list_scheduled_errands, make_phone_call, control_device) through Module.ServerTools() when
+// list_scheduled_errands, make_phone_call) through Module.ServerTools() when
 // their modules land. answer_question and get_command_examples stay unregistered: both are
 // disabled in legacy, and the node's own answer_question client tool would otherwise be
-// shadowed.
+// shadowed (a client tool of a registered name wins at warmup instead, #512).
 func (m *Module) registerServerTools() {
 	m.tools.Register(servertools.NewRequestValidation())
 	m.tools.Register(servertools.NewIdentifySpeaker())
@@ -66,7 +66,8 @@ func (m *Module) registerServerTools() {
 	m.tools.Register(&enableComputerControlTool{m: m}) // "enable computer control" (computer_voice.go)
 	m.tools.Register(&disableComputerControlTool{m: m})
 	m.tools.Register(&computerControlStatusTool{m: m})
-	m.tools.Register(&runWorkflowTool{m: m}) // "download my bank statement for October" (workflows_run.go)
+	m.tools.Register(&runWorkflowTool{m: m})   // "download my bank statement for October" (workflows_run.go)
+	m.tools.Register(&controlDeviceTool{m: m}) // "turn off the office light bar" (device_tool.go, #512)
 	if m.Recipes != nil {
 		m.tools.Register(&saveRecipeTool{m: m, imp: m.Recipes}) // chat photo → recipe (chat_image_actions.go)
 	}

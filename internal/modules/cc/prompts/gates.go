@@ -20,6 +20,11 @@ type ToolGates struct {
 	// could only say so, and one more tool next to the recording ones makes the small live model
 	// call those less.
 	Workflows bool
+	// Devices: the household has an active device in its registry (cc_devices). Gates
+	// control_device, the server-side device tool for conversations whose node offers no
+	// control_device client tool of its own (#512); warmup drops the server copy when the
+	// node sends one.
+	Devices bool
 	// ChatPhotos: a mobile chat conversation whose live slot takes images, the only place
 	// photos come from (docs/cc/chat-images.md §8-9). Gates every photo tool.
 	ChatPhotos bool
@@ -77,6 +82,8 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return false // errand steps only: the planner offers them with computer_task
 	case "run_workflow":
 		return g.Computers && g.Workflows && g.SpeakerKnown
+	case "control_device":
+		return g.Devices
 	}
 	if g.PhotoTools[name] {
 		return g.ChatPhotos
@@ -87,7 +94,7 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 // TextServerTools is the text path's server-tool list, in the legacy order: the whitelist,
 // then deep_research and quick_search, then remember, forget and recall, then create_watch,
 // list_watches and cancel_watch, then start_recording and stop_recording, then the computer
-// control tools and run_workflow, then the photo tools
+// control tools, run_workflow and control_device, then the photo tools
 // (sorted), each behind its gate. Names the caller's registry does not have are skipped by the
 // caller (legacy get_tool).
 func TextServerTools(g ToolGates) []string {
@@ -99,7 +106,8 @@ func TextServerTools(g ToolGates) []string {
 	sort.Strings(photo)
 	for _, n := range append([]string{"deep_research", "quick_search", "remember", "forget", "recall",
 		"create_watch", "list_watches", "cancel_watch", "start_recording", "stop_recording",
-		"enable_computer_control", "disable_computer_control", "computer_control_status", "run_workflow"}, photo...) {
+		"enable_computer_control", "disable_computer_control", "computer_control_status", "run_workflow",
+		"control_device"}, photo...) {
 		if ServerToolAllowed(n, g) {
 			out = append(out, n)
 		}

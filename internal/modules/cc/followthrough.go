@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -23,11 +24,12 @@ import (
 //     call, and the watch stayed on (#221, nagNotCancelled).
 
 const (
-	nagRecallFirst  = "[RECALL_FIRST]"
-	nagUnfinished   = "[UNFINISHED_REQUEST]"
-	nagNoMemoryTool = "[NO_MEMORY_TOOL]"
-	nagUnsaved      = "[NOT_SAVED]"
-	nagNotCancelled = "[NOT_CANCELLED]"
+	nagRecallFirst   = "[RECALL_FIRST]"
+	nagUnfinished    = "[UNFINISHED_REQUEST]"
+	nagNoMemoryTool  = "[NO_MEMORY_TOOL]"
+	nagUnsaved       = "[NOT_SAVED]"
+	nagNotCancelled  = "[NOT_CANCELLED]"
+	nagDeviceNotDone = "[DEVICE_NOT_DONE]"
 )
 
 const (
@@ -45,20 +47,25 @@ const (
 	noMemoryToolRetry = nagNoMemoryTool + " None of your tools can save that, so nothing was saved. Answer " +
 		"again: tell the user plainly, in one short sentence, that you can't remember it for them here. Do not " +
 		"say it was noted or saved."
+	deviceNotDoneRetry = nagDeviceNotDone + " No successful control_device call ran this turn, so no device was " +
+		"changed and your reply is not true yet. control_device is the tool for smart-home devices (control_node " +
+		"is only this speaker's own volume). Call control_device now with the device the user means (copy its " +
+		"entity_id from the device list), or if its result above failed, tell the user plainly it didn't work."
 )
 
 // serverToolKeywords are the force guard's keywords for offered server tools, whose definitions
 // carry none (a node's own tools carry theirs). Without them the guard's keyword half only knew
 // the node's words: a Pi's happened to cover "remember", a desktop agent's didn't.
 var serverToolKeywords = map[string][]string{
-	"remember": {"remember", "note", "don't forget", "keep in mind"},
-	"forget":   {"forget"},
+	"remember":       {"remember", "note", "don't forget", "keep in mind"},
+	"forget":         {"forget"},
+	"control_device": {"turn on", "turn off", "switch on", "switch off", "light", "lights", "lock", "unlock", "thermostat", "dim", "brighten"},
 }
 
 // offeredServerKeywords are serverToolKeywords for the server tools this conversation offers.
 func offeredServerKeywords(conv *conversation) []string {
 	var out []string
-	for _, n := range []string{"remember", "forget"} {
+	for _, n := range []string{"remember", "forget", "control_device"} {
 		if conv.serverNames[n] {
 			out = append(out, serverToolKeywords[n]...)
 		}
@@ -83,6 +90,9 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 	case conv.serverNames["cancel_watch"] && !calledThisTurn(msgs, "cancel_watch") && countNags(msgs, nagNotCancelled) < 1 &&
 		tf.IsStopWatchingRequest(utterance) && tf.ClaimsStoppedWatching(reply):
 		return notCancelledRetry
+	case conv.hasTool("control_device") && countNags(msgs, nagDeviceNotDone) < 1 &&
+		tf.IsDeviceChangeRequest(utterance) && tf.ClaimsDeviceChanged(reply) && !deviceDoneThisTurn(msgs):
+		return deviceNotDoneRetry
 	case !ran && conv.serverNames["recall"] && countNags(msgs, nagRecallFirst) < 1 &&
 		tf.AsksOwnFact(utterance) && tf.DeniesStoredFact(reply):
 		return recallFirstRetry
@@ -98,6 +108,42 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 		}
 	}
 	return ""
+}
+
+// deviceDoneThisTurn reports a successful control_device result since the turn's user message
+// (#512: a reply may only say a device changed when its tool call confirmed it). A node's
+// result message carries no Name, so results are matched to calls by id.
+func deviceDoneThisTurn(msgs []chatMsg) bool {
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck) {
+			start = i
+			break
+		}
+	}
+	names := map[string]string{}
+	for _, m := range msgs[start:] {
+		for _, c := range m.ToolCalls {
+			names[c.ID] = c.Function.Name
+		}
+		if m.Role != "tool" {
+			continue
+		}
+		name := m.Name
+		if name == "" {
+			name = names[m.ToolCallID]
+		}
+		if name != "control_device" {
+			continue
+		}
+		var o map[string]any
+		if json.Unmarshal([]byte(m.Content), &o) == nil {
+			if s, ok := o["success"].(bool); ok && s {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // calledThisTurn reports whether an assistant message since the turn's user message called
@@ -120,6 +166,6 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 // isFollowThroughNag reports one of this file's nudges (scrubbed like the other nags).
 func isFollowThroughNag(m chatMsg) bool {
 	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
-		isNag(m, nagNotCancelled) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) || isNag(m, nagRecordingNotRun) ||
-		isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool)
+		isNag(m, nagNotCancelled) || isNag(m, nagDeviceNotDone) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) ||
+		isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool)
 }
