@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { type CSSProperties, useState } from 'react'
 import { ImageIcon } from 'lucide-react'
 import type { ChatAction } from '@/api/chat'
 import type { ChatMessage } from '@/lib/chatState'
 import { optionLabel } from '@/lib/chatState'
 import { cn } from '@/lib/utils'
-import { Button, Spinner, type ButtonVariant } from '@/components/ui'
+import { Button, type ButtonVariant } from '@/components/ui'
 import Markdown from './Markdown'
 
 interface Props {
@@ -44,7 +44,7 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
           <div
             className={cn(
               'rounded-bubble px-4 py-2.5 text-body',
-              user ? 'rounded-br-control bg-primary text-on-primary' : 'rounded-bl-control border border-border bg-surface text-text',
+              user ? 'rounded-br-control border border-primary/25 bg-primary-soft text-text' : 'rounded-bl-control border border-border bg-surface-alt text-text',
               m.error && 'border-danger/40 bg-danger-soft text-danger',
             )}
           >
@@ -59,8 +59,12 @@ export default function MessageBubble({ message: m, userName, onAnswer, onAction
                 {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
               </>
             ) : m.pending && !m.text ? (
-              <p className="flex items-center gap-2 text-text-muted" role="status">
-                <Spinner className="size-3.5" />
+              <p className="flex items-center gap-2.5 text-text-muted" role="status">
+                <span className="flex items-center gap-[3px]" aria-hidden="true">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <span key={i} className="chat-wave-bar" style={{ '--wave-i': i } as CSSProperties} />
+                  ))}
+                </span>
                 {m.status || 'Thinking…'}
               </p>
             ) : (
