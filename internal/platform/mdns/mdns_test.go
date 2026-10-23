@@ -279,12 +279,19 @@ func TestAdvertiseNoAddresses(t *testing.T) {
 // depends on the host (CI runners may drop multicast loopback), so they don't run by default.
 const multicastTestEnv = "JARVIS_TEST_MULTICAST"
 
-// Advertise, then browse exactly as mobile does (type jarvis-config/tcp, domain local.)
-// and check the port and TXT come through. Needs JARVIS_TEST_MULTICAST=1 (real network).
+// Advertise, then browse exactly as mobile does (type jarvis-config/tcp, or jarvis-setup/tcp
+// for a Pi in setup mode, domain local.) and check the port and TXT come through. Needs
+// JARVIS_TEST_MULTICAST=1 (real network).
 func TestAdvertiseBrowse(t *testing.T) {
 	if os.Getenv(multicastTestEnv) != "1" {
 		t.Skip("real-multicast round trip; set " + multicastTestEnv + "=1 to run")
 	}
+	for _, service := range []string{ServiceType, SetupServiceType} {
+		t.Run(service, func(t *testing.T) { advertiseBrowse(t, service) })
+	}
+}
+
+func advertiseBrowse(t *testing.T, service string) {
 	ifaces := multicastIfaces()
 	if len(ifaces) == 0 {
 		t.Fatal("no multicast-capable interface")
@@ -294,6 +301,7 @@ func TestAdvertiseBrowse(t *testing.T) {
 	defer cancel()
 
 	stop, err := Advertise(ctx, Options{
+		Service:    service,
 		Instance:   instance,
 		Port:       17700,
 		TXT:        map[string]string{"version": "test"},
@@ -313,7 +321,7 @@ func TestAdvertiseBrowse(t *testing.T) {
 	browsed := make(chan struct{})
 	go func() {
 		defer close(browsed)
-		browseErr = zeroconf.Browse(bctx, ServiceType, Domain, entries, zeroconf.SelectIfaces(ifaces))
+		browseErr = zeroconf.Browse(bctx, service, Domain, entries, zeroconf.SelectIfaces(ifaces))
 	}()
 	defer func() {
 		bcancel()
@@ -385,5 +393,19 @@ func TestAdvertiseStopImmediately(t *testing.T) {
 			t.Skipf("multicast unavailable: %v", err)
 		}
 		stop()
+	}
+}
+
+// A Pi in setup mode advertises another service type (#508): Service picks it.
+func TestAdvertiseServiceType(t *testing.T) {
+	regs := make(chan registration, 1)
+	srv := &fakeServer{shutdowns: make(chan struct{}, 1)}
+	stop, err := Advertise(t.Context(), hermetic(Options{Service: SetupServiceType, Port: 8080, HostName: "pi"}, regs, srv, "10.0.0.179/24"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if r := <-regs; r.service != "_jarvis-setup._tcp" || r.port != 8080 {
+		t.Fatalf("registered %+v, want _jarvis-setup._tcp on 8080", r)
 	}
 }

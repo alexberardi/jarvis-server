@@ -1668,6 +1668,10 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
       checks on :80; the unit grants `CAP_NET_BIND_SERVICE`), the HAT on the `setup` pattern, and
       becomes the node in the same process once provisioned. Unit-tested; pending on-device.
       [decision](../decisions/2026-10-19-pi-setup-mode-at-boot.md).
+      A Pi whose wlan0 is already on a network keeps it and serves the API on its LAN address
+      (#423), advertising it over mDNS as `_jarvis-setup._tcp` (instance = node id, TXT
+      `node_id`, `hardware`) until it is provisioned (#508), so the app finds it without the
+      hotspot. [decision](../decisions/2026-10-22-pi-setup-mdns.md).
    5. The sidecar with the built-in commands once the SDK backends (§5.2) land. **Built
       2026-10-18** (loop #168, [decision](../decisions/2026-10-18-pi-builtin-commands.md)): the Pi
       profile pip-installs jarvis-node-setup (pinned) into the packages venv at boot and the

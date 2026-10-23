@@ -1,5 +1,7 @@
 // Package mdns advertises jarvisd on the LAN as _jarvis-config._tcp (PLAN §3.1), so the
-// mobile app finds the server without a manual URL or a /24 sweep.
+// mobile app finds the server without a manual URL or a /24 sweep. A Pi agent in setup mode on
+// its Wi-Fi advertises its provisioning API as _jarvis-setup._tcp the same way (Options.Service;
+// docs/decisions/2026-10-22-pi-setup-mdns.md).
 //
 // What clients rely on (jarvis-node-mobile src/services/configDiscoveryService.ts): they
 // browse type "jarvis-config", protocol "tcp", domain "local.", take the resolved port and
@@ -27,6 +29,9 @@ import (
 const (
 	// ServiceType is the DNS-SD service type mobile browses for.
 	ServiceType = "_jarvis-config._tcp"
+	// SetupServiceType is what an unprovisioned Pi agent on a LAN advertises: its provisioning
+	// API, with TXT node_id and hardware.
+	SetupServiceType = "_jarvis-setup._tcp"
 	// Domain is the mDNS domain.
 	Domain = "local."
 	// DefaultPort is the config-service listener mobile probes.
@@ -35,6 +40,8 @@ const (
 
 // Options configures an advertisement.
 type Options struct {
+	// Service is the DNS-SD service type. Default ServiceType.
+	Service string
 	// Instance is the human-readable instance name. Default "Jarvis (<hostname>)".
 	Instance string
 	// Port is the advertised port. Default DefaultPort.
@@ -75,6 +82,9 @@ func Advertise(ctx context.Context, opts Options) (stop func(), err error) {
 	log = log.With("component", "mdns")
 	if opts.Instance == "" {
 		opts.Instance = DefaultInstance()
+	}
+	if opts.Service == "" {
+		opts.Service = ServiceType
 	}
 	if opts.Port == 0 {
 		opts.Port = DefaultPort
@@ -123,11 +133,11 @@ func Advertise(ctx context.Context, opts Options) (stop func(), err error) {
 	if register == nil {
 		register = registerProxy
 	}
-	srv, err := register(opts.Instance, ServiceType, Domain, opts.Port, host, ips, txt, ifaces)
+	srv, err := register(opts.Instance, opts.Service, Domain, opts.Port, host, ips, txt, ifaces)
 	if err != nil {
-		return nil, fmt.Errorf("mdns: register %s: %w", ServiceType, err)
+		return nil, fmt.Errorf("mdns: register %s: %w", opts.Service, err)
 	}
-	log.Info("mdns advertising", "instance", opts.Instance, "type", ServiceType, "port", opts.Port,
+	log.Info("mdns advertising", "instance", opts.Instance, "type", opts.Service, "port", opts.Port,
 		"host", host+"."+Domain, "interfaces", names, "addrs", ips)
 
 	done := make(chan struct{})
