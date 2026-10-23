@@ -1,11 +1,13 @@
 // Command fakespeech is a fake OpenAI-compatible speech provider for the harness: it answers
-// POST /v1/audio/transcriptions with canned text and records every request (model, fields,
-// the WAV's rate, whether the key matched; never the key), so tests can run jarvisd's remote
-// stt without a real provider (docs/llm/07-remote-speech.md §5). scripts/sandbox up --speech
-// fake starts one (port 7796 + offset) and points stt.remote_url at it; tests read
-// $SBX_FAKESPEECH/control/requests. API: server.go.
+// POST /v1/audio/transcriptions with canned text and POST /v1/audio/speech with a tone (24 kHz
+// s16le PCM or WAV), records every request (never the key) and can be told to fail, so jarvisd's
+// remote stt and tts run end to end without a paid provider (docs/llm/07-remote-speech.md §5).
+// scripts/sandbox up --speech fake starts one (port 7796 + offset) and points stt.remote_url at
+// it; tests read $SBX_FAKESPEECH/control/requests. API: server.go.
 //
 //	fakespeech [--listen ADDR] [--key KEY] [--log FILE]
+//
+// Point tts at it by hand: tts.provider=remote, tts.remote_url=http://ADDR/v1.
 package main
 
 import (

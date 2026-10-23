@@ -14,14 +14,21 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
-// The wizard's Voice step (AD3b): the Kokoro voices to choose from and a short sample of one,
-// rendered in process by the tts module. Superuser only, like every BFF route; the sample is
-// a few seconds of audio for the operator's own ears, never stored.
+// The wizard's Voice step (AD3b): the active provider's voices to choose from (Kokoro's, or a
+// remote provider's) and a short sample of one, rendered in process by the tts module.
+// Superuser only, like every BFF route; the sample is a few seconds of audio for the
+// operator's own ears, never stored.
 
 // Speech renders a voice sample as WAV (the tts module); ttsmod.ErrNotInstalled while no voice
 // model is installed.
 type Speech interface {
 	Sample(ctx context.Context, voice, text string) ([]byte, error)
+}
+
+// VoiceLister lists the active TTS provider's voices (the tts module): Kokoro's, or a remote
+// provider's. A Speech without it offers Kokoro's.
+type VoiceLister interface {
+	VoiceChoices(ctx context.Context) ttsmod.VoiceChoices
 }
 
 // SampleText is what the Voice step plays when no text is given.
@@ -36,18 +43,41 @@ const sampleTimeout = 60 * time.Second
 // voiceSetting is the tts module's voice setting the Voice step writes.
 const voiceSetting = "tts.kokoro_voice"
 
-// handleVoices is GET /api/tts/voices: the voice names, the one in use and the default.
+// handleVoices is GET /api/tts/voices: the active provider's voice names, the one in use, the
+// default, the setting a choice goes to, and free_text when the provider has no list.
 func (m *Module) handleVoices(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, m.voiceChoices(r.Context()))
+}
+
+func (m *Module) voiceChoices(ctx context.Context) ttsmod.VoiceChoices {
+	if l, ok := m.TTS.(VoiceLister); ok {
+		return l.VoiceChoices(ctx)
+	}
 	current := ttsmod.DefaultVoice
 	if src := m.settingsSource("tts"); src != nil {
-		if v := src.Settings().String(r.Context(), voiceSetting, settings.Scope{}); v != "" {
+		if v := src.Settings().String(ctx, voiceSetting, settings.Scope{}); v != "" {
 			current = v
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"voices": ttsmod.Voices(), "current": current, "default": ttsmod.DefaultVoice, "setting": "tts/" + voiceSetting,
-	})
+	return ttsmod.VoiceChoices{Provider: ttsmod.ProviderName, Voices: ttsmod.Voices(), Current: current,
+		Default: ttsmod.DefaultVoice, Setting: "tts/" + voiceSetting}
 }
+
+// sampleVoice is the provider's spelling of the voice asked for; ok=false when it has no such
+// voice. Free text takes any name.
+func sampleVoice(c ttsmod.VoiceChoices, asked string) (string, bool) {
+	asked = strings.TrimSpace(asked)
+	if asked == "" {
+		return "", false
+	}
+	if i := slices.IndexFunc(c.Voices, func(v string) bool { return strings.EqualFold(v, asked) }); i >= 0 {
+		return c.Voices[i], true
+	}
+	return asked, c.FreeText && len(asked) <= maxVoiceChars
+}
+
+// maxVoiceChars caps a free-text voice name.
+const maxVoiceChars = 100
 
 // handleVoiceSample is POST /api/tts/sample with {"voice": name, "text"?: string}: a WAV of
 // the voice saying text (SampleText when empty). 409 while no voice model is installed.
@@ -63,8 +93,8 @@ func (m *Module) handleVoiceSample(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	voice := strings.ToLower(strings.TrimSpace(body.Voice))
-	if !slices.Contains(ttsmod.Voices(), voice) {
+	voice, known := sampleVoice(m.voiceChoices(r.Context()), body.Voice)
+	if !known {
 		httpx.ValidationError(w, httpx.FieldError{Type: "value_error", Loc: []any{"body", "voice"},
 			Msg: "Unknown voice", Input: body.Voice})
 		return

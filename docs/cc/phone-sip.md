@@ -229,7 +229,7 @@ scripts/sandbox down --name N --purge           # removes the lane's containers 
 ```sh
 scripts/freepbx-lane build --dev-box <dev-box>   # once: Debian 12 VM, FreePBX 17, snapshots installed + provisioned
 scripts/freepbx-lane weekly [--no-update]        # update, provision 100 afresh, diff against L1; exit 1 on drift
-scripts/freepbx-lane timer                       # the weekly systemd user units, and how to enable them
+scripts/freepbx-lane timer                       # the weekly systemd user units, and how to enable them (not enabled; see below)
 go run ./tools/siplane drift FILE                # the diff alone, on a saved `pjsip show endpoint/aor 100`
 ```
 
@@ -238,8 +238,10 @@ go run ./tools/siplane drift FILE                # the diff alone, on a saved `p
   (bulkimport CSVs, `routes.sql`, `provision.sh`) and the timer's units.
 - Drift: every setting pjsip.conf spells out for 100, plus everything else L1's Asterisk shows
   (`tools/siplane/testdata/l1-show-100.txt`), against the real FreePBX.
-- Not yet: one call each way and the firewall lockout path (after the SIP provider, step 2).
-  The VM path waits for the user to install qemu, build the VM and enable the timer.
+- Not yet: one call each way and the firewall lockout path (loop item #490).
+- Built and first run 2026-10-22 (FreePBX 17.0.33.2, Asterisk 22.11.0; 9 settings drifted, #489).
+  **Run by hand on Thursdays**, not by the timer
+  ([../decisions/2026-10-22-freepbx-lane-run-by-hand.md](../decisions/2026-10-22-freepbx-lane-run-by-hand.md)).
 
 No real PSTN call is needed in CI. If one is ever wanted, the existing Twilio account could front
 the L1 Asterisk with Twilio Elastic SIP Trunking, but nothing in this plan depends on it.
@@ -272,6 +274,6 @@ Choices: [../decisions/2026-10-22-sip-support-tools.md](../decisions/2026-10-22-
 ## 7. Answered (user, 2026-10-21)
 
 - **Barge-in ships before inbound** (part of step 3).
-- **L2 runs weekly on the dev box** (a FreePBX VM).
+- **L2 runs weekly on the dev box** (a FreePBX VM), by hand on Thursdays (user, 2026-10-22).
 - **Inbound messages**: a notification with caller, reason and summary, as outbound outcome cards
   do today; the recording is kept the same way (`audio_available`). No inbox transcript for now.
