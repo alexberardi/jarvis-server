@@ -164,15 +164,20 @@ type verboseJSON struct {
 	Error string `json:"error"`
 }
 
-// infer posts the clip to whisper-server's /inference with the legacy decode parameters.
+// infer transcribes the clip on the "stt" label's engine: a remote provider, or
+// whisper-server's /inference with the legacy decode parameters.
 func (m *Module) infer(ctx context.Context, samples []float32, p inferenceParams) (string, []Segment, error) {
 	if m.Engine == nil {
 		return "", nil, fmt.Errorf("%w: no engine resolver", ErrEngineUnavailable)
 	}
-	base, err := m.Engine.Resolve(ctx, "stt")
+	ep, err := m.Engine.Resolve(ctx, "stt")
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: %v", ErrEngineUnavailable, err)
 	}
+	if ep.Remote {
+		return m.inferOpenAI(ctx, ep, samples, p)
+	}
+	base := ep.BaseURL
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	fw, _ := mw.CreateFormFile("file", "audio.wav")

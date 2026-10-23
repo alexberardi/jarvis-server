@@ -3,8 +3,11 @@ package selfupdate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/update"
 )
 
 type checkerRig struct {
@@ -168,4 +171,46 @@ func TestCheckerRun(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// A server running an unpublished build (a release dry run) has no release to follow: the agent
+// stays on its version without a word in the island, and waits a day before looking again.
+func TestCheckerIgnoresAnUnpublishedServerVersion(t *testing.T) {
+	r := newRig("v0.1.0-rc18")
+	r.startErr = fmt.Errorf("release v0.1.0-rc18.3: %w", update.ErrNoRelease)
+	r.beat("v0.1.0-rc18.3", nil)
+	if len(r.starts) != 1 {
+		t.Fatalf("%+v", r.starts)
+	}
+	if len(r.status) != 0 {
+		t.Fatalf("status shown for an unpublished server version: %q", r.status)
+	}
+	if r.c.Current != "v0.1.0-rc18" {
+		t.Fatal(r.c.Current)
+	}
+	r.now = r.now.Add(time.Hour)
+	r.beat("v0.1.0-rc18.3", nil)
+	if len(r.starts) != 1 {
+		t.Fatalf("retried within a day: %+v", r.starts)
+	}
+	// Once it is published, the daily look finds it.
+	r.startErr = nil
+	r.now = r.now.Add(CheckEvery)
+	r.c.Step(context.Background())
+	if len(r.starts) != 2 {
+		t.Fatalf("no daily retry: %+v", r.starts)
+	}
+}
+
+// Asked by jarvisd for a version with no release, the agent still answers the task.
+func TestCheckerReportsAnUnpublishedRequestedVersion(t *testing.T) {
+	r := newRig("v0.1.0-rc18")
+	r.startErr = fmt.Errorf("release v0.1.0-rc18.3: %w", update.ErrNoRelease)
+	r.beat("v0.1.0-rc18.3", &Pending{TaskID: "t1"})
+	if len(r.reports) != 1 || r.reports[0] != "t1: release v0.1.0-rc18.3: "+update.ErrNoRelease.Error() {
+		t.Fatalf("%q", r.reports)
+	}
+	if len(r.status) != 1 || r.status[0] != "Update to v0.1.0-rc18.3 failed; still on v0.1.0-rc18" {
+		t.Fatalf("%q", r.status)
+	}
 }

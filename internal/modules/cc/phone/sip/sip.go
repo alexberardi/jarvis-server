@@ -42,9 +42,10 @@ type Config struct {
 	Extension string
 	Password  string
 	// LocalPort is jarvisd's own SIP port. It stays the same across restarts, so the Contact
-	// does too: FreePBX's max_contacts=1 with remove_existing=no refuses a second Contact
-	// until the first expires, and each refusal feeds its firewall. Default 5062, not 5060, in
-	// case the PBX runs on the same host.
+	// does too: FreePBX 17 defaults to Remove Existing = yes (a new Contact replaces the
+	// old), but an older install or an admin's max_contacts=1 with remove_existing=no refuses
+	// a second Contact until the first expires, and each refusal feeds its firewall. Default
+	// 5062, not 5060, in case the PBX runs on the same host.
 	LocalPort int
 	// BindHost is the local address to bind; "" is the address the route to Server uses.
 	BindHost string

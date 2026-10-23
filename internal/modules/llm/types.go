@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
-// Labels (LD1): the two chat labels, and the embeddings engine.
+// Labels (LD1): the two chat labels, and the embeddings engine. cloud is the optional remote
+// chat label only callers inside jarvisd reach, by naming it (decisions/2026-10-22-cloud-model-slot.md).
 const (
 	LabelLive       = "live"
 	LabelBackground = "background"
 	LabelEmbeddings = "embeddings"
+	LabelCloud      = "cloud"
 )
 
 // Priorities: a live call never waits; a background one waits for live calls on its engine.
@@ -44,6 +47,8 @@ type Endpoint struct {
 	// NoReasoningBudget: the engine refuses reasoning_budget (transformers serve answers 422);
 	// thinking goes by chat_template_kwargs alone.
 	NoReasoningBudget bool
+	// Timeout bounds one request to a remote endpoint (remote_timeout_ms, stt); 0 = none.
+	Timeout time.Duration
 }
 
 // Endpoint dialects (engine.APIOpenAI, engine.APIAnthropic).

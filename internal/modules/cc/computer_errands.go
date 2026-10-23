@@ -76,15 +76,9 @@ func computerDefinitions() []settings.Definition {
 			Description: "Most rounds (look, decide, act) one computer task may take before it gives up."},
 		{Key: computer.SettingMaxMinutes, Category: "computer", Type: settings.Int, Default: int64(20), Validate: positive,
 			Description: "Most minutes one computer task may run before it gives up."},
-		{Key: computer.SettingModel, Category: "computer", Type: settings.String, Default: computer.ModelAuto,
-			Description: "Which model drives computer tasks: auto (the largest vision model), live or background.",
-			Validate: func(v any) error {
-				switch v {
-				case computer.ModelAuto, computer.ModelLive, computer.ModelBackground:
-					return nil
-				}
-				return errors.New("must be auto, live or background")
-			}},
+		llm.SlotSetting(computer.SettingModel, "computer",
+			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+
+				"(the optional cloud slot: page contents and screenshots go to its provider)."),
 		{Key: computer.SettingAutoApproveCents, Category: "computer", Type: settings.Int, Default: int64(0),
 			Description: "Spend limit in cents: a computer task's checkout at most this much is approved without " +
 				"asking (the progress card says so). 0 = always ask.",

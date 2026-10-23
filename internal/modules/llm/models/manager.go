@@ -455,8 +455,12 @@ func (m *Manager) flavourFor(ctx context.Context, kind engine.Kind, req InstallR
 // is already installing returns that install (existing = true).
 func (m *Manager) Install(ctx context.Context, req InstallRequest) (inst Install, existing bool, err error) {
 	for _, l := range req.Assign {
-		if _, ok := lookupLabel(l); !ok {
+		d, ok := lookupLabel(l)
+		if !ok {
 			return Install{}, false, badRequest("unknown label %q", l)
+		}
+		if d.RemoteOnly {
+			return Install{}, false, badRequest("label %s runs a remote endpoint only; it takes no installed model", l)
 		}
 	}
 	mod, proj, err := m.plan(ctx, req)
@@ -1136,6 +1140,9 @@ func (m *Manager) Assign(ctx context.Context, label, modelID string) error {
 	if !ok {
 		return badRequest("unknown label %q", label)
 	}
+	if d.RemoteOnly {
+		return badRequest("label %s runs a remote endpoint only; it takes no installed model", label)
+	}
 	mod, err := m.Store.Get(ctx, modelID)
 	if err != nil {
 		return badRequest("model %s is not installed", modelID)
@@ -1399,6 +1406,9 @@ func (m *Manager) labelFlavours(ctx context.Context, hw engine.Hardware) map[str
 	}
 	out := map[string]engine.Flavour{}
 	for _, d := range engine.LabelDefs {
+		if d.RemoteOnly {
+			continue
+		}
 		f, err := engine.ParseFlavour(m.Settings.String(ctx, d.Prefix+".gpu_backend", settings.Scope{}))
 		switch {
 		case m.Settings.Int(ctx, d.Prefix+".gpu_layers", settings.Scope{}) == 0:
@@ -1595,7 +1605,7 @@ func (m *Manager) fitFor(ctx context.Context, hw engine.Hardware, kind string, w
 	var labels []string
 	on := engine.Flavour("")
 	for _, d := range engine.LabelDefs {
-		if d.ModelKind != kind {
+		if d.ModelKind != kind || d.RemoteOnly {
 			continue
 		}
 		labels = append(labels, d.Name)

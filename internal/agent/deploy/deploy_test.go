@@ -286,6 +286,14 @@ func TestMacBundleInfoPlist(t *testing.T) {
 			t.Errorf("%s = %q", k, p[k])
 		}
 	}
+	// macOS's Local Network privacy silently blocks the agent from a server on the LAN without
+	// these (#480); the Bonjour type is the one the setup page browses for.
+	if !strings.HasPrefix(p["NSLocalNetworkUsageDescription"], "string:Jarvis Automation Agent ") {
+		t.Errorf("NSLocalNetworkUsageDescription = %q", p["NSLocalNetworkUsageDescription"])
+	}
+	if p["NSBonjourServices"] != "array:<string>_jarvis-config._tcp</string>" {
+		t.Errorf("NSBonjourServices = %q", p["NSBonjourServices"])
+	}
 	if p["CFBundleIconFile"] != "string:AppIcon" {
 		t.Errorf("CFBundleIconFile = %q", p["CFBundleIconFile"])
 	}

@@ -27,7 +27,8 @@ const MODES: Record<EngineLabel, string[]> = {
   live: ['local', 'remote', 'off'],
   background: ['local', 'shared', 'remote', 'off'],
   embeddings: ['local', 'remote', 'off'],
-  stt: ['local', 'off'],
+  stt: ['local', 'remote', 'off'],
+  cloud: ['remote', 'off'],
 }
 
 const MODE_TITLE: Record<string, string> = {
@@ -49,6 +50,7 @@ const BUILD_KIND: Record<EngineLabel, string> = {
   background: 'llama-server',
   embeddings: 'llama-server',
   stt: 'whisper-server',
+  cloud: 'llama-server',
 }
 
 function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: string; children: ReactNode }) {
@@ -198,6 +200,7 @@ function EngineLabelCard({
   const [draft, setDraft] = useState<LabelUpdate>({})
   const [advanced, setAdvanced] = useState(false)
   const isLLM = cfg.model_kind === 'llm'
+  const isSTT = cfg.model_kind === 'stt'
   const kindModels = models.filter((m) => m.kind === LABEL_KIND[label])
   const projectors = models.filter((m) => m.kind === 'mmproj')
   // A Python engine (a Hugging Face model folder) takes no projector: the label is text-only.
@@ -268,6 +271,12 @@ function EngineLabelCard({
         <p className="text-small text-warning">{cfg.problem || status.reason}</p>
       )}
       {cfg.note && <p className="text-small text-text-muted">{cfg.note}</p>}
+      {label === 'cloud' && (
+        <p className="text-small text-text-muted">
+          A provider's model, next to the ones on this machine. Nothing uses it until you pick it for a feature under
+          Feature models; leave the URL empty to keep everything on your network.
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Runs" htmlFor={id('engine')}>
@@ -290,8 +299,11 @@ function EngineLabelCard({
       {mode === 'remote' && (
         <div className="space-y-3">
           <Banner tone="warning" icon={<Globe size={16} />}>
-            Requests for this label leave this machine: prompts, conversation text
-            {isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.
+            {label === 'cloud'
+              ? 'Requests from the features you set to cloud leave this machine: their prompts and any images go to the endpoint below. Use it only with a provider you trust.'
+              : isSTT
+                ? 'The audio of every voice turn leaves this machine (twice when it starts with the wake word): it goes to the endpoint below to be transcribed, and each turn waits for it. Speaker recognition stays on this machine. Use it only with a provider you trust.'
+                : `Requests for this label leave this machine: prompts, conversation text${isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.`}
           </Banner>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Base URL" htmlFor={id('remote_url')}>
@@ -299,7 +311,7 @@ function EngineLabelCard({
                 id={id('remote_url')}
                 value={v('remote_url')}
                 onChange={(e) => set({ remote_url: e.target.value })}
-                placeholder="https://api.example.com/v1"
+                placeholder={isSTT ? 'https://api.openai.com/v1' : 'https://api.example.com/v1'}
                 className={inputClass}
               />
             </Field>
@@ -321,7 +333,11 @@ function EngineLabelCard({
                 </select>
               </Field>
             )}
-            <Field label="Model name" htmlFor={id('remote_model')}>
+            <Field
+              label="Model name"
+              htmlFor={id('remote_model')}
+              hint={isSTT ? 'e.g. gpt-transcribe (OpenAI) or whisper-large-v3-turbo (Groq, at https://api.groq.com/openai/v1)' : undefined}
+            >
               <input
                 id={id('remote_model')}
                 value={v('remote_model')}
@@ -344,6 +360,19 @@ function EngineLabelCard({
                 <input type="checkbox" checked={v('remote_vision')} onChange={(e) => set({ remote_vision: e.target.checked })} />
                 The remote model accepts images
               </label>
+            )}
+            {isSTT && (
+              <Field label="Timeout (ms)" htmlFor={id('remote_timeout_ms')} hint="How long a voice turn waits for the transcript">
+                <input
+                  id={id('remote_timeout_ms')}
+                  type="number"
+                  min={0}
+                  step={1000}
+                  value={v('remote_timeout_ms') ?? 0}
+                  onChange={(e) => set({ remote_timeout_ms: num(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
             )}
             {isLLM && foldField()}
             {isLLM && (

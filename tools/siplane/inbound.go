@@ -46,7 +46,34 @@ func (l *lane) disclosurePCM(ctx context.Context) (string, []int16, error) {
 // jarvisInbound: the carrier calls the Jarvis DID; jarvisd answers after the answer delay,
 // says the disclosure, and records the caller's message until the caller hangs up.
 func jarvisInbound(ctx context.Context, l *lane, r *report) error {
-	const message = "Hi, this is Sam from the bike shop. Your repair is ready, please call me back tomorrow."
+	return jarvisInboundCall(ctx, l, r, "jarvis-inbound", "5551230000",
+		"Hi, this is Sam from the bike shop. Your repair is ready, please call me back tomorrow.",
+		func(in sip.Incoming) string {
+			if in.Number == "" || in.Source != "pai" {
+				return "want the caller's number from P-Asserted-Identity (send_pai=yes)"
+			}
+			return ""
+		})
+}
+
+// jarvisInboundWithheld: the same call from a caller who withheld their number (the withheld
+// DID sets CALLERID(pres)=prohib, as a carrier's Privacy: id does). FreePBX 17's
+// trust_id_outbound=no sends it to 100 with no PAI and an anonymous From: jarvisd records no
+// caller ID and still answers and hears the message.
+func jarvisInboundWithheld(ctx context.Context, l *lane, r *report) error {
+	return jarvisInboundCall(ctx, l, r, "jarvis-inbound-withheld", "5551230009",
+		"Hello, I am calling about the car you have for sale. Please call me back.",
+		func(in sip.Incoming) string {
+			if in.Number != "" || in.Name != "" || in.Source != "withheld" {
+				return "want a withheld caller: no number or name, source withheld"
+			}
+			return ""
+		})
+}
+
+// jarvisInboundCall is one inbound call to did, answered by jarvisd, the caller saying message;
+// badCaller says what is wrong with the caller ID jarvisd was offered, "" when nothing is.
+func jarvisInboundCall(ctx context.Context, l *lane, r *report, scenario, did, message string, badCaller func(sip.Incoming) string) error {
 	const delay = 2 * time.Second
 	const lead, total = 11.0, 19.0
 	c := l.party("carrier")
@@ -86,7 +113,7 @@ func jarvisInbound(ctx context.Context, l *lane, r *report) error {
 		return err
 	}
 	defer done()
-	if err := cs["carrier"].Command(ctx, "dial", l.uri("5551230000")); err != nil {
+	if err := cs["carrier"].Command(ctx, "dial", l.uri(did)); err != nil {
 		return err
 	}
 	var o offer
@@ -97,8 +124,8 @@ func jarvisInbound(ctx context.Context, l *lane, r *report) error {
 		return nil
 	}
 	r.notef("jarvisd was offered the call: caller %q (%q) from %s", o.in.Number, o.in.Name, o.in.Source)
-	if o.in.Number == "" || o.in.Source != "pai" {
-		r.failf("caller %+v: want the caller's number from P-Asserted-Identity (send_pai=yes)", o.in)
+	if bad := badCaller(o.in); bad != "" {
+		r.failf("caller %+v: %s", o.in, bad)
 	}
 	var call *sip.Call
 	select {
@@ -149,7 +176,7 @@ record:
 	waitClosed(ctx, r, 10*time.Second, cs, "carrier")
 	wav := live.WAV(live.Resample(heard, 8000, 16000), 16000)
 	if l.out != "" {
-		os.WriteFile(filepath.Join(l.out, "jarvis-inbound-jarvisd.wav"), wav, 0o644)
+		os.WriteFile(filepath.Join(l.out, scenario+"-jarvisd.wav"), wav, 0o644)
 	}
 	text, err := l.voice.Transcribe(ctx, wav)
 	if err != nil {
@@ -157,11 +184,11 @@ record:
 	}
 	w, _ := bestWER([]string{message}, text)
 	r.notef("jarvisd heard: %q (WER %.2f against %q)", text, w, message)
-	l.keep("jarvis-inbound-jarvisd.txt", text+"\n")
+	l.keep(scenario+"-jarvisd.txt", text+"\n")
 	if w > maxWER {
 		r.failf("jarvisd heard %q, WER %.2f > %.2f", text, w, maxWER)
 	}
-	return l.expectHeard(ctx, r, "jarvis-inbound", c, disclosure)
+	return l.expectHeard(ctx, r, scenario, c, disclosure)
 }
 
 // jarvisInboundRingGroup: the ring-group DID rings 101 and jarvisd's 100; jarvisd's answer

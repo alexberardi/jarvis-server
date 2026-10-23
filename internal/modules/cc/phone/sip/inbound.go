@@ -22,7 +22,8 @@ type Incoming struct {
 	// sendrpid=pai), else From. A hint for the message, never authentication: a caller (or a
 	// trunk) can put anything there. Both are trimmed to printable text.
 	Number, Name string
-	// Source is the header they came from: "pai" or "from".
+	// Source is the header they came from: "pai" or "from", or "withheld" (both empty) when
+	// the caller withheld their number: an anonymous From or Privacy: id (RFC 3323).
 	Source string
 }
 
@@ -165,11 +166,17 @@ func (u *UA) refuse(d *diago.DialogServerSession, code int, seen func(int)) {
 	}
 }
 
-// incoming reads an INVITE's caller: P-Asserted-Identity first, then From.
+// incoming reads an INVITE's caller: P-Asserted-Identity first, then From. A withheld number
+// is neither: FreePBX 17 (trust_id_outbound=no) sends a private caller with no PAI and From
+// "Anonymous" <sip:anonymous@anonymous.invalid>, which is not a caller ID.
 func incoming(req *sip.Request) Incoming {
 	in := Incoming{}
 	if id := req.CallID(); id != nil {
 		in.CallID = id.Value()
+	}
+	if withheld(req) {
+		in.Source = "withheld"
+		return in
 	}
 	for _, h := range req.GetHeaders("P-Asserted-Identity") {
 		for _, v := range splitAddresses(h.Value()) {
@@ -183,6 +190,19 @@ func incoming(req *sip.Request) Incoming {
 		in.Number, in.Name, in.Source = clean(f.Address.User), clean(f.DisplayName), "from"
 	}
 	return in
+}
+
+// withheld is a caller who asked for privacy: Privacy: id, or an anonymous From.
+func withheld(req *sip.Request) bool {
+	for _, h := range req.GetHeaders("Privacy") {
+		for _, p := range strings.Split(h.Value(), ";") {
+			if strings.EqualFold(strings.TrimSpace(p), "id") {
+				return true
+			}
+		}
+	}
+	f := req.From()
+	return f != nil && (strings.EqualFold(f.Address.User, "anonymous") || strings.EqualFold(f.Address.Host, "anonymous.invalid"))
 }
 
 // parseIdentity reads one name-addr: `"Name" <sip:+12125550100@host>` or `<tel:+12125550100>`.

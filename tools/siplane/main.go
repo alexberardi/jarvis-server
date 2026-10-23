@@ -5,6 +5,9 @@
 //	scripts/sandbox up --name N --voice --sip     (TTS, whisper and the lane)
 //	go run ./tools/siplane [--sandbox N] [--filter RE] [--out DIR] [--list]
 //	go run ./tools/siplane drift FREEPBX.txt      (the L2 lane's check, drift.go)
+//	go run ./tools/siplane l2 [--sandbox N] [--sip ADDR] [--ssh ADDR] [--filter RE] [--out DIR] [--list]
+//	                                              (calls and the lockout path through the L2 lane's
+//	                                              FreePBX VM, l2.go; scripts/freepbx-lane calls)
 //
 // Exits 1 when a scenario fails, 2 when the lane or sandbox is missing. --out keeps every
 // far end's recording (<scenario>-<party>.wav), its transcript, the PBX's endpoint and
@@ -52,16 +55,29 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "drift" {
 		return runDrift(args[1:], stdout)
 	}
+	l2 := len(args) > 0 && args[0] == "l2"
+	if l2 {
+		args = args[1:]
+	}
 	fs := flag.NewFlagSet("siplane", flag.ContinueOnError)
 	name := fs.String("sandbox", os.Getenv("JARVIS_SANDBOX"), "the sandbox (up with --voice --sip); default $JARVIS_SANDBOX, else default")
 	filter := fs.String("filter", "", "run only the scenarios whose name matches this regexp")
 	out := fs.String("out", "", "keep recordings, transcripts and results.md here")
 	list := fs.Bool("list", false, "list the scenarios and exit")
+	var vm l2VM
+	if l2 {
+		fs.StringVar(&vm.sip, "sip", "127.0.0.1:"+envOr("FREEPBX_SIP_PORT", "5260"), "l2: the FreePBX VM's SIP, forwarded on loopback")
+		fs.StringVar(&vm.ssh, "ssh", "127.0.0.1:"+envOr("FREEPBX_SSH_PORT", "2247"), "l2: the FreePBX VM's SSH, forwarded on loopback")
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	all, title := scenarios, "SIP lane (L1)"
+	if l2 {
+		all, title = l2Scenarios, "SIP lane L2 (FreePBX VM at "+vm.sip+")"
+	}
 	if *list {
-		for _, s := range scenarios {
+		for _, s := range all {
 			fmt.Fprintf(stdout, "%-22s %s\n", s.Name, s.What)
 		}
 		return nil
@@ -81,6 +97,11 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if l2 {
+		if err := l.useL2(vm); err != nil {
+			return err
+		}
+	}
 	if *out != "" {
 		if err := os.MkdirAll(*out, 0o755); err != nil {
 			return err
@@ -88,10 +109,10 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		l.out = *out
 	}
 	var md strings.Builder
-	fmt.Fprintf(&md, "# SIP lane (L1), sandbox %s, %s\n\n| scenario | result | time | what |\n|---|---|---|---|\n", *name, time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&md, "# %s, sandbox %s, %s\n\n| scenario | result | time | what |\n|---|---|---|---|\n", title, *name, time.Now().Format(time.RFC3339))
 	var details strings.Builder
 	ran, failed := 0, 0
-	for _, s := range scenarios {
+	for _, s := range all {
 		if !re.MatchString(s.Name) {
 			continue
 		}
@@ -159,6 +180,13 @@ func openLane(root, name string) (*lane, error) {
 	}
 	return &lane{env: env, root: root,
 		voice: &voice{cc: sbx["SBX_CC"], id: sbx["SBX_NODE_ID"], key: sbx["SBX_NODE_KEY"], http: &http.Client{Timeout: 3 * time.Minute}}}, nil
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
 
 // repoRoot walks up from the working directory to the module root.

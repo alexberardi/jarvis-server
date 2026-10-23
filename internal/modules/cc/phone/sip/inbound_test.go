@@ -157,6 +157,41 @@ func TestInboundCallerIsPAIThenFrom(t *testing.T) {
 	}
 }
 
+// A caller who withholds their number: FreePBX 17 (trust_id_outbound=no) sends no PAI and an
+// anonymous From (RFC 3323), so there is no number and no name to record, not "anonymous".
+func TestIncomingWithheldCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name, from string
+		headers    []sip.Header
+		want       Incoming
+	}{
+		{"anonymous From, no PAI", `"Anonymous" <sip:anonymous@anonymous.invalid>;tag=1`, nil,
+			Incoming{Source: "withheld"}},
+		{"anonymous user on the PBX's host", `<sip:anonymous@127.0.0.1>;tag=1`, nil,
+			Incoming{Source: "withheld"}},
+		{"Privacy: id", `"Bob" <sip:2125550142@127.0.0.1>;tag=1`, []sip.Header{sip.NewHeader("Privacy", "id")},
+			Incoming{Source: "withheld"}},
+		{"PAI with Privacy: id (a trusting PBX)", `"Anonymous" <sip:anonymous@anonymous.invalid>;tag=1`,
+			[]sip.Header{sip.NewHeader("P-Asserted-Identity", `"Bob" <sip:+12125550142@127.0.0.1>`), sip.NewHeader("Privacy", "id;critical")},
+			Incoming{Source: "withheld"}},
+		{"Privacy: none", `"Bob" <sip:2125550142@127.0.0.1>;tag=1`, []sip.Header{sip.NewHeader("Privacy", "none")},
+			Incoming{Number: "2125550142", Name: "Bob", Source: "from"}},
+		{"a caller named Anonymous with a number", `"Anonymous" <sip:2125550142@127.0.0.1>;tag=1`, nil,
+			Incoming{Number: "2125550142", Name: "Anonymous", Source: "from"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := sip.NewRequest(sip.INVITE, sip.Uri{Scheme: "sip", User: "100", Host: "127.0.0.1"})
+			req.AppendHeader(sip.NewHeader("From", tc.from))
+			for _, h := range tc.headers {
+				req.AppendHeader(h)
+			}
+			if got := incoming(req); got != tc.want {
+				t.Fatalf("incoming = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseIdentity(t *testing.T) {
 	for _, tc := range []struct{ in, num, name string }{
 		{`<tel:+12125550100>`, "+12125550100", ""},
@@ -284,12 +319,12 @@ func TestOurHangupOfAnInboundCallSendsBye(t *testing.T) {
 func TestAScannerCannotReachTheInboundHandler(t *testing.T) {
 	called := make(chan struct{}, 1)
 	_, u := inboundUA(t, func(Incoming) Admission { called <- struct{}{}; return Admission{Refuse: 480} })
-	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname("127.0.0.66"))
+	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname(otherLoopback(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ua.Close()
-	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr("127.0.0.66:0"))
+	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr(otherLoopback(t)+":0"))
 	if err != nil {
 		t.Fatal(err)
 	}

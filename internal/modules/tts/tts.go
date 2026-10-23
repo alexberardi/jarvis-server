@@ -10,7 +10,8 @@
 //     X-Audio-Sample-Rate/Channels/Sample-Width/Provider.
 //
 // App-to-app auth on /audio/format and both /speak routes. Cut: /generate-wake-response (CC
-// owns it) and Piper; tts.provider is kept for the settings API but only "kokoro" exists.
+// owns it) and Piper. tts.provider is kokoro (in the binary) or remote (remote.go: an
+// OpenAI-compatible service, delivered in Kokoro's format).
 //
 // In process, command-center calls Speak, which returns the same per-sentence PCM stream.
 //
@@ -63,7 +64,20 @@ const ServiceName = "jarvis-tts"
 // per request, so no reload is needed. The model itself is the llm module's tts.model.
 var Definitions = []settings.Definition{
 	{Key: "tts.provider", Category: "tts", Type: settings.String, Default: ProviderName,
-		Description: "Active TTS provider backend (only kokoro: Piper is cut)", Options: []any{ProviderName}},
+		Description: "Active TTS provider: kokoro (local, default) or remote (an OpenAI-compatible service at tts.remote_url; each sentence's text is sent there). Piper is cut.",
+		Options:     []any{ProviderName, RemoteProvider}},
+	{Key: "tts.remote_url", Category: "tts", Type: settings.String, Default: "",
+		Description: "Remote TTS base URL, up to and including the version (e.g. https://api.openai.com/v1); speech is requested at {url}/audio/speech"},
+	{Key: "tts.remote_api", Category: "tts", Type: settings.String, Default: "openai",
+		Description: "Remote TTS API dialect (openai: POST /audio/speech)", Options: []any{"openai"}},
+	{Key: "tts.remote_model", Category: "tts", Type: settings.String, Default: "",
+		Description: "Remote TTS model (e.g. gpt-4o-mini-tts)"},
+	{Key: "tts.remote_api_key", Category: "tts", Type: settings.String, Default: "", IsSecret: true,
+		Description: "Remote TTS API key, sent as a bearer token (empty: none)"},
+	{Key: "tts.remote_voice", Category: "tts", Type: settings.String, Default: "",
+		Description: "Remote TTS voice, used for everything including phone calls (e.g. marin for OpenAI)"},
+	{Key: "tts.remote_timeout_ms", Category: "tts", Type: settings.Int, Default: 8000,
+		Description: "How long to wait for the remote TTS to answer a sentence, or to send more of it, before giving up (ms)"},
 	{Key: "tts.kokoro_voice", Category: "tts", Type: settings.String, Default: DefaultVoice,
 		Description: "Kokoro voice ID (e.g., bm_george, bm_fable, af_heart)"},
 	{Key: "tts.kokoro_speed", Category: "tts", Type: settings.Float, Default: 1.25,
@@ -108,6 +122,9 @@ type Module struct {
 	MaxConcurrent int
 	// NoWarm skips loading the engine in the background at Start.
 	NoWarm bool
+	// HTTPClient calls a remote provider (default http.DefaultClient; per-request timeouts
+	// come from tts.remote_timeout_ms).
+	HTTPClient *http.Client
 
 	// newSynth replaces the sherpa loader (tests).
 	newSynth func(engineKey) (synth, error)
@@ -204,6 +221,9 @@ func (m *Module) Start(ctx context.Context) error {
 // warm loads the engine for the configured voice if a model is installed. Failure is only
 // logged: the first request retries.
 func (m *Module) warm(ctx context.Context) {
+	if m.provider(ctx) == RemoteProvider {
+		return
+	}
 	dir, ok := m.modelDir(ctx)
 	if !ok {
 		m.log().Info("tts: no Kokoro model installed yet; /speak answers 503 until one is")

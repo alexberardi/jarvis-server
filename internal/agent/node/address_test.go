@@ -118,6 +118,38 @@ func TestResolveConfigURLSaysWhatIsWrongInPlainWords(t *testing.T) {
 	}
 }
 
+// macOS's Local Network privacy blocks the agent from the LAN silently (#480): on a Mac, no
+// answer from an address on the network names the setting; not for this computer, nor elsewhere.
+func TestNoAnswerOnAMacNamesTheLocalNetworkSetting(t *testing.T) {
+	const setting = "System Settings → Privacy & Security → Local Network"
+	for _, c := range []struct {
+		goos, host string
+		hint       bool
+	}{
+		{"darwin", "10.0.0.122:7700", true},
+		{"darwin", "jarvis.local:7700", true},
+		{"darwin", "[fd00::1]:7700", true},
+		{"darwin", "127.0.0.1:7700", false},
+		{"darwin", "localhost:7700", false},
+		{"darwin", "[::1]:7700", false},
+		{"linux", "10.0.0.122:7700", false},
+		{"windows", "10.0.0.122:7700", false},
+	} {
+		err := WithLocalNetworkHint(c.goos, &NoAnswerError{Host: c.host})
+		if got := strings.Contains(err.Error(), setting); got != c.hint {
+			t.Errorf("%s %s: %q", c.goos, c.host, err)
+		}
+		if !strings.Contains(err.Error(), "No Jarvis Automation server answered at "+c.host) {
+			t.Errorf("%s %s: %q", c.goos, c.host, err)
+		}
+	}
+	// Something answered, but not Jarvis: not a privacy block.
+	nj := &NotJarvisError{Host: "10.0.0.122:7700"}
+	if err := WithLocalNetworkHint("darwin", nj); err != nj || strings.Contains(err.Error(), "Local Network") {
+		t.Fatalf("not jarvis: %v", err)
+	}
+}
+
 func TestDiscoverOnAWebPageSaysItIsNotJarvis(t *testing.T) {
 	_, web := fakeServer(t)
 	_, err := Discover(context.Background(), http.DefaultClient, web.URL)

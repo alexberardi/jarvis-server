@@ -57,9 +57,11 @@ func (m *Module) handleNodeLLMChat(w http.ResponseWriter, r *http.Request, n *no
 			msgs = append(msgs, llm.Message{Role: role, Content: llm.TextContent(content)})
 		}
 	}
-	model := "live"
+	// The node names live or background; anything else (cloud included) is live, so a node
+	// can't send a prompt to the cloud slot: only features set to it reach it.
+	model := llm.LabelLive
 	if s, ok := b.str("model", false); ok {
-		model = s
+		model = llm.NormalizeLabel(s)
 	}
 	temp := 0.0
 	if f, ok := b.number("temperature"); ok {

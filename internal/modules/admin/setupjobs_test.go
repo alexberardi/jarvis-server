@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	llmmod "github.com/alexberardi/jarvis-server/internal/modules/llm"
@@ -169,5 +170,40 @@ func TestVoiceBFF(t *testing.T) {
 	}
 	if w := send(e.mux, "POST", "/api/tts/sample", `{"voice":"af_heart"}`, "Content-Type", "application/json"); w.Code != 401 {
 		t.Fatalf("anonymous sample: %d", w.Code)
+	}
+}
+
+// listingSpeech is a tts module with a remote provider's voices.
+type listingSpeech struct {
+	fakeSpeech
+	choices ttsmod.VoiceChoices
+}
+
+func (l *listingSpeech) VoiceChoices(context.Context) ttsmod.VoiceChoices { return l.choices }
+
+func TestVoiceBFFRemoteProvider(t *testing.T) {
+	e := newBFF(t)
+	sp := &listingSpeech{choices: ttsmod.VoiceChoices{Provider: "remote", Voices: []string{"marin", "Coral"},
+		Current: "marin", Default: "marin", Setting: "tts/tts.remote_voice"}}
+	e.m.TTS = sp
+	out := decode(t, send(e.mux, "GET", "/api/tts/voices", "", root...))
+	if out["provider"] != "remote" || out["setting"] != "tts/tts.remote_voice" || len(out["voices"].([]any)) != 2 || out["free_text"] != false {
+		t.Fatalf("voices: %v", out)
+	}
+	hdr := append([]string{"Content-Type", "application/json"}, root...)
+	if w := send(e.mux, "POST", "/api/tts/sample", `{"voice":"coral"}`, hdr...); w.Code != 200 || sp.voice != "Coral" {
+		t.Fatalf("listed voice: %d %q", w.Code, sp.voice)
+	}
+	if w := send(e.mux, "POST", "/api/tts/sample", `{"voice":"bm_george"}`, hdr...); w.Code != 422 {
+		t.Fatalf("a Kokoro voice on a remote provider: %d", w.Code)
+	}
+	sp.choices.Voices, sp.choices.FreeText = []string{}, true
+	if w := send(e.mux, "POST", "/api/tts/sample", `{"voice":"EXAVITQu4vr4xnSDxMaL"}`, hdr...); w.Code != 200 || sp.voice != "EXAVITQu4vr4xnSDxMaL" {
+		t.Fatalf("free text: %d %q", w.Code, sp.voice)
+	}
+	for _, body := range []string{`{"voice":"  "}`, `{"voice":"` + strings.Repeat("v", 101) + `"}`} {
+		if w := send(e.mux, "POST", "/api/tts/sample", body, hdr...); w.Code != 422 {
+			t.Errorf("%.30s: %d", body, w.Code)
+		}
 	}
 }

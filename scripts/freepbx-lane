@@ -10,12 +10,23 @@
 #       100 and the inbound route by fwconsole bulkimport, the carrier trunk and the outbound route
 #       by SQL + fwconsole reload), snapshot "provisioned". NAME must be this box's hostname; it
 #       is kept next to the disk, and every other command refuses on any other host.
-#   scripts/freepbx-lane weekly [--no-update] [--dry-run]
+#   scripts/freepbx-lane weekly [--no-update] [--no-calls] [--sandbox N] [--dry-run]
 #       revert to "installed", boot, update FreePBX and Debian (fwconsole ma upgradeall, apt),
 #       provision extension 100 afresh with the new release's defaults, capture
-#       `pjsip show endpoint 100` + `pjsip show aor 100`, shut down, and diff them against L1
-#       (go run ./tools/siplane drift). --no-update reverts to "provisioned" instead (offline, the
-#       build's release). Exits 1 on drift. The report is in runs/<date>/ (drift.txt).
+#       `pjsip show endpoint 100` + `pjsip show aor 100`, then the calls (below, unless
+#       --no-calls), shut down, and diff the capture against L1 (go run ./tools/siplane drift).
+#       --no-update reverts to "provisioned" instead (the build's release; offline with
+#       --no-calls). Exits 1 on drift or a failed call. The report is in runs/<date>/ (drift.txt,
+#       calls/results.md).
+#   scripts/freepbx-lane calls [--sandbox N] [--dry-run]
+#       the calls alone, on the "provisioned" snapshot: jarvisd's SIP provider registers as 100,
+#       places one call through the outbound route to the fake carrier and answers one from it
+#       via DID 5551230000, both audio directions transcribed (max WER, as L1), then a wrong
+#       password: it stops after 3, FreePBX's fail2ban bans this host, and the unban lets the
+#       right password register (scripts/freepbx-lane.d/calls.sh fits the VM to the host, then
+#       go run ./tools/siplane l2). The far ends and voice are sandbox N's (default freepbx-l2,
+#       brought up with --voice --sip --llm none and purged after unless it is already up).
+#       Report in runs/<date>-calls/.
 #   scripts/freepbx-lane timer
 #       render the weekly timer's units (scripts/freepbx-lane.d/jarvis-freepbx-lane.*) for this
 #       checkout into $JARVIS_FREEPBX_DIR/systemd/ and print the systemctl --user lines that
@@ -26,8 +37,9 @@
 #
 # Everything lives in $JARVIS_FREEPBX_DIR (default ~/.cache/jarvis-harness/freepbx): the disk, the
 # lane's own SSH key and known_hosts (never ~/.ssh), the dev-box marker, runs/. The VM uses qemu's
-# user-mode network: SSH on 127.0.0.1:$FREEPBX_SSH_PORT (2247) and HTTP on 127.0.0.1:$FREEPBX_WEB_PORT
-# (8447), nothing else forwarded.
+# user-mode network, forwarded on 127.0.0.1 only (never the LAN): SSH on $FREEPBX_SSH_PORT (2247),
+# HTTP on $FREEPBX_WEB_PORT (8447), SIP over UDP and TCP on $FREEPBX_SIP_PORT (5260) and
+# $FREEPBX_RTP_COUNT RTP ports from $FREEPBX_RTP_START (20 from 30800, the same numbers inside).
 #
 # Needs /dev/kvm (read-write), qemu-system-x86_64, qemu-img, ssh, ssh-keygen, curl, and
 # cloud-localds or xorriso/genisoimage/mkisofs for the seed. Building needs the network (Debian's
@@ -43,6 +55,13 @@ DIR=${JARVIS_FREEPBX_DIR:-$HOME/.cache/jarvis-harness/freepbx}
 KVM=${FREEPBX_KVM:-/dev/kvm}
 SSH_PORT=${FREEPBX_SSH_PORT:-2247}
 WEB_PORT=${FREEPBX_WEB_PORT:-8447}
+# SIP (UDP and TCP) on this host port reaches the VM's 5060; RTP is forwarded port for port (the
+# same number inside and out, so the ports in Asterisk's SDP stay right), and `calls` narrows the
+# VM's RTP range to it. Between the sandboxes' port blocks (7700-7799, 5060-5172 and 20000-20599
+# plus 10000, 11000, ...), so neither collides with an L1 lane.
+SIP_PORT=${FREEPBX_SIP_PORT:-5260}
+RTP_START=${FREEPBX_RTP_START:-30800}
+RTP_COUNT=${FREEPBX_RTP_COUNT:-20}
 MEM=${FREEPBX_MEM:-4096}
 CPUS=${FREEPBX_CPUS:-2}
 DISK_SIZE=40G
@@ -56,17 +75,19 @@ DISK=$DIR/disk.qcow2
 PIDFILE=$DIR/qemu.pid
 say() { echo "freepbx-lane: $*" >&2; }
 die() { say "$*"; exit 1; }
-usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; }
 
 CMD=${1:-}
 [ -n "$CMD" ] || { usage; exit 2; }
 shift
-DRY=0 DEVBOX='' UPDATE=1
+DRY=0 DEVBOX='' UPDATE=1 CALLS=1 SANDBOX=freepbx-l2
 while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) DRY=1; shift ;;
     --dev-box) DEVBOX=${2:-}; shift 2 ;;
     --no-update) UPDATE=0; shift ;;
+    --no-calls) CALLS=0; shift ;;
+    --sandbox) SANDBOX=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "unknown argument $1" ;;
@@ -116,20 +137,31 @@ guard_tools() {
 running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 
 vssh() {
-  ssh -q -p "$SSH_PORT" -i "$DIR/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+  ssh -q -F none -p "$SSH_PORT" -i "$DIR/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
     -o UserKnownHostsFile="$DIR/known_hosts" -o StrictHostKeyChecking=accept-new \
     -o ConnectTimeout=5 -o ServerAliveInterval=30 lane@127.0.0.1 "$@"
 }
 
 vscp() {
-  scp -q -P "$SSH_PORT" -i "$DIR/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+  scp -q -F none -P "$SSH_PORT" -i "$DIR/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
     -o UserKnownHostsFile="$DIR/known_hosts" -o StrictHostKeyChecking=accept-new "$@"
 }
 
-# boot starts the VM in the background; restrict=1 cuts it off from the network (SSH and HTTP
-# forwards still work).
+# forwards is the VM's port forwards, every one on 127.0.0.1 (never the LAN): SSH, HTTP, SIP over
+# UDP and TCP, and each RTP port.
+forwards() {
+  local f="hostfwd=tcp:127.0.0.1:$SSH_PORT-:22,hostfwd=tcp:127.0.0.1:$WEB_PORT-:80"
+  f="$f,hostfwd=udp:127.0.0.1:$SIP_PORT-:5060,hostfwd=tcp:127.0.0.1:$SIP_PORT-:5060"
+  local p
+  for p in $(seq "$RTP_START" $((RTP_START + RTP_COUNT - 1))); do f="$f,hostfwd=udp:127.0.0.1:$p-:$p"; done
+  echo "$f"
+}
+
+# boot starts the VM in the background; restrict=1 cuts it off from the network (the forwards
+# still work).
 boot() {
-  local restrict=${1:-0} net="user,id=n0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22,hostfwd=tcp:127.0.0.1:$WEB_PORT-:80"
+  local restrict=${1:-0} net
+  net="user,id=n0,$(forwards)"
   [ "$restrict" = 1 ] && net="$net,restrict=on"
   local seed=()
   [ -f "$DIR/seed.iso" ] && seed=(-drive "file=$DIR/seed.iso,if=virtio,format=raw,readonly=on")
@@ -206,6 +238,67 @@ provision() {
   x vssh sudo bash lane-provision/provision.sh
 }
 
+# calls_run OUT: with the VM up and provisioned, the calls and the lockout path. The far ends (the
+# L1 lane's carrier baresip) and the voice that speaks and transcribes for them come from a
+# sandbox up with --voice --sip: $SANDBOX if it is up, else one brought up here and purged after.
+# calls.sh fits the VM to the host, then `go run ./tools/siplane l2` plays the scenarios.
+calls_run() {
+  local out=$1 sroot=$ROOT/.sandbox/$SANDBOX started=0 rc=0 cport
+  case $SANDBOX in *[!a-zA-Z0-9_-]*|'') die "--sandbox: letters, digits, - and _ only" ;; esac
+  x mkdir -p "$out/calls"
+  step "far ends and voice: sandbox $SANDBOX with --voice --sip (brought up here unless it is up)"
+  if [ "$DRY" = 1 ]; then
+    echo "+ scripts/sandbox up --name $SANDBOX --voice --sip --llm none (unless up) > $out/sandbox.log"
+    cport='<5072+its offset>'
+  else
+    if ! { [ -f "$sroot/sip/lane.env" ] && "$ROOT/scripts/sandbox" status --name "$SANDBOX" 2>/dev/null | grep -q ': up'; }; then
+      "$ROOT/scripts/sandbox" up --name "$SANDBOX" --voice --sip --llm none >"$out/sandbox.log" 2>&1 ||
+        { say "scripts/sandbox up --name $SANDBOX --voice --sip failed (see $out/sandbox.log)"; return 1; }
+      started=1
+    fi
+    cport=$((5072 + $(sed -n 's/^SIP_LANE_OFFSET=//p' "$sroot/sip/lane.env")))
+  fi
+  step "fit the VM to the host (calls.sh): SIP on 127.0.0.1:$SIP_PORT, RTP $RTP_START-$((RTP_START + RTP_COUNT - 1)), carrier at 10.0.2.2:$cport"
+  x vssh rm -rf lane-provision
+  x vscp -r "$D" "lane@127.0.0.1:lane-provision"
+  if [ "$DRY" = 1 ]; then
+    echo "+ ssh lane@127.0.0.1 sudo bash lane-provision/calls.sh $SIP_PORT $RTP_START $((RTP_START + RTP_COUNT - 1)) $cport"
+  else
+    vssh sudo bash lane-provision/calls.sh "$SIP_PORT" "$RTP_START" $((RTP_START + RTP_COUNT - 1)) "$cport" >"$out/calls-setup.log" 2>&1 ||
+      { say "calls.sh failed (see $out/calls-setup.log)"; rc=1; }
+  fi
+  local go=(go)
+  command -v mise >/dev/null && go=(mise exec go@1.27 -- go)
+  step "one call each way and the lockout path (go run ./tools/siplane l2); results in $out/calls/results.md"
+  if [ "$DRY" = 1 ]; then
+    echo "+ ${go[*]} run ./tools/siplane l2 --sandbox $SANDBOX --sip 127.0.0.1:$SIP_PORT --ssh 127.0.0.1:$SSH_PORT --out $out/calls | tee $out/calls.txt"
+  elif [ "$rc" = 0 ]; then
+    (cd "$ROOT" && "${go[@]}" run ./tools/siplane l2 --sandbox "$SANDBOX" --sip "127.0.0.1:$SIP_PORT" \
+      --ssh "127.0.0.1:$SSH_PORT" --out "$out/calls") 2>&1 | tee "$out/calls.txt" >&2 || rc=1
+  fi
+  if [ "$started" = 1 ]; then "$ROOT/scripts/sandbox" down --name "$SANDBOX" --purge >>"$out/sandbox.log" 2>&1 || true; fi
+  return "$rc"
+}
+
+cmd_calls() {
+  guard_host
+  guard_tools
+  [ "$DRY" = 1 ] || ! running || die "the VM is running (scripts/freepbx-lane stop first)"
+  local out
+  out=$DIR/runs/$(date +%Y-%m-%d-%H%M)-calls
+  x mkdir -p "$out"
+  step "revert to the provisioned snapshot"
+  x qemu-img snapshot -a provisioned "$DISK"
+  [ "$DRY" = 1 ] || trap shutdown_vm EXIT
+  # Not restrict=on: it also drops the VM's replies on the forwarded UDP ports (SIP and RTP).
+  boot 0
+  local rc=0
+  calls_run "$out" || rc=1
+  shutdown_vm
+  trap - EXIT
+  return "$rc"
+}
+
 cmd_build() {
   guard_host
   guard_tools
@@ -267,11 +360,18 @@ cmd_weekly() {
     xto "$out/update.log" vssh "sudo apt-get -q update && sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y full-upgrade && sudo fwconsole ma upgradeall && sudo fwconsole reload"
     provision
   else
-    boot 1
+    # Offline (restrict=on) unless the calls run: restrict=on also drops the VM's replies on the
+    # forwarded UDP ports.
+    boot $((1 - CALLS))
   fi
   step "capture extension 100 as this FreePBX shows it"
-  xto "$out/freepbx-show-100.txt" vssh "sudo asterisk -rx 'core waitfullybooted' >/dev/null && sudo asterisk -rx 'pjsip show endpoint 100' && sudo asterisk -rx 'pjsip show aor 100'"
+  # SSH answers before Asterisk has started, and `core waitfullybooted` needs a running Asterisk to
+  # connect to, so wait (up to 3 min) for it to accept a console connection first.
+  xto "$out/freepbx-show-100.txt" vssh "for _ in \$(seq 90); do sudo asterisk -rx 'core waitfullybooted' >/dev/null 2>&1 && break; sleep 2; done; sudo asterisk -rx 'core waitfullybooted' >/dev/null && sudo asterisk -rx 'pjsip show endpoint 100' && sudo asterisk -rx 'pjsip show aor 100'"
   xto "$out/versions.txt" vssh "sudo fwconsole -V; sudo asterisk -rx 'core show version'; sudo fwconsole ma list | grep -E '^\| (core|framework) '"
+  # After the capture: calls.sh changes SIP Settings and the trunk, never extension 100.
+  local calls_rc=0
+  [ "$CALLS" = 0 ] || calls_run "$out" || calls_rc=1
   shutdown_vm
   trap - EXIT
   step "diff against L1 (go run ./tools/siplane drift); report in $out/drift.txt"
@@ -285,6 +385,7 @@ cmd_weekly() {
   local rc=0
   (cd "$ROOT" && "${go[@]}" run ./tools/siplane drift "$out/freepbx-show-100.txt") >"$out/drift.txt" 2>&1 || rc=$?
   cat "$out/drift.txt"
+  [ "$calls_rc" = 0 ] || { say "the calls or the lockout path failed (see $out/calls/results.md)"; rc=1; }
   return "$rc"
 }
 
@@ -304,6 +405,7 @@ case $CMD in
   timer) cmd_timer ;;
   build) cmd_build ;;
   weekly) cmd_weekly ;;
+  calls) cmd_calls ;;
   start) guard_host; guard_tools; boot 0; say "up: ssh with scripts/freepbx-lane ssh, admin UI on http://127.0.0.1:$WEB_PORT" ;;
   stop) guard_host; shutdown_vm ;;
   ssh) guard_host; x vssh "$@" ;;

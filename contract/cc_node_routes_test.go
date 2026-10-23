@@ -246,13 +246,14 @@ func TestCCAdminNodesPatchAndList(t *testing.T) {
 	})
 }
 
-var latestReleaseShape = Obj{"tag": NonEmptyString, "version": NonEmptyString, "published_at": NullOr(String)}
+var latestReleaseShape = Obj{"tag": NonEmptyString, "version": NonEmptyString, "published_at": NullOr(String), "kind": OneOf("go", "python")}
 
 func TestCCReleasesLatest(t *testing.T) {
 	tg := T(t)
 	tg.Need(t, CommandCenter)
 	// Unauthenticated passthrough to node-setup's latest GitHub release; JSON null when the
-	// check is disabled (updates.allow_check defaults off) or GitHub is unreachable.
+	// check is disabled (updates.allow_check defaults off) or GitHub is unreachable. With
+	// ?node_id= it is that node's kind's release and needs a member's token (#487).
 	tg.Get(t, CommandCenter, "/api/v0/releases/latest").Expect(http.StatusOK, NullOr(latestReleaseShape))
 }
 

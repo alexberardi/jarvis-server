@@ -316,3 +316,82 @@ describe('LabelsEditor model folders', () => {
     await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ background: { model: 'qwen3.5-9b-4bit' } }))
   })
 })
+
+describe('LabelsEditor cloud slot', () => {
+  it('runs remote or off only, with the remote fields and no local model', async () => {
+    const cloud: llm.LabelStatus = {
+      label: 'cloud',
+      config: { ...config('cloud', ''), engine: 'remote', model: '', model_path: '' },
+      state: 'not_configured',
+    }
+    const labels = { labels: [cloud], engines: [], voice: [], proposal: {}, recommend: {}, warnings: [] } as unknown as llm.LabelsResponse
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <LabelsEditor labels={['cloud']} />
+      </QueryClientProvider>,
+    )
+    const card = await screen.findByTestId('label-cloud')
+    expect(within(card).getByText('Cloud (optional)')).toBeInTheDocument()
+    expect(within(card).getByText(/Nothing uses it until you pick it for a feature/)).toBeInTheDocument()
+    const runs = within(card).getByLabelText('Runs') as HTMLSelectElement
+    expect([...runs.options].map((o) => o.value)).toEqual(['remote', 'off'])
+    expect(within(card).queryByLabelText('Model')).not.toBeInTheDocument()
+    fireEvent.change(within(card).getByLabelText('Base URL'), { target: { value: 'https://api.anthropic.com' } })
+    fireEvent.change(within(card).getByLabelText('Model name'), { target: { value: 'claude-sonnet-5-5' } })
+    fireEvent.change(within(card).getByLabelText('API key'), { target: { value: 'sk-ant' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() =>
+      expect(api.putLabels).toHaveBeenCalledWith({
+        cloud: { remote_url: 'https://api.anthropic.com', remote_model: 'claude-sonnet-5-5', remote_api_key: 'sk-ant' },
+      }),
+    )
+  })
+})
+
+describe('LabelsEditor speech to text', () => {
+  it('runs local, remote or off; remote shows the provider fields, says the audio leaves, and saves them', async () => {
+    const stt: llm.LabelStatus = {
+      label: 'stt',
+      config: { ...config('stt', ''), kind: 'whisper', model_kind: 'stt', model: 'whisper-small.en', remote_timeout_ms: 8000 },
+      state: 'ready',
+    }
+    const labels = { labels: [stt], engines: [], voice: [], proposal: {}, recommend: {}, warnings: [] } as unknown as llm.LabelsResponse
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <LabelsEditor labels={['stt']} />
+      </QueryClientProvider>,
+    )
+    const card = await screen.findByTestId('label-stt')
+    const runs = within(card).getByLabelText('Runs') as HTMLSelectElement
+    expect([...runs.options].map((o) => o.value)).toEqual(['local', 'remote', 'off'])
+    fireEvent.change(runs, { target: { value: 'remote' } })
+    expect(within(card).getByText(/audio of every voice turn/)).toBeInTheDocument()
+    expect(within(card).getByText(/Speaker recognition stays on this machine/)).toBeInTheDocument()
+    // No LLM-only fields, and none of whisper-server's local ones.
+    for (const f of ['API', 'Context window', 'Model', 'GPU layers']) expect(within(card).queryByLabelText(f)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/accepts images/)).not.toBeInTheDocument()
+    expect((within(card).getByLabelText('API key') as HTMLInputElement).type).toBe('password')
+    fireEvent.change(within(card).getByLabelText('Base URL'), { target: { value: 'https://api.groq.com/openai/v1' } })
+    fireEvent.change(within(card).getByLabelText('Model name'), { target: { value: 'whisper-large-v3-turbo' } })
+    fireEvent.change(within(card).getByLabelText('API key'), { target: { value: 'gsk-1' } })
+    fireEvent.change(within(card).getByLabelText('Timeout (ms)'), { target: { value: '5000' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() =>
+      expect(api.putLabels).toHaveBeenCalledWith({
+        stt: {
+          engine: 'remote',
+          remote_url: 'https://api.groq.com/openai/v1',
+          remote_model: 'whisper-large-v3-turbo',
+          remote_api_key: 'gsk-1',
+          remote_timeout_ms: 5000,
+        },
+      }),
+    )
+  })
+})

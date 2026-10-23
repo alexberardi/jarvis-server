@@ -36,7 +36,8 @@ type Endpoint struct {
 	Label string `json:"label"`
 	Kind  Kind   `json:"kind"`
 	// BaseURL: for LLM and embedding labels, an OpenAI-compatible base including /v1 (append
-	// "/chat/completions" or "/embeddings"); for stt, the whisper-server root (POST /inference).
+	// "/chat/completions" or "/embeddings"); for stt, the whisper-server root (POST /inference),
+	// or for a remote stt an OpenAI-compatible base (POST /audio/transcriptions).
 	BaseURL string `json:"base_url"`
 	// APIKey goes in "Authorization: Bearer" (x-api-key for API=anthropic). Local llama-server engines get a random key per
 	// instance; whisper-server and the Python engines have none (they bind 127.0.0.1 only).
@@ -59,6 +60,8 @@ type Endpoint struct {
 	// API is the dialect a remote endpoint speaks: APIOpenAI or APIAnthropic (remote_api).
 	// Local engines leave it empty (OpenAI-compatible).
 	API string `json:"api,omitempty"`
+	// TimeoutMS bounds one request to a remote endpoint (remote_timeout_ms; 0 = the caller's).
+	TimeoutMS int `json:"timeout_ms,omitempty"`
 	// NoReasoningBudget: the engine refuses a request with reasoning_budget (Transformers).
 	NoReasoningBudget bool `json:"-"`
 }
@@ -330,13 +333,17 @@ func describe(c LabelConfig) (ep Endpoint, local bool, err error) {
 		if c.RemoteURL == "" {
 			return ep, false, ErrNotConfigured
 		}
-		api := RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
+		api := c.RemoteAPI
+		if api == "" {
+			api = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
+		}
 		if c.Embedding && api == APIAnthropic {
 			return ep, false, &NotReadyError{Label: c.Label, State: "misconfigured",
 				Reason: "the Anthropic API has no embeddings endpoint; use a local engine or an OpenAI-compatible remote (remote_api=openai)"}
 		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
 		ep.Vision, ep.FoldSystemMessages, ep.API = c.RemoteVision, c.FoldSystemMessages, api
+		ep.TimeoutMS = c.RemoteTimeoutMS
 		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
 		// cc compaction needs it (docs/cc/chat-images.md §7).
 		ep.ContextLength, ep.Parallel = c.Context, 1
@@ -464,7 +471,7 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 // are dropped.
 func NormalizeBaseURL(u string) string {
 	u = strings.TrimRight(strings.TrimSpace(u), "/")
-	for _, suf := range []string{"/chat/completions", "/embeddings", "/completions", "/messages"} {
+	for _, suf := range []string{"/chat/completions", "/embeddings", "/completions", "/messages", "/audio/transcriptions", "/audio/speech"} {
 		u = strings.TrimSuffix(u, suf)
 	}
 	return strings.TrimRight(u, "/")

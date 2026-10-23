@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- A device registering (or, with -key expires 0, unregistering) its contact: 200 OK.
+     Run by tools/siplane (scenarios.go): -key caller the extension, -au/-ap its digest
+     credentials, -key expires the Expires, -i the address it registers from, -key run a nonce
+     per run. -->
+<scenario name="lane: REGISTER a contact (200)">
+  <send retrans="500">
+    <![CDATA[
+
+      REGISTER sip:[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[run]
+      From: <sip:[caller]@[remote_ip]>;tag=[run]SIPpTag00[call_number]
+      To: <sip:[caller]@[remote_ip]>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:[caller]@[local_ip]:[local_port]>
+      Expires: [expires]
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="401" auth="true"/>
+  <send retrans="500">
+    <![CDATA[
+
+      REGISTER sip:[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[run]
+      From: <sip:[caller]@[remote_ip]>;tag=[run]SIPpTag00[call_number]
+      To: <sip:[caller]@[remote_ip]>
+      Call-ID: [call_id]
+      CSeq: 2 REGISTER
+      Contact: <sip:[caller]@[local_ip]:[local_port]>
+      Expires: [expires]
+      [authentication]
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="200"/>
+</scenario>

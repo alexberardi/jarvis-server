@@ -120,7 +120,6 @@ type Task struct {
 	StartURL string
 	Success  *SuccessCheck
 	Rules    string // the household's rules as one line for the model ("" = the defaults)
-	UseCloud bool
 	// Approved are the digests of held actions the user approved: the loop mints their tokens
 	// and runs the held batch before anything else.
 	Approved []string
@@ -321,7 +320,7 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: "I couldn't start the computer task: " + err.Error()}
 	}
 	sc := settings.Scope{HouseholdID: t.HouseholdID}
-	pick, err := pickLabel(ctx, l.Models, l.str(ctx, SettingModel, sc, ModelAuto), t.UseCloud)
+	pick, err := pickLabel(ctx, l.Models, l.str(ctx, SettingModel, sc, ModelAuto))
 	if err != nil {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}

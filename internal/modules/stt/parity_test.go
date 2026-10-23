@@ -123,7 +123,7 @@ func TestParityServe(t *testing.T) {
 		Speaker:       toneEmbedder{},
 	}
 	if u := os.Getenv("JARVIS_PARITY_WHISPER_URL"); u != "" {
-		m.Engine = ResolveFunc(func(context.Context, string) (string, error) { return u, nil })
+		m.Engine = LocalURL(u)
 	} else {
 		m.Engine = newFakeWhisper(t).resolver()
 	}

@@ -1,5 +1,7 @@
 // /admin/models: the catalog against the server's, a job's "Set up" narrowing it, a model
-// assigned to a label (saved on the server, survives a reload), and installs that never start.
+// assigned to a label (saved on the server, survives a reload), installs that never start, and
+// the optional cloud slot picked for computer control (with what it sends where), and speech to
+// text sent to a remote provider (its key never read back).
 import { must, tokenOf } from '../../helpers/api'
 import { env, stateFile } from '../../helpers/env'
 import { expect, test } from '../../helpers/fixtures'
@@ -86,6 +88,81 @@ test.describe('admin models', () => {
       await expect(page.getByTestId('label-live').getByLabel('Model name')).toHaveValue(model)
     } finally {
       await must('PUT', `${LLM()}/labels`, { token: tokenOf('superuser'), body: { live: { remote_model: before.remote_model } } })
+    }
+  })
+
+  test('the cloud slot, set up and picked for computer control, says what it sends where', async ({ page }) => {
+    // Nothing calls the cloud endpoint here: no computer task runs, and the URL is never dialled.
+    const settingURL = `${env('SBX_ADMIN')}/api/settings/cc/computer.model`
+    const superuser = { token: tokenOf('superuser') }
+    const cloudOf = (b: any) => b.labels.find((l: { label: string }) => l.label === 'cloud')
+    expect(cloudOf(await get('/labels'))).toMatchObject({ state: 'not_configured', config: { remote_url: '' } })
+    try {
+      await page.goto('/admin/models')
+      const select = page.getByLabel('Computer control')
+      await expect(select).toHaveValue('auto')
+      await expect(page.getByRole('option', { name: 'Cloud (not set up)' })).toBeDisabled()
+
+      const card = page.getByTestId('label-cloud')
+      await card.getByLabel('Base URL').fill('https://api.anthropic.com')
+      await card.getByLabel('Model name').fill('claude-sonnet-5-5')
+      await card.getByRole('button', { name: 'Save' }).click()
+      await expect(page.getByText('Cloud (optional) saved; its engine restarts if needed')).toBeVisible()
+      expect(cloudOf(await get('/labels'))).toMatchObject({ state: 'remote', config: { remote_url: 'https://api.anthropic.com' } })
+
+      await select.selectOption('cloud')
+      const notice = page.getByText(
+        'Page contents and screenshots of your browser are sent to Anthropic (api.anthropic.com) while a task runs.',
+      )
+      await expect(notice).toBeVisible()
+      await expect.poll(async () => (await must('GET', `${env('SBX_ADMIN')}/api/settings/?service=cc`, superuser))
+        .services.flatMap((s: any) => s.settings).find((s: any) => s.key === 'computer.model')?.value).toBe('cloud')
+      await page.reload()
+      await expect(page.getByLabel('Computer control')).toHaveValue('cloud')
+      await expect(notice).toBeVisible()
+      await page.getByLabel('Computer control').selectOption('auto')
+      await expect(notice).toHaveCount(0)
+    } finally {
+      await must('PUT', settingURL, { ...superuser, body: { value: 'auto' } })
+      await must('PUT', `${LLM()}/labels`, { ...superuser, body: { cloud: { remote_url: '', remote_model: '' } } })
+    }
+  })
+
+  test('speech to text set to a remote provider saves, and no read gives its key back', async ({ page }) => {
+    // Nothing transcribes here, so the URL (a closed local port) is never dialled.
+    const superuser = { token: tokenOf('superuser') }
+    const sttOf = (b: any) => b.labels.find((l: { label: string }) => l.label === 'stt')
+    const before = sttOf(await get('/labels')).config
+    const key = `sk-e2e-${Date.now().toString(36)}`
+    try {
+      await page.goto('/admin/models')
+      const card = page.getByTestId('label-stt')
+      await card.getByLabel('Runs').selectOption('remote')
+      await expect(card.getByText(/The audio of every voice turn leaves this machine/)).toBeVisible()
+      await card.getByLabel('Base URL').fill('http://127.0.0.1:9/v1')
+      await card.getByLabel('Model name').fill('whisper-large-v3-turbo')
+      await card.getByLabel('API key').fill(key)
+      await card.getByRole('button', { name: 'Save' }).click()
+      await expect(page.getByText('Speech to text saved; its engine restarts if needed')).toBeVisible()
+
+      const labels = await get('/labels')
+      expect(sttOf(labels)).toMatchObject({
+        state: 'remote',
+        config: { engine: 'remote', remote_url: 'http://127.0.0.1:9/v1', remote_model: 'whisper-large-v3-turbo', remote_api_effective: 'openai' },
+      })
+      expect(JSON.stringify(labels)).not.toContain(key)
+      const settings = await must('GET', `${env('SBX_ADMIN')}/api/settings/?service=llm`, superuser)
+      expect(JSON.stringify(settings)).not.toContain(key)
+      expect(settings.services.flatMap((s: any) => s.settings).find((s: any) => s.key === 'stt.remote_api_key')?.value).toBe('********')
+
+      await page.reload()
+      await expect(page.getByTestId('label-stt').getByLabel('Runs')).toHaveValue('remote')
+      await expect(page.getByTestId('label-stt').getByLabel('API key')).toHaveValue('')
+    } finally {
+      await must('PUT', `${LLM()}/labels`, {
+        ...superuser,
+        body: { stt: { engine: before.engine, remote_url: '', remote_model: '', remote_api_key: '' } },
+      })
     }
   })
 

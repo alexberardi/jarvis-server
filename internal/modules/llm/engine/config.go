@@ -13,12 +13,15 @@ import (
 )
 
 // Labels (LD1). live and background are LLM labels; embeddings runs llama-server --embedding;
-// stt runs whisper-server (D7). Track B forces any other requested model name to live.
+// stt runs whisper-server (D7). Track B forces any other requested model name to live. cloud is
+// an optional remote-only LLM label that only features choosing it reach
+// (decisions/2026-10-22-cloud-model-slot.md).
 const (
 	LabelLive       = "live"
 	LabelBackground = "background"
 	LabelEmbeddings = "embeddings"
 	LabelSTT        = "stt"
+	LabelCloud      = "cloud"
 )
 
 // Model kinds, as the model manager records them.
@@ -46,6 +49,9 @@ type LabelDef struct {
 	// DefaultModel is used when the label names no model and this installed model exists.
 	DefaultModel string
 	Defaults     map[string]any // per-label setting defaults that differ from the common ones
+	// RemoteOnly labels run no local engine: they have only the remote fields, and engine is
+	// remote or off.
+	RemoteOnly bool
 }
 
 // LabelDefs lists every label in display order.
@@ -58,6 +64,9 @@ var LabelDefs = []LabelDef{
 		DefaultModel: "all-minilm-l6-v2",
 		Defaults:     map[string]any{"context": int64(512), "parallel": int64(4), "gpu_layers": int64(0)}},
 	{Name: LabelSTT, Prefix: "stt", Kind: KindWhisper, ModelKind: ModelSTT},
+	// Empty by default: nothing leaves the network until a superuser sets remote_url.
+	{Name: LabelCloud, Prefix: "llm.cloud", Kind: KindLlama, ModelKind: ModelLLM, RemoteOnly: true,
+		Defaults: map[string]any{"engine": ModeRemote}},
 }
 
 // LabelDefFor returns a label's definition.
@@ -80,16 +89,18 @@ type field struct {
 	// only limits the field to labels of these model kinds (nil = all).
 	only   []string
 	secret bool
+	// remote: the field also applies to a RemoteOnly label (which has no others).
+	remote bool
 }
 
 var fields = []field{
 	{name: "engine", typ: settings.String, def: ModeLocal, desc: "local (supervised engine), remote (OpenAI-compatible URL), shared (background: use live's engine) or off",
-		opts: []any{ModeLocal, ModeRemote, ModeShared, ModeOff}},
+		opts: []any{ModeLocal, ModeRemote, ModeShared, ModeOff}, remote: true},
 	{name: "model", typ: settings.String, def: "", desc: "Installed model id, or an absolute path to a model file"},
 	{name: "mmproj", typ: settings.String, def: "", desc: "Vision projector: empty = the model's own if installed, \"none\" = no vision, or an installed id / absolute path",
 		only: []string{ModelLLM}},
 	{name: "context", typ: settings.Int, def: int64(0), desc: "Context size (-c, shared by the parallel slots); 0 = the model's catalog default",
-		only: []string{ModelLLM, ModelEmbedding}},
+		only: []string{ModelLLM, ModelEmbedding}, remote: true},
 	{name: "parallel", typ: settings.Int, def: int64(1), desc: "Parallel request slots (-np)", only: []string{ModelLLM, ModelEmbedding}},
 	{name: "gpu_backend", typ: settings.String, def: "auto", desc: "auto, cpu, cuda, rocm, vulkan or metal",
 		opts: []any{"auto", "cpu", "cuda", "rocm", "vulkan", "metal"}},
@@ -115,20 +126,39 @@ var fields = []field{
 	{name: "flash_attn", typ: settings.String, def: "auto", desc: "Flash attention: auto, on or off", opts: []any{"auto", "on", "off"}},
 	{name: "fold_system_messages", typ: settings.String, def: FoldAuto,
 		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
-		opts: []any{FoldAuto, FoldOn, FoldOff}, only: []string{ModelLLM}},
+		opts: []any{FoldAuto, FoldOn, FoldOff}, only: []string{ModelLLM}, remote: true},
 	{name: "extra_args", typ: settings.String, def: "", desc: "Extra engine flags (shell-quoted); a --chat-template-file here overrides the model's pinned template"},
 	{name: "remote_url", typ: settings.String, def: "", desc: "Remote base URL, e.g. https://api.openai.com/v1 (OpenAI-compatible) or https://api.anthropic.com",
-		only: []string{ModelLLM, ModelEmbedding}},
+		only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
 	{name: "remote_api", typ: settings.String, def: APIAuto,
 		desc: "API the remote endpoint speaks: auto (anthropic for api.anthropic.com, else openai), openai (/chat/completions) or anthropic (the Messages API; chat only, no embeddings)",
-		opts: []any{APIAuto, APIOpenAI, APIAnthropic}, only: []string{ModelLLM, ModelEmbedding}},
-	{name: "remote_model", typ: settings.String, def: "", desc: "Model name sent to the remote endpoint", only: []string{ModelLLM, ModelEmbedding}},
+		opts: []any{APIAuto, APIOpenAI, APIAnthropic}, only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
+	{name: "remote_model", typ: settings.String, def: "", desc: "Model name sent to the remote endpoint", only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
 	{name: "remote_api_key", typ: settings.String, def: "", desc: "API key for the remote endpoint", secret: true,
-		only: []string{ModelLLM, ModelEmbedding}},
-	{name: "remote_vision", typ: settings.Bool, def: false, desc: "Whether the remote model accepts images", only: []string{ModelLLM}},
+		only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
+	{name: "remote_timeout_ms", typ: settings.Int, def: int64(8000),
+		desc: "How long one remote transcription may take, in milliseconds (a voice turn can't wait long)", only: []string{ModelSTT}},
+	{name: "remote_vision", typ: settings.Bool, def: false, desc: "Whether the remote model accepts images", only: []string{ModelLLM}, remote: true},
+}
+
+// sttFields overrides a field's description, options and default on the stt label, whose
+// remote endpoint transcribes audio rather than chatting (docs/llm/07-remote-speech.md §2).
+var sttFields = map[string]field{
+	"engine": {desc: "local (supervised whisper-server), remote (an OpenAI-compatible speech-to-text API: every voice turn's audio leaves the house, " +
+		"twice for a wake turn; speaker recognition stays local) or off",
+		opts: []any{ModeLocal, ModeRemote, ModeOff}},
+	"remote_url": {desc: "Remote speech-to-text base URL: https://api.openai.com/v1 (OpenAI), https://api.groq.com/openai/v1 (Groq), " +
+		"or any server with /audio/transcriptions (speaches, LocalAI)"},
+	// No auto-detect for stt: the Anthropic API has no speech-to-text.
+	"remote_api": {desc: "API the remote speech-to-text endpoint speaks: openai (multipart /audio/transcriptions)",
+		opts: []any{APIOpenAI}, def: APIOpenAI},
+	"remote_model": {desc: "Transcription model sent to the remote endpoint, e.g. gpt-transcribe (OpenAI) or whisper-large-v3-turbo (Groq)"},
 }
 
 func (f field) appliesTo(d LabelDef) bool {
+	if d.RemoteOnly {
+		return f.remote
+	}
 	if f.name == "engine" && d.ModelKind == ModelSTT {
 		return true
 	}
@@ -229,13 +259,25 @@ func SettingDefinitions() []settings.Definition {
 			opts := f.opts
 			if f.name == "engine" && d.Name != LabelBackground {
 				opts = []any{ModeLocal, ModeRemote, ModeOff}
-				if d.Kind == KindWhisper {
-					opts = []any{ModeLocal, ModeOff}
+				if d.RemoteOnly {
+					opts = []any{ModeRemote, ModeOff}
+				}
+			}
+			desc := f.desc
+			if o, ok := sttFields[f.name]; ok && d.Kind == KindWhisper {
+				if o.desc != "" {
+					desc = o.desc
+				}
+				if o.opts != nil {
+					opts = o.opts
+				}
+				if o.def != nil {
+					def = o.def
 				}
 			}
 			out = append(out, settings.Definition{
 				Key: d.Prefix + "." + f.name, Category: cat, Type: f.typ, Default: def,
-				Description: f.desc, RequiresReload: true, IsSecret: f.secret, Options: opts,
+				Description: desc, RequiresReload: true, IsSecret: f.secret, Options: opts,
 			})
 		}
 	}
@@ -305,6 +347,8 @@ type LabelConfig struct {
 	// effect for RemoteURL (openai or anthropic).
 	RemoteAPIMode string `json:"remote_api"`
 	RemoteAPI     string `json:"remote_api_effective"`
+	// RemoteTimeoutMS bounds one remote request (remote_timeout_ms, stt only; 0 = none).
+	RemoteTimeoutMS int `json:"remote_timeout_ms"`
 
 	// Problem says why the label can't run as configured (missing model file, …).
 	Problem string `json:"problem,omitempty"`
@@ -403,6 +447,11 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	}
 	c.RemoteAPIMode = strings.ToLower(str("remote_api"))
 	c.RemoteAPI = RemoteAPI(c.RemoteAPIMode, c.RemoteURL)
+	if d.Kind == KindWhisper {
+		// stt speaks openai only (no auto-detect: the Anthropic API has no speech-to-text).
+		c.RemoteAPI = APIOpenAI
+	}
+	c.RemoteTimeoutMS = num("remote_timeout_ms")
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}
@@ -410,6 +459,9 @@ func (s SettingsSource) Label(ctx context.Context, label string) (LabelConfig, e
 	c.FoldSystemMessages = c.FoldMode == FoldOn
 	if c.Engine == "" {
 		c.Engine = ModeLocal
+	}
+	if d.RemoteOnly && c.Engine != ModeOff {
+		c.Engine = ModeRemote
 	}
 	if c.Engine == ModeShared {
 		if label != LabelBackground {

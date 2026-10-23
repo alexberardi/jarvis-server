@@ -34,8 +34,9 @@ func TestRegistersWithAStableContactAndKeepsAlive(t *testing.T) {
 	// OPTIONS to the registrar every KeepAlive.
 	eventually(t, 2*time.Second, "OPTIONS keepalives", func() bool { return p.optionsSeen() >= 3 })
 
-	// A clean shutdown unregisters (Expires: 0), so a restart's REGISTER is not refused by
-	// max_contacts=1 + remove_existing=no.
+	// A clean shutdown unregisters (Expires: 0), so a restart's REGISTER is not refused where
+	// the PBX has max_contacts=1 + remove_existing=no (FreePBX 17's default is yes, older
+	// installs and some admins have no).
 	u.Close(context.Background())
 	all := p.registers()
 	last := all[len(all)-1]
@@ -188,12 +189,12 @@ func TestAnswersOptionsAndRefusesAnyoneButTheRegistrar(t *testing.T) {
 		t.Fatalf("OPTIONS from the PBX: %d, want 200", code)
 	}
 	// A scanner elsewhere gets nothing useful.
-	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname("127.0.0.66"))
+	ua, err := sipgo.NewUA(sipgo.WithUserAgentHostname(otherLoopback(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ua.Close()
-	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr("127.0.0.66:0"))
+	other, err := sipgo.NewClient(ua, sipgo.WithClientConnectionAddr(otherLoopback(t)+":0"))
 	if err != nil {
 		t.Fatal(err)
 	}

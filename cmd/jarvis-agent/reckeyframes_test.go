@@ -128,7 +128,7 @@ func TestKeyframeRefusalsAndRetries(t *testing.T) {
 	if _, err := e.rec.End(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the first keyframes not sent", func() bool { return len(e.jarvisd.keyframes()) == 2 })
+	waitFor(t, "the 503 on keyframe 3", func() bool { return e.jarvisd.attempts(kfPaths(down, "3")[0]) == 1 })
 	if p := e.rec.KeyframesPending(); len(p) != 1 || p[0].ID != down {
 		t.Fatalf("pending after a 503: %+v", p)
 	}

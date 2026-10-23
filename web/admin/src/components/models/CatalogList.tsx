@@ -37,7 +37,7 @@ function CatalogRow({
 }: {
   entry: CatalogEntry
   recommended: CatalogResponse['recommended']
-  current: Record<Label, string>
+  current: Partial<Record<Label, string>>
   installing: boolean
   onNeedsToken?: (reason: string) => void
 }) {

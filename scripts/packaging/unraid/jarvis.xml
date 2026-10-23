@@ -7,7 +7,7 @@
   <Privileged>false</Privileged>
   <Shell>bash</Shell>
   <Support>https://github.com/alexberardi/jarvis-server/issues</Support>
-  <Project>https://jarvisautomation.io</Project>
+  <Project>https://docs.jarvisautomation.dev/install/unraid/</Project>
   <Overview>Jarvis Automation: a private voice assistant server for your home. One container runs the whole server (speech-to-text, the language model, text-to-speech, Pi nodes, the mobile app and the recipes app). Open the WebUI to run the setup wizard, which downloads the models. NVIDIA GPU: install the Nvidia Driver plugin, add --runtime=nvidia to Extra Parameters and set NVIDIA_VISIBLE_DEVICES. The template uses bridge networking: phones and nodes are given the server's address, and the desktop agent finds it over mDNS only if you switch the Network Type to Host. Migrating from the legacy Docker stack: run jarvisd import-legacy before the first start; it turns the legacy ports on for older nodes, so also map 7701, 7702, 7703, 7704, 7706, 7707, 7712, 7030, 7031 and 9883 to the same host ports (see JARVIS_LEGACY_PORTS).</Overview>
   <Category>HomeAutomation: Productivity:</Category>
   <WebUI>http://[IP]:[PORT:7710]/</WebUI>

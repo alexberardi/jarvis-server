@@ -108,6 +108,9 @@ type lane struct {
 	root  string
 	voice *voice
 	out   string // --out: heard audio, transcripts and PBX dumps go here; "" = nowhere
+	// vm is set for `siplane l2`: the PBX is the L2 lane's FreePBX VM, reached over the lane's
+	// SSH, and nobody else holds 100 there.
+	vm *l2VM
 }
 
 // docker runs a docker command; its combined output is in the error when it fails.
@@ -126,6 +129,9 @@ func (l *lane) docker(ctx context.Context, args ...string) (string, error) {
 
 // cli is an Asterisk CLI command on the lane's PBX.
 func (l *lane) cli(ctx context.Context, command string) (string, error) {
+	if l.vm != nil {
+		return l.vmRun(ctx, "sudo asterisk -rx "+shellQuote(command))
+	}
 	return l.docker(ctx, "exec", l.env["SIP_LANE_ASTERISK"], "asterisk", "-rx", command)
 }
 
@@ -296,9 +302,8 @@ func (l *lane) deadFarEnds(ctx context.Context, scenario string) ([]string, erro
 	return dead, nil
 }
 
-// restart brings the whole lane up again (scripts/sip-lane up, same name and ports): a far
-// end restarted alone would register a new contact, which max_contacts=1 with
-// remove_existing=no refuses while the dead one's is still bound.
+// restart brings the whole lane up again (scripts/sip-lane up, same name and ports), so every
+// far end, its registration and its ctrl_tcp start from a known state together.
 func (l *lane) restart(ctx context.Context) error {
 	args := []string{"up", "--name", l.env["SIP_LANE_NAME"]}
 	if o := l.env["SIP_LANE_OFFSET"]; o != "" {

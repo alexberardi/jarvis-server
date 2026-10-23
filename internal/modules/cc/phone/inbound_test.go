@@ -214,7 +214,13 @@ func (e *env) endedInbound(t *testing.T) *InboundCall {
 // answerInbound admits bob's call and hands the answered fake call to the service.
 func (e *env) answerInbound(t *testing.T, acct SIPAccount) *fakeCall {
 	t.Helper()
-	tk, code := e.admit(acct, bob)
+	return e.answerInboundFrom(t, acct, bob)
+}
+
+// answerInboundFrom is answerInbound for another caller.
+func (e *env) answerInboundFrom(t *testing.T, acct SIPAccount, in sip.Incoming) *fakeCall {
+	t.Helper()
+	tk, code := e.admit(acct, in)
 	if tk == nil {
 		t.Fatalf("not admitted: %d", code)
 	}
@@ -288,6 +294,30 @@ func TestInboundCallTakesAMessageAndNotifiesTheHousehold(t *testing.T) {
 	}
 	if cards[0].UserID != nil || cards[0].Metadata["inbound_call_id"] != row.ID || cards[0].Metadata["audio_available"] != false {
 		t.Errorf("card %+v", cards[0])
+	}
+}
+
+// A caller who withheld their number (FreePBX 17: no PAI, an anonymous From) still gets the
+// receptionist, and the card says the number was withheld rather than inventing one.
+func TestInboundWithheldCallerTakesAMessage(t *testing.T) {
+	e, acct := inboundEnv(t)
+	e.stt.heard = []string{"Hi, I'm calling about the car you have for sale."}
+	e.llm.replies = []string{"Thanks, I'll pass that on. Goodbye! [TAKE_MESSAGE:  | the car for sale | please call back] [HANGUP]"}
+	e.llm.assess = `{"summary": "A caller asked about the car for sale."}`
+	c := e.answerInboundFrom(t, acct, sip.Incoming{CallID: "call-anon@pbx", Source: "withheld"})
+	defer playing(c)()
+	c.say()
+	waitFor(t, "media closed", c.ended)
+	row := e.endedInbound(t)
+	if row.Outcome != InboundMessage || row.CallerNumber != "" || row.CallerIDName != "" || row.CallerIDSource != "withheld" {
+		t.Fatalf("row %+v", row)
+	}
+	cards := e.notify.titled("📞 Message from an unknown caller")
+	if len(cards) != 1 {
+		t.Fatalf("cards: %+v", e.notify.all())
+	}
+	if body := cards[0].Body; !strings.Contains(body, "**Caller ID:** withheld by the caller") || strings.Contains(body, "anonymous") {
+		t.Errorf("card body:\n%s", body)
 	}
 }
 

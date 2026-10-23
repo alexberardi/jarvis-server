@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
-<!-- FreePBX's max_contacts=1 with remove_existing=no: a second device (or jarvisd restarted on a
-     new port) with the right password is refused while the old contact has not expired.
+<!-- max_contacts=1 with remove_existing=no (an older FreePBX install, or an admin who set Remove
+     Existing = no; FreePBX 17 defaults to yes): a second device (or jarvisd restarted on a new
+     port) with the right password is refused while the old contact has not expired.
      Run by tools/siplane (scenarios.go): -key caller the extension, -au/-ap its digest
      credentials, -i the address it registers from, -key run a nonce per run. -->
 <scenario name="lane: REGISTER while another contact holds the extension (403)">

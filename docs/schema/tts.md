@@ -33,6 +33,10 @@ From `jarvis-tts/app/services/settings_definitions.py` (the input for the module
 | `server.log_remote_level` | string | `'DEBUG'` | JARVIS_LOG_REMOTE_LEVEL | Remote logging level |
 | `auth.cache_ttl_seconds` | int | `60` | NODE_AUTH_CACHE_TTL | Auth validation cache TTL in seconds |
 
+- **Added in jarvisd (no legacy source):** `tts.provider` gains `remote`, with `tts.remote_url`,
+  `tts.remote_api` (`openai`), `tts.remote_model`, `tts.remote_api_key` (secret),
+  `tts.remote_voice` and `tts.remote_timeout_ms` (8000): TTS from an OpenAI-compatible service
+  (docs/llm/07-remote-speech.md §3, docs/decisions/2026-10-22-remote-tts.md).
 - **Cut keys:** `tts.default_voice` (Piper, cut), `tts.kokoro_device` (PyTorch device; sherpa Kokoro runs on CPU in-binary). `tts.provider` default becomes `kokoro` (legacy default `piper`; prod is already Kokoro). `tts.wake_system_prompt` and `tts.llm_proxy_version` belong to the deprecated `/generate-wake-response` route, which is cut.
 
 ## Settings import (all modules with a settings table)

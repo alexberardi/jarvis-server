@@ -260,7 +260,15 @@ func cliProgress(w io.Writer) func(string, int64) {
 // in a process the supervisor won't stop with this one.
 func startUpdate(u *selfupdate.Updater, status func(string), log *slog.Logger) func(context.Context, selfupdate.StageOptions) error {
 	return func(ctx context.Context, o selfupdate.StageOptions) error {
-		status("Downloading " + o.Target + "…")
+		// "Downloading" only once the release is found: a version never published (the server
+		// runs a dry-run build) puts nothing in the island.
+		shown := false
+		u.Progress = func(step string, _ int64) {
+			if step == "downloading" && !shown {
+				shown = true
+				status("Downloading " + o.Target + "…")
+			}
+		}
 		m, err := u.Stage(ctx, o)
 		if err != nil {
 			return err
