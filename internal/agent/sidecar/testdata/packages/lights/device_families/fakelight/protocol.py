@@ -46,8 +46,13 @@ class FakeLight(IJarvisDeviceProtocol):
 
     async def get_state(self, ip, **kwargs):
         entity_id = kwargs.get("entity_id")
+        JarvisStorage("fakelight").save("state_queried", {"entity_id": entity_id, "model": kwargs.get("model")})
         if entity_id == "light.pair_me":
             return {"needs_pairing": True}
+        if entity_id == "light.unknowable":
+            return {"state": "unknown"}
+        if entity_id == "light.erroring":
+            return {"error": "device unreachable"}
         if entity_id == "climate.hall":
             # 20.5 rounds to 20 and 21.5 to 22, as Python's round() does on the Python node.
             return {"mode": "HEAT", "current_temperature": 20.5, "heat_setpoint": 21.5,
