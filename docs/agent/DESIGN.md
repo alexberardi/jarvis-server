@@ -2314,8 +2314,9 @@ last input came:
   connection, 1 ms rounded forward (the server counts whole milliseconds).
 
 Both count our own injected events as input too (virtual pointer and keyboard, XTEST); the
-guard tells them apart by time, against its own injection windows (+250 ms). Pointer drift
-(`Cursor()`, > 3 px from where our last action left it) is the same check as on macOS.
+guard tells them apart by time, against its own injection windows (+500 ms; macOS 26 counts
+ours too). Pointer drift (`Cursor()`, > 3 px from where our last action left it, or from where
+it sent it) is the same check as on macOS. `Guard.Reason` says which check paused.
 
 **The stop hotkey, Ctrl+Alt+Esc** (`island.RunWith`/`RunLoop` start it; it calls
 `AppEvents.StopHotkey`, which stops what Jarvis is doing, like the tray's "Stop Jarvis"):

@@ -31,9 +31,9 @@ const (
 )
 
 // cgSource is the CGEventSourceRef every event is created with: a private source
-// (kCGEventSourceStatePrivate), so our events stay apart from the HID system state that tells
-// when the user last used the mouse or keyboard (NativeMonitor). 0 (the default source) if it
-// couldn't be created.
+// (kCGEventSourceStatePrivate), meant to keep our events apart from the HID system state that
+// tells when the user last used the mouse or keyboard (NativeMonitor; macOS 26 counts them
+// anyway). 0 (the default source) if it couldn't be created.
 var cgSource uintptr
 
 const (
@@ -135,7 +135,8 @@ func (cgPoster) Location() (x, y float64, err error) {
 	if err := loadCG(); err != nil {
 		return 0, 0, err
 	}
-	ev := cgEventCreate(cgSource)
+	// A NULL source: the system's pointer, not our private source's view of it.
+	ev := cgEventCreate(0)
 	if ev == 0 {
 		return 0, 0, errNoEvent
 	}

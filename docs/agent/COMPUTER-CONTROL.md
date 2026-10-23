@@ -126,7 +126,9 @@ password the model can see.
 - **While controlling the desktop (C9):** an always-visible "Jarvis is controlling" indicator
   (island + tray), auto-pause the moment the user touches mouse or keyboard, "stop" by voice and
   by hotkey. On macOS (`computer.Guard`): HID activity outside our own injection windows
-  (+250 ms), or the pointer > 3 px from where our last action left it, polled every 100 ms,
+  (+500 ms: macOS 26 counts our private-source events as HID activity, stamped late), or the
+  pointer > 3 px from where our last action left it or sent it (a move may land after the read
+  that follows it), polled every 100 ms,
   pauses the task; ⌃⌥⎋ (Carbon hotkey, named in the tray tooltip) stops it. On Linux: idle-notify
   (wlroots) or the X server's idle time, and Ctrl+Alt+Esc (X11 grab, GlobalShortcuts portal, or a
   Hyprland bind); DESIGN.md §17.
