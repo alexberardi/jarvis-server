@@ -196,6 +196,14 @@ failed ──retry_failed_loads (cooldown 60s·2^(n-1) ≤ 600s; or force) ─�
   - Multiple devices add `--split-mode layer|row` and `--tensor-split a,b`.
   - `gpu_layers` → `-ngl`.
   - CPU → `-ngl 0` (or a CPU build).
+  - **The host prompt cache** → `--cache-ram <MiB>`, always passed: llama-server's own default is
+    8192 MiB of host RAM (§6), which every install would pay on top of the model's VRAM. A chat
+    label gets `min(2048, RAM/10)` MiB, at least 256; an `--embedding` engine gets `--cache-ram 0`
+    (it never reuses a prompt). 256 MiB also stands in when the OS won't say how much RAM there is
+    (`sysinfo.TotalMemory() == 0`), since a tenth of nothing would switch the cache off. The value
+    is read from the host, not from the label, so it never splits one model into two engines (LD1).
+    `extra_args` wins: an operator's own `--cache-ram`/`-cram` token means ours is left out
+    altogether, so `ps` and admin's argv say what the engine really runs.
 - **Reporting.** `jarvisd doctor` and admin show detection, proposal and effective assignment.
 
 ### 3.5 Metal (macOS)
@@ -436,7 +444,7 @@ See 05 §5 for the full disposition. The engine-shaping keys are:
 | `gpu_layers` | |
 | `kv_cache_type` | |
 | `flash_attn` | |
-| `extra_args` | |
+| `extra_args` | A `--cache-ram` or `-cram` token here replaces jarvisd's own (§3.4). |
 | `gpu_memory_utilization` | vLLM (§3.12) |
 | `dir_engine`, `dtype`, `quantization` | Transformers (§3.13) |
 | `remote_*` | |
@@ -466,6 +474,13 @@ The live slot's thinking flags become redundant once jarvisd sends the kwarg per
   - `--chat-template-file` (the catalog's pinned template, ID12; last one wins, so `extra_args` can override)
   - `--mmproj`
   - `--embedding`
+  - `--cache-ram` / `-cram` (b11457): the server prompt cache's size in MiB. Upstream defaults to
+    8192, so an unset flag costs up to 8 GiB of host RAM per engine — on the devbox the 9B held
+    8.5 GiB of anonymous RAM for it with every layer on the GPU. jarvisd always sets it (§3.4) and
+    keeps the cache **on** for chat labels: it saves re-processing the system prompt when live,
+    background and computer turns alternate on one slot. `--cache-idle-slots` (on by default)
+    requires it, so `--cache-ram 0` turns prompt caching off for that engine. llama-server
+    rejects the `--cache-ram=N` form and takes the flag twice (last wins).
   - `--list-devices`
   - `/health`, `/v1/chat/completions` (stream + `stream_options.include_usage`), `/v1/embeddings`, `/props`
 
@@ -532,7 +547,7 @@ internal/modules/llm/
 **Local slot spec.**
 
 ```go
-engines.Spec{Name: "llm-live", Path: <llama-server>, Args: ["-m", model, "--jinja", "-c", ctx, "-np", par, "-ngl", layers, "--host", "127.0.0.1", "--port", port, ...mmproj, ...split, ...extra], GPU: {Backend, VisibleDevices}, Health: &HealthCheck{URL: "http://127.0.0.1:<port>/health", DrainGrace: 30s}, StartTimeout: 10m}
+engines.Spec{Name: "llm-live", Path: <llama-server>, Args: ["-m", model, "--jinja", "-c", ctx, "-np", par, "-ngl", layers, "--host", "127.0.0.1", "--port", port, ...mmproj, "--cache-ram", cacheMiB, ...split, ...extra], GPU: {Backend, VisibleDevices}, Health: &HealthCheck{URL: "http://127.0.0.1:<port>/health", DrainGrace: 30s}, StartTimeout: 10m}
 ```
 
 - The port comes from `engines.FreePort()`. The engine binds **127.0.0.1 only**: jarvisd is the only client.
