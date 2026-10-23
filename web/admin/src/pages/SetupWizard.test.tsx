@@ -219,7 +219,10 @@ beforeEach(() => {
   }))
   api.getPromptProvider.mockResolvedValue(superState.prompt_provider!)
   api.hfTokenIsSet.mockResolvedValue(false)
-  tts.getVoices.mockResolvedValue({ voices: ['af_heart', 'bm_george', 'bm_lewis'], current: 'bm_george', default: 'bm_george' })
+  tts.getVoices.mockResolvedValue({
+    provider: 'kokoro', voices: ['af_heart', 'bm_george', 'bm_lewis'], current: 'bm_george', default: 'bm_george',
+    setting: 'tts/tts.kokoro_voice', free_text: false,
+  })
   tts.setVoice.mockResolvedValue()
   settings.getAllSettings.mockResolvedValue({
     services: [
@@ -490,7 +493,7 @@ describe('setup wizard (AD3, AD3a, AD3b)', () => {
       recommend: {},
       warnings: null,
     })
-    tts.sampleVoice.mockResolvedValue(new Blob(['RIFF'], { type: 'audio/wav' }))
+    tts.sampleVoice.mockResolvedValue({ blob: new Blob(['RIFF'], { type: 'audio/wav' }), engine: 'local' })
     const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockResolvedValue()
     URL.createObjectURL = vi.fn(() => 'blob:sample')
     URL.revokeObjectURL = vi.fn()

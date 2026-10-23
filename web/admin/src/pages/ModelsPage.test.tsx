@@ -13,6 +13,8 @@ vi.mock('sonner', () => ({
 }))
 // The voice prompt editor has its own tests and needs a signed-in household.
 vi.mock('@/components/models/PromptEditorCard', () => ({ default: () => null }))
+// The Speech section has its own tests (SpeechCard.test.tsx) and its own settings queries.
+vi.mock('@/components/models/SpeechCard', () => ({ default: () => null }))
 vi.mock('@/api/auth', async (orig) => ({ ...(await orig<typeof import('@/api/auth')>()), getSetupState: vi.fn() }))
 vi.mock('@/api/llm', async (orig) => ({
   ...(await orig<typeof import('@/api/llm')>()),

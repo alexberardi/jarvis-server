@@ -51,6 +51,7 @@ type Module struct {
 	Registry        Registry         // config (A4)
 	Apps            AppClients       // auth (A4)
 	TTS             Speech           // tts: the wizard's voice sample (AD3b)
+	STT             Transcriber      // stt: the Speech section's STT test
 	Phone           PhoneSIP         // cc: the SIP provider's status, self-tests and trace
 	// Exposure is what /api/doctor checks (the listeners served, MQTT, mDNS).
 	Exposure doctor.Exposure
