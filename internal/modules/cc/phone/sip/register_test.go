@@ -158,9 +158,18 @@ func TestBacksOffExponentially(t *testing.T) {
 	for i := 1; i < 6; i++ {
 		gaps = append(gaps, at[i].Sub(at[i-1]))
 	}
-	// timeout + 40, 80, 160, 320, 320 ms
-	if gaps[2] < 2*gaps[0] || gaps[3] < gaps[2] {
+	// timeout + 40, 80, 160, 320, 320 ms. On a loaded runner the first REGISTER can go
+	// unrecorded, shifting the schedule a step (seen in CI: 101, 181, 341, 341, 341 ms), so
+	// this checks the shape, not which step came first: it doubles, and once at the cap a
+	// gap may come in a hair under the one before it.
+	const jitter = 15 * time.Millisecond
+	if gaps[2] < 2*gaps[0] {
 		t.Fatalf("gaps %v do not grow", gaps)
+	}
+	for i := 1; i < len(gaps); i++ {
+		if gaps[i] < gaps[i-1]-jitter {
+			t.Fatalf("gaps %v shrink at %d", gaps, i)
+		}
 	}
 	if gaps[4] > cfg.BackoffMax+cfg.RequestTimeout+200*time.Millisecond {
 		t.Fatalf("gap %v beyond the cap %v", gaps[4], cfg.BackoffMax)
