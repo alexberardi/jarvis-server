@@ -445,14 +445,24 @@ func TestLateHIDStampIgnored(t *testing.T) {
 }
 
 // TestBeginAfterInjectionIgnoresItsLateStamp: a task that begins (or resumes) straight after
-// one of our injections does not take that injection's late HID stamp for the user's.
+// one of our injections does not take that injection's late HID stamp for the user's — even
+// once a newer action has replaced it as the Injecting() window, so only Begin itself could
+// have kept it.
 func TestBeginAfterInjectionIgnoresItsLateStamp(t *testing.T) {
 	ctx := context.Background()
 	f := newGuard(t)
 	f.in.Move(ctx, 200, 150) // not guarded: before the task began
 	f.g.Begin(ctx)
 	f.clock.Advance(100 * time.Millisecond)
-	f.mon.set(f.clock.Now())
+	stamp := f.clock.Now() // the pre-Begin move's event, stamped late (within its 500 ms)
+	f.clock.Advance(50 * time.Millisecond)
+	// An action after Begin: Injecting() now returns only its window, so the poll cannot
+	// recover the pre-Begin one; Begin must have kept it.
+	if err := f.g.Guarded().Move(ctx, 321, 243); err != nil {
+		t.Fatalf("our own move after Begin refused: %v (%s)", err, f.g.Reason())
+	}
+	f.clock.Advance(100 * time.Millisecond)
+	f.mon.set(stamp)
 	f.g.poll(ctx)
 	if err := f.g.Check(); err != nil {
 		t.Fatalf("the injection before Begin paused the task: %v (%s)", err, f.g.Reason())

@@ -35,8 +35,9 @@ type window struct{ start, end time.Time } // end zero: still posting
 // Guard pauses a computer task the moment the user moves the mouse or types. While Jarvis
 // controls the computer, Run polls every 100 ms: HID activity outside every one of our own
 // injection windows ([start, end+500ms]), or the pointer more than 3 px from where our last
-// action left it (or sent it: a move may land after the read that follows it), is the user's. Then the task pauses: Activity shows Paused, and every action
-// through Guarded (or after Check) gets ErrPaused until Resume.
+// action left it (or sent it: a move may land after the read that follows it), is the user's.
+// Then the task pauses: Activity shows Paused, and every action through Guarded (or after
+// Check) gets ErrPaused until Resume.
 //
 // The executor calls Begin when a task starts, runs Run on a goroutine, sends its actions
 // through Guarded and calls Resume when told to (computer_act {resume: true}, or the server's
