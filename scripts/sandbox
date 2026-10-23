@@ -235,7 +235,10 @@ pick_offset() {
   for f in "$SBX_ROOT"/*/offset; do [ -f "$f" ] && taken+="$(cat "$f") "; done
   for o in $(seq 10000 1000 40000); do
     case $taken in *" $o "*) continue ;; esac
-    port_busy $((7700 + o)) || port_busy $((7703 + o)) || port_busy $((7710 + o)) || { echo "$o"; return; }
+    # The model ports too (the tap 7799, scriptllm 7798, the relay 7797): a leftover scripted model
+    # on 7798+o once answered a suite's real-model sandbox (2026-10-22).
+    port_busy $((7700 + o)) || port_busy $((7703 + o)) || port_busy $((7710 + o)) ||
+      port_busy $((7797 + o)) || port_busy $((7798 + o)) || port_busy $((7799 + o)) || { echo "$o"; return; }
   done
   die "no free port offset"
 }
