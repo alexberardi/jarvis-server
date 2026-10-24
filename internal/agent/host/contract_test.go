@@ -59,7 +59,7 @@ var subjects = []subject{
 		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s }, arranging},
 	{"linux-ewmh", "linux", linuxWinID,
 		func() (Backend, recorder) { s, x := linuxEWMH(); return &Linux{Sys: s, X: x}, s },
-		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }, arranging},
+		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }, []string{CapWindowsMonitor}},
 	{"linux-hyprland", "linux", hyprWinID,
 		func() (Backend, recorder) { s := linuxHyprland(); return NewLinux(s), s },
 		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s },
