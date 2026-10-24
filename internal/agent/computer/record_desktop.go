@@ -514,7 +514,9 @@ func (d *deskRecorder) sendAt(e DesktopEvent, pt *Point) {
 }
 
 // keyframe takes event seq's keyframe unless the last one is too recent (on the inputs'
-// clock), and returns where the point is on it when the platform marks it.
+// clock), and returns where the point is on it when the platform marks it. A click the
+// platform marks (Wayland) always gets one: it is all the learner has to name the click by
+// sight, and quick clicks ("7", "7", "=") are each a step (#581).
 func (d *deskRecorder) keyframe(seq int64, pt *Point) *KeyframePoint {
 	if d.p.Keyframe == nil && d.p.Frame == nil {
 		return nil
@@ -523,7 +525,8 @@ func (d *deskRecorder) keyframe(seq int64, pt *Point) *KeyframePoint {
 	if now.IsZero() {
 		now = d.now()
 	}
-	if !d.lastShot.IsZero() && now.Sub(d.lastShot) < cmp.Or(d.p.KeyframeEvery, KeyframeEvery) {
+	marked := pt != nil && d.p.Frame != nil
+	if !marked && !d.lastShot.IsZero() && now.Sub(d.lastShot) < cmp.Or(d.p.KeyframeEvery, KeyframeEvery) {
 		return nil
 	}
 	d.lastShot = now
