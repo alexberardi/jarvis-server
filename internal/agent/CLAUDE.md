@@ -266,6 +266,10 @@ the agent (+~4.5 MB), the price of one verification path.
     sway (`swaymsg`), in `host/wlcomp.go`: list (with `focused`), focus, close. Neither offers
     minimise: there's no real one, and a stand-in is never offered (DESKTOP-COMMANDS.md Q4).
     GNOME/KDE Wayland still have no window control. XWayland's `DISPLAY` does not count.
+    On X11 the EWMH window manager's own requests arrange windows (`_NET_WM_STATE`
+    maximise/fullscreen, `_NET_MOVERESIZE_WINDOW` into half the `_NET_WORKAREA` for snap,
+    `_NET_WM_DESKTOP`), each offered only when the WM advertises it. Live check on a throwaway
+    Xvfb + openbox: `TestX11ArrangingLive` (`JARVIS_X11_ARRANGE=1`, under `env -i`).
 14. **macOS window control needs Accessibility for "Jarvis Automation Agent.app"** (`net.jarvisautomation.agent`, `internal/agent/appid`; was `io.jarvis.agent`) plus
     an Automation grant for System Events. A bare binary added with "+" never shows in the list
     on macOS 26, so the agent ships as a bundle and calls `AXIsProcessTrustedWithOptions`

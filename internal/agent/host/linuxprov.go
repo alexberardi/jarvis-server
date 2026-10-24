@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -38,6 +39,11 @@ type X11 interface {
 	Activate(ctx context.Context, id uint32) error
 	CloseWindow(ctx context.Context, id uint32) error
 	Iconify(ctx context.Context, id uint32) error
+	// Features: the EWMH names the window manager supports, and its desktop count.
+	Features(ctx context.Context) (map[string]bool, int, error)
+	SetState(ctx context.Context, id uint32, add bool, states ...string) error
+	MoveToDesktop(ctx context.Context, id uint32, n int) error
+	Snap(ctx context.Context, id uint32, left bool) error
 }
 
 // NewLinux builds the Linux backend. It touches nothing.
@@ -58,6 +64,7 @@ func (l *Linux) Capabilities(ctx context.Context) []string {
 		caps = append(caps, l.compCapabilities(ctx, l.compositor())...)
 	case l.nativeX(ctx):
 		caps = append(caps, AllWindowCaps...)
+		caps = append(caps, l.x11Arranging(ctx)...)
 	case l.x11Available():
 		caps = append(caps, CapWindowsList, CapWindowsFocus, CapWindowsClose)
 		// wmctrl cannot iconify; minimise needs xdotool. Advertise only what works.
@@ -201,7 +208,7 @@ func (l *Linux) ListWindows(ctx context.Context) ([]Window, error) {
 		}
 		out := make([]Window, len(ws))
 		for i, w := range ws {
-			out[i] = Window{ID: x11.FormatID(w.ID), Title: w.Title, App: w.Class, Minimized: w.Minimized}
+			out[i] = Window{ID: x11.FormatID(w.ID), Title: w.Title, App: w.Class, Minimized: w.Minimized, Focused: w.Active}
 		}
 		return out, nil
 	}
@@ -303,12 +310,67 @@ func (l *Linux) CloseWindow(ctx context.Context, id string) error {
 	return err
 }
 
-// ArrangeWindow: Hyprland and sway (wlcomp.go); X11 gets them in a later change.
+// x11Arranging: the arranging capabilities the EWMH window manager supports now. Unminimize is
+// its activate (it un-minimises); move to a monitor needs RandR, not done yet.
+func (l *Linux) x11Arranging(ctx context.Context) []string {
+	sup, desktops, err := l.X.Features(ctx)
+	if err != nil {
+		return nil
+	}
+	caps := []string{CapWindowsUnminimize}
+	if sup["_NET_WM_STATE"] && sup["_NET_WM_STATE_MAXIMIZED_VERT"] && sup["_NET_WM_STATE_MAXIMIZED_HORZ"] {
+		caps = append(caps, CapWindowsMaximize, CapWindowsUnmaximize)
+	}
+	if sup["_NET_WM_STATE"] && sup["_NET_WM_STATE_FULLSCREEN"] {
+		caps = append(caps, CapWindowsFullscreen)
+		if !slices.Contains(caps, CapWindowsUnmaximize) {
+			caps = append(caps, CapWindowsUnmaximize)
+		}
+	}
+	if sup["_NET_MOVERESIZE_WINDOW"] && sup["_NET_WORKAREA"] {
+		caps = append(caps, CapWindowsSnap)
+	}
+	if sup["_NET_WM_DESKTOP"] && desktops > 1 {
+		caps = append(caps, CapWindowsWorkspace)
+	}
+	return caps
+}
+
+// ArrangeWindow: Hyprland and sway (wlcomp.go), or an EWMH window manager on X11.
 func (l *Linux) ArrangeWindow(ctx context.Context, id string, a WindowAction, target string) error {
 	if comp := l.compositor(); comp != "" {
 		return l.compArrange(ctx, comp, id, a, target)
 	}
-	return Errorf(ErrNotSupported, "%s is not available on X11 yet", a)
+	if err := l.requireWindow(ctx, id); err != nil {
+		return err
+	}
+	w, ok := l.xwin(ctx, id)
+	if !ok {
+		return Errorf(ErrNotSupported, "%s needs an EWMH window manager", a)
+	}
+	const vert, horz, full = "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_STATE_FULLSCREEN"
+	switch a {
+	case ActionUnminimize:
+		return l.xdo(l.X.Activate(ctx, w))
+	case ActionMaximize:
+		return l.xdo(l.X.SetState(ctx, w, true, vert, horz))
+	case ActionFullscreen:
+		return l.xdo(l.X.SetState(ctx, w, true, full))
+	case ActionUnmaximize:
+		if err := l.X.SetState(ctx, w, false, full); err != nil {
+			return l.xdo(err)
+		}
+		return l.xdo(l.X.SetState(ctx, w, false, vert, horz))
+	case ActionSnapLeft, ActionSnapRight:
+		return l.xdo(l.X.Snap(ctx, w, a == ActionSnapLeft))
+	case ActionMoveToWorkspace:
+		n, _ := strconv.Atoi(target)
+		if _, desktops, err := l.X.Features(ctx); err == nil && n > desktops {
+			return Errorf(ErrInvalidTarget, "there is no workspace %d (%d exist)", n, desktops)
+		}
+		return l.xdo(l.X.MoveToDesktop(ctx, w, n-1)) // EWMH desktops count from 0
+	}
+	return Errorf(ErrNotSupported, "%s is not available on X11", a)
 }
 
 func (l *Linux) Open(_ context.Context, target string) error {
