@@ -549,6 +549,10 @@ Nothing below has been done yet. The user chose to hold it until development sta
 
 ### Windows 11 test VM on the dev box
 
+**Built:** `scripts/win11-vm` (install, start, stop, snapshot/revert) and the runbook
+[win11-vm.md](win11-vm.md); the boot path was checked headless. The install itself is the user's
+(a license, clicking through Setup).
+
 - **Install** (the user runs it; it needs sudo):
   `sudo pacman -S --needed swtpm passt qemu-audio-pipewire qemu-ui-gtk qemu-hw-display-virtio-gpu`.
   Already present: `qemu-base` 11.1, `qemu-system-x86`, `edk2-ovmf`, and `/dev/kvm`.
