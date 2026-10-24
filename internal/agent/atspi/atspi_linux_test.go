@@ -86,9 +86,14 @@ func (n *fakeNode) GetExtents(coord uint32) (extents, *dbus.Error) {
 }
 
 func (n *fakeNode) GetAccessibleAtPoint(x, y int32, coord uint32) (objRef, *dbus.Error) {
+	if coord == coordWindow { // the window's corner is at the app's origin on the screen
+		n.app.mu.Lock()
+		x, y = x+n.app.origin[0], y+n.app.origin[1]
+		n.app.mu.Unlock()
+	}
 	for _, k := range n.kids {
 		b := k.box
-		if coord == 0 && x >= b[0] && y >= b[1] && x < b[0]+b[2] && y < b[1]+b[3] {
+		if coord <= coordWindow && x >= b[0] && y >= b[1] && x < b[0]+b[2] && y < b[1]+b[3] {
 			return k.ref(), nil
 		}
 	}
@@ -113,8 +118,10 @@ func (n *fakeNode) GetText(start, end int32) (string, *dbus.Error) {
 }
 
 type fakeApp struct {
-	conn  *dbus.Conn
-	count int
+	conn   *dbus.Conn
+	count  int
+	mu     sync.Mutex
+	origin [2]int32 // where its window is on the screen
 }
 
 // export puts n and its subtree on the app's connection; the root is the app object.
@@ -438,4 +445,46 @@ func startBus(t *testing.T, dir string) string {
 		t.Fatalf("dbus-daemon: %v: %s", err, stderr.String())
 	}
 	return strings.TrimSpace(line)
+}
+
+// ElementAtWindow takes the point from the window's corner (Wayland): the OK button at screen
+// (20, 25) is (15, 15) in a window at (5, 10).
+func TestElementAtWindow(t *testing.T) {
+	w := newWindow()
+	fakeDesktop(t, w.app)
+	w.app.app.mu.Lock()
+	w.app.app.origin = [2]int32{5, 10}
+	w.app.app.mu.Unlock()
+	if el, err := ElementAtWindow(os.Getpid(), 15, 15); err != nil || el == nil || el.Name != "OK" {
+		t.Fatalf("ElementAtWindow(OK) = %+v, %v", el, err)
+	}
+}
+
+// Enable switches org.a11y.Status IsEnabled on (Qt apps join the bus then) and says where the
+// bus address came from; with it on already it leaves it.
+func TestEnable(t *testing.T) {
+	fakeDesktop(t, newWindow().app)
+	addr := os.Getenv("AT_SPI_BUS_ADDRESS")
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", addr) // the session bus, here the same daemon
+	launcher := dial(t, addr)
+	if r, err := launcher.RequestName("org.a11y.Bus", dbus.NameFlagDoNotQueue); err != nil || r != dbus.RequestNameReplyPrimaryOwner {
+		t.Fatalf("own org.a11y.Bus: %v %v", r, err)
+	}
+	props, err := prop.Export(launcher, "/org/a11y/bus", prop.Map{"org.a11y.Status": {
+		"IsEnabled":           {Value: false, Writable: true, Emit: prop.EmitTrue},
+		"ScreenReaderEnabled": {Value: false, Writable: true, Emit: prop.EmitTrue},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := Enable(context.Background())
+	if st.Err != nil || !st.SessionBus || st.From != "AT_SPI_BUS_ADDRESS" || !st.Enabled || !st.TurnedOn || st.ScreenReader {
+		t.Fatalf("Enable = %+v", st)
+	}
+	if v, err := props.Get("org.a11y.Status", "IsEnabled"); err != nil || v.Value() != true {
+		t.Fatalf("IsEnabled after Enable = %v, %v", v, err)
+	}
+	if st := Enable(context.Background()); !st.Enabled || st.TurnedOn {
+		t.Fatalf("Enable with it on = %+v", st)
+	}
 }
