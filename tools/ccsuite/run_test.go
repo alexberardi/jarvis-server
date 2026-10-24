@@ -34,20 +34,34 @@ func TestCopyLines(t *testing.T) {
 
 func TestSkipReason(t *testing.T) {
 	browser := Case{Name: "web_form", Phase: "browser", Status: "required", Target: "browser"}
+	mac := Case{Name: "notes_macos", Phase: "desktop-mac", Status: "required", Target: "desktop"}
+	macPending := Case{Name: "notes_macos", Phase: "desktop-mac", Status: "pending", Target: "desktop"}
 	for _, c := range []struct {
 		c       Case
 		llm     string
 		pending bool
+		goos    string
 		want    string
 	}{
-		{browser, "shared", false, ""},
-		{browser, "scripted", false, "the scripted model does no computer tasks"},
-		{Case{Phase: "browser", Status: "pending"}, "shared", false, "pending"},
-		{Case{Phase: "browser", Status: "pending"}, "shared", true, ""},
-		{Case{Phase: "tests", Status: "required"}, "scripted", false, ""},
+		{browser, "shared", false, "linux", ""},
+		{browser, "scripted", false, "linux", "the scripted model does no computer tasks"},
+		{Case{Phase: "browser", Status: "pending"}, "shared", false, "linux", "pending"},
+		{Case{Phase: "browser", Status: "pending"}, "shared", true, "linux", ""},
+		{Case{Phase: "tests", Status: "required"}, "scripted", false, "linux", ""},
+		// A mac case runs on the Mac test host and nowhere else; it is no longer skipped
+		// there for being unwired (piece 22).
+		{mac, "shared", false, "darwin", ""},
+		{mac, "shared", false, "linux", "macOS only: the Mac test host"},
+		{macPending, "shared", true, "darwin", ""},
+		{macPending, "shared", false, "darwin", "pending"},
+		// The Linux sessions (and the browser cases that need one) are the dev box's.
+		{browser, "shared", false, "darwin", "Linux only: this is the Mac test host"},
+		{Case{Phase: "desktop-wlroots", Status: "required"}, "shared", false, "darwin", "Linux only: this is the Mac test host"},
+		{Case{Phase: "desktop-x11", Status: "required"}, "shared", false, "darwin", "Linux only: this is the Mac test host"},
+		{Case{Phase: "tests", Status: "required"}, "shared", false, "darwin", ""},
 	} {
-		if got := skipReason(c.c, c.llm, c.pending, "linux"); got != c.want {
-			t.Errorf("%+v %s: %q, want %q", c.c, c.llm, got, c.want)
+		if got := skipReason(c.c, c.llm, c.pending, c.goos); got != c.want {
+			t.Errorf("%+v %s on %s: %q, want %q", c.c, c.llm, c.goos, got, c.want)
 		}
 	}
 }
