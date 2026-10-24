@@ -401,7 +401,7 @@ func TestMobileChatOfflineNode(t *testing.T) {
 	ce.eng.say("Your kitchen node is offline right now.")
 	start := time.Now()
 	frames := normalize(ce.chat("tok-7", map[string]any{"message": "weather", "conversation_id": r["conversation_id"]}))
-	// Waiting on the node would take the whole chatToolWait (10 s).
+	// Waiting on the node would take the whole chatToolWait.
 	if time.Since(start) >= chatToolWait || len(ce.pub.cmds) != 0 {
 		t.Fatal("offline node was waited on")
 	}
@@ -414,11 +414,31 @@ func TestMobileChatOfflineNode(t *testing.T) {
 	}
 	// The LLM saw the failure, and (every call failed) the note that nothing was done.
 	msgs := messagesOf(ce.eng.last())
-	if c := msgs[len(msgs)-2]["content"].(string); !strings.Contains(c, "the node is offline") {
+	if c := msgs[len(msgs)-2]["content"].(string); !strings.Contains(c, "the node is offline") || !strings.Contains(c, `"error_code": "offline"`) {
 		t.Fatalf("formatting prompt %q", c)
 	}
 	if last := msgs[len(msgs)-1]; last["role"] != "system" || last["content"] != toolsFailedNote {
 		t.Fatalf("no failure note: %v", last)
+	}
+}
+
+// TestMobileChatNodeTimeout (#587): a node that doesn't answer in chatToolWait gives the model a
+// failure with an error_code, and a hint that the command may still have run.
+func TestMobileChatNodeTimeout(t *testing.T) {
+	old := chatToolWait
+	chatToolWait = 50 * time.Millisecond
+	t.Cleanup(func() { chatToolWait = old })
+	ce := newChatEnv(t, prompts.Qwen3_8B)
+	r := ce.do("POST", "/api/v0/mobile/chat/warmup", map[string]any{"node_id": ce.node.id, "household_id": voiceHH}, bearer("tok-7")).want(200).json()
+	ce.eng.say(`<tool_call>{"name": "get_weather", "arguments": {}}</tool_call>`)
+	ce.eng.say("The node didn't answer.")
+	ce.chat("tok-7", map[string]any{"message": "weather", "conversation_id": r["conversation_id"]})
+	msgs := messagesOf(ce.eng.last())
+	c := msgs[len(msgs)-2]["content"].(string)
+	for _, want := range []string{`"success": false`, `"timeout": true`, `"error_code": "timeout"`, "may still have run", "don't open another tab"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("tool result %q lacks %q", c, want)
+		}
 	}
 }
 
@@ -709,7 +729,7 @@ func TestReportToolsNeedsMQTTSession(t *testing.T) {
 	}
 	// The errand runner's node calls fail fast as well.
 	if out := (errandNodes{ve.m}).RunTool(context.Background(), ce.node.id, "x", nil, nil, "", time.Hour); pyjson.Dumps(out, false) !=
-		`{"success": false, "error": "the node is offline"}` {
+		`{"success": false, "error": "the node is offline", "error_code": "offline"}` {
 		t.Fatal(pyjson.Dumps(out, false))
 	}
 	if len(pub.commands("report_tools"))+len(pub.commands("tool_call")) != 0 {

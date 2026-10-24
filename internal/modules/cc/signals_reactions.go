@@ -355,7 +355,7 @@ func (r *toolsReport) clientTools() []prompts.Tool {
 // come back as a synthetic failure, never an error. No `trusted` flag (D4/D7).
 func (m *Module) dispatchNodeCommand(ctx context.Context, nodeID, command string, args map[string]any, userID *int64, timeout time.Duration) map[string]any {
 	if !m.bus.Available() {
-		return map[string]any{"success": false, "error": "could not dispatch to node: " + ErrNoBroker.Error()}
+		return map[string]any{"success": false, "error": "could not dispatch to node: " + ErrNoBroker.Error(), "error_code": "no_broker"}
 	}
 	if args == nil {
 		args = map[string]any{}
@@ -369,11 +369,11 @@ func (m *Module) dispatchNodeCommand(ctx context.Context, nodeID, command string
 	defer cancel()
 	_, raw, err := m.bus.CommandAwait(cctx, nodeID, "tool_call", details, key)
 	if err != nil {
-		return map[string]any{"success": false, "error": "the node didn't respond in time", "timeout": true}
+		return map[string]any{"success": false, "error": "the node didn't respond in time", "timeout": true, "error_code": "timeout"}
 	}
 	var res map[string]any
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return map[string]any{"success": false, "error": "malformed node result"}
+		return map[string]any{"success": false, "error": "malformed node result", "error_code": "malformed"}
 	}
 	out, present := res["output"]
 	if !present {
