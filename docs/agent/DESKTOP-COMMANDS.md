@@ -1,0 +1,71 @@
+# Desktop commands: voice instead of the mouse
+
+Status: **spec in progress** (question rounds with the user, one at a time; queue at the bottom).
+
+## North star
+
+A user can realistically **talk to Jarvis instead of using their mouse**. Every routine
+pointer action on the desktop (switch window, arrange windows, scroll, pick a tab, press a
+button, choose a menu item) has a spoken path that is fast and dependable enough to be the
+default, not a party trick.
+
+## Decided
+
+- **2026-10-24: first-party Go commands compiled into `jarvis-agent` (option B).** Go/WASM
+  Pantry packages (A/C) are deferred. Keep the window API shaped so it could later be exposed to
+  packages, but don't build that now.
+
+## Where we are today (main @ 8c58f315)
+
+| Layer | What exists |
+|---|---|
+| `internal/agent/host` | `Backend` with list / minimize / focus / close, volume, open, launch. Capabilities are a closed set, computed per call. |
+| Linux backend | X11 only (built-in EWMH, wmctrl/xdotool fallback). **On Wayland, including Hyprland and sway, it reports no window capabilities at all.** |
+| macOS backend | Accessibility API; ids are `pid/index`. |
+| Windows backend | Win32 (`HWND`). |
+| `internal/agent/desktop` | One node tool per capability: `desktop_list_windows`, `desktop_minimize_window`, `desktop_focus_window`, `desktop_close_window` (Risky), plus open/apps/volume. `window_id` accepts a spoken name, resolved by `winmatch`. |
+| Elsewhere | `dictate/linuxwin.go` already focuses windows via `hyprctl`/`swaymsg`. `computer/desktop_linux.go` lists Wayland windows, captures with grim, and reads elements via AT-SPI; `ax` does the same on macOS. These belong to the computer-control task loop (`COMPUTER-CONTROL.md`), not the voice desktop tools. |
+
+Gaps against the north star:
+
+1. **Wayland/Hyprland has zero voice window control**, while the code to do it already sits in
+   `dictate` and `computer`.
+2. Missing window verbs: restore, maximize, fullscreen, snap/tile (left/right/halves), move to
+   another monitor, move to a workspace/desktop, always-on-top, active window ("what's this"),
+   close every window of an app, show desktop.
+3. Nothing inside an app: scroll, tabs, back/forward, menus, "click Send".
+4. Token budget: the prompt diet (`docs/decisions/2026-10-20-prompt-diet.md`) halved prompt
+   size. One tool per verb would add back roughly 1–2k tokens on a desktop node.
+
+## Draft shape (will change as questions are answered)
+
+- **L1: windows.** Full verb set on all four backends (X11, Hyprland/sway, macOS, Windows),
+  with Hyprland/sway moved into `host` so `dictate` and `computer` share one implementation.
+- **L2: in-app navigation without targeting.** Scroll, page, tab next/previous/N, back/forward,
+  zoom, by sending keys or scroll events to the focused window.
+- **L3: targeting elements.** "Click Send", "open the File menu", by name from the
+  accessibility tree (AX / AT-SPI / UIA), with a numbered-overlay fallback ("show numbers",
+  "click 7") for apps that expose no tree.
+
+## Question queue
+
+1. **Scope:** does this spec cover L2 and L3 (in-app navigation and element targeting), or
+   windows only, leaving in-app work to computer control? *(asked 2026-10-24)*
+2. Tool shape against the token budget: one `desktop_window {window, action, …}` tool vs. one
+   tool per verb, and how toolbench gates it.
+3. Speed: deterministic fast path (a grammar matched on the node, no LLM) for hot phrases like
+   "scroll down" and "next tab", or LLM for everything?
+4. Hyprland tiling semantics: what do "maximize", "snap left" and "move to the other monitor"
+   mean in a tiling compositor (fullscreen 1 vs. a float, `movewindow l`)?
+5. Workspaces and Spaces: macOS Spaces and Windows virtual desktops have no public API. Ship
+   per-platform, or leave them out?
+6. Named layouts ("work mode": Chrome left, Slack right on monitor 2): in scope, and where are
+   they stored?
+7. "This window", "that one", "the other one": pronoun and recency resolution, and whether the
+   last-acted window stays sticky.
+8. Risk: which verbs need a confirmation (close all of an app, quit), and whether a voice
+   confirmation is enough.
+9. Feedback: how the user knows it worked without looking: spoken reply, sound, or silent on
+   success.
+10. Test plan: the contract suite per backend, live tests on this box (Hyprland), MBP and the
+    Windows box, and the toolbench corpus for new utterances.
