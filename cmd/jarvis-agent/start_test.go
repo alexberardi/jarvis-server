@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -232,6 +233,10 @@ func TestStartHandsOverToTheInstalledCopy(t *testing.T) {
 // bundle would own it forever (#483). The dirs and version func are fakes: the test never reads
 // the real /Applications or execs a binary.
 func TestHandoverDecisionAfterAHandover(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// install.BundleOf reads a macOS path ('/'-separated); a Windows temp dir is not one.
+		t.Skip("macOS bundle paths")
+	}
 	old := version
 	version = "v1.0.0"
 	t.Cleanup(func() { version = old })
