@@ -948,7 +948,7 @@ func hideFromScreenshots(tools node.Multi, i *island.Island) {
 }
 
 // attachIsland keeps the island out of desktop_read_screen's pictures and shows on it what
-// dictation types, fills, clicks or asks, while listening is on.
+// dictation types, fills, clicks or asks, and what window commands did, while listening is on.
 func attachIsland(tools node.Multi, i *island.Island, listening func() bool) {
 	note := func(text string, d time.Duration) {
 		if listening() {
@@ -965,6 +965,8 @@ func attachIsland(tools node.Multi, i *island.Island, listening func() bool) {
 				x.Confirm.Show = note
 			}
 		case *browser.Tools:
+			x.Show = note
+		case *desktop.Tools:
 			x.Show = note
 		}
 	}
@@ -1132,6 +1134,7 @@ func dictationTools(h *host.Host, mode string, log *slog.Logger) (*dictate.Tools
 func openThenType(d *desktop.Tools, dt *dictate.Tools) *desktop.Tools {
 	tr := &launches.Tracker{Log: dt.Log}
 	d.Log = dt.Log
+	d.Confirm = dt.Confirm // closing every window of an app asks first (DESKTOP-COMMANDS.md Q8)
 	if dt.Win != nil && runtime.GOOS == "darwin" {
 		// The window list is AppleScript there, seconds on a busy Mac and behind the Automation
 		// grant; the window server answers in milliseconds with no grant.

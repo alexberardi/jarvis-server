@@ -59,6 +59,10 @@ type engineResult struct {
 	Validation    *validationRequest
 	ServerResults []chatMsg
 	EndOfExchange bool
+	// IslandOnly: every client result of the round said the node's island covered it
+	// (island_only, a desktop command): no LLM call; a voice node gets no reply to speak, other
+	// callers (mobile chat) get the island text as Message (DESKTOP-COMMANDS.md Q9).
+	IslandOnly bool
 	// KeepListening: a follow-up the gate rejected; the node keeps its window open
 	// (followup_gate.go). Sent as keep_listening only when true.
 	KeepListening bool

@@ -183,7 +183,9 @@ func TestChainedToolCalls(t *testing.T) {
 		return complete("Minimised Firefox."), nil
 	}
 	r, tr := toolRig(t, desktopTools(os), toolCalls(call("c1", desktop.ToolList, `{}`)), cont)
-	if tr.Outcome != OutcomeSpoken || tr.Message != "Minimised Firefox." {
+	// The minimise is a desktop command: the island showed it, so nothing is spoken (Q9), even
+	// though this fake command-center still replied.
+	if tr.Outcome != OutcomeSilent || tr.Message != "" {
 		t.Fatalf("turn %+v", tr)
 	}
 	if got := os.did(); !slices.Equal(got, []string{"minimize 0x1"}) {
@@ -366,5 +368,23 @@ func TestContinueEndingNotForMeOrSilentSaysNothing(t *testing.T) {
 		if slices.Contains(r.srv.callList(), "speak") || len(r.spk.all()) != 1 {
 			t.Fatalf("%s: something was played", stop)
 		}
+	}
+}
+
+// A desktop command the computer can't do is a failure the island shows: the error chime, no
+// "Sorry, that didn't work" spoken over it.
+func TestIslandOnlyFailureChimesInsteadOfSpeaking(t *testing.T) {
+	os := &fakeOS{}
+	r, tr := toolRig(t, desktopTools(os), toolCalls(call("c1", desktop.ToolWindow, `{"action":"unsupported"}`)),
+		steps(t, complete("")))
+	if tr.Outcome != OutcomeSilent || tr.Message != "" {
+		t.Fatalf("turn %+v", tr)
+	}
+	outs := r.spk.all()
+	if len(outs) != 2 { // the wake chime, then the error chime: no speech
+		t.Fatalf("%d playbacks", len(outs))
+	}
+	if got := os.did(); len(got) != 0 {
+		t.Fatalf("OS did %v", got)
 	}
 }

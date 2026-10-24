@@ -225,7 +225,7 @@
             "type": "string"
           },
           "window": {
-            "description": "The app or window as the user said it ('Firefox', 'the terminal'), or an id from desktop_list_windows. Leave out for the window in front",
+            "description": "The app or window as the user said it ('Firefox', 'the terminal'), 'it' (the one just acted on), 'the other one' (the one before this one, as 'switch back' means), or an id from desktop_list_windows. Leave out for the window in front",
             "type": "string"
           }
         },
@@ -256,22 +256,24 @@
     "allow_direct_answer": false,
     "examples": [],
     "function": {
-      "description": "Ask one window on the user's computer to close, as if its close button were clicked. The app may prompt to save; it is never force-killed.",
+      "description": "Close a window on the user's computer, as its close button would (the app may ask to save; never force-killed). all_of_app closes every window of that app.",
       "name": "desktop_close_window",
       "parameters": {
         "properties": {
+          "all_of_app": {
+            "description": "Close every window of the app, not just this one",
+            "type": "boolean"
+          },
           "window_id": {
-            "description": "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')",
+            "description": "The app or window as the user said it ('TextEdit', 'the terminal', 'it'), or an id from desktop_list_windows. Leave out for the window in front",
             "type": "string"
           }
         },
-        "required": [
-          "window_id"
-        ],
+        "required": [],
         "type": "object"
       }
     },
-    "is_risky": true,
+    "is_risky": false,
     "keywords": [
       "close",
       "window"

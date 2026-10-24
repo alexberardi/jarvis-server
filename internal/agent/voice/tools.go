@@ -59,6 +59,9 @@ type roundResult struct {
 	allFailed   bool
 	firstErr    string // the first failure's spoken form (failure_message, else the tool's error)
 	toolMessage string // the first successful call's own "message"
+	// islandOnly: every call's result said the island showed it (island_only, a desktop
+	// command): nothing is spoken for the round, a failure gets the error chime instead.
+	islandOnly bool
 	// signals: wait_for_input and clear_history if any call set them; the last deferred step.
 	signals node.Signals
 }
@@ -68,6 +71,7 @@ type roundResult struct {
 func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls []ToolCall) roundResult {
 	var r roundResult
 	r.allFailed = len(calls) > 0
+	r.islandOnly = len(calls) > 0
 	for _, c := range calls {
 		args := node.DecodeArgs(c.Function.Arguments)
 		start := p.Now()
@@ -79,6 +83,9 @@ func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls
 			r.signals.OnResponseComplete = sig.OnResponseComplete
 		}
 		ok, _ := out["success"].(bool)
+		if only, _ := out[node.IslandOnlyKey].(bool); !only {
+			r.islandOnly = false
+		}
 		run := ToolRun{Name: c.Function.Name, Args: args, Success: ok, Took: p.Now().Sub(start)}
 		if !ok && out["status"] == "awaiting_confirmation" {
 			// A parked action (dictate.Confirmer.Ask): nothing done yet, so not a success, but a
