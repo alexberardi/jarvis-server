@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/atspi"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/evdev"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -228,6 +230,9 @@ type wlEnv struct {
 	openErr  error
 	a11yErr  error
 	focus    map[int]*computeruse.Element
+	at       map[[3]int]*computeruse.Element // ElementAt's answers by pid and window point
+	offBus   map[int]bool                    // processes not on the accessibility bus
+	logs     bytes.Buffer
 	shots    int
 	stopped  bool
 	startOut map[string]any
@@ -236,8 +241,9 @@ type wlEnv struct {
 func newWLEnv(t *testing.T) *wlEnv {
 	t.Helper()
 	e := &wlEnv{recEnv: newRecEnv(t), hypr: newFakeHypr(), clock: newFakeDesk(),
-		focus: map[int]*computeruse.Element{42: {Role: "text", Name: "Document"}}}
-	e.src = newWaylandSource(e.r.Dir, e.system(), slogDiscard())
+		focus: map[int]*computeruse.Element{42: {Role: "text", Name: "Document"}},
+		at:    map[[3]int]*computeruse.Element{}, offBus: map[int]bool{}}
+	e.src = newWaylandSource(e.r.Dir, e.system(), slog.New(slog.NewTextHandler(&lockedWriter{w: &e.logs, mu: &e.mu}, nil)))
 	e.src.now = e.clock.now
 	e.r.Sources[ModeDesktop] = e.src
 	return e
@@ -259,11 +265,24 @@ func (e *wlEnv) system() wlSystem {
 			return func() { e.mu.Lock(); e.stopped = true; e.mu.Unlock() }, nil
 		},
 		Layout: func(context.Context) *xkb.Layout { return xkb.US() },
-		Access: func(context.Context) error { return e.a11yErr },
+		Access: func(context.Context) atspi.State {
+			return atspi.State{SessionBus: true, From: "org.a11y.Bus", Enabled: true, Err: e.a11yErr}
+		},
 		Focused: func(pid int) (*computeruse.Element, error) {
 			e.mu.Lock()
 			defer e.mu.Unlock()
+			if e.offBus[pid] {
+				return nil, &atspi.Error{Code: atspi.CodeNotFound, Msg: "no accessible app"}
+			}
 			return e.focus[pid], nil
+		},
+		ElementAt: func(pid, x, y int) (*computeruse.Element, error) {
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			if e.offBus[pid] {
+				return nil, &atspi.Error{Code: atspi.CodeNotFound, Msg: "no accessible app"}
+			}
+			return e.at[[3]int{pid, x, y}], nil
 		},
 		Shot: func(context.Context) (screen.Shot, error) {
 			e.mu.Lock()
@@ -322,6 +341,20 @@ func (e *wlEnv) record(t *testing.T, do func()) (Trace, []DesktopEvent) {
 	}
 	return tr, evs
 }
+
+// lockedWriter is a log's writer under the env's lock (the worker logs while the test reads).
+type lockedWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(b []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(b)
+}
+
+func (e *wlEnv) logged() string { e.mu.Lock(); defer e.mu.Unlock(); return e.logs.String() }
 
 // The whole path on Hyprland: typing grouped per focused element (AT-SPI's role and name) in
 // the focused window, a shortcut as a key, clicks with the cursor's point and the window, a
@@ -399,6 +432,70 @@ func TestWaylandRecording(t *testing.T) {
 	}
 	if _, warned := e.startOut["warning"]; warned {
 		t.Fatalf("no warning with AT-SPI: %v", e.startOut)
+	}
+	if l := e.logged(); !strings.Contains(l, "desktop recording: accessibility") || !strings.Contains(l, "address_from=org.a11y.Bus") {
+		t.Fatalf("the start doesn't log the accessibility setup: %s", l)
+	}
+}
+
+// A click is named by AT-SPI's element under it, asked from the focused window's corner (GTK
+// and Qt on Wayland don't know where their window is); outside that window nothing is asked.
+func TestWaylandClickElement(t *testing.T) {
+	e := newWLEnv(t)
+	e.at[[3]int{42, 500, 250}] = &computeruse.Element{Role: "button", Name: "Save"}
+	_, evs := e.record(t, func() {
+		e.hypr.set("", "1500, 250")
+		s := &evStream{at: evT0}
+		s.tap(evdev.BtnLeft)
+		e.feed(s)
+		e.hypr.set("", "200, 250") // left of the window at x 1000
+		s = &evStream{at: evT0.Add(time.Second)}
+		s.tap(evdev.BtnLeft)
+		e.feed(s)
+	})
+	if got := summary(evs); got != `click Save; click` {
+		t.Fatalf("trace: %s", got)
+	}
+	if el := evs[0].Element; el.Role != "button" || evs[0].Context != "" || evs[1].Context != "" {
+		t.Fatalf("clicks: %+v %+v", evs[0], evs[1])
+	}
+}
+
+// An app that isn't on the accessibility bus (foot) marks its events context none, so learning
+// knows there was no element to name (and keeps none of its typing); its failure is logged
+// once. The recording's other apps keep their elements.
+func TestWaylandAppOffBus(t *testing.T) {
+	e := newWLEnv(t)
+	e.offBus[99] = true
+	_, evs := e.record(t, func() {
+		e.hypr.set(`{"address":"0x3","at":[0,0],"size":[1000,1080],"class":"foot","title":"~","pid":99}`, "500, 500")
+		s := &evStream{at: evT0}
+		s.tap(evdev.BtnLeft)
+		s.tap(evKeyH)
+		s.tap(evKeyI)
+		s.tap(evdev.KeyEnter)
+		e.feed(s)
+		e.hypr.set(editorWindow, "")
+		s = &evStream{at: evT0.Add(time.Second)}
+		s.tap(evKeyT)
+		e.feed(s)
+	})
+	if got := summary(evs); got != `click; input "hi"; key [Enter]; input Document "t"` {
+		t.Fatalf("trace: %s", got)
+	}
+	for _, ev := range evs[:3] {
+		if ev.Context != "none" || ev.App != "foot" {
+			t.Fatalf("foot's event: %+v", ev)
+		}
+	}
+	if evs[3].Context != "" {
+		t.Fatalf("the editor's event: %+v", evs[3])
+	}
+	if n := strings.Count(e.logged(), "no accessibility for an app"); n != 1 {
+		t.Fatalf("logged foot's failure %d times: %s", n, e.logged())
+	}
+	if _, warned := e.startOut["warning"]; warned {
+		t.Fatalf("no start warning with the bus up: %v", e.startOut)
 	}
 }
 

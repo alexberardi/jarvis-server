@@ -138,7 +138,8 @@ type DesktopEvent struct {
 	DX          int             `json:"dx,omitempty"` // scroll: lines
 	DY          int             `json:"dy,omitempty"`
 	Window      *EventWindow    `json:"window,omitempty"`
-	// Context is "none" when the recording has no accessibility context (no element, no mask).
+	// Context is "none" when the recording, or the event's app, has no accessibility context
+	// (no element, no mask).
 	Context string `json:"context,omitempty"`
 	// KeyframePoint: the event has a keyframe with its point marked, here.
 	KeyframePoint *KeyframePoint `json:"keyframe_point,omitempty"`
@@ -446,6 +447,9 @@ func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *EventWindow, a
 	e := DesktopEvent{RecordingID: d.id, Kind: kind, TS: at.UnixMilli(), Window: win, Context: d.context}
 	if el != nil {
 		e.App = el.App
+		if el.NoContext {
+			e.Context = ContextNone
+		}
 		if el.Role != "" || el.Name != "" || el.Path != "" {
 			e.Element = &DesktopElement{Role: el.Role, Name: el.Name, AXPath: el.Path}
 		}
