@@ -597,6 +597,9 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
+	if res := t.reuseTaskTab(ctx, u); res != nil {
+		return res, nil
+	}
 	extra := map[string]any{"url": u}
 	behind := false
 	if t.Origins.Known() {
@@ -619,6 +622,37 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		res["opened_behind_chat"] = true
 	}
 	return res, nil
+}
+
+// reuseTaskTab answers an open of a site's home page (https://www.google.com) while the task tab
+// is already on that site (#587: "search for cats instead" opened a second Google tab, and its
+// fill missed the box): nothing opens, and the model is told to search in the task tab. Nil
+// when there is no such tab, or u is another site or a page deeper in it.
+func (t *Tools) reuseTaskTab(ctx context.Context, u string) map[string]any {
+	want, err := url.Parse(u)
+	if err != nil || (want.Path != "" && want.Path != "/") || want.RawQuery != "" || want.Fragment != "" {
+		return nil
+	}
+	task := t.taskTab()
+	if task == "" {
+		return nil
+	}
+	cur, ok := t.tabURL(ctx, map[string]any{"tab_id": task})
+	if !ok {
+		return nil
+	}
+	have, err := url.Parse(cur)
+	if err != nil || siteHost(have) != siteHost(want) {
+		return nil
+	}
+	return map[string]any{"success": true, "tab_id": task, "reused": true, "url": cur,
+		"note": "The task tab is already on " + have.Hostname() + "; nothing new was opened. " +
+			"Use browser_fill with field search (and submit true) on it; it acts on this tab without a tab_id."}
+}
+
+// siteHost is u's host without a "www." prefix, lower case.
+func siteHost(u *url.URL) string {
+	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
 }
 
 func intArg(args map[string]any, k string) (int, bool) {
@@ -808,6 +842,15 @@ func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, 
 		t.show("Filling " + where + ": " + shown)
 		extra := map[string]any{"text": text, "field": field, "submit": submit}
 		res, err := t.call(ctx, "fill", args, extra)
+		var ce *CommandError
+		if field == "" && errors.As(err, &ce) && ce.Code == "field_not_found" {
+			// #587: nothing focused (a results page after a search): the page's one search box,
+			// when it has one. Otherwise the extension's own error, which lists the fields.
+			extra["field"] = "search"
+			if r, err2 := t.call(ctx, "fill", args, extra); err2 == nil {
+				return r, nil
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
