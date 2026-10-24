@@ -360,10 +360,56 @@ func TestPiListsDeviceFamilies(t *testing.T) {
 	}
 }
 
+// The user's QA (2026-10-23): comfyui's comfyui_jobs agent was logged skipped on the Go node,
+// so its finished videos never reached the inbox. On a Pi a package's agents are listed for
+// the sidecar and not skipped; a desktop still skips them. An agent the scheduler reports
+// failing (AgentHealth) marks its package failed, as a command that didn't load does.
+func TestPiRunsPackageAgents(t *testing.T) {
+	r := newRepos(t)
+	repo := r.add(t, "o/weather", "HEAD", weather("1.0.0"))
+	m, _, _, _ := newPiManager(t, r)
+	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands"}
+	details, err := m.Install(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := readList(filepath.Join(m.Root, "commands.json"))
+	if len(list) != 1 || details["skipped_components"] != nil ||
+		!reflect.DeepEqual(list[0].Agents, []string{"agents/weather_context/agent.py"}) {
+		t.Fatalf("pi: details %v, list %+v", details, list)
+	}
+	if h := m.Report()[0]["health"]; h != "ok" {
+		t.Fatalf("health = %v", h)
+	}
+	m.AgentHealth = func() map[string]string { return map[string]string{"get_weather_meteo": "weather_context: boom"} }
+	if h := m.Report()[0]["health"]; h != "failed" {
+		t.Fatalf("health with a failing agent = %v", h)
+	}
+
+	desk, _, _ := newTestManager(t, r)
+	details, err = desk.Install(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ = readList(filepath.Join(desk.Root, "commands.json"))
+	if !reflect.DeepEqual(details["skipped_components"], []string{"agent:weather_context"}) || list[0].Agents != nil {
+		t.Fatalf("desktop: details %v, list %+v", details, list)
+	}
+}
+
 // A device component's declared path must stay inside the package.
 func TestManifestRefusesADeviceComponentOutside(t *testing.T) {
 	_, err := ParseManifest([]byte("name: x\ncomponents:\n  - type: device_protocol\n    name: x\n    path: ../x/protocol.py\n"))
 	if err == nil {
 		t.Fatal("accepted a path outside the package")
+	}
+	for _, y := range []string{"path: ../x/agent.py", "path: agents/x/agent.sh"} {
+		if _, err := ParseManifest([]byte("name: x\ncomponents:\n  - type: agent\n    name: x\n    " + y + "\n")); err == nil {
+			t.Fatalf("accepted an agent at %s", y)
+		}
+	}
+	// Without a path, the conventional one (agents/<name>/agent.py) is checked.
+	if _, err := ParseManifest([]byte("name: x\ncomponents:\n  - type: agent\n    name: ../../x\n")); err == nil {
+		t.Fatal("accepted an agent named outside the package")
 	}
 }

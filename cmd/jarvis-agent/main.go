@@ -52,6 +52,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
+	"github.com/alexberardi/jarvis-server/internal/agent/pkgagents"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -1098,6 +1099,11 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 			f.pkgs.Builtins = packages.PiBuiltins(os.Getenv("JARVIS_AGENT_NODE_COMMANDS"))
 			// apt packages and post_install ops through install-pi.sh's root wrappers.
 			f.pkgs.System = packages.NewSystem(log)
+			// The packages' background agents (comfyui_jobs) on their schedules, their alerts
+			// in the Pi's queue; one that keeps failing marks its package failed in the app.
+			agents := &pkgagents.Scheduler{Sidecar: live, Alerts: f.host.Alerts, Log: log}
+			f.pkgs.AgentHealth = agents.Failing
+			go agents.Run(ctx)
 			go boot()
 		} else {
 			boot()

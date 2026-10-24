@@ -76,6 +76,9 @@ type Manager struct {
 	// System, when set (the Pi profile), runs a package's apt sources, apt packages and
 	// post_install ops; without it a package that needs them is refused.
 	System *System
+	// AgentHealth, when set (the Pi profile: pkgagents.Scheduler.Failing), are the packages
+	// whose agents keep failing, with why: Report marks them failed.
+	AgentHealth func() map[string]string
 
 	mu     sync.Mutex
 	now    func() time.Time  // time.Now; tests move it
@@ -130,18 +133,23 @@ func (m *Manager) List() []Installed {
 
 // Report is the installed_packages list of a report_tools answer, as a Pi sends it: name,
 // version, previous_version when there is one, and health "failed" when the package's
-// commands didn't load.
+// commands or agents didn't load, or its agents keep failing (AgentHealth).
 func (m *Manager) Report() []map[string]any {
 	m.mu.Lock()
 	failed := m.failed
 	m.mu.Unlock()
+	var failing map[string]string
+	if m.AgentHealth != nil {
+		failing = m.AgentHealth()
+	}
 	out := []map[string]any{}
 	for _, in := range m.List() {
 		e := map[string]any{"name": in.Manifest.Name, "version": in.Manifest.Version, "health": "ok"}
 		if in.PreviousVersion != "" {
 			e["previous_version"] = in.PreviousVersion
 		}
-		if _, bad := failed[in.Manifest.Name]; bad {
+		_, bad := failed[in.Manifest.Name]
+		if _, f := failing[in.Manifest.Name]; bad || f {
 			e["health"] = "failed"
 		}
 		out = append(out, e)
@@ -185,10 +193,10 @@ func (m *Manager) Boot(ctx context.Context) error {
 }
 
 // runs are the component types beyond commands this node's sidecar loads: on a Pi (the one
-// with built-ins) device families and managers, which only its device topics use.
+// with built-ins) device families and managers, which only its device topics use, and agents.
 func (m *Manager) runs() []string {
 	if m.Builtins != nil {
-		return DeviceTypes
+		return PiTypes
 	}
 	return nil
 }
@@ -221,6 +229,7 @@ func (m *Manager) writeList() (int, error) {
 		Commands []string `json:"commands"`
 		Families []string `json:"families,omitempty"`
 		Managers []string `json:"managers,omitempty"`
+		Agents   []string `json:"agents,omitempty"`
 	}
 	list := []entry{}
 	pi := len(m.runs()) > 0
@@ -231,6 +240,7 @@ func (m *Manager) writeList() (int, error) {
 		}
 		if pi {
 			e.Families, e.Managers = in.Manifest.Paths("device_protocol"), in.Manifest.Paths("device_manager")
+			e.Agents = in.Manifest.Paths(Agent)
 		}
 		list = append(list, e)
 	}

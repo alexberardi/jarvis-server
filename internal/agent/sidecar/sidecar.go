@@ -90,6 +90,7 @@ type Sidecar struct {
 	pkgOf   map[string]string // command -> the installed package it came from
 	player  map[string]string // command -> its takes_over_playback_binary
 	failed  map[string]string // package -> why its commands didn't load
+	agents  []AgentDef
 
 	devMu   sync.Mutex
 	devices nodesettings.Devices
@@ -191,6 +192,12 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
+		Agents []struct {
+			Name         string `json:"name"`
+			Package      string `json:"package"`
+			Interval     int    `json:"interval_seconds"`
+			RunOnStartup bool   `json:"run_on_startup"`
+		} `json:"agents"`
 		deviceComponents
 	}
 	if err := s.roundTrip("describe", nil, &desc); err != nil {
@@ -214,6 +221,10 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		}
 	}
 	s.failed = desc.Failed
+	for _, a := range desc.Agents {
+		s.agents = append(s.agents, AgentDef{Name: a.Name, Package: a.Package,
+			Interval: time.Duration(a.Interval) * time.Second, RunOnStartup: a.RunOnStartup})
+	}
 	s.setDevices(desc.deviceComponents)
 	return s, nil
 }
@@ -322,6 +333,33 @@ func (s *Sidecar) RemindersDue(_ context.Context) ([]DueReminder, int, error) {
 		return nil, 0, err
 	}
 	return res.Due, res.Pending, nil
+}
+
+// AgentDef is one installed package's background agent (an IJarvisAgent) and its schedule.
+type AgentDef struct {
+	Name, Package string
+	Interval      time.Duration
+	RunOnStartup  bool
+}
+
+// Agents are the packages' background agents, read once at start (a Pi's sidecar).
+func (s *Sidecar) Agents() []AgentDef { return s.agents }
+
+// RunAgent is one run of an agent (its run(), then its get_alerts()): the alerts, each the
+// SDK's Alert.to_dict(). An error is the run raising, or the sidecar failing. The sidecar
+// serves nothing else while it runs.
+func (s *Sidecar) RunAgent(_ context.Context, name string) ([]json.RawMessage, error) {
+	var res struct {
+		Alerts []json.RawMessage `json:"alerts"`
+		Error  *string           `json:"error"`
+	}
+	if err := s.roundTrip("agent_run", map[string]any{"name": name}, &res); err != nil {
+		return nil, err
+	}
+	if res.Error != nil {
+		return nil, errors.New(*res.Error)
+	}
+	return res.Alerts, nil
 }
 
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {
