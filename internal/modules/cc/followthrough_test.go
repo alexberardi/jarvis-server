@@ -10,6 +10,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/watches"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -368,5 +369,97 @@ func TestFollowThroughUnsavedWithExchangeComplete(t *testing.T) {
 	msgs := messagesOf(reqs[len(reqs)-2])
 	if last := msgs[len(msgs)-1]; last["role"] != "system" || !strings.HasPrefix(last["content"].(string), nagUnsaved) {
 		t.Fatalf("no not-saved nudge: %v", last)
+	}
+}
+
+// #512: "Turn off the office light bar" got control_node {mute} and "Got it, Jordan. The
+// office light bars are now off." — a device-change claim with no successful control_device
+// call this turn gets one nudge, and a failed result never passes as done.
+func TestFollowThroughDeviceNotDone(t *testing.T) {
+	def, err := pyjson.Loads(controlDeviceDefinition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv := &conversation{tools: []prompts.Tool{def.(*pyjson.Object)}}
+	utt := "Turn off the office light bar"
+	msgs := []chatMsg{{Role: "user", Content: utt},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c1", Function: parse.FunctionCall{Name: "control_node", Arguments: `{"action": "mute"}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: `{"success": true}`}}
+	reply := "Got it, Jordan. The office light bars are now off."
+	if nag := followThroughNag(conv, utt, reply, msgs); nag != deviceNotDoneRetry {
+		t.Fatalf("nag %q", nag)
+	}
+	// A successful control_device call this turn makes the claim true: no nudge. The node's
+	// result message carries no Name, so it is matched by tool_call_id.
+	ran := append(slices.Clone(msgs),
+		chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c2", Function: parse.FunctionCall{Name: "control_device", Arguments: `{"device_name": "office light bars", "action": "turn_off"}`}}}},
+		chatMsg{Role: "tool", ToolCallID: "c2", Content: `{"success": true, "entity_id": "rgbic_tv_light_bars", "action": "turn_off", "error": null, "input_required": null}`})
+	if nag := followThroughNag(conv, utt, reply, ran); nag != "" {
+		t.Fatalf("after success: %q", nag)
+	}
+	// A failed control_device result is not done: the nudge still fires.
+	failed := append(slices.Clone(msgs),
+		chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c3", Function: parse.FunctionCall{Name: "control_device", Arguments: `{"device_name": "office light bars", "action": "turn_off"}`}}}},
+		chatMsg{Role: "tool", ToolCallID: "c3", Content: `{"success": false, "entity_id": "rgbic_tv_light_bars", "action": "turn_off", "error": "Timed out waiting for node response", "input_required": null}`})
+	if nag := followThroughNag(conv, utt, reply, failed); nag != deviceNotDoneRetry {
+		t.Fatalf("after failure: %q", nag)
+	}
+	// An honest reply after the failure claims nothing.
+	if nag := followThroughNag(conv, utt, "I couldn't reach the office light bars — nothing was turned off.", failed); nag != "" {
+		t.Fatalf("honest failure reply: %q", nag)
+	}
+	// Spent once per run.
+	nagged := append(slices.Clone(msgs), sysMsg(deviceNotDoneRetry))
+	if nag := followThroughNag(conv, utt, reply, nagged); nag != "" {
+		t.Fatalf("second nag %q", nag)
+	}
+	// A node's own control_device writes its own result: success is read leniently, as the
+	// rest of the module reads node results (laxBool), so "true" is done.
+	lax := append(slices.Clone(msgs),
+		chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c4", Function: parse.FunctionCall{Name: "control_device", Arguments: `{"device_name": "office light bars", "action": "turn_off"}`}}}},
+		chatMsg{Role: "tool", ToolCallID: "c4", Content: `{"success": "true", "entity_id": "rgbic_tv_light_bars"}`})
+	if nag := followThroughNag(conv, utt, reply, lax); nag != "" {
+		t.Fatalf("lax success: %q", nag)
+	}
+	// The node's own audio is control_node's job: no nudge.
+	if nag := followThroughNag(conv, "turn down the volume", "Volume's down.", msgs); nag != "" {
+		t.Fatalf("volume request: %q", nag)
+	}
+	// Nor are the node's own timers, alarms, reminders and playback devices: cancel_timer
+	// answered the request and the reply is true, so the nudge must stay out of it —
+	// control_device would answer "No device called 'timer' here" and the model would then
+	// deny a change that did happen (review of #512).
+	timer := []chatMsg{{Role: "user", Content: "turn off the timer"},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "t1", Function: parse.FunctionCall{Name: "cancel_timer", Arguments: `{"label": "five minutes"}`}}}},
+		{Role: "tool", ToolCallID: "t1", Content: `{"success": true}`}}
+	for _, c := range []struct{ utt, reply string }{
+		{"turn off the timer", "The timer is off."},
+		{"turn off the alarm", "The alarm is off."},
+		{"turn off the reminder", "That reminder is off."},
+		{"turn off the radio", "The radio is off."},
+	} {
+		if nag := followThroughNag(conv, c.utt, c.reply, timer); nag != "" {
+			t.Fatalf("%q -> %q: %q", c.utt, c.reply, nag)
+		}
+	}
+	// Stacked articles: "all the lights" is the same #512 shape — control_node ran, the reply
+	// says the lights are off, no control_device — so the nudge fires (review of #512).
+	all := []chatMsg{{Role: "user", Content: "turn off all the lights"},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "a1", Function: parse.FunctionCall{Name: "control_node", Arguments: `{"action": "mute"}`}}}},
+		{Role: "tool", ToolCallID: "a1", Content: `{"success": true}`}}
+	if nag := followThroughNag(conv, "turn off all the lights", "All the lights are off.", all); nag != deviceNotDoneRetry {
+		t.Fatalf("all the lights: %q", nag)
+	}
+	// Computer control has its own switch guard, and it wins: a desktop node offered
+	// control_device (the registry fallback) still gets [SWITCH_NOT_RUN], not
+	// [DEVICE_NOT_DONE] (review of #512).
+	desk := &conversation{tools: conv.tools, serverNames: map[string]bool{toolDisableComputerControl: true}}
+	cc := []chatMsg{{Role: "user", Content: "turn off computer control"}}
+	if nag := followThroughNag(desk, "turn off computer control", "Computer control is now off.", cc); nag != switchNotRunRetry {
+		t.Fatalf("computer control: %q", nag)
+	}
+	// Without a device tool offered, nothing to nudge toward.
+	if nag := followThroughNag(&conversation{}, utt, reply, msgs); nag != "" {
+		t.Fatalf("no tool: %q", nag)
 	}
 }

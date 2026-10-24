@@ -225,6 +225,13 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		m.vocab.set(n.ID, cleanVocabulary(vocab))
 	}
 
+	// A node that reports no devices still gets the household's imported registry (#512): the
+	// Go agent and the desktop agents send no `agents` payload, so the prompt's device list,
+	// get_ha_entities and the control_device server tool read one built from cc_devices.
+	if conv.agents == nil || conv.agents.Len() == 0 {
+		conv.agents = m.registryAgents(ctx, hh)
+	}
+
 	// Per-household gates: memory fails open, web search closed (01 §7.10). The tool list is
 	// fixed at warmup (prefix cache), and no speaker exists yet (D3), so the memory tools are
 	// offered when the household can identify speakers at all; they refuse an unknown speaker
@@ -255,6 +262,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		Watches:       m.householdBool(ctx, settingWatchesEnabled, hh),
 		Computers:     m.hasComputer(ctx, hh),
 		Workflows:     m.hasWorkflows(ctx, hh),
+		Devices:       agentsHaveDevices(conv.agents),
 		ChatPhotos:    photosPossible,
 		PhotoTools:    make(map[string]bool, len(serverPhoto)),
 	}
@@ -280,6 +288,24 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	} else {
 		// The switch and the recorder only through jarvisd's tools (enable_computer_control, start_recording).
 		clientTools, commands = withoutComputerTools(clientTools, commands, computeruse.IsServerOnlyTool)
+	}
+	// A node offering its own tool of a server tool's name keeps it (the Python node's
+	// control_device resolves on the node, against its live registry): the server copy is
+	// dropped, as routing (engine.go) would otherwise intercept the node's calls (#512).
+	if len(clientTools) > 0 {
+		client := make(map[string]bool, len(clientTools))
+		for _, t := range clientTools {
+			client[toolName(t)] = true
+		}
+		kept := serverDefs[:0]
+		for _, d := range serverDefs {
+			if name := toolName(d); client[name] {
+				delete(conv.serverNames, name)
+				continue
+			}
+			kept = append(kept, d)
+		}
+		serverDefs = kept
 	}
 	offered := append(append([]prompts.Tool(nil), serverDefs...), clientTools...)
 	conv.tools = make([]prompts.Tool, len(offered))

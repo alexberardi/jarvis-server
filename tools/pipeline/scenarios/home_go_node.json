@@ -1,0 +1,38 @@
+[
+ {
+  "name": "go node: turn off the office light bar goes to control_device, not control_node",
+  "tools": "../toolsets/node-go.json",
+  "home": "light_bars",
+  "turns": [
+   {
+    "say": "Turn off the office light bar",
+    "expect": {
+     "server_tool": "control_device",
+     "args_match": {
+      "device_name": "(?i)light ?bars?|rgbic_tv_light_bars"
+     },
+     "not_tool": ["control_node"],
+     "not_reply": "(?i)(is|are)( now)? off\\b|turned off|switched off|all set"
+    }
+   }
+  ]
+ },
+ {
+  "name": "devices: a failed control_device result is not reported as done",
+  "results": {
+   "control_device": {"success": false, "error": "Device did not respond"}
+  },
+  "turns": [
+   {
+    "say": "turn off the kitchen lights",
+    "expect": {
+     "tool": "control_device",
+     "args": {
+      "action": "turn_off"
+     },
+     "not_reply": "(?i)(is|are)( now)? off\\b|turned off|switched off|all set|done"
+    }
+   }
+  ]
+ }
+]
