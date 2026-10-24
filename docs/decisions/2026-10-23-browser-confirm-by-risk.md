@@ -11,17 +11,23 @@ Supersedes, for the browser, part of the 2026-10-17 update in
 Google search included. That contradicts the computer-control plan, which confirms only at moments
 of real risk. Now they ask only when the action is risky (`internal/agent/browser/risk.go`):
 
-- the button's label or the field names paying (buy, pay, checkout, place order, subscribe…), sending
-  or posting as the user (send, post, reply, comment, submit, confirm…), deleting (delete, remove,
-  trash, unsubscribe, cancel subscription…), sharing (share, invite, make public, transfer) or an
-  account or security change (password, 2FA, reset, sign out of all…);
+- the button's label or the field names paying (buy, pay, checkout, place order, place your order,
+  confirm order, confirm purchase, complete purchase, pay now, subscribe…), sending or posting as the
+  user (send, post, reply, comment, submit, confirm…), deleting (delete, remove, trash, unsubscribe,
+  cancel subscription…), sharing (share, invite, make public, transfer) or an account or security
+  change (password, 2FA, 2-step or two step, turn off verification, reset, authorize, grant, revoke,
+  disable, sign out of all…);
 - a submitting fill names a password field or a field whose submit sends something (message,
   comment, email, to, card, amount…);
-- or the page is a checkout, cart, payment, billing, compose or security page, a webmail
-  (`mail.*`, Outlook) or a messaging or payment site (WhatsApp, Slack, Discord, Teams, PayPal…).
+- the page is a checkout, cart, buy, purchase, order, subscription, payment or billing page; a
+  compose, messages, messaging, direct, inbox, chat, dm or comments page; a security, password,
+  OAuth (`oauth`, `authorize`, `consent`) or sign-in options or verification page; a webmail
+  (`mail.*`, Outlook) or a messaging or payment site (WhatsApp, Slack, Discord, Teams, PayPal…);
+- or the page can't be told (`list_tabs` failed or timed out, or the tab wasn't listed): an
+  unknown page asks, as every submit did before.
 
-A fill whose field is a search box (search, q, query, find) never asks, except for a password
-field. Everything else runs: search boxes, navigation and result links, filters, tabs. `all` still
+A fill whose field is a search box (search, q, query, find) never asks, on an unknown page too,
+except for a password field. Everything else runs: search boxes, navigation and result links, filters, tabs. `all` still
 asks for everything, and `off` never asks. Typing plus Enter on the desktop (`desktop_type_text`
 with submit) is unchanged and still asks in `submit` mode: the agent can't tell from a window title
 whether Enter sends a message.

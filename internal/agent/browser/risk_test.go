@@ -19,8 +19,28 @@ func TestClickRisk(t *testing.T) {
 		{"Under $50", "https://shop.example.com/s?k=lamp", false},
 		{"Posts", "https://forum.example.com/", false},
 		{"Sign in", "https://example.com/", false},
-		{"", "", false},
+		{"Next", "", true}, // a page that can't be told asks
 		{"Place order", "https://shop.example.com/", true},
+		{"Place your order", "https://www.amazon.com/gp/buy/spc/handlers/display.html", true},
+		{"Place your order", "https://shop.example.com/", true},
+		{"Place my order", "https://shop.example.com/", true},
+		{"Confirm order", "https://shop.example.com/", true},
+		{"Confirm purchase", "https://shop.example.com/", true},
+		{"Complete purchase", "https://shop.example.com/", true},
+		{"Pay now", "https://shop.example.com/", true},
+		{"Continue", "https://shop.example.com/buy/1", true},
+		{"Continue", "https://shop.example.com/purchase", true},
+		{"Continue", "https://shop.example.com/order/review", true},
+		{"Continue", "https://example.com/subscription", true},
+		{"Authorize", "https://github.com/login/oauth/authorize?client_id=abc", true},
+		{"Authorize app", "https://example.com/", true},
+		{"Allow", "https://accounts.google.com/signin/oauth/consent?authuser=0", true},
+		{"Grant access", "https://example.com/", true},
+		{"Revoke", "https://example.com/", true},
+		{"Disable", "https://example.com/", true},
+		{"Turn off 2-Step Verification", "https://example.com/", true},
+		{"Turn off two step", "https://example.com/", true},
+		{"Turn off", "https://myaccount.google.com/signinoptions/two-step-verification", true},
 		{"Buy now", "https://shop.example.com/item/1", true},
 		{"Add to cart", "https://shop.example.com/item/1", true},
 		{"Send", "https://example.com/", true},
@@ -62,6 +82,16 @@ func TestSubmitRisk(t *testing.T) {
 		{"card number", "https://shop.example.com/", true},
 		{"", "https://web.whatsapp.com/", true},
 		{"", "https://shop.example.com/cart", true},
+		{"", "https://x.com/messages/123-456", true},
+		{"", "https://www.facebook.com/messages/t/100001", true},
+		{"", "https://www.linkedin.com/messaging/thread/2-abc/", true},
+		{"", "https://www.instagram.com/direct/t/1234/", true},
+		{"", "https://www.reddit.com/r/golang/comments/abc123/title/", true},
+		{"", "https://example.com/inbox", true},
+		{"", "https://example.com/chat/42", true},
+		{"", "https://example.com/dm/42", true},
+		{"", "", true},        // a page that can't be told asks
+		{"search", "", false}, // unless the field is a search box
 	} {
 		if got := submitRisk(c.field, c.url) != ""; got != c.risky {
 			t.Errorf("submit %q on %s: risky %v, want %v", c.field, c.url, got, c.risky)
@@ -69,11 +99,15 @@ func TestSubmitRisk(t *testing.T) {
 	}
 }
 
-// pageExt answers list_tabs with one current tab at url and every fill and click with success.
+// pageExt answers list_tabs with one current tab at url (an error when url is "") and every
+// fill and click with success.
 func pageExt(url string) func(Message) Message {
 	return func(m Message) Message {
 		switch m.Cmd {
 		case "list_tabs":
+			if url == "" {
+				return Message{Error: "list_tabs failed", Code: "internal"}
+			}
 			return ok(map[string]any{"tabs": []any{
 				map[string]any{"tab_id": 7.0, "url": url, "title": "Page", "current": true},
 			}, "count": 1})
@@ -106,6 +140,9 @@ func TestSubmitModeAsksOnlyBeforeRiskyActions(t *testing.T) {
 		{"anything in mail", dictate.ConfirmSubmit, "https://mail.google.com/mail/u/0/", ToolFill, map[string]any{"text": "hi", "submit": true}, true},
 		{"all: a search", dictate.ConfirmAll, "https://www.google.com/", ToolFill, map[string]any{"field": "search", "text": "dogs", "submit": true}, true},
 		{"all: a plain fill", dictate.ConfirmAll, "https://www.google.com/", ToolFill, map[string]any{"field": "search", "text": "dogs"}, true},
+		{"page can't be told: focused field and submit", dictate.ConfirmSubmit, "", ToolFill, map[string]any{"text": "hi", "submit": true}, true},
+		{"page can't be told: a click", dictate.ConfirmSubmit, "", ToolClick, map[string]any{"text": "Next"}, true},
+		{"page can't be told: search and submit", dictate.ConfirmSubmit, "", ToolFill, map[string]any{"field": "search", "text": "dogs", "submit": true}, false},
 		{"off: place order", dictate.ConfirmOff, "https://shop.example.com/", ToolClick, map[string]any{"text": "Place order"}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {

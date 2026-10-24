@@ -28,17 +28,20 @@ var riskyWords = map[string]string{
 	"share": "share", "invite": "share", "transfer": "share",
 	// account and security
 	"password": "account", "passcode": "account", "passphrase": "account", "2fa": "account",
-	"security": "account", "reset": "account",
+	"security": "account", "reset": "account", "authorize": "account", "grant": "account",
+	"revoke": "account", "disable": "account",
 }
 
 // riskyPhrases are word sequences that mark an action as risky where their words alone don't.
 var riskyPhrases = map[string]string{
-	"place order": "pay", "order now": "pay", "complete order": "pay", "submit order": "pay",
+	"place order": "pay", "place your order": "pay", "place my order": "pay", "confirm order": "pay",
+	"confirm purchase": "pay", "complete purchase": "pay", "pay now": "pay", "order now": "pay", "complete order": "pay", "submit order": "pay",
 	"check out": "pay", "book now": "pay", "add to cart": "pay", "add payment": "pay",
 	"cancel subscription": "delete", "cancel membership": "delete", "cancel order": "delete",
 	"close account": "delete", "empty trash": "delete",
 	"make public": "share",
-	"two factor":  "account", "sign out of all": "account", "log out of all": "account",
+	"two factor":  "account", "2 step": "account", "two step": "account",
+	"turn off verification": "account", "sign out of all": "account", "log out of all": "account",
 	"change email": "account",
 }
 
@@ -58,7 +61,12 @@ var searchFields = map[string]bool{"search": true, "q": true, "query": true, "fi
 var (
 	riskyPaths = map[string]string{
 		"checkout": "pay", "cart": "pay", "basket": "pay", "payment": "pay", "payments": "pay",
-		"billing": "pay", "pay": "pay", "compose": "send", "security": "account", "password": "account",
+		"billing": "pay", "pay": "pay", "buy": "pay", "purchase": "pay", "order": "pay",
+		"subscription": "pay",
+		"compose":      "send", "messages": "send", "messaging": "send", "direct": "send", "inbox": "send",
+		"chat": "send", "dm": "send", "comments": "send",
+		"security": "account", "password": "account", "oauth": "account", "authorize": "account",
+		"consent": "account", "signinoptions": "account", "verification": "account",
 	}
 	riskyHosts = map[string]string{
 		"outlook.live.com": "send", "outlook.office.com": "send", "outlook.office365.com": "send",
@@ -92,8 +100,16 @@ func wordRisk(s string, single map[string]string) string {
 	return ""
 }
 
-// urlRisk is the risk of acting on a page at u by its site and path ("" none or unknown).
+// unknownPage is the risk of acting on a page whose address can't be told (list_tabs failed or
+// timed out, or the tab wasn't listed): it asks, as every submit did before #578.
+const unknownPage = "unknown page"
+
+// urlRisk is the risk of acting on a page at u by its site and path ("" none); an empty u is
+// a page that can't be told.
 func urlRisk(u string) string {
+	if u == "" {
+		return unknownPage
+	}
 	p, err := url.Parse(u)
 	if err != nil || p.Host == "" {
 		return ""
@@ -122,7 +138,7 @@ func clickRisk(label, pageURL string) string {
 }
 
 // submitRisk is why filling field and submitting it on the page at pageURL needs the user's yes
-// ("" it doesn't). A search box never does.
+// ("" it doesn't). A search box never does, even on a page that can't be told.
 func submitRisk(field, pageURL string) string {
 	if isPasswordField(field) {
 		return "account"
