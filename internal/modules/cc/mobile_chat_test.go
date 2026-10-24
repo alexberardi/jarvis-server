@@ -716,3 +716,47 @@ func TestReportToolsNeedsMQTTSession(t *testing.T) {
 		t.Fatal("published to a node with no session")
 	}
 }
+
+// #575: a browser task that needs a sixth round of tools used to end in a red "Too many tool
+// iterations". At the cap, the pending calls answer "budget used up" and the model replies
+// with what it found; one that still calls a tool gets a plain fallback, never the raw error.
+func TestMobileChatToolBudget(t *testing.T) {
+	ce := newChatEnv(t, prompts.Qwen3_5_9B)
+	ce.pub.toolReply = `{"output": {"success": true, "message": "Page text."}}`
+	call := func(i int) engineReply {
+		return engineReply{toolCalls: []map[string]any{{"id": fmt.Sprintf("call_%d", i), "type": "function",
+			"function": map[string]any{"name": "get_weather", "arguments": fmt.Sprintf(`{"city": "c%d"}`, i)}}}}
+	}
+	for _, wrap := range []string{"Today's featured article is about a lighthouse.", ""} {
+		cid := ce.warm("tok-7")
+		before := len(ce.pub.commands("tool_call"))
+		for i := 0; i <= chatMaxToolIterations; i++ {
+			ce.eng.push(call(i))
+		}
+		if wrap != "" {
+			ce.eng.say(wrap)
+		} else {
+			ce.eng.push(call(99))
+		}
+		frames := normalize(ce.chat("tok-7", map[string]any{"message": "find today's featured article", "conversation_id": cid}))
+		done := event(t, frames[len(frames)-1])
+		want := wrap
+		if want == "" {
+			want = toolBudgetFallback
+		}
+		if done["type"] != "done" || done["full_text"] != want {
+			t.Fatalf("wrap %q: last frame %v", wrap, done)
+		}
+		if n := len(ce.pub.commands("tool_call")) - before; n != chatMaxToolIterations {
+			t.Fatalf("wrap %q: %d tool rounds ran", wrap, n)
+		}
+		budgeted := false
+		for _, m := range messagesOf(ce.eng.last()) {
+			s, _ := m["content"].(string)
+			budgeted = budgeted || m["role"] == "tool" && strings.Contains(s, "budget")
+		}
+		if !budgeted {
+			t.Fatalf("wrap %q: the last call never heard the budget was spent", wrap)
+		}
+	}
+}
