@@ -21,7 +21,9 @@ import (
 //   - "Open Omerite and type hello there." opened the app, then told the user to type "hello
 //     there" themselves (nagUnfinished);
 //   - "Stop watching the example.com one" got "I've stopped watching it" with no cancel_watch
-//     call, and the watch stayed on (#221, nagNotCancelled).
+//     call, and the watch stayed on (#221, nagNotCancelled);
+//   - a reply ending "Let me open it in the browser instead…" or "I'll run an errand to …"
+//     ended the turn with nothing done (#575, nagPromised).
 
 const (
 	nagRecallFirst   = "[RECALL_FIRST]"
@@ -30,6 +32,7 @@ const (
 	nagUnsaved       = "[NOT_SAVED]"
 	nagNotCancelled  = "[NOT_CANCELLED]"
 	nagDeviceNotDone = "[DEVICE_NOT_DONE]"
+	nagPromised      = "[PROMISED_NOT_DONE]"
 )
 
 const (
@@ -51,6 +54,9 @@ const (
 		"changed and your reply is not true yet. control_device is the tool for smart-home devices (control_node " +
 		"is only this speaker's own volume). Call control_device now with the device the user means (copy its " +
 		"entity_id from the device list), or if its result above failed, tell the user plainly it didn't work."
+	promisedRetry = nagPromised + " Your reply says you will do something, but it ends your turn: nothing will do it. " +
+		"Call the tool for it now (run_errand for a task on the computer or the web that takes several steps), or " +
+		"tell the user plainly, in one short sentence, that you can't."
 )
 
 // serverToolKeywords are the force guard's keywords for offered server tools, whose definitions
@@ -104,10 +110,12 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 	case conv.hasTool("control_device") && countNags(msgs, nagDeviceNotDone) < 1 &&
 		tf.IsDeviceChangeRequest(utterance) && tf.ClaimsDeviceChanged(reply) && !deviceDoneThisTurn(msgs):
 		return deviceNotDoneRetry
-	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool):
-		if words := tf.TypeAfterOpenWords(utterance); words != "" {
-			return fmt.Sprintf(unfinishedTypeFormat, words)
-		}
+	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool) &&
+		tf.TypeAfterOpenWords(utterance) != "":
+		return fmt.Sprintf(unfinishedTypeFormat, tf.TypeAfterOpenWords(utterance))
+	// Last: "Let me open it in the browser instead…" or "I'll run an errand…" ended the turn (#575).
+	case countNags(msgs, nagPromised) < 1 && tf.PromisesAction(reply):
+		return promisedRetry
 	}
 	return ""
 }
@@ -173,5 +181,6 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 func isFollowThroughNag(m chatMsg) bool {
 	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
 		isNag(m, nagNotCancelled) || isNag(m, nagDeviceNotDone) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) ||
-		isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool)
+		isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool) ||
+		isNag(m, nagPromised)
 }
