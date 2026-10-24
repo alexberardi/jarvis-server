@@ -229,5 +229,57 @@
     }
    }
   ]
+ },
+ {
+  "name": "desktop windows (Hyprland): close every window of an app",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "close all my terminal windows",
+    "expect": {
+     "tool": "desktop_close_window",
+     "args_match": {
+      "window_id": "(?i)terminal"
+     },
+     "args": {
+      "all_of_app": true
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): the other one",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "switch to the other window",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$",
+      "window": "(?i)other|previous"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): it, with nothing acted on yet (the focused window)",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "maximize it",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^maximize$"
+     }
+    }
+   }
+  ]
  }
 ]

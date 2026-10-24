@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
@@ -94,6 +95,30 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
 	}
 	return engineResult{Stop: stopComplete, Message: content, Reasoning: reasoning}, msgs
+}
+
+// islandNotes: when every result is an object with island_only true (DESKTOP-COMMANDS.md Q9:
+// desktop commands don't talk, the island shows what happened), their island texts.
+func islandNotes(results []toolResult) ([]string, bool) {
+	if len(results) == 0 {
+		return nil, false
+	}
+	var notes []string
+	for _, r := range results {
+		o := outputObject(r.Output)
+		if o == nil {
+			return nil, false
+		}
+		if v, _ := o.Get("island_only"); v != true {
+			return nil, false
+		}
+		if t, _ := o.Get("island"); t != nil {
+			if s, ok := t.(string); ok && strings.TrimSpace(s) != "" {
+				notes = append(notes, strings.TrimSpace(s))
+			}
+		}
+	}
+	return notes, true
 }
 
 // toolsFailedNote is added (transient, after the results) when every tool call of a round
@@ -209,7 +234,15 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		msgs = append(msgs, toolMsg(tr))
 	}
 	var res engineResult
-	if native := conv.mode.Native(); native || typingPending(conv, msgs) {
+	if notes, ok := islandNotes(results); ok {
+		// A desktop command's result was shown on the node's island: no formatting call.
+		if !conv.mode.Native() {
+			msgs = withoutRole(msgs, "tool")
+		}
+		content := strings.Join(notes, "; ")
+		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
+		res = engineResult{Stop: stopComplete, Message: content, IslandOnly: true}
+	} else if native := conv.mode.Native(); native || typingPending(conv, msgs) {
 		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)
 		maxIter := 10
@@ -269,6 +302,9 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 	defer conv.mu.Unlock()
 	if len(conv.messages) == 0 || typingPending(conv, conv.messages) {
 		return nil // the typing is still owed: the blocking continue runs the loop
+	}
+	if _, ok := islandNotes(results); ok {
+		return nil // nothing to stream: the blocking continue ends the turn silently
 	}
 	stashReferenced(conv, results)
 	m.notePendingConfirm(conv, results)

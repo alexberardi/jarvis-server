@@ -13,10 +13,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -98,14 +100,25 @@ type Tools struct {
 	// recorded).
 	Launched *launches.Tracker
 	Log      *slog.Logger // nil: no logs
-	tools    []tool
+	// Show puts a window command's outcome on the island ("Maximized Firefox"); nil: not shown.
+	Show func(text string, d time.Duration)
+	// Confirm holds closing every window of an app for the user's yes (Q8); nil or off: no
+	// question.
+	Confirm *dictate.Confirmer
+	// Now is the clock for "it" (the last window acted on, for a minute); nil: time.Now.
+	Now   func() time.Time
+	tools []tool
+
+	mu        sync.Mutex
+	lastActed host.Window
+	actedAt   time.Time
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).
 func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	t := &Tools{Host: h, Policy: policy, Apps: list}
-	winID := node.Param{Name: "window_id", Type: "string", Required: true,
-		Description: "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')"}
+	winID := node.Param{Name: "window_id", Type: "string",
+		Description: "The app or window as the user said it ('TextEdit', 'the terminal', 'it'), or an id from desktop_list_windows. Leave out for the window in front"}
 	t.tools = []tool{
 		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text.",
 			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "The app's name as said, or a URL"}},
@@ -138,9 +151,10 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 			Examples: []node.Example{{VoiceCommand: "what windows are open on my computer", Params: map[string]any{}, Primary: true}}},
 			host.CapWindowsList, t.list, nil},
 		{spec: node.Spec{Name: ToolWindow}, render: windowSpec, call: t.window},
-		{node.Spec{Name: ToolClose, Description: "Ask one window on the user's computer to close, as if its close button were clicked. The app may prompt to save; it is never force-killed.", Params: []node.Param{winID},
-			Keywords: []string{"close", "window"}, Risky: true},
-			host.CapWindowsClose, t.windowAction(host.ActionClose), nil},
+		{node.Spec{Name: ToolClose, Description: "Close a window on the user's computer, as its close button would (the app may ask to save; never force-killed). all_of_app closes every window of that app.",
+			Params:   []node.Param{winID, {Name: "all_of_app", Type: "bool", Description: "Close every window of the app, not just this one"}},
+			Keywords: []string{"close", "window"}},
+			host.CapWindowsClose, t.close, nil},
 	}
 	return t
 }
@@ -170,7 +184,8 @@ func (t *Tools) Available(ctx context.Context) []node.ToolDef {
 
 // Call runs a tool. Failures are outputs ({"success": false, "error", "error_code"}), so the
 // LLM can tell the user what happened.
-func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ node.Request) (map[string]any, bool) {
+func (t *Tools) Call(ctx context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
+	ctx = context.WithValue(ctx, saidKey{}, req.VoiceCommand)
 	for _, tl := range t.tools {
 		if tl.spec.Name != name {
 			continue
@@ -179,6 +194,10 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		if err != nil {
 			o := node.Fail("%v", err)
 			o["error_code"] = code(err)
+			if (name == ToolWindow || name == ToolClose) && o["error_code"] == "not_supported" {
+				// Q9: the island says it, with the error chime; nothing is spoken.
+				t.island(o, UnsupportedMessage, true)
+			}
 			var amb *apps.AmbiguousError
 			var nf *apps.NotFoundError
 			var we *windowError
@@ -196,7 +215,9 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 			}
 			return o, true
 		}
-		out["success"] = true
+		if _, set := out["success"]; !set { // a parked confirmation says success: false itself
+			out["success"] = true
+		}
 		return out, true
 	}
 	return nil, false
@@ -386,26 +407,6 @@ func (t *Tools) list(ctx context.Context, _ map[string]any) (map[string]any, err
 		return nil, err
 	}
 	return map[string]any{"windows": ws}, nil
-}
-
-func (t *Tools) windowAction(a host.WindowAction) func(context.Context, map[string]any) (map[string]any, error) {
-	return func(ctx context.Context, args map[string]any) (map[string]any, error) {
-		id, _ := args["window_id"].(string)
-		if id == "" {
-			return nil, fmt.Errorf("%w: window_id is required", errBadArgs)
-		}
-		out := map[string]any{}
-		if w, ok, err := t.resolveWindow(ctx, id); err != nil {
-			return nil, err
-		} else if ok && w.ID != id {
-			id, out["matched_window"] = w.ID, windowName(w)
-		}
-		if err := t.Host.WindowDo(ctx, a, id); err != nil {
-			return nil, err
-		}
-		out["window_id"], out["action"] = id, string(a)
-		return out, nil
-	}
 }
 
 // windowError is a window_id that names no single window, with the open windows so the model
