@@ -304,7 +304,7 @@ func TestEWMHWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Window{{ID: 0x400001, Title: "notes — ✓", Class: "gedit.Gedit"}, {ID: 0x400002, Title: "xterm", Class: "xterm.XTerm", Minimized: true}}
+	want := []Window{{ID: 0x400001, Title: "notes — ✓", Class: "gedit.Gedit"}, {ID: 0x400002, Title: "xterm", Class: "xterm.XTerm", Minimized: true, Active: true}}
 	if !slices.Equal(ws, want) {
 		t.Fatalf("%+v", ws)
 	}
@@ -392,5 +392,50 @@ func TestEWMHStacking(t *testing.T) {
 	got, err := d.Stacking(ctx)
 	if err != nil || !slices.Equal(got, []uint32{0x400003, 0x400001, 0x400002}) {
 		t.Fatalf("%#x %v", got, err)
+	}
+}
+
+// The arranging requests are the pager messages EWMH defines, sent to the root window.
+func TestEWMHArranging(t *testing.T) {
+	ctx := context.Background()
+	f := ewmhFake()
+	f.setAtoms(root, "_NET_SUPPORTED", "_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", "_NET_WM_STATE",
+		"_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_STATE_FULLSCREEN",
+		"_NET_MOVERESIZE_WINDOW", "_NET_WORKAREA", "_NET_NUMBER_OF_DESKTOPS", "_NET_WM_DESKTOP")
+	f.setProp32(root, "_NET_NUMBER_OF_DESKTOPS", 4)
+	f.setProp32(root, "_NET_WORKAREA", 0, 30, 1920, 1050, 0, 30, 1920, 1050)
+	d, _ := display(f)
+	sup, n, err := d.Features(ctx)
+	if err != nil || n != 4 || !sup["_NET_WM_STATE_FULLSCREEN"] || !sup["_NET_MOVERESIZE_WINDOW"] {
+		t.Fatalf("features %v %d %v", sup, n, err)
+	}
+	a := func(n string) uint32 { v, _ := f.Atom(n); return v }
+	vert, horz, full := a("_NET_WM_STATE_MAXIMIZED_VERT"), a("_NET_WM_STATE_MAXIMIZED_HORZ"), a("_NET_WM_STATE_FULLSCREEN")
+	f.log = nil
+	if err := d.SetState(ctx, 0x400001, true, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetState(ctx, 0x400001, false, "_NET_WM_STATE_FULLSCREEN"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MoveToDesktop(ctx, 0x400001, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Snap(ctx, 0x400001, false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		fmt.Sprintf("msg root _NET_WM_STATE 0x400001 [1 %d %d 2 0]", vert, horz), "sync",
+		fmt.Sprintf("msg root _NET_WM_STATE 0x400001 [0 %d 0 2 0]", full), "sync",
+		"msg root _NET_WM_DESKTOP 0x400001 [2 2 0 0 0]", "sync",
+		fmt.Sprintf("msg root _NET_WM_STATE 0x400001 [0 %d %d 2 0]", vert, horz), "sync",
+		// The right half of the work area: x 960, y 30, 960 × 1050; NorthWest, all four, pager.
+		fmt.Sprintf("msg root _NET_MOVERESIZE_WINDOW 0x400001 [%d 960 30 960 1050]", 1|0xf00|2<<12), "sync",
+	}
+	if !slices.Equal(f.log, want) {
+		t.Fatalf("sent\n%s\nwant\n%s", strings.Join(f.log, "\n"), strings.Join(want, "\n"))
+	}
+	if err := d.SetState(ctx, 0x400001, true); err == nil {
+		t.Fatal("SetState with no state")
 	}
 }

@@ -414,10 +414,13 @@ func cased(sym uint32) bool {
 
 // Window is one managed top-level window.
 type Window struct {
-	ID        uint32
-	Title     string
-	Class     string // WM_CLASS as wmctrl -x prints it: instance.Class
-	Minimized bool
+	ID         uint32
+	Title      string
+	Class      string // WM_CLASS as wmctrl -x prints it: instance.Class
+	Minimized  bool
+	Maximized  bool // both _NET_WM_STATE_MAXIMIZED_VERT and _HORZ
+	Fullscreen bool
+	Active     bool // _NET_ACTIVE_WINDOW
 }
 
 // WMAvailable: an X11 session with an EWMH window manager that lists its clients and
@@ -456,7 +459,9 @@ func supported(c Conn) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	want := []string{"_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", "_NET_CLOSE_WINDOW", "_NET_CURRENT_DESKTOP", "_NET_WM_DESKTOP", "_NET_CLIENT_LIST_STACKING"}
+	want := []string{"_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", "_NET_CLOSE_WINDOW", "_NET_CURRENT_DESKTOP", "_NET_WM_DESKTOP",
+		"_NET_CLIENT_LIST_STACKING", "_NET_WM_STATE", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ",
+		"_NET_WM_STATE_FULLSCREEN", "_NET_MOVERESIZE_WINDOW", "_NET_WORKAREA", "_NET_NUMBER_OF_DESKTOPS"}
 	byAtom := map[uint32]string{}
 	for _, n := range want {
 		a, err := c.Atom(n)
@@ -488,9 +493,24 @@ func (d *Display) Windows(context.Context) ([]Window, error) {
 	if err != nil {
 		return nil, err
 	}
-	hidden, err := c.Atom("_NET_WM_STATE_HIDDEN")
-	if err != nil {
-		return nil, err
+	st := map[string]uint32{}
+	for _, n := range []string{"_NET_WM_STATE_HIDDEN", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_STATE_FULLSCREEN"} {
+		a, err := c.Atom(n)
+		if err != nil {
+			return nil, err
+		}
+		st[n] = a
+	}
+	hidden := st["_NET_WM_STATE_HIDDEN"]
+	var active uint32
+	if v, err := prop32(c, c.Root(), "_NET_ACTIVE_WINDOW"); err == nil && len(v) > 0 {
+		active = v[0]
+	}
+	// Newest first where the WM says (stacking top first: it raises what it focuses), so "the
+	// other one" can mean the window used before; the client list order otherwise.
+	if stack, err := prop32(c, c.Root(), "_NET_CLIENT_LIST_STACKING"); err == nil && len(stack) == len(ids) {
+		ids = slices.Clone(stack)
+		slices.Reverse(ids)
 	}
 	out := make([]Window, 0, len(ids))
 	for _, id := range ids {
@@ -504,13 +524,23 @@ func (d *Display) Windows(context.Context) ([]Window, error) {
 			parts := strings.Split(strings.TrimRight(cls, "\x00"), "\x00")
 			w.Class = strings.Join(parts, ".")
 		}
-		if st, err := prop32(c, id, "_NET_WM_STATE"); err == nil {
-			for _, a := range st {
-				if a == hidden {
+		if states, err := prop32(c, id, "_NET_WM_STATE"); err == nil {
+			var vert, horz bool
+			for _, a := range states {
+				switch a {
+				case hidden:
 					w.Minimized = true
+				case st["_NET_WM_STATE_MAXIMIZED_VERT"]:
+					vert = true
+				case st["_NET_WM_STATE_MAXIMIZED_HORZ"]:
+					horz = true
+				case st["_NET_WM_STATE_FULLSCREEN"]:
+					w.Fullscreen = true
 				}
 			}
+			w.Maximized = vert && horz
 		}
+		w.Active = id == active
 		out = append(out, w)
 	}
 	return out, nil
@@ -666,6 +696,140 @@ func (d *Display) Stacking(context.Context) ([]uint32, error) {
 	}
 	slices.Reverse(ids)
 	return ids, nil
+}
+
+// Features is what the window manager can do beyond list, activate and close, by EWMH name
+// (_NET_WM_STATE_MAXIMIZED_VERT, _NET_MOVERESIZE_WINDOW, …), and how many desktops it has.
+func (d *Display) Features(context.Context) (map[string]bool, int, error) {
+	c, err := d.open()
+	if err != nil {
+		return nil, 0, err
+	}
+	defer c.Close()
+	if ok, why := wmCheck(c); !ok {
+		return nil, 0, errors.New(why)
+	}
+	sup, err := supported(c)
+	if err != nil {
+		return nil, 0, err
+	}
+	n := 0
+	if v, err := prop32(c, c.Root(), "_NET_NUMBER_OF_DESKTOPS"); err == nil && len(v) > 0 {
+		n = int(v[0])
+	}
+	return sup, n, nil
+}
+
+// EWMH _NET_WM_STATE actions.
+const (
+	stateRemove = 0
+	stateAdd    = 1
+)
+
+// SetState adds or removes up to two _NET_WM_STATE properties (_NET_WM_STATE_FULLSCREEN, …),
+// as a pager would ask the window manager.
+func (d *Display) SetState(_ context.Context, id uint32, add bool, states ...string) error {
+	if len(states) == 0 || len(states) > 2 {
+		return fmt.Errorf("x11: SetState takes one or two states (got %d)", len(states))
+	}
+	c, err := d.open()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	msg, err := c.Atom("_NET_WM_STATE")
+	if err != nil {
+		return err
+	}
+	data := [5]uint32{stateRemove, 0, 0, sourcePager}
+	if add {
+		data[0] = stateAdd
+	}
+	for i, n := range states {
+		a, err := c.Atom(n)
+		if err != nil {
+			return err
+		}
+		data[1+i] = a
+	}
+	if err := c.ClientMessage(id, msg, data); err != nil {
+		return err
+	}
+	return c.Sync()
+}
+
+// MoveToDesktop moves the window to desktop n (0-based, _NET_WM_DESKTOP); the current desktop
+// stays.
+func (d *Display) MoveToDesktop(_ context.Context, id uint32, n int) error {
+	c, err := d.open()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	a, err := c.Atom("_NET_WM_DESKTOP")
+	if err != nil {
+		return err
+	}
+	if err := c.ClientMessage(id, a, [5]uint32{uint32(n), sourcePager}); err != nil {
+		return err
+	}
+	return c.Sync()
+}
+
+// Snap gives the window the left or right half of the current desktop's work area (the screen
+// minus panels, _NET_WORKAREA) through _NET_MOVERESIZE_WINDOW: the geometry the window manager
+// itself would set. A maximised window is unmaximised first, or the WM ignores the move.
+func (d *Display) Snap(ctx context.Context, id uint32, left bool) error {
+	x, y, w, h, err := d.workArea()
+	if err != nil {
+		return err
+	}
+	half := w / 2
+	if !left {
+		x += half
+	}
+	if err := d.SetState(ctx, id, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ"); err != nil {
+		return err
+	}
+	c, err := d.open()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	a, err := c.Atom("_NET_MOVERESIZE_WINDOW")
+	if err != nil {
+		return err
+	}
+	// Flags: NorthWest gravity (1), x, y, width and height present (bits 8-11), from a pager (bits 12-13).
+	flags := uint32(1) | 0xf00 | sourcePager<<12
+	if err := c.ClientMessage(id, a, [5]uint32{flags, x, y, half, h}); err != nil {
+		return err
+	}
+	return c.Sync()
+}
+
+// workArea is the current desktop's _NET_WORKAREA.
+func (d *Display) workArea() (x, y, w, h uint32, err error) {
+	c, err := d.open()
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	defer c.Close()
+	area, err := prop32(c, c.Root(), "_NET_WORKAREA")
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	desk := 0
+	if v, err := prop32(c, c.Root(), "_NET_CURRENT_DESKTOP"); err == nil && len(v) > 0 {
+		desk = int(v[0])
+	}
+	if len(area) < 4*(desk+1) {
+		desk = 0
+	}
+	if len(area) < 4 {
+		return 0, 0, 0, 0, errors.New("the window manager reports no work area")
+	}
+	return area[4*desk], area[4*desk+1], area[4*desk+2], area[4*desk+3], nil
 }
 
 // --- the typing backend for dictation ---
