@@ -28,6 +28,8 @@ import (
 //
 //	HELPER_STARTS           append one line per start, once the knobs below are set up
 //	HELPER_CRASH_AFTER      exit 3 after this duration
+//	HELPER_ERROR_LINE       print this line (as a traceback's root cause)
+//	HELPER_ERROR_AFTER      wait this long before printing HELPER_ERROR_LINE
 //	HELPER_ENV_FILE         write the environment here
 //	HELPER_CHILD_PID_FILE   spawn a sleeping grandchild and write its pid here
 //	HELPER_IGNORE_TERM      ignore SIGTERM
@@ -71,6 +73,13 @@ func runHelper() {
 	fmt.Println("hello stdout")
 	fmt.Fprintln(os.Stderr, "hello stderr")
 	if v := os.Getenv("HELPER_ERROR_LINE"); v != "" {
+		if d := os.Getenv("HELPER_ERROR_AFTER"); d != "" {
+			wait, err := time.ParseDuration(d)
+			if err != nil {
+				panic(err)
+			}
+			time.Sleep(wait)
+		}
 		// A Python traceback: the root cause, then lines that push it out of the tail.
 		fmt.Fprintln(os.Stderr, "(EngineCore pid=123) ERROR 10-20 04:40:09 [core.py:1510] "+v)
 		for i := 0; i < 40; i++ {
@@ -293,6 +302,58 @@ func TestErrorLineExplainsExit(t *testing.T) {
 	})
 	if out := s.Status().Output; slices.ContainsFunc(out, func(l string) bool { return strings.HasPrefix(l, "ValueError") }) {
 		t.Fatal("the test's root cause is still in the tail: it proves nothing")
+	}
+}
+
+// A Fatal line (the GPU is out of memory) means restarting can't help: the engine fails at
+// once, with the line, and is not restarted (#562).
+func TestFatalLineFailsWithoutRestart(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false)
+	spec := f.spec(map[string]string{"HELPER_CRASH_AFTER": "0s",
+		"HELPER_ERROR_LINE": "ggml_backend_cuda_buffer_type_alloc_buffer: allocating 5120.00 MiB on device 0: cudaMalloc failed: out of memory"})
+	spec.Restart.MaxRestarts = 5
+	spec.Fatal = regexp.MustCompile(`cudaMalloc failed: out of memory`)
+	s := start(t, spec)
+	ctx, cancel := context.WithTimeout(context.Background(), hangGuard)
+	defer cancel()
+	if err := s.WaitHealthy(ctx); !errors.Is(err, ErrFailed) {
+		t.Fatalf("WaitHealthy = %v, want ErrFailed", err)
+	}
+	st := s.Status()
+	if st.State != Failed || st.Restarts != 0 || !strings.Contains(st.Fatal, "cudaMalloc failed: out of memory") ||
+		!strings.Contains(st.LastError, "cudaMalloc failed") {
+		t.Fatalf("status = %+v", st)
+	}
+	if n := f.startCount(); n != 1 {
+		t.Fatalf("starts = %d, want 1", n)
+	}
+	// Started again (Retry after freeing the card): the old line no longer counts.
+	f.health.set(true)
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Fatal != "" {
+		t.Fatalf("fatal kept across a start: %+v", st)
+	}
+}
+
+// A Fatal line only counts at load: an engine that served, then printed one on a big request
+// and crashed, is restarted (the crash freed the card), as any other crash is.
+func TestFatalLineAfterHealthyRestarts(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	spec := f.spec(map[string]string{"HELPER_ERROR_AFTER": "300ms", "HELPER_CRASH_AFTER": "300ms",
+		"HELPER_ERROR_LINE": "ggml_gallocr_reserve_n: failed to allocate CUDA0 buffer of size 2147483648"})
+	spec.Restart.MaxRestarts = 5
+	spec.Fatal = regexp.MustCompile(`failed to allocate \S+ buffer`)
+	s := start(t, spec)
+	waitHealthy(t, s)
+	eventually(t, "a restart or a failure", func() bool { return f.startCount() >= 2 || s.State() == Failed })
+	st := s.Status()
+	if n := f.startCount(); n < 2 || st.Fatal != "" || st.Restarts < 1 {
+		t.Fatalf("starts = %d, status = %+v; want restarted, no fatal line", n, st)
 	}
 }
 

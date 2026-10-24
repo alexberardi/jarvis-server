@@ -73,6 +73,17 @@ describe('HardwarePanel engines', () => {
   })
 })
 
+describe('HardwarePanel out of GPU memory (#562)', () => {
+  it('says why it gave up at once instead of counting retries, and still offers Retry', async () => {
+    const why = "out of GPU memory (cudaMalloc failed: out of memory): the card can't hold this engine next to what else is on it. Free GPU memory, lower the context or pick a smaller model, then press Retry"
+    api.getHardware.mockResolvedValue(hardware({ ...engine, retries: 0, restarts: 0, gave_up: true, gave_up_reason: why }))
+    renderPanel()
+    await screen.findByText(why)
+    expect(screen.queryByText(/Gave up after/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+  })
+})
+
 describe('HardwarePanel builds', () => {
   it('offers the MLX engine where it runs and says why not elsewhere', async () => {
     const why = 'mlx-lm needs Apple Silicon (darwin/arm64, macOS 14 or later); this host is linux/amd64'

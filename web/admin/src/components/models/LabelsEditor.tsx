@@ -46,6 +46,7 @@ const STATE_TEXT: Record<string, string> = {
   fetching_engine: 'fetching engine',
   no_engine_build: 'no engine build',
   gpu_unavailable: 'GPU unavailable',
+  does_not_fit: "doesn't fit",
 }
 
 const BUILD_KIND: Record<EngineLabel, string> = {
@@ -274,6 +275,7 @@ function EngineLabelCard({
         <p className="text-small text-warning">{cfg.problem || status.reason}</p>
       )}
       {cfg.note && <p className="text-small text-text-muted">{cfg.note}</p>}
+      {status.note && <p className="text-small text-text-muted">{status.note}</p>}
       {label === 'cloud' && (
         <p className="text-small text-text-muted">
           A provider's model, next to the ones on this machine. Nothing uses it until you pick it for a feature under

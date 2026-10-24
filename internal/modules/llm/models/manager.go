@@ -1456,7 +1456,8 @@ func deviceList(s string) []int {
 }
 
 // Residents lists the GPU memory assigned local engines need, from the current label
-// settings. Labels sharing one engine (same model, context and devices, LD1) count once.
+// settings. Labels sharing one engine count once: by the engine a running label is on, else by
+// engine.EngineIdentity (LD1; #562: two labels on one model that differ in slots are two engines).
 // Labels on the CPU (gpu_layers 0 or gpu_backend cpu), remote, shared or off need none.
 func (m *Manager) Residents(ctx context.Context) []Resident {
 	if m.Labels == nil {
@@ -1473,7 +1474,10 @@ func (m *Manager) Residents(ctx context.Context) []Resident {
 		if !ok {
 			continue
 		}
-		key := fmt.Sprintf("%s|%s|%d|%s", c.Kind, c.Model, c.Context, c.GPUDevices)
+		key := "id:" + engine.EngineIdentity(c)
+		if ls.Endpoint != nil && ls.Endpoint.Engine != "" {
+			key = "engine:" + ls.Endpoint.Engine
+		}
 		if i, ok := idx[key]; ok {
 			out[i].Labels = append(out[i].Labels, c.Label)
 			continue

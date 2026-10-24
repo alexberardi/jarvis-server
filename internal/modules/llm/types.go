@@ -74,6 +74,9 @@ const (
 	// StateGPUUnavailable: the label must run on a GPU that isn't usable (a driver update
 	// waiting for a reboot, …); Reason is a sentence for the user. It fails at once.
 	StateGPUUnavailable = "gpu_unavailable"
+	// StateDoesNotFit is a label state only (requests see StateFailed): the GPU can't hold the
+	// label's engine next to the others on it, so none was started (engine.StateDoesNotFit).
+	StateDoesNotFit = "does_not_fit"
 )
 
 // NotReadyError says a label's engine can't serve yet.

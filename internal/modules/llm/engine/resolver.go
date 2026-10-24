@@ -22,6 +22,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -81,7 +82,7 @@ var ErrNotReady = errors.New("not ready")
 type NotReadyError struct {
 	Label string
 	// State is the engine state (starting, restarting, draining, failed, stopped) or one of
-	// "fetching_engine", "no_engine_build", "misconfigured".
+	// "fetching_engine", "no_engine_build", "misconfigured", StateDoesNotFit.
 	State  string
 	Reason string
 }
@@ -95,6 +96,14 @@ func (e *NotReadyError) Error() string {
 }
 
 func (e *NotReadyError) Is(target error) bool { return target == ErrNotReady }
+
+// StateDoesNotFit is the NotReadyError state of a label whose engine the GPU can't hold next to
+// the engines already on it (Resolver.Fits); Reason names the card. Nothing is started for it.
+const StateDoesNotFit = "does_not_fit"
+
+// gpuOOM matches an engine's out-of-GPU-memory line (llama.cpp on CUDA, Vulkan or Metal; torch):
+// restarting the same placement gives the same OOM, so the engine isn't restarted (#562).
+var gpuOOM = regexp.MustCompile(`(?i)cudaMalloc failed|out of (device )?memory|unable to allocate \S+ buffer|failed to allocate \S+ buffer|ErrorOutOfDeviceMemory`)
 
 // BinaryProvider finds installed engine builds.
 type BinaryProvider interface {
@@ -150,6 +159,13 @@ type Resolver struct {
 	// Memory persists where each label last ran healthy on a GPU, so a GPU that disappears
 	// later is noticed even when the label's settings are all "auto" (nil = in memory only).
 	Memory GPUMemory
+	// Fits, if set, says whether a new engine for c on a GPU build f fits next to the GPU engines
+	// already placed (alongside: the config each was started with, its Label naming the labels it
+	// serves): "" when it does or can't be judged, else why not, naming the card. A label that
+	// doesn't fit runs on an engine of the same model it can share (differing only in context,
+	// slots, KV cache or flash attention), or is refused with StateDoesNotFit (#562). The model
+	// manager sets it (models.Manager.PlacementFit).
+	Fits func(ctx context.Context, c LabelConfig, f Flavour, alongside []LabelConfig) string
 
 	// mu guards the maps below. It is never held while an engine stops (that waits up to
 	// StopTimeout): engines are detached from instances under mu and stopped after it is
@@ -173,9 +189,13 @@ type Resolver struct {
 	gpuDown map[string]string
 	// cpuUsed is when each label's CPU fallback was last asked for (ResolveCPU), for CPUIdle.
 	cpuUsed map[string]time.Time
+	// notes says why a label runs on an engine started for other settings (Fits), for Status.
+	notes map[string]string
 }
 
 type instance struct {
+	// cfg is the config the engine was started for (Fits weighs it).
+	cfg    LabelConfig
 	key    instanceKey
 	hash   string
 	name   string
@@ -185,8 +205,10 @@ type instance struct {
 	sup    *engines.Supervisor
 	// retries counts failed-engine retries, for the cooldown and MaxRetries.
 	retries int
-	// gaveUp is set once retries reach MaxRetries: the engine stays failed until Retry.
+	// gaveUp is set once retries reach MaxRetries, or at once when retrying can't help (why):
+	// the engine stays failed until Retry.
 	gaveUp bool
+	why    string
 }
 
 // ErrUnknownEngine is returned by Retry for an engine name the resolver doesn't run.
@@ -206,6 +228,7 @@ func (r *Resolver) init() {
 		r.stopping = map[*instance]chan struct{}{}
 		r.last = map[string]error{}
 		r.cpuUsed = map[string]time.Time{}
+		r.notes = map[string]string{}
 		// Before any engine starts, so only a previous jarvisd's are in the dir.
 		if n := engines.Sweep(r.PIDDir, r.Log); n > 0 {
 			r.Log.Warn("killed engines left running by a previous jarvisd", "count", n)
@@ -269,6 +292,15 @@ type parked struct {
 
 func (inst *instance) parked() parked { return parked{inst.gaveUp, inst.retries} }
 
+// oomReason is a failed engine's reason when it ran out of GPU memory at load, "" otherwise.
+func oomReason(st engines.Status) string {
+	if st.State != engines.Failed || st.Fatal == "" {
+		return ""
+	}
+	return fmt.Sprintf("out of GPU memory (%s): the card can't hold this engine next to what else is on it. "+
+		"Free GPU memory, lower the context or pick a smaller model, then press Retry", strings.TrimSpace(st.Fatal))
+}
+
 // ready reports a local label's endpoint by its engine's state; p is its parked snapshot.
 func ready(ep Endpoint, inst *instance, p parked) (Endpoint, error) {
 	st := inst.sup.Status()
@@ -278,7 +310,9 @@ func ready(ep Endpoint, inst *instance, p parked) (Endpoint, error) {
 		ep.Degraded = true
 	default:
 		reason := st.LastError
-		if p.gaveUp {
+		if oom := oomReason(st); oom != "" {
+			reason = oom
+		} else if p.gaveUp {
 			reason = fmt.Sprintf("gave up after %d retries (%s); fix the settings or press Retry", p.retries, st.LastError)
 		}
 		return Endpoint{}, &NotReadyError{Label: ep.Label, State: string(st.State), Reason: reason}
@@ -442,6 +476,21 @@ func (r *Resolver) applyConfig(ctx context.Context, label string, c LabelConfig)
 	}
 	h := key.hash()
 	inst := r.instances[h]
+	note := ""
+	if inst == nil && key.onGPU() && r.Fits != nil {
+		if why := r.Fits(ctx, c, f, r.alongside(label)); why != "" {
+			if inst = r.shareable(key); inst == nil {
+				delete(r.bound, label)
+				return ep, nil, &NotReadyError{Label: label, State: StateDoesNotFit, Reason: why}
+			}
+			note = fmt.Sprintf("Runs on %s (%s's engine, its context and slots): %s", inst.name, strings.Join(r.labelsOn(inst.hash, label), ", "), why)
+		}
+	}
+	if note == "" {
+		delete(r.notes, label)
+	} else {
+		r.notes[label] = note
+	}
 	if inst == nil {
 		// Free whatever this label held alone before loading the replacement, and load nothing
 		// while an engine is still stopping.
@@ -460,6 +509,7 @@ func (r *Resolver) applyConfig(ctx context.Context, label string, c LabelConfig)
 			return ep, nil, &NotReadyError{Label: label, State: string(engines.Failed), Reason: err.Error()}
 		}
 	}
+	h = inst.hash // a shared engine's, when the label runs on one started for other settings
 	prev, had := r.bound[label]
 	r.bound[label] = h
 	// A label newly bound to an engine that is already healthy (background joining live's
@@ -468,6 +518,58 @@ func (r *Resolver) applyConfig(ctx context.Context, label string, c LabelConfig)
 		go r.OnReady([]string{label})
 	}
 	return r.fill(ep, c, inst), inst, nil
+}
+
+// alongside are the configs of the GPU engines label doesn't hold alone, each Label naming the
+// labels it serves, by engine name: what a new engine for label is placed next to. r.mu is held.
+func (r *Resolver) alongside(label string) []LabelConfig {
+	var out []LabelConfig
+	for _, inst := range r.sortedInstances() {
+		labels := r.labelsOn(inst.hash, "")
+		if !inst.key.onGPU() || len(labels) == 0 || (len(labels) == 1 && labels[0] == label) {
+			continue
+		}
+		c := inst.cfg
+		c.Label = strings.Join(labels, ", ")
+		out = append(out, c)
+	}
+	return out
+}
+
+// shareable is a running engine that can serve a label with key k although k differs: same
+// model, build, placement, projector, template and extra args; only the context, slots, KV
+// cache type or flash attention differ (the label then gets the engine's). nil if none. r.mu is
+// held.
+func (r *Resolver) shareable(k instanceKey) *instance {
+	loose := func(k instanceKey) instanceKey {
+		k.Context, k.Parallel, k.KVCacheType, k.FlashAttn = 0, 0, "", ""
+		return k
+	}
+	for _, inst := range r.sortedInstances() {
+		if r.users(inst.hash) > 0 && loose(inst.key) == loose(k) {
+			return inst
+		}
+	}
+	return nil
+}
+
+// labelsOn lists the labels bound to the engine with key hash h, sorted, except skip. r.mu is held.
+func (r *Resolver) labelsOn(h, skip string) []string {
+	var out []string
+	for l, b := range r.bound {
+		if b == h && l != skip {
+			out = append(out, l)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// sortedInstances are the engines by name, for a deterministic pick. r.mu is held.
+func (r *Resolver) sortedInstances() []*instance {
+	out := slices.Collect(maps.Values(r.instances))
+	slices.SortFunc(out, func(a, b *instance) int { return strings.Compare(a.name, b.name) })
+	return out
 }
 
 // fill completes a local label's endpoint from its instance.
@@ -588,7 +690,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 	if err != nil {
 		return nil, err
 	}
-	inst := &instance{key: key, hash: h, name: shortKind(c.Kind) + "-" + h[:8], port: port, alias: c.Model}
+	inst := &instance{cfg: c, key: key, hash: h, name: shortKind(c.Kind) + "-" + h[:8], port: port, alias: c.Model}
 	if inst.alias == "" {
 		inst.alias = filepath.Base(c.ModelPath)
 	}
@@ -642,6 +744,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 			DrainGrace: def(r.DrainGrace, 30*time.Second),
 		},
 		ErrorLine:    errorLine(c.Kind),
+		Fatal:        gpuOOM,
 		OnHealthy:    func() { r.ready(h) },
 		StartTimeout: def(r.StartTimeout, 10*time.Minute),
 		StopTimeout:  def(r.StopTimeout, 10*time.Second),
@@ -749,6 +852,11 @@ func (r *Resolver) retryFailed() {
 		if inst.gaveUp {
 			continue
 		}
+		if oom := oomReason(st); oom != "" {
+			inst.gaveUp, inst.why = true, oom
+			r.Log.Error("engine gave up: out of GPU memory, retrying can't help", "engine", inst.name, "line", st.Fatal)
+			continue
+		}
 		if maxRetries >= 0 && inst.retries >= maxRetries {
 			inst.gaveUp = true
 			r.Log.Error("engine gave up: still failing after retries", "engine", inst.name, "retries", inst.retries, "err", st.LastError)
@@ -785,7 +893,7 @@ func (r *Resolver) Retry(_ context.Context, name string) error {
 		if inst.sup.Status().State != engines.Failed {
 			return fmt.Errorf("%w: %q", ErrNotFailed, name)
 		}
-		inst.retries, inst.gaveUp = 0, false
+		inst.retries, inst.gaveUp, inst.why = 0, false, ""
 		r.Log.Info("retrying engine on request", "engine", inst.name)
 		return inst.sup.Start()
 	}
@@ -861,6 +969,9 @@ type LabelStatus struct {
 	State    string    `json:"state"`
 	Reason   string    `json:"reason,omitempty"`
 	Endpoint *Endpoint `json:"endpoint,omitempty"`
+	// Note says why a ready label runs on an engine started for other settings: the GPU can't
+	// hold a second copy of its model (Resolver.Fits).
+	Note string `json:"note,omitempty"`
 	// Fallback is a remote stt label's fallback: its setting, which path served lately, the
 	// fallback count and last remote error (SpeechFallback), and a warning when it can't work.
 	Fallback *fallback.Status `json:"fallback,omitempty"`
@@ -877,15 +988,18 @@ type InstanceStatus struct {
 	LastError string        `json:"last_error,omitempty"`
 	// Retries counts the resolver's retries of this failed engine; GaveUp is set once they
 	// reach MaxRetries and the engine is left failed until Retry or a settings change.
-	Retries int      `json:"retries"`
-	GaveUp  bool     `json:"gave_up"`
-	Output  []string `json:"output"`
-	Kind    Kind     `json:"kind"`
-	Flavour Flavour  `json:"flavour"`
-	Port    int      `json:"port"`
-	Model   string   `json:"model"`
-	Labels  []string `json:"labels"`
-	Args    []string `json:"args"`
+	Retries int  `json:"retries"`
+	GaveUp  bool `json:"gave_up"`
+	// GaveUpReason is set when the resolver gave up at once because retrying can't help (the
+	// engine ran out of GPU memory).
+	GaveUpReason string   `json:"gave_up_reason,omitempty"`
+	Output       []string `json:"output"`
+	Kind         Kind     `json:"kind"`
+	Flavour      Flavour  `json:"flavour"`
+	Port         int      `json:"port"`
+	Model        string   `json:"model"`
+	Labels       []string `json:"labels"`
+	Args         []string `json:"args"`
 }
 
 // Status reports every label against the current settings. It only reads: a local label is
@@ -904,7 +1018,7 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 		c.RemoteAPIKey = ""
 		ls.Config = c
 		ls.Fallback = r.fallbackStatus(ctx, c)
-		ep, err := r.peek(c)
+		ep, note, err := r.peek(c)
 		var nr *NotReadyError
 		switch {
 		case errors.Is(err, ErrNotConfigured):
@@ -915,7 +1029,7 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 			ls.State, ls.Reason = "error", err.Error()
 		default:
 			ep.APIKey = ""
-			ls.Endpoint = &ep
+			ls.Endpoint, ls.Note = &ep, note
 			switch {
 			case ep.Remote:
 				ls.State = "remote"
@@ -930,16 +1044,17 @@ func (r *Resolver) Status(ctx context.Context) []LabelStatus {
 	return out
 }
 
-// peek is Resolve without side effects, for Status.
-func (r *Resolver) peek(c LabelConfig) (Endpoint, error) {
+// peek is Resolve without side effects, for Status; note is the label's Status note.
+func (r *Resolver) peek(c LabelConfig) (Endpoint, string, error) {
 	ep, local, err := describe(c)
 	if !local {
-		return ep, err
+		return ep, "", err
 	}
 	r.mu.Lock()
 	r.init()
 	inst := r.instances[r.bound[c.Label]]
 	last, seen := r.last[c.Label]
+	note := r.notes[c.Label]
 	var p parked
 	if inst != nil {
 		p = inst.parked()
@@ -947,11 +1062,12 @@ func (r *Resolver) peek(c LabelConfig) (Endpoint, error) {
 	r.mu.Unlock()
 	switch {
 	case inst != nil:
-		return ready(r.fill(ep, c, inst), inst, p)
+		ep, err := ready(r.fill(ep, c, inst), inst, p)
+		return ep, note, err
 	case seen && last != nil:
-		return Endpoint{}, last
+		return Endpoint{}, "", last
 	}
-	return Endpoint{}, &NotReadyError{Label: c.Label, State: string(engines.Stopped), Reason: "no engine running"}
+	return Endpoint{}, "", &NotReadyError{Label: c.Label, State: string(engines.Stopped), Reason: "no engine running"}
 }
 
 // Instances reports the supervised engines, sorted by name.
@@ -971,7 +1087,7 @@ func (r *Resolver) Instances() []InstanceStatus {
 		args, _ := inst.key.args(inst.port, inst.alias)
 		st := inst.sup.Status()
 		out = append(out, InstanceStatus{Name: st.Name, State: st.State, PID: st.PID, Restarts: st.Restarts,
-			Since: st.Since, Started: st.Started, LastError: st.LastError, Retries: inst.retries, GaveUp: inst.gaveUp, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
+			Since: st.Since, Started: st.Started, LastError: st.LastError, Retries: inst.retries, GaveUp: inst.gaveUp, GaveUpReason: inst.why, Output: st.Output, Kind: inst.key.Kind, Flavour: inst.key.Flavour,
 			Port: inst.port, Model: inst.key.Model, Labels: labels, Args: args})
 	}
 	slices.SortFunc(out, func(a, b InstanceStatus) int { return strings.Compare(a.Name, b.Name) })

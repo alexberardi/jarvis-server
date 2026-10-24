@@ -79,6 +79,17 @@ func keyFor(c LabelConfig, f Flavour, binary string) instanceKey {
 	return k
 }
 
+// EngineIdentity is what decides, from settings alone, whether two labels' local configs run
+// one engine (LD1): equal identities share one. The resolver's instance key adds the build. A
+// label the GPU can't hold a second copy for may run on another's engine anyway (Resolver.Fits);
+// a running label's Endpoint.Engine is then the truth.
+func EngineIdentity(c LabelConfig) string {
+	if c.ModelPath == "" {
+		c.ModelPath = c.Model
+	}
+	return keyFor(c, Flavour(c.GPUBackend), "").hash()
+}
+
 func normList(s string) string {
 	var parts []string
 	for _, p := range strings.Split(s, ",") {

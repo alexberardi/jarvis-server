@@ -41,6 +41,7 @@ const STATE_TEXT: Record<string, string> = {
   fetching_engine: 'Fetching engine',
   no_engine_build: 'No engine build',
   gpu_unavailable: 'GPU unavailable',
+  does_not_fit: "Doesn't fit",
 }
 
 const BADGE_TONE: Record<Tone, BadgeTone> = { ok: 'success', warn: 'warning', bad: 'danger', info: 'primary', muted: 'neutral' }
