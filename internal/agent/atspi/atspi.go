@@ -72,7 +72,15 @@ func Element(gen int, ref string) (*computeruse.Element, error) { return element
 // ElementAt returns the deepest element under screen point (x, y) in the active window of the app
 // with this pid (the caller finds the window under the point), for the deny check on a coordinate
 // action and for recording; nil when there's none.
-func ElementAt(pid int, x, y int) (*computeruse.Element, error) { return elementAt(pid, x, y) }
+func ElementAt(pid int, x, y int) (*computeruse.Element, error) {
+	return elementAt(pid, x, y, coordScreen)
+}
+
+// ElementAtWindow is ElementAt with (x, y) from the active window's top-left corner: on Wayland
+// an app doesn't know where its window is on the screen, so screen points find nothing.
+func ElementAtWindow(pid int, x, y int) (*computeruse.Element, error) {
+	return elementAt(pid, x, y, coordWindow)
+}
 
 // Focused returns the element with the keyboard focus in the active window of the app with
 // this pid, which recorded typing goes to (a passwordtext is Secure); nil when none has it.
@@ -86,6 +94,17 @@ func clip(s string) string {
 	return string(r[:maxText]) + "…"
 }
 
-// Available reports whether the accessibility bus can be reached (nil) or why not: without it a
-// desktop recording has no element context and masks nothing.
-func Available(ctx context.Context) error { return available(ctx) }
+// State is the accessibility setup as Enable found it; a desktop recording logs it at its start.
+type State struct {
+	SessionBus   bool   // DBUS_SESSION_BUS_ADDRESS is set
+	From         string // where the bus address comes from: AT_SPI_BUS_ADDRESS or org.a11y.Bus
+	Enabled      bool   // org.a11y.Status IsEnabled, after Enable
+	TurnedOn     bool   // Enable switched IsEnabled on
+	ScreenReader bool   // org.a11y.Status ScreenReaderEnabled
+	Err          error  // why the accessibility bus can't be reached; nil when it can
+}
+
+// Enable switches the session's org.a11y.Status IsEnabled on when it is off, as a screen
+// reader does: Qt and Chromium apps join the accessibility bus only then (GTK 4 always does).
+// It stays on after the recording. It reports the setup, and whether the bus can be reached.
+func Enable(ctx context.Context) State { return enable(ctx) }
