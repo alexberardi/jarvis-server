@@ -328,6 +328,30 @@ func (c *CC) UploadKeyframe(ctx context.Context, recordingID string, seq int, cr
 	return c.do(ctx, http.MethodPut, path, rawBody{jpeg, "image/jpeg"}, nil)
 }
 
+// uploadTimeout bounds one inbox attachment upload: a 25 MB video over a Pi's Wi-Fi outlasts
+// the client's 15 s.
+const uploadTimeout = 2 * time.Minute
+
+// UploadInboxAttachment uploads one image or video for an inbox item the node posts next
+// (POST /node/inbox-attachment, the raw bytes with their type) and returns its id.
+func (c *CC) UploadInboxAttachment(ctx context.Context, mime string, data []byte) (string, error) {
+	hc := &http.Client{}
+	if c.HTTP != nil {
+		copied := *c.HTTP
+		hc = &copied
+	}
+	hc.Timeout = uploadTimeout
+	var out struct {
+		ID string `json:"id"`
+	}
+	err := doJSON(ctx, hc, http.MethodPost, joinURL(c.BaseURL, "/api/v0/node/inbox-attachment"),
+		map[string]string{"X-API-Key": c.Creds.APIKey()}, rawBody{data, mime}, &out)
+	if err == nil && out.ID == "" {
+		err = errors.New("inbox attachment: no id in the answer")
+	}
+	return out.ID, err
+}
+
 // PostToolReport answers report_tools.
 func (c *CC) PostToolReport(ctx context.Context, rid string, report any) error {
 	return c.do(ctx, http.MethodPost, "/api/v0/mobile/node-tool-reports/"+url.PathEscape(rid), report, nil)

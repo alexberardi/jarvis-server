@@ -127,6 +127,101 @@ func TestCommandCenterBackendsGoOutAsTheNode(t *testing.T) {
 	}
 }
 
+// inboxCC is command-center's attachment upload and inbox-item endpoints: each upload's type and
+// bytes, the item's body, and a status per upload to answer instead of 201.
+type inboxCC struct {
+	mu        sync.Mutex
+	uploads   []string // "content-type:body"
+	item      map[string]any
+	uploadErr []int
+	itemErr   int
+}
+
+func (f *inboxCC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, _ := io.ReadAll(r.Body)
+	switch r.URL.Path {
+	case "/api/v0/node/inbox-attachment":
+		if len(f.uploadErr) > 0 {
+			code := f.uploadErr[0]
+			f.uploadErr = f.uploadErr[1:]
+			http.Error(w, `{"detail":"no"}`, code)
+			return
+		}
+		f.uploads = append(f.uploads, r.Header.Get("Content-Type")+":"+string(b))
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("att-%d", len(f.uploads)), "mime": r.Header.Get("Content-Type")})
+	case "/api/v0/node/inbox-item":
+		if f.itemErr != 0 {
+			http.Error(w, `{"detail":"no"}`, f.itemErr)
+			return
+		}
+		_ = json.Unmarshal(b, &f.item)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": true})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// A package agent's finished video (comfyui_jobs) reaches the inbox as an attachment: each file
+// the sidecar names is uploaded, then the item is posted with their ids
+// (N:services/inbox_backend.py, its tags for jarvisd's refusals).
+func TestInboxPostUploadsAttachments(t *testing.T) {
+	f := &inboxCC{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	h := &Host{}
+	h.SetCC(node.NewCC(srv.URL, node.Creds{NodeID: "n1", NodeKey: "k"}))
+	dir := t.TempDir()
+	mp4, png := filepath.Join(dir, "fox.mp4"), filepath.Join(dir, "dot.png")
+	_ = os.WriteFile(mp4, []byte("video bytes"), 0o600)
+	_ = os.WriteFile(png, []byte("png bytes"), 0o600)
+	post := func(paths ...string) any {
+		var atts []map[string]any
+		for _, p := range paths {
+			mime := "video/mp4"
+			if strings.HasSuffix(p, ".png") {
+				mime = "image/png"
+			}
+			atts = append(atts, map[string]any{"path": p, "mime": mime, "filename": filepath.Base(p)})
+		}
+		return ask(t, h, "inbox.post", map[string]any{"command_name": "comfyui", "title": "Your video is ready",
+			"user_id": 7, "create_push_notification": true, "target_type": "user", "attachments": atts})
+	}
+
+	if v := post(mp4, png); v != "ok" {
+		t.Fatalf("post = %v", v)
+	}
+	ids, _ := json.Marshal(f.item["attachment_ids"])
+	if strings.Join(f.uploads, ",") != "video/mp4:video bytes,image/png:png bytes" || string(ids) != `["att-1","att-2"]` ||
+		f.item["title"] != "Your video is ready" || f.item["user_id"] != 7.0 || f.item["create_push_notification"] != true {
+		t.Fatalf("uploads %v, item %v", f.uploads, f.item)
+	}
+
+	for _, c := range []struct {
+		upload []int
+		item   int
+		want   string
+	}{
+		{[]int{http.StatusRequestEntityTooLarge}, 0, "attachment_too_large"},
+		{[]int{http.StatusUnsupportedMediaType}, 0, "attachment_type"},
+		{[]int{http.StatusServiceUnavailable}, 0, "http_error"},
+		{nil, http.StatusUnprocessableEntity, "invalid"},
+		{nil, http.StatusRequestEntityTooLarge, "attachment_too_large"},
+		{nil, http.StatusBadGateway, "http_error"},
+	} {
+		f.uploadErr, f.itemErr = c.upload, c.item
+		if v := post(mp4); v != c.want {
+			t.Errorf("upload %v, item %d: %v, want %s", c.upload, c.item, v, c.want)
+		}
+	}
+	f.itemErr = 0
+	if v := post(filepath.Join(dir, "gone.mp4")); v != "invalid" {
+		t.Fatalf("missing file = %v", v)
+	}
+}
+
 func TestTimerAndAlertMethods(t *testing.T) {
 	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
 	ts := &timers.Service{Path: filepath.Join(t.TempDir(), "timers.json"), Now: func() time.Time { return now },

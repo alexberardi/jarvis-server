@@ -113,6 +113,8 @@ internal/agent/
   packages/           Pantry package install/update/revert/uninstall from the app (DESIGN.md §6):
                       the MQTT requests (requests.go), download (archive.go), manifest checks,
                       uv + venv (python.go), pkgs/ and the sidecar swap (manager.go)
+  pkgagents/          a Pi's package agents (a manifest's agents: comfyui_jobs) on their schedules, run in
+                      the sidecar (agent_run); their alerts in the Pi's queue, Failing for the app
   browser/            browser control: native-messaging host relay (nativehost.go), the agent's
                       socket + peer check (ipc.go), Hub of connected browsers (hub.go), the 9
                       browser_* tools (tools.go), host-manifest registration per OS/browser

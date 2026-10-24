@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -87,6 +88,29 @@ type params struct {
 	UserID                 json.RawMessage `json:"user_id"`
 	CreatePushNotification bool            `json:"create_push_notification"`
 	TargetType             string          `json:"target_type"`
+	// The files the sidecar wrote or the package named, uploaded before the item.
+	Attachments []struct {
+		Path     string `json:"path"`
+		Mime     string `json:"mime"`
+		Filename string `json:"filename"`
+	} `json:"attachments"`
+}
+
+// rejection is the inbox tag for jarvisd refusing an attachment or an item that references
+// them (N:services/inbox_backend.py): 413 too large, 415 a type it won't show, 422 bad ids.
+func rejection(err error) string {
+	var he *node.HTTPError
+	if errors.As(err, &he) {
+		switch he.Status {
+		case http.StatusRequestEntityTooLarge:
+			return "attachment_too_large"
+		case http.StatusUnsupportedMediaType:
+			return "attachment_type"
+		case http.StatusUnprocessableEntity:
+			return "invalid"
+		}
+	}
+	return "http_error"
 }
 
 // Answer serves one request (sidecar.Host).
@@ -274,11 +298,31 @@ func (h *Host) commandCenter(ctx context.Context, method string, p params) (any,
 		if len(p.UserID) == 0 {
 			body["user_id"] = nil
 		}
+		if len(p.Attachments) > 0 {
+			ids := []string{}
+			for _, a := range p.Attachments {
+				data, err := os.ReadFile(a.Path)
+				if err != nil {
+					h.log().Warn("sdkhost: inbox attachment unreadable", "command", p.CommandName, "file", a.Filename, "err", err)
+					return "invalid", nil
+				}
+				id, err := cc.UploadInboxAttachment(ctx, a.Mime, data)
+				if err != nil {
+					h.log().Warn("sdkhost: inbox attachment not uploaded", "command", p.CommandName, "file", a.Filename, "err", err)
+					return rejection(err), nil
+				}
+				ids = append(ids, id)
+			}
+			body["attachment_ids"] = ids
+		}
 		var resp struct {
 			Sent bool `json:"sent"`
 		}
 		if err := cc.Do(ctx, http.MethodPost, "/api/v0/node/inbox-item", body, &resp); err != nil {
 			h.log().Warn("sdkhost: inbox post failed", "command", p.CommandName, "err", err)
+			if len(p.Attachments) > 0 {
+				return rejection(err), nil
+			}
 			return "http_error", nil
 		}
 		if !resp.Sent {

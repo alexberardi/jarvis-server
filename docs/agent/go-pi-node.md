@@ -1218,7 +1218,7 @@ sudo systemctl start jarvis-node
 
 **Status:** the soak tooling is written and tested without a Pi; **the soak has not run** (no
 runner reaches a Pi: it is the user's QA, below). **The retirement is BLOCKED** on the open parity
-gaps (a)–(e) in the checklist and on a passing soak. The user chose this order on 2026-10-19:
+gaps (a)–(f) in the checklist and on a passing soak. The user chose this order on 2026-10-19:
 the docs and the script now, the gaps as their own items.
 
 **`scripts/pi-soak.sh`** runs on the Pi as the node's user. `run --lab-host NAME` refuses unless
@@ -1351,6 +1351,7 @@ checked on the lab Pi 4 since it was built.
 | 5.4 Pi volume and mute from the app (`volume_percent`, `is_muted`; #295) | built (`sdkhost.Audio`, persisted in `volume.json`) | no: the slider heard to change the HAT's speaker, and kept after a restart |
 | 5.5 K2 + settings snapshot | built for the desktop agent (`internal/agent/nodesettings`); the Pi reports its `node_config`, volume included | **open (c)**: not marked done or checked for the Pi profile |
 | 5.6 packages (apt, post_install, test-install) | built | no |
+| 5.6 package agents (a manifest's `agents`: comfyui's `comfyui_jobs`) | built (loop #583: `internal/agent/pkgagents`, the sidecar's `agent_run`, inbox attachments) | no; **open (f)**: missing until #583, found in the user's QA (2026-10-23) |
 | 5.7 factory reset, routines sync, context requests | built | no; a reset node boots into setup mode (#292), pending the lab Pi; jarvisd's broker drops `context/operations` answers (ACL, held for the user) |
 | 5.8 Bluetooth | built | no |
 | 5.9 device registry (14a), app-driven control (14b) | built | no; **open (b)**: voice control (`control_device` tool) |
@@ -1370,8 +1371,19 @@ What each open gap blocks, if the Python node were retired today:
   `setup` breath) until the app provisions it; pending the lab Pi check (reset from the app, the
   phone sees `jarvis-<id8>` within ~60 s, provisioning brings it back).
 - **(e)** a bad release that crash-loops may not roll back by itself on a Pi.
+- **(f)** package agents (a Pantry package's `agents`: `agents/<name>/agent.py`, an
+  IJarvisAgent) never ran on the Go node: `packages.Manager.runs()` returned only the device
+  types, so an install logged `skipped=[agent:comfyui_jobs]` and a finished ComfyUI video never
+  reached the inbox (the user's QA, 2026-10-23). Built in loop #583: the Pi's sidecar loads them
+  and `pkgagents.Scheduler` runs each on its `AgentSchedule` (every 10 s it checks, as
+  `N:agent_scheduler_service`), their alerts go to the Pi's queue, their inbox posts carry
+  attachments, and an agent failing 3 runs in a row marks its package failed in the app. Not
+  ported: the agents' context data in voice requests, the app's per-agent switch and the
+  auto-disable. A run holds the sidecar (one request at a time), so a voice command waits for
+  it. Pending the lab Pi: "create a video of a fox running" on a Go node with comfyui, and the
+  video in the web and mobile inbox.
 
-#### Retirement proposal (BLOCKED on (a)–(e) and the soak; for the user to approve)
+#### Retirement proposal (BLOCKED on (a)–(f) and the soak; for the user to approve)
 
 Nothing here is done. It is the order proposed once the checklist has no open row, every Pi item
 is checked on the lab Pi 4 and the soak meets the pass bar:
@@ -1792,7 +1804,7 @@ all of them except `jarvis-alsa-store` (not yet run on a Pi):
    are written; the 24 h soak on the lab Zero 2 W is the user's to run, and the retirement waits
    on the open gaps: (a) #180's 17b–17e, (b) voice `control_device`/`routine`/`send_link` in the
    sidecar, (c) K2 and the settings snapshot on the Pi, (d) setup mode at boot, (e) the on-device
-   rollback repro. It also needs the user's choice on the node identity (§3.19 step 2).
+   rollback repro, (f) package agents (comfyui_jobs) on the Go node (#583). It also needs the user's choice on the node identity (§3.19 step 2).
 
 ---
 
