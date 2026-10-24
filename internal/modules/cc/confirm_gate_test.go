@@ -174,8 +174,23 @@ func TestConfirmNeedsAnAnswerToAShownQuestion(t *testing.T) {
 		ve.continueWith("call_c3", map[string]any{"success": true, "filled": "Search"})
 		ve.eng.push(confirm)
 		ve.eng.say("Done.")
-		if r := ve.turn("/api/v0/voice/command", "g1", "yes", nil).want(200).json(); confirmCallSent(t, r) != nil {
+		// "yes please", not "yes": the same arguments again would be dropped as a duplicate call.
+		if r := ve.turn("/api/v0/voice/command", "g1", "yes please", nil).want(200).json(); confirmCallSent(t, r) != nil {
 			t.Fatalf("an answered question confirmed again: %v", r)
+		}
+	})
+	t.Run("a later yes after a cancel", func(t *testing.T) {
+		ve := confirmEnv(t)
+		ve.eng.push(nativeCall("call_v1", "request_validation", `{"question": "Submit?", "parameter_name": "confirm", "options": ["Yes", "Cancel"]}`))
+		ve.continueWith("call_f1", parkedOutput())
+		// The user cancels and the model doesn't call desktop_confirm.
+		ve.eng.say("OK, I won't submit it.")
+		ve.turn("/api/v0/voice/command", "g1", "cancel", nil).want(200)
+		// Their next "yes" is about something else; the parked action keeps the "cancel".
+		ve.eng.push(confirm)
+		sent := confirmCallSent(t, ve.turn("/api/v0/voice/command", "g1", "yes, and turn on the lights", nil).want(200).json())
+		if sent != nil && sent["answer"] != "cancel" {
+			t.Fatalf("a later yes answered the question: %v", sent)
 		}
 	})
 	t.Run("another id", func(t *testing.T) {

@@ -23,7 +23,7 @@ import (
 type confirmGate struct {
 	id string
 	// asked: a request_validation was shown to the user since the park (or since the user's
-	// last answer); answer is the user's words after it, and heard says there are some.
+	// last answer); answer is the user's first words after it, and heard says there are some.
 	asked  bool
 	heard  bool
 	answer string
@@ -63,9 +63,10 @@ func (m *Module) noteConfirmGate(conv *conversation, results []toolResult) {
 	}
 }
 
-// hear records the user's words, if they answer a question that was shown.
+// hear records the user's words, if they answer a question that was shown. Only the first
+// answer after it counts: a later "yes" is about something else.
 func (g *confirmGate) hear(words string) {
-	if g == nil || !g.asked {
+	if g == nil || !g.asked || g.heard {
 		return
 	}
 	g.heard, g.answer = true, words

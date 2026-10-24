@@ -17,6 +17,8 @@ only when all of these hold:
 3. the user answered after it: a new turn (chat, voice, typed) or the node's
    `validation-response` result. cc's own synthetic user messages (the text path's tool-result
    continuation, nags) don't count, and a newer `request_validation` needs a newer answer.
+   Only the first answer after a shown question counts: a "cancel" followed by a later "yes"
+   (about something else) stays a cancel.
 
 The call's `answer` is replaced with the user's words; the model's is ignored, and the node's
 Confirmer still decides yes or no from them; that call's result closes the gate. Otherwise cc doesn't call the node and returns a
