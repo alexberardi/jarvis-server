@@ -1,0 +1,233 @@
+[
+  {
+    "name": "desktop windows (Hyprland): maximize a named window",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "maximize firefox",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^maximize$",
+            "window": "(?i)firefox"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): maximize the focused window",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "maximize this window",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^maximize$"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): switch to an app",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "switch to the terminal",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^focus$",
+            "window": "(?i)terminal"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): fullscreen",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "make firefox full screen",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^fullscreen$",
+            "window": "(?i)firefox"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): leave maximize",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "unmaximize this",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^unmaximize$"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): restore a maximized window",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "restore firefox to its normal size",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^unmaximize$",
+            "window": "(?i)firefox"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): snap left",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "snap slack to the left",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^snap_left$",
+            "window": "(?i)slack"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): snap right",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "put the terminal on the right side",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^snap_right$",
+            "window": "(?i)terminal"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): move to a workspace",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "move firefox to workspace 3",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^move_to_workspace$",
+            "window": "(?i)firefox"
+          },
+          "args": {
+            "workspace": 3
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): minimize is not here",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "minimize slack",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^(unsupported|minimize|move_to_monitor|pin|(keep|always)[ _]?on[ _]?top)$"
+          }
+        }
+      }
+    ],
+    "comment": "Any action not offered here gets the same answer as unsupported (desktop/window.go): the fixed not-supported message."
+  },
+  {
+    "name": "desktop windows (Hyprland): keep on top is not here",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "keep the terminal on top of everything",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^(unsupported|minimize|move_to_monitor|pin|(keep|always)[ _]?on[ _]?top)$"
+          }
+        }
+      }
+    ],
+    "comment": "Any action not offered here gets the same answer as unsupported (desktop/window.go): the fixed not-supported message."
+  },
+  {
+    "name": "desktop windows (Hyprland): one monitor: no move to monitor",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "move this window to my other monitor",
+        "expect": {
+          "tool": "desktop_window",
+          "args_match": {
+            "action": "^(unsupported|minimize|move_to_monitor|pin|(keep|always)[ _]?on[ _]?top)$"
+          }
+        }
+      }
+    ],
+    "comment": "Any action not offered here gets the same answer as unsupported (desktop/window.go): the fixed not-supported message."
+  },
+  {
+    "name": "desktop windows (Hyprland): near miss: what is open",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "what windows are open on my computer",
+        "expect": {
+          "tool": "desktop_list_windows"
+        }
+      }
+    ]
+  },
+  {
+    "name": "desktop windows (Hyprland): near miss: close",
+    "tools": "../toolsets/desktop-hyprland.json",
+    "home": "none",
+    "turns": [
+      {
+        "say": "close the terminal window",
+        "expect": {
+          "tool": "desktop_close_window"
+        }
+      }
+    ]
+  }
+]

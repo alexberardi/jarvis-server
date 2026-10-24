@@ -26,6 +26,22 @@ type subject struct {
 	lacks []string
 }
 
+// arranging is the arranging capabilities, which the X11, macOS and Windows backends don't have
+// yet.
+var arranging = []string{CapWindowsUnminimize, CapWindowsMaximize, CapWindowsUnmaximize,
+	CapWindowsFullscreen, CapWindowsSnap, CapWindowsMonitor, CapWindowsWorkspace}
+
+// do runs any window action, with a target for the moves.
+func do(h *Host, a WindowAction, id string) error {
+	switch a {
+	case ActionMoveToWorkspace:
+		return h.WindowMove(ctx, a, id, "2")
+	case ActionMoveToMonitor:
+		return h.WindowMove(ctx, a, id, "next")
+	}
+	return h.WindowDo(ctx, a, id)
+}
+
 func (s subject) wantCaps() []string {
 	var want []string
 	for c := range KnownCapabilities {
@@ -40,24 +56,24 @@ func (s subject) wantCaps() []string {
 var subjects = []subject{
 	{"linux", "linux", linuxWinID,
 		func() (Backend, recorder) { s := linuxFull(); return NewLinux(s), s },
-		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s }, nil},
+		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s }, arranging},
 	{"linux-ewmh", "linux", linuxWinID,
 		func() (Backend, recorder) { s, x := linuxEWMH(); return &Linux{Sys: s, X: x}, s },
-		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }, nil},
+		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }, arranging},
 	{"linux-hyprland", "linux", hyprWinID,
 		func() (Backend, recorder) { s := linuxHyprland(); return NewLinux(s), s },
 		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s },
-		[]string{CapWindowsMinimize}},
+		[]string{CapWindowsMinimize, CapWindowsUnminimize}},
 	{"linux-sway", "linux", swayWinID,
 		func() (Backend, recorder) { s := linuxSway(); return NewLinux(s), s },
 		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s },
-		[]string{CapWindowsMinimize}},
+		[]string{CapWindowsMinimize, CapWindowsUnminimize, CapWindowsMaximize}},
 	{"darwin", "darwin", macWinID,
 		func() (Backend, recorder) { d, s, _ := macDesktop(); return d, s },
-		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }, nil},
+		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }, arranging},
 	{"windows", "windows", winWinID,
 		func() (Backend, recorder) { w := winFull(); return NewWindows(w), w },
-		func() (Backend, recorder) { w := winEmpty(); return NewWindows(w), w }, nil},
+		func() (Backend, recorder) { w := winEmpty(); return NewWindows(w), w }, arranging},
 }
 
 func forEach(t *testing.T, f func(t *testing.T, s subject)) {
@@ -186,9 +202,9 @@ func TestListWindowsReturnsOpaqueIDs(t *testing.T) {
 // actions only: no stand-ins).
 func TestWindowActionsSucceedOnALiveWindow(t *testing.T) {
 	forEach(t, func(t *testing.T, s subject) {
-		for _, a := range []WindowAction{ActionMinimize, ActionFocus, ActionClose} {
+		for _, a := range WindowActions {
 			b, _ := s.full()
-			err := New(b).WindowDo(ctx, a, s.winID)
+			err := do(New(b), a, s.winID)
 			if slices.Contains(s.lacks, ActionCapability[a]) {
 				if !errors.Is(err, ErrNotSupported) {
 					t.Fatalf("%s: err = %v, want ErrNotSupported", a, err)

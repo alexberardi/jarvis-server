@@ -1,6 +1,7 @@
-// Package desktop turns host capabilities into node client tools: one tool per capability,
-// offered only while the capability is available, with the open policy applied here (host owns
-// mechanism, this package owns what the LLM may ask for).
+// Package desktop turns host capabilities into node client tools, offered only while their
+// capability is available, with the open policy applied here (host owns mechanism, this package
+// owns what the LLM may ask for). Window verbs are one tool, desktop_window, whose action list is
+// computed per call from the capabilities (docs/agent/DESKTOP-COMMANDS.md Q3).
 package desktop
 
 import (
@@ -29,8 +30,7 @@ const (
 	ToolGetVolume = "desktop_get_volume"
 	ToolSetVolume = "desktop_set_volume"
 	ToolList      = "desktop_list_windows"
-	ToolMinimize  = "desktop_minimize_window"
-	ToolFocus     = "desktop_focus_window"
+	ToolWindow    = "desktop_window"
 	ToolClose     = "desktop_close_window"
 	ToolListApps  = "desktop_list_apps"
 )
@@ -81,6 +81,9 @@ type tool struct {
 	spec       node.Spec
 	capability string
 	call       func(ctx context.Context, args map[string]any) (map[string]any, error)
+	// render, when set, builds the spec from the capabilities present now (false: not offered),
+	// in place of spec + capability.
+	render func(have map[string]bool) (node.Spec, bool)
 }
 
 // Lister returns the installed-app catalogue, computed now.
@@ -111,7 +114,7 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 				{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true},
 				{VoiceCommand: "launch steam on my computer", Params: map[string]any{"target": "Steam"}},
 			}},
-			host.CapOpen, t.open},
+			host.CapOpen, t.open, nil},
 		{node.Spec{Name: ToolListApps, Description: "The apps installed on the computer. Use for 'what apps can you open' or 'do I have X', not to open one.",
 			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional name to look up"}},
 			Keywords: []string{"apps", "applications", "programs", "games", "installed", "available", "open", "computer", "desktop"},
@@ -120,29 +123,24 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 				{VoiceCommand: "what apps are on my computer", Params: map[string]any{}},
 				{VoiceCommand: "do I have steam installed", Params: map[string]any{"query": "steam"}},
 			}},
-			host.CapOpen, t.listApps},
+			host.CapOpen, t.listApps, nil},
 		{node.Spec{Name: ToolGetVolume, Description: "The computer's volume.",
 			Keywords: []string{"volume", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what's the volume on my computer", Params: map[string]any{}, Primary: true}}},
-			host.CapVolumeGet, t.getVolume},
+			host.CapVolumeGet, t.getVolume, nil},
 		{node.Spec{Name: ToolSetVolume, Description: "Set the computer's volume.",
 			Params:   []node.Param{{Name: "volume", Type: "int", Required: true, Description: "0-100"}},
 			Keywords: []string{"volume", "louder", "quieter", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "set my computer volume to 30", Params: map[string]any{"volume": 30}, Primary: true}}},
-			host.CapVolumeSet, t.setVolume},
-		{node.Spec{Name: ToolList, Description: "List the windows open on the user's computer: id, title, app, minimized. Call it to answer what's open on screen, and before minimizing, focusing or closing a window, to get its id. Never invent ids.",
+			host.CapVolumeSet, t.setVolume, nil},
+		{node.Spec{Name: ToolList, Description: "List the windows open on the user's computer: id, title, app, minimized, focused (newest first where known). Call it to answer what's open or what's in front.",
 			Keywords: []string{"windows", "apps", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what windows are open on my computer", Params: map[string]any{}, Primary: true}}},
-			host.CapWindowsList, t.list},
-		{node.Spec{Name: ToolMinimize, Description: "Minimize one window on the user's computer.", Params: []node.Param{winID},
-			Keywords: []string{"minimize", "hide", "window"}},
-			host.CapWindowsMinimize, t.windowAction(host.ActionMinimize)},
-		{node.Spec{Name: ToolFocus, Description: "Bring one window on the user's computer to the front.", Params: []node.Param{winID},
-			Keywords: []string{"focus", "switch to", "window"}},
-			host.CapWindowsFocus, t.windowAction(host.ActionFocus)},
+			host.CapWindowsList, t.list, nil},
+		{spec: node.Spec{Name: ToolWindow}, render: windowSpec, call: t.window},
 		{node.Spec{Name: ToolClose, Description: "Ask one window on the user's computer to close, as if its close button were clicked. The app may prompt to save; it is never force-killed.", Params: []node.Param{winID},
 			Keywords: []string{"close", "window"}, Risky: true},
-			host.CapWindowsClose, t.windowAction(host.ActionClose)},
+			host.CapWindowsClose, t.windowAction(host.ActionClose), nil},
 	}
 	return t
 }
@@ -159,7 +157,11 @@ func (t *Tools) Available(ctx context.Context) []node.ToolDef {
 	}
 	var out []node.ToolDef
 	for _, tl := range t.tools {
-		if have[tl.capability] {
+		if tl.render != nil {
+			if spec, ok := tl.render(have); ok {
+				out = append(out, spec.Render())
+			}
+		} else if have[tl.capability] {
 			out = append(out, tl.spec.Render())
 		}
 	}

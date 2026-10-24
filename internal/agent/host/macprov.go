@@ -242,3 +242,9 @@ func (d *Darwin) LaunchApp(_ context.Context, path string) error {
 	}
 	return nil
 }
+
+// ArrangeWindow: not on macOS yet (DESKTOP-COMMANDS.md L1: AX fullscreen, fill and geometry
+// come later), and never advertised, so Host never calls it.
+func (d *Darwin) ArrangeWindow(context.Context, string, WindowAction, string) error {
+	return Errorf(ErrNotSupported, "arranging windows is not available on macOS yet")
+}
