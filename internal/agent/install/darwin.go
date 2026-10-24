@@ -76,8 +76,14 @@ func darwinPlan(e Env, o Options) ([]Op, error) {
 			// A plain LaunchAgent from an earlier install would run a second copy.
 			Op{Kind: Exec, Activate: true, IgnoreErr: true, Path: p.plist, Args: []string{"launchctl", "bootout", p.domain + "/" + appid.ID}},
 			Op{Kind: Remove, Path: p.plist},
-			Op{Kind: LoginItem, Activate: true, Path: p.bundle, Name: BundlePlistName},
 		)
+		if o.Adopt {
+			// Another copy of the app may hold the login item (same label, registered by the
+			// bundle that ran first): unregister it, so register points it at this bundle
+			// instead of returning early on "already enabled" (#483).
+			ops = append(ops, Op{Kind: LoginItemGone, Activate: true, IgnoreErr: true, Path: p.bundle, Name: BundlePlistName})
+		}
+		ops = append(ops, Op{Kind: LoginItem, Activate: true, Path: p.bundle, Name: BundlePlistName})
 	case LoginLaunchAgent:
 		data := strings.ReplaceAll(deploy.LaunchAgent, deploy.BinPlaceholder, xmlText(e.Exe))
 		data = strings.ReplaceAll(data, deploy.LogDirPlaceholder, xmlText(p.logs))

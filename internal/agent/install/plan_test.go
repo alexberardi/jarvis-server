@@ -10,7 +10,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/appid"
 )
 
-var update = flag.Bool("update", false, "rewrite the golden files")
+// updateGolden (named so handover.go can import internal/update) rewrites the golden files.
+var updateGolden = flag.Bool("update", false, "rewrite the golden files")
 
 // goldenEnvs are fixed machines, one per OS: the plans must not depend on the host.
 func goldenEnvs() map[string]Env {
@@ -29,7 +30,7 @@ func goldenEnvs() map[string]Env {
 func golden(t *testing.T, name, got string) {
 	t.Helper()
 	p := filepath.Join("testdata", name+".golden")
-	if *update {
+	if *updateGolden {
 		if err := os.WriteFile(p, []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -42,6 +43,17 @@ func golden(t *testing.T, name, got string) {
 	if string(want) != got {
 		t.Errorf("%s differs from %s (go test -update rewrites it):\n%s", name, p, got)
 	}
+}
+
+// The adopt plan (#483): the installed copy takes the login item over from whatever bundle
+// holds it (unregister, then register from this bundle).
+func TestGoldenAdoptPlan(t *testing.T) {
+	e := goldenEnvs()["darwin"]
+	ops, err := Plan(e, Options{Adopt: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "darwin-adopt", Dump(e, ops))
 }
 
 func TestGoldenPlans(t *testing.T) {
