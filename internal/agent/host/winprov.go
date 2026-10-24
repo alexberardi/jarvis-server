@@ -23,6 +23,23 @@ type Win32 interface {
 	Focus(hwnd uintptr) error
 	PostClose(hwnd uintptr) error  // WM_CLOSE: a request the app may answer with a save prompt
 	ShellOpen(target string) error // ShellExecuteW "open": returns once the shell accepted it
+	Maximize(hwnd uintptr) error   // ShowWindow SW_MAXIMIZE
+	Restore(hwnd uintptr) error    // ShowWindow SW_RESTORE: out of minimised or maximised
+	IsZoomed(hwnd uintptr) bool
+	IsIconic(hwnd uintptr) bool
+	// WorkAreas are the monitors' work areas (minus the taskbar), left to right.
+	WorkAreas() ([]Rect, error)
+	WindowRect(hwnd uintptr) (Rect, error)
+	SetRect(hwnd uintptr, r Rect) error // SetWindowPos, no z-order change, no activation
+}
+
+// Rect is a screen rectangle in Windows' coordinates (right and bottom exclusive).
+type Rect struct{ L, T, R, B int }
+
+func (r Rect) w() int { return r.R - r.L }
+func (r Rect) h() int { return r.B - r.T }
+func (r Rect) contains(x, y int) bool {
+	return x >= r.L && x < r.R && y >= r.T && y < r.B
 }
 
 // Windows is the Windows backend: WASAPI for volume, user32 for windows, ShellExecute for open.
@@ -41,6 +58,12 @@ func (w *Windows) Capabilities(context.Context) []string {
 	if w.API.DesktopAvailable() {
 		caps = append(caps, CapOpen)
 		caps = append(caps, AllWindowCaps...)
+		// Native only (Q4): ShowWindow's states and SetWindowPos geometry. No fullscreen (apps
+		// do their own) and no workspaces (IVirtualDesktopManager can't list desktops).
+		caps = append(caps, CapWindowsUnminimize, CapWindowsMaximize, CapWindowsUnmaximize, CapWindowsSnap)
+		if areas, err := w.API.WorkAreas(); err == nil && len(areas) > 1 {
+			caps = append(caps, CapWindowsMonitor)
+		}
 	}
 	if w.API.AudioAvailable() {
 		caps = append(caps, CapVolumeGet, CapVolumeSet)
@@ -119,8 +142,86 @@ func (w *Windows) LaunchApp(_ context.Context, path string) error {
 	return nil
 }
 
-// ArrangeWindow: not on Windows yet (DESKTOP-COMMANDS.md L1: ShowWindow and SetWindowPos come
-// later), and never advertised, so Host never calls it.
-func (w *Windows) ArrangeWindow(context.Context, string, WindowAction, string) error {
-	return Errorf(ErrNotSupported, "arranging windows is not available on Windows yet")
+// ArrangeWindow: ShowWindow for the states, SetWindowPos into the monitors' work areas for snap
+// and moving to another monitor (the geometry Windows' own snap sets; snap assist just won't
+// offer the other half).
+func (w *Windows) ArrangeWindow(_ context.Context, id string, a WindowAction, target string) error {
+	h, err := w.hwnd(id)
+	if err != nil {
+		return err
+	}
+	fail := func(err error) error {
+		if err != nil {
+			return Errorf(ErrOperationFailed, "%v", err)
+		}
+		return nil
+	}
+	switch a {
+	case ActionMaximize:
+		return fail(w.API.Maximize(h))
+	case ActionUnminimize:
+		if !w.API.IsIconic(h) {
+			return nil
+		}
+		return fail(w.API.Restore(h))
+	case ActionUnmaximize:
+		if !w.API.IsZoomed(h) {
+			return nil
+		}
+		return fail(w.API.Restore(h))
+	case ActionSnapLeft, ActionSnapRight, ActionMoveToMonitor:
+	default:
+		return Errorf(ErrNotSupported, "%s is not available on Windows", a)
+	}
+	areas, err := w.API.WorkAreas()
+	if err != nil || len(areas) == 0 {
+		return Errorf(ErrOperationFailed, "no monitor work area: %v", err)
+	}
+	if w.API.IsZoomed(h) || w.API.IsIconic(h) {
+		if err := w.API.Restore(h); err != nil {
+			return fail(err)
+		}
+	}
+	r, err := w.API.WindowRect(h)
+	if err != nil {
+		return fail(err)
+	}
+	cur := 0
+	for i, area := range areas {
+		if area.contains(r.L+r.w()/2, r.T+r.h()/2) {
+			cur = i
+			break
+		}
+	}
+	if a != ActionMoveToMonitor {
+		area := areas[cur]
+		half := area.w() / 2
+		x := area.L
+		if a == ActionSnapRight {
+			x += half
+		}
+		return fail(w.API.SetRect(h, Rect{L: x, T: area.T, R: x + half, B: area.B}))
+	}
+	dst := cur
+	switch target {
+	case "next":
+		dst = (cur + 1) % len(areas)
+	case "previous":
+		dst = (cur + len(areas) - 1) % len(areas)
+	default:
+		n, err := strconv.Atoi(target)
+		if err != nil {
+			return Errorf(ErrInvalidTarget, "on Windows a monitor is next, previous or its number (got %q)", target)
+		}
+		if n > len(areas) {
+			return Errorf(ErrInvalidTarget, "there is no monitor %d (%d connected)", n, len(areas))
+		}
+		dst = n - 1
+	}
+	src, to := areas[cur], areas[dst]
+	// Same place relative to the work area, shrunk to fit.
+	nw, nh := min(r.w(), to.w()), min(r.h(), to.h())
+	x := min(to.L+(r.L-src.L), to.R-nw)
+	y := min(to.T+(r.T-src.T), to.B-nh)
+	return fail(w.API.SetRect(h, Rect{L: max(x, to.L), T: max(y, to.T), R: max(x, to.L) + nw, B: max(y, to.T) + nh}))
 }
