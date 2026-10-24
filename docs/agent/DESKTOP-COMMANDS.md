@@ -47,6 +47,17 @@ default, not a party trick.
   Merge gate: the new utterances join the toolbench corpus. 4B and 9B accuracy must stay at or
   above the current baseline, and the desktop node's prompt may grow by at most ~600 tokens
   (starting number, to revisit with measurements).
+- **2026-10-24: native actions only, never emulated** (Q4). If a platform has no real version
+  of an action, that action isn't in its enum. User: "i don't like the idea of hacking together
+  a minimize on a OS that doesn't support it."
+  - **minimize / restore:** only where a true minimize exists (X11, macOS, Windows). Not on
+    Hyprland or sway: no special-workspace or scratchpad stand-in.
+  - **maximize / fullscreen:** native everywhere (Hyprland `fullscreen 1` / `fullscreen 0`).
+  - **snap_left / snap_right, move_to_monitor, move_to_workspace:** nice to have, not required.
+    Ship each where it's cheap and native (Hyprland `movewindow l/r`, `movewindow mon:…`,
+    `movetoworkspacesilent`; Win32 and X11 geometry). Workspaces stay out on macOS (Spaces) and
+    Windows (virtual desktops), which have no public API.
+  - **keep_on_top:** not in v1.
 
 ## Where we are today (main @ 8c58f315)
 
@@ -85,14 +96,13 @@ Gaps against the north star:
 1. ~~Scope~~: answered, all three layers (see Decided).
 2. ~~Speed~~: answered, pre-routes + repeat mode (see Decided).
 3. ~~Tool shape~~: answered, per-layer tools with capability-filtered action enums.
-4. **Hyprland tiling** *(asked 2026-10-24)* semantics: what do "maximize", "snap left" and "move to the other monitor"
-   mean in a tiling compositor (fullscreen 1 vs. a float, `movewindow l`)?
-5. Workspaces and Spaces: macOS Spaces and Windows virtual desktops have no public API. Ship
-   per-platform, or leave them out?
-6. Named layouts ("work mode": Chrome left, Slack right on monitor 2): in scope, and where are
-   they stored?
-7. "This window", "that one", "the other one": pronoun and recency resolution, and whether the
-   last-acted window stays sticky.
+4. ~~Hyprland tiling~~: answered, native only (see Decided).
+5. ~~Workspaces and Spaces~~: settled by the native-only rule: per platform, not on macOS or
+   Windows.
+6. Named layouts ("work mode": Chrome left, Slack right on monitor 2): **proposed deferred
+   past v1**, since snap and move are nice-to-haves themselves. Reopen if the user disagrees.
+7. **"This window", "it", "the other one":** pronoun and recency resolution, and whether the
+   last-acted window stays sticky. *(asked 2026-10-24)*
 8. Risk: which verbs need a confirmation (close all of an app, quit), and whether a voice
    confirmation is enough.
 9. Feedback: how the user knows it worked without looking: spoken reply, sound, or silent on
