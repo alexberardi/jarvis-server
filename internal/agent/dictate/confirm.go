@@ -11,7 +11,7 @@ import (
 // Confirmation modes (--confirm-dictation).
 const (
 	ConfirmOff    = "off"    // never ask
-	ConfirmSubmit = "submit" // ask before anything is sent: Enter after typing, a browser click, a fill that submits (the default)
+	ConfirmSubmit = "submit" // ask before anything risky is sent: Enter after typing on the desktop; in the browser, a click or submitting fill that pays, sends, deletes, shares or changes the account (browser/risk.go). A search runs (the default)
 	ConfirmAll    = "all"    // ask before every typing, key press, fill or click
 )
 
@@ -63,7 +63,7 @@ type Gate int
 
 const (
 	GateType   Gate = iota // types or presses keys, nothing is sent
-	GateSubmit             // sends: Enter after text, a click, a fill that submits
+	GateSubmit             // sends something risky: Enter after text, a risky browser click or submitting fill
 )
 
 // Needs reports whether an action of this kind must be confirmed first.

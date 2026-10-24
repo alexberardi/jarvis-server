@@ -294,7 +294,8 @@ control needs no `wmctrl`/`xdotool` either). On GNOME and KDE (Wayland) it types
 desktop portal once you allow it: run `jarvis-agent dictation allow` and accept the dialog (asked
 once). macOS needs the Accessibility grant. Typing into a *named* app works on Hyprland, sway, X11,
 macOS and Windows (on GNOME/KDE, click into the app first). `jarvis-agent status` says what works. By default Jarvis asks
-"Send … to Claude?" before anything is sent (Enter, a click, a submitting fill); `run --confirm-dictation off`
+"Send … to Claude?" before anything is sent (Enter, or a browser click or submit that pays, sends, deletes,
+shares or changes your account; a search just runs); `run --confirm-dictation off`
 turns that off, `all` asks before every keystroke too. Typing presses keys, as you would: in a terminal app
 with key bindings (Neovim/Vim in normal mode, `less`, `htop`) they run as commands, so switch it to
 insert mode first (DESIGN §14, "Safety summary").

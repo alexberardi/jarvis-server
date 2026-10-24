@@ -1713,9 +1713,11 @@ Clicking a native button by its label needs accessibility APIs (open question 6)
 
 - **off:** nothing is asked; the island shows what is being typed, filled or clicked as it
   happens (same stance as closing windows by voice, §9.2).
-- **submit (the default, since 2026-10-17):** asks before anything is *sent*: `desktop_type_text`
-  with `submit`, `browser_click`, `browser_fill` with `submit`. Typing without Enter isn't asked
-  (it can be deleted).
+- **submit (the default, since 2026-10-17):** asks before anything risky is *sent*:
+  `desktop_type_text` with `submit`, and a `browser_click` or a `browser_fill` with `submit` that
+  pays, sends or posts, deletes, shares or changes the account (since 2026-10-23, #578:
+  `internal/agent/browser/risk.go`, decision 2026-10-23-browser-confirm-by-risk). A search, a
+  navigation link or a filter runs. Typing without Enter isn't asked (it can be deleted).
 - **all:** asks before every type, key, fill and click.
 
 A gated call does nothing and returns `status: awaiting_confirmation` with a `confirmation_id`
