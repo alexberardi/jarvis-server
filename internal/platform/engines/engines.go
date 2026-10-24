@@ -132,8 +132,10 @@ type Spec struct {
 	// exit's error, e.g. the root cause of a Python traceback the last lines no longer show.
 	ErrorLine *regexp.Regexp
 	// Fatal, if set, matches an output line that means restarting can't help (the GPU is out
-	// of memory): once the process exits after printing one, the engine fails at once, with
-	// the line in LastError and Status.Fatal, instead of restarting.
+	// of memory at load): once the process exits after printing one at load, before the engine
+	// first passes its health check, it fails at once, with the line in LastError and
+	// Status.Fatal, instead of restarting. A line after that (one big request) does not count:
+	// the crash frees the card, so a restart can help.
 	Fatal *regexp.Regexp
 	// OnHealthy, if set, runs (in its own goroutine) each time a start first passes its health
 	// check: after the first start and after every restart. The llm layer warms the engine
@@ -252,7 +254,7 @@ type Status struct {
 	Started   time.Time // when the running process was launched; zero when none
 	LastError string    // why it last went down or unhealthy
 	Output    []string  // last lines of stdout and stderr
-	Fatal     string    // the Spec.Fatal line the last run printed, "" for none
+	Fatal     string    // the Spec.Fatal line the last run printed at load, "" for none
 }
 
 const outputTail = 20
@@ -274,7 +276,8 @@ type Supervisor struct {
 	lastErr  string
 	tail     []string
 	reason   string // ErrorLine's match since the start
-	fatal    string // Fatal's first matching line since the start
+	fatal    string // Fatal's first matching line since the start, before it first served
+	served   bool   // the current process has passed its health check
 
 	cur *run // nil when the loop is not running
 }
@@ -550,6 +553,9 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 			if !healthy {
 				healthy = true
 				startup.Stop()
+				s.mu.Lock()
+				s.served, s.fatal = true, ""
+				s.mu.Unlock()
 				s.log.Info("engine healthy", "pid", p.cmd.Process.Pid)
 				if s.spec.OnHealthy != nil {
 					go s.spec.OnHealthy()
@@ -653,7 +659,7 @@ func (p *proc) exitErr() error {
 
 // spawn launches the engine. Callers hold s.mu; the output goroutines take it per line.
 func (s *Supervisor) spawn() (*proc, error) {
-	s.reason, s.fatal = "", ""
+	s.reason, s.fatal, s.served = "", "", false
 	cmd := exec.Command(s.spec.Path, s.spec.Args...)
 	cmd.Dir = s.spec.Dir
 	cmd.Env = s.spec.environ(os.Environ())
@@ -728,7 +734,7 @@ func (w *lineWriter) emit(line []byte) {
 			w.s.reason = m[len(m)-1]
 		}
 	}
-	if re := w.s.spec.Fatal; re != nil && w.s.fatal == "" && re.MatchString(l) {
+	if re := w.s.spec.Fatal; re != nil && !w.s.served && w.s.fatal == "" && re.MatchString(l) {
 		w.s.fatal = l
 	}
 	w.s.tail = append(w.s.tail, l)

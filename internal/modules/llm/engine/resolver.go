@@ -292,7 +292,7 @@ type parked struct {
 
 func (inst *instance) parked() parked { return parked{inst.gaveUp, inst.retries} }
 
-// oomReason is a failed engine's reason when it ran out of GPU memory, "" otherwise.
+// oomReason is a failed engine's reason when it ran out of GPU memory at load, "" otherwise.
 func oomReason(st engines.Status) string {
 	if st.State != engines.Failed || st.Fatal == "" {
 		return ""

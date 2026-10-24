@@ -36,11 +36,14 @@ settings, a smaller model, lower context, another card or the CPU). Nothing is s
 is no Retry loop. The label is weighed again on every reconcile and starts by itself once the
 other engine goes away.
 
-**3. An engine that ran out of GPU memory is not restarted or retried.** The supervisor gets a
-`Fatal` pattern (`engines.Spec.Fatal`). The resolver sets it to llama.cpp's and torch's
+**3. An engine that ran out of GPU memory at load is not restarted or retried.** The supervisor
+gets a `Fatal` pattern (`engines.Spec.Fatal`). The resolver sets it to llama.cpp's and torch's
 out-of-memory lines (`cudaMalloc failed`, `out of memory`, `unable to allocate … buffer`,
-`ErrorOutOfDeviceMemory`). When an exit follows such a line, the engine fails at once, with no
-backoff restarts, and the resolver gives up without its timed retries. The label's reason says
+`ErrorOutOfDeviceMemory`). When an exit follows such a line printed at load, before the engine
+is first healthy, the engine fails at once, with no backoff restarts, and the resolver gives up
+without its timed retries. A line printed after the engine first passed its health check (one
+big request ran out of memory) does not count: that crash frees the card, so the engine is
+restarted and retried as before. The label's reason says
 "out of GPU memory (<line>) … free GPU memory, lower the context or pick a smaller model, then
 press Retry". Retry stays: once something has freed the card, starting again can work, and a
 settings change still starts a fresh engine.

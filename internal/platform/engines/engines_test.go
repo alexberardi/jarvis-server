@@ -28,6 +28,8 @@ import (
 //
 //	HELPER_STARTS           append one line per start, once the knobs below are set up
 //	HELPER_CRASH_AFTER      exit 3 after this duration
+//	HELPER_ERROR_LINE       print this line (as a traceback's root cause)
+//	HELPER_ERROR_AFTER      wait this long before printing HELPER_ERROR_LINE
 //	HELPER_ENV_FILE         write the environment here
 //	HELPER_CHILD_PID_FILE   spawn a sleeping grandchild and write its pid here
 //	HELPER_IGNORE_TERM      ignore SIGTERM
@@ -71,6 +73,13 @@ func runHelper() {
 	fmt.Println("hello stdout")
 	fmt.Fprintln(os.Stderr, "hello stderr")
 	if v := os.Getenv("HELPER_ERROR_LINE"); v != "" {
+		if d := os.Getenv("HELPER_ERROR_AFTER"); d != "" {
+			wait, err := time.ParseDuration(d)
+			if err != nil {
+				panic(err)
+			}
+			time.Sleep(wait)
+		}
 		// A Python traceback: the root cause, then lines that push it out of the tail.
 		fmt.Fprintln(os.Stderr, "(EngineCore pid=123) ERROR 10-20 04:40:09 [core.py:1510] "+v)
 		for i := 0; i < 40; i++ {
@@ -327,6 +336,24 @@ func TestFatalLineFailsWithoutRestart(t *testing.T) {
 	}
 	if st := s.Status(); st.Fatal != "" {
 		t.Fatalf("fatal kept across a start: %+v", st)
+	}
+}
+
+// A Fatal line only counts at load: an engine that served, then printed one on a big request
+// and crashed, is restarted (the crash freed the card), as any other crash is.
+func TestFatalLineAfterHealthyRestarts(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	spec := f.spec(map[string]string{"HELPER_ERROR_AFTER": "300ms", "HELPER_CRASH_AFTER": "300ms",
+		"HELPER_ERROR_LINE": "ggml_gallocr_reserve_n: failed to allocate CUDA0 buffer of size 2147483648"})
+	spec.Restart.MaxRestarts = 5
+	spec.Fatal = regexp.MustCompile(`failed to allocate \S+ buffer`)
+	s := start(t, spec)
+	waitHealthy(t, s)
+	eventually(t, "a restart or a failure", func() bool { return f.startCount() >= 2 || s.State() == Failed })
+	st := s.Status()
+	if n := f.startCount(); n < 2 || st.Fatal != "" || st.Restarts < 1 {
+		t.Fatalf("starts = %d, status = %+v; want restarted, no fatal line", n, st)
 	}
 }
 
