@@ -1,0 +1,54 @@
+package cc
+
+import (
+	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+)
+
+// A desktop command whose result the node's island showed (island_only): the continue makes no
+// LLM call, a voice node gets nothing to speak and no follow-up window, and the history keeps
+// what was shown, so "it" in the next turn has something to refer to (DESKTOP-COMMANDS.md Q9).
+func TestIslandOnlyResultsEndTheTurnSilently(t *testing.T) {
+	for _, model := range []string{prompts.Qwen3_5_9B, prompts.Qwen3_8B} { // native, text
+		ve := newVoiceEnv(t, model)
+		ve.start("c-island", weatherTool)
+		if model == prompts.Qwen3_5_9B {
+			ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_w1", "type": "function",
+				"function": map[string]any{"name": "get_weather", "arguments": `{}`}}}})
+		} else {
+			ve.eng.say(`<tool_call>{"name": "get_weather", "arguments": {}}</tool_call>`)
+		}
+		r := ve.turn("/api/v0/voice/command/stream", "c-island", "maximize firefox", nil).want(202).json()
+		id := r["tool_calls"].([]any)[0].(map[string]any)["id"]
+		before := len(ve.eng.requests())
+		b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "c-island",
+			"tool_results": []any{map[string]any{"tool_call_id": id, "output": map[string]any{
+				"success": true, "action": "maximize", "island": "Maximized Firefox", "island_only": true}}}}, ve.node.h()).want(200).json()
+		if b["assistant_message"] != "" || b["end_of_exchange"] != true || b["stop_reason"] != "complete" {
+			t.Fatalf("%s: continue %v", model, b)
+		}
+		if n := len(ve.eng.requests()); n != before {
+			t.Fatalf("%s: %d LLM calls for an island-only result", model, n-before)
+		}
+		conv := ve.m.convs.get("c-island")
+		if last := conv.messages[len(conv.messages)-1]; last.Role != "assistant" || last.Content != "Maximized Firefox" {
+			t.Fatalf("%s: history ends %+v", model, last)
+		}
+	}
+}
+
+// One result without island_only (a question, or another tool) means the round is answered as
+// usual.
+func TestMixedRoundIsAnsweredAsUsual(t *testing.T) {
+	ok, _ := islandNotes([]toolResult{
+		{Output: map[string]any{"island_only": true, "island": "Tab 3"}},
+		{Output: map[string]any{"windows": []any{}}},
+	})
+	if ok != nil {
+		t.Fatalf("notes %v", ok)
+	}
+	if _, all := islandNotes(nil); all {
+		t.Fatal("no results counted as island-only")
+	}
+}

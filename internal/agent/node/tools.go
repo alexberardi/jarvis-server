@@ -168,6 +168,15 @@ func Fail(format string, a ...any) map[string]any {
 // MQTT dispatcher, the voice pipeline) takes them out with TakeSignals before posting it.
 const SignalsKey = "_jarvis_node_signals"
 
+// IslandKey and IslandOnlyKey mark a result whose outcome the node's island showed (a desktop
+// command, DESKTOP-COMMANDS.md Q9): IslandKey is the text shown, IslandOnlyKey true tells the
+// voice loop and command-center that nothing is to be spoken for it. Unlike the signals they go
+// to command-center, which ends the turn without a formatting call.
+const (
+	IslandKey     = "island"
+	IslandOnlyKey = "island_only"
+)
+
 // Signals are the jarvis-command-sdk CommandResponse fields only the node acts on
 // (N:utils/command_execution_service.py ToolExecutionResult). Go's built-in tools set none.
 type Signals struct {

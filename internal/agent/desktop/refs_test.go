@@ -1,0 +1,166 @@
+package desktop
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
+	"github.com/alexberardi/jarvis-server/internal/agent/host"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+)
+
+// Newest first, as Hyprland and sway list them: the terminal has focus, Firefox was before it.
+var recent = []host.Window{
+	{ID: "0xa", Title: "~", App: "foot", Focused: true},
+	{ID: "0xb", Title: "Mozilla Firefox", App: "firefox"},
+	{ID: "0xc", Title: "general", App: "Slack"},
+}
+
+type clock struct{ t time.Time }
+
+func (c *clock) now() time.Time { return c.t }
+
+func refTools(b *fakeBackend, c *clock) *Tools {
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	ts.Now = c.now
+	return ts
+}
+
+// Q7: "it" is the window Jarvis last acted on for a minute, then the focused one; "the other
+// one" the window focused before this one.
+func TestWindowReferences(t *testing.T) {
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	b := &fakeBackend{caps: hypr, windows: recent}
+	ts := refTools(b, c)
+	do := func(args map[string]any) string {
+		t.Helper()
+		b.actions = nil
+		if out := call(t, ts, ToolWindow, args); out["success"] != true {
+			t.Fatalf("%v: %v", args, out)
+		}
+		return strings.Join(b.actions, ";")
+	}
+	if got := do(map[string]any{"action": "maximize", "window": "slack"}); got != "maximize 0xc" {
+		t.Fatalf("named: %s", got)
+	}
+	c.t = c.t.Add(30 * time.Second)
+	if got := do(map[string]any{"action": "unmaximize", "window": "it"}); got != "unmaximize 0xc" {
+		t.Fatalf("it within a minute: %s", got)
+	}
+	c.t = c.t.Add(61 * time.Second)
+	if got := do(map[string]any{"action": "maximize", "window": "that"}); got != "maximize 0xa" {
+		t.Fatalf("it after a minute is the focused window: %s", got)
+	}
+	if got := do(map[string]any{"action": "focus", "window": "the other one"}); got != "focus 0xb" {
+		t.Fatalf("the other one: %s", got)
+	}
+	if got := do(map[string]any{"action": "maximize", "window": "this"}); got != "maximize 0xa" {
+		t.Fatalf("this: %s", got)
+	}
+}
+
+// Without a focus flag the host lists in no known order: "the other one" asks which window.
+func TestTheOtherOneNeedsRecencyOrder(t *testing.T) {
+	ws := []host.Window{{ID: "1", App: "Terminal"}, {ID: "2", App: "Mail"}}
+	b := &fakeBackend{caps: all, windows: ws}
+	out := call(t, New(host.New(b), OpenPolicy{}, catalogue), ToolWindow, map[string]any{"action": "focus", "window": "the other one"})
+	if out["error_code"] != "invalid_argument" || len(b.actions) != 0 {
+		t.Fatalf("%v %v", out, b.actions)
+	}
+}
+
+// Q9: a window command's outcome goes on the island, marked island_only; a failure only when the
+// action isn't supported (not found and ambiguous still go back to the model to ask or retry).
+func TestWindowCommandsShowOnTheIsland(t *testing.T) {
+	var shown []string
+	b := &fakeBackend{caps: hypr, windows: recent}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	ts.Show = func(text string, _ time.Duration) { shown = append(shown, text) }
+	out := call(t, ts, ToolWindow, map[string]any{"action": "snap_left", "window": "firefox"})
+	if out[node.IslandOnlyKey] != true || out[node.IslandKey] != "Snapped firefox left" {
+		t.Fatalf("success: %v", out)
+	}
+	out = call(t, ts, ToolWindow, map[string]any{"action": "minimize", "window": "firefox"})
+	if out[node.IslandOnlyKey] != true || out[node.IslandKey] != UnsupportedMessage || out["success"] != false {
+		t.Fatalf("unsupported: %v", out)
+	}
+	out = call(t, ts, ToolWindow, map[string]any{"action": "focus", "window": "spotify"})
+	if out[node.IslandOnlyKey] != nil {
+		t.Fatalf("not found is for the model to retry: %v", out)
+	}
+	out = call(t, ts, ToolClose, map[string]any{"window_id": "the terminal"})
+	if out[node.IslandOnlyKey] != true || out[node.IslandKey] != "Closed foot" {
+		t.Fatalf("close: %v", out)
+	}
+	if strings.Join(shown, "|") != "Snapped firefox left|"+UnsupportedMessage+"|Closed foot" {
+		t.Fatalf("island showed %q", shown)
+	}
+}
+
+// Q8: closing one window never asks; closing every window of an app asks when confirmation is
+// on, and does it only on the yes.
+func TestCloseAllOfAnAppAsksFirst(t *testing.T) {
+	ws := []host.Window{{ID: "0xa", App: "foot", Focused: true}, {ID: "0xb", App: "firefox"}, {ID: "0xd", App: "foot", Title: "logs"}}
+	b := &fakeBackend{caps: hypr, windows: ws}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	ts.Confirm = &dictate.Confirmer{Mode: dictate.ConfirmSubmit}
+	out := call(t, ts, ToolClose, map[string]any{"window_id": "the terminal", "all_of_app": true})
+	if out["status"] != "awaiting_confirmation" || out["success"] != false || len(b.actions) != 0 {
+		t.Fatalf("parked: %v %v", out, b.actions)
+	}
+	if q, _ := out["question"].(string); q != "Close all 2 foot windows?" {
+		t.Fatalf("question %q", q)
+	}
+	res, err := ts.Confirm.Answer(context.Background(), out["confirmation_id"].(string), "yes")
+	if err != nil || strings.Join(b.actions, ";") != "close 0xa;close 0xd" || res[node.IslandKey] != "Closed 2 foot windows" {
+		t.Fatalf("after yes: %v %v %v", res, err, b.actions)
+	}
+	b.actions = nil
+	ts.Confirm = &dictate.Confirmer{Mode: dictate.ConfirmOff}
+	out = call(t, ts, ToolClose, map[string]any{"window_id": "foot", "all_of_app": true})
+	if out["success"] != true || len(b.actions) != 2 {
+		t.Fatalf("full control closes without asking: %v %v", out, b.actions)
+	}
+}
+
+func TestCloseIsNoLongerRisky(t *testing.T) {
+	ts := New(host.New(&fakeBackend{caps: all}), OpenPolicy{}, catalogue)
+	for _, d := range ts.Available(context.Background()) {
+		if d.Name == ToolClose && d.ClientTool["is_risky"] != false {
+			t.Fatalf("close is risky: %v", d.ClientTool["is_risky"])
+		}
+	}
+}
+
+// The model often drops "the other one" or "it": with no window in the call, the words the user
+// said decide.
+func TestWhatWasSaidFillsAnOmittedWindow(t *testing.T) {
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	b := &fakeBackend{caps: hypr, windows: recent}
+	ts := refTools(b, c)
+	run := func(said string, args map[string]any) string {
+		t.Helper()
+		b.actions = nil
+		out, _ := ts.Call(context.Background(), ToolWindow, args, node.Request{VoiceCommand: said})
+		if out["success"] != true {
+			t.Fatalf("%q: %v", said, out)
+		}
+		return strings.Join(b.actions, ";")
+	}
+	if got := run("switch to the other window", map[string]any{"action": "focus"}); got != "focus 0xb" {
+		t.Fatalf("the other window: %s", got)
+	}
+	run("maximize slack", map[string]any{"action": "maximize", "window": "slack"})
+	if got := run("actually restore it", map[string]any{"action": "unmaximize"}); got != "unmaximize 0xc" {
+		t.Fatalf("it: %s", got)
+	}
+	if got := run("maximize this window", map[string]any{"action": "maximize"}); got != "maximize 0xa" {
+		t.Fatalf("this: %s", got)
+	}
+	// A window named in the call wins over the words.
+	if got := run("switch to the other window", map[string]any{"action": "focus", "window": "slack"}); got != "focus 0xc" {
+		t.Fatalf("named: %s", got)
+	}
+}
