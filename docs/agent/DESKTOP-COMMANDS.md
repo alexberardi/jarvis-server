@@ -71,6 +71,26 @@ default, not a party trick.
   | a name ("Slack", "the terminal") | matched against the window list, as today (`winmatch`) |
 
   Jarvis's own windows (tray, island, setup) never count as focused.
+- **2026-10-24: confirmation only for what costs time or money and has no confirmation or undo
+  of its own** (Q8). User: "we should limit asking for confirmation on basically anything that
+  would cost the user time or money where a confirmation wouldn't typically exist." Apps already
+  prompt before discarding unsaved work, and deleting through the UI goes to the trash.
+
+  | Action | Asks? |
+  |---|---|
+  | window actions, navigation | never |
+  | close one window | never. `Risky` comes off `desktop_close_window`'s single-window path |
+  | close every window of an app (`all_of_app`) | yes |
+  | `desktop_click` from the LLM | only for a risky label, under `--confirm-dictation=submit` |
+  | a click from a pre-route ("click 7", exact "click Send") | never: no LLM, nothing could have steered it |
+  | an overlay number with no readable label | never from a pre-route; from the LLM, asks in `submit` mode |
+
+  A spoken "yes" through `desktop_confirm` is enough. Because `Risky` is per tool, `all_of_app`
+  is held by the node's confirmer, not by the flag.
+
+  The desktop risky-label list starts from `browser/risk.go` and applies the same rule: pay,
+  send/post, share and account changes stay. **Delete is dropped for desktop clicks**, because
+  a UI delete goes to the trash. (The browser list keeps it: a web app's delete is often final.)
 
 ## Talking to windows (user-facing; goes into the user guide when this ships)
 
@@ -130,9 +150,8 @@ Gaps against the north star:
 6. Named layouts ("work mode": Chrome left, Slack right on monitor 2): **proposed deferred
    past v1**, since snap and move are nice-to-haves themselves. Reopen if the user disagrees.
 7. ~~"This", "it", "the other one"~~: answered (see Decided).
-8. **Risk:** which actions need a confirmation (close all of an app, clicks by name), and
-   whether a voice "yes" is enough. *(asked 2026-10-24)*
-9. Feedback: how the user knows it worked without looking: spoken reply, sound, or silent on
+8. ~~Risk~~: answered (see Decided).
+9. **Feedback** *(asked 2026-10-24)*: how the user knows it worked without looking: spoken reply, sound, or silent on
    success.
 10. Test plan: the contract suite per backend, live tests on this box (Hyprland), MBP and the
     Windows box, and the toolbench corpus for new utterances.
