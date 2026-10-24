@@ -35,6 +35,9 @@ func (f *fakeBackend) MinimizeWindow(_ context.Context, id string) error { retur
 func (f *fakeBackend) FocusWindow(_ context.Context, id string) error    { return f.act("focus " + id) }
 func (f *fakeBackend) CloseWindow(_ context.Context, id string) error    { return f.act("close " + id) }
 func (f *fakeBackend) act(s string) error                                { f.actions = append(f.actions, s); return nil }
+func (f *fakeBackend) ArrangeWindow(_ context.Context, id string, a host.WindowAction, target string) error {
+	return f.act(strings.TrimSpace(string(a) + " " + id + " " + target))
+}
 func (f *fakeBackend) LaunchApp(_ context.Context, p string) error {
 	f.launched = append(f.launched, p)
 	return nil
@@ -57,7 +60,7 @@ func names(defs []node.ToolDef) string {
 func TestToolsFollowCapabilitiesPerCall(t *testing.T) {
 	b := &fakeBackend{caps: all}
 	ts := New(host.New(b), OpenPolicy{}, catalogue)
-	if got := len(ts.Available(context.Background())); got != 8 {
+	if got := len(ts.Available(context.Background())); got != 7 {
 		t.Fatalf("full host offers %d tools", got)
 	}
 	b.caps = []string{"open", "volume.get", "volume.set"} // Wayland, or AX revoked
@@ -198,7 +201,7 @@ func TestWindowToolsPassIDsThrough(t *testing.T) {
 	if out := call(t, ts, ToolClose, map[string]any{"window_id": "0x1"}); out["success"] != true {
 		t.Fatal(out)
 	}
-	if out := call(t, ts, ToolFocus, map[string]any{}); out["error_code"] != "invalid_argument" {
+	if out := call(t, ts, ToolWindow, map[string]any{"action": "focus"}); out["error_code"] != "invalid_argument" {
 		t.Fatal(out)
 	}
 	if strings.Join(b.actions, ";") != "close 0x1" {
@@ -218,17 +221,21 @@ func TestWindowToolsResolveNames(t *testing.T) {
 		{ID: "77/1", Title: "Inbox", App: "Mail", Minimized: true},
 	}
 	for _, c := range []struct{ tool, id, want string }{
-		{ToolFocus, "text-edit-window", "focus 643/1"},
-		{ToolFocus, "TextEdit", "focus 643/1"},
-		{ToolFocus, "the TextEdit window", "focus 643/1"},
+		{"focus", "text-edit-window", "focus 643/1"},
+		{"focus", "TextEdit", "focus 643/1"},
+		{"focus", "the TextEdit window", "focus 643/1"},
 		{ToolClose, "terminal-1", "close 33410/1"},
 		{ToolClose, "the terminal", "close 33410/1"},
-		{ToolMinimize, "zsh", "min 33410/1"},
-		{ToolFocus, "mail", "focus 77/1"},
-		{ToolFocus, "643/1", "focus 643/1"},
+		{"minimize", "zsh", "min 33410/1"},
+		{"focus", "mail", "focus 77/1"},
+		{"focus", "643/1", "focus 643/1"},
 	} {
 		b := &fakeBackend{caps: all, windows: ws}
-		out := call(t, New(host.New(b), OpenPolicy{}, catalogue), c.tool, map[string]any{"window_id": c.id})
+		tool, args := ToolWindow, map[string]any{"window": c.id, "action": c.tool}
+		if c.tool == ToolClose {
+			tool, args = ToolClose, map[string]any{"window_id": c.id}
+		}
+		out := call(t, New(host.New(b), OpenPolicy{}, catalogue), tool, args)
 		if out["success"] != true || strings.Join(b.actions, ";") != c.want {
 			t.Errorf("%s %q: got %v, actions %v; want %s", c.tool, c.id, out, b.actions, c.want)
 		}
@@ -250,7 +257,7 @@ func TestWindowToolsAmbiguousOrUnknownNameListsWindows(t *testing.T) {
 	if out["success"] != false || out["error_code"] != "ambiguous_window" || len(out["candidates"].([]string)) != 2 {
 		t.Fatalf("ambiguous: %v", out)
 	}
-	out = call(t, ts, ToolFocus, map[string]any{"window_id": "spotify-window"})
+	out = call(t, ts, ToolWindow, map[string]any{"window": "spotify-window", "action": "focus"})
 	if out["success"] != false || out["error_code"] != "window_not_found" {
 		t.Fatalf("unknown: %v", out)
 	}

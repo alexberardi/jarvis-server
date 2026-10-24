@@ -45,8 +45,11 @@ func (f *fakeOS) ListWindows(context.Context) ([]host.Window, error) {
 func (f *fakeOS) MinimizeWindow(_ context.Context, id string) error { return f.act("minimize " + id) }
 func (f *fakeOS) FocusWindow(_ context.Context, id string) error    { return f.act("focus " + id) }
 func (f *fakeOS) CloseWindow(_ context.Context, id string) error    { return f.act("close " + id) }
-func (f *fakeOS) LaunchApp(_ context.Context, p string) error       { return f.act("launch " + p) }
-func (f *fakeOS) Open(_ context.Context, t string) error            { return f.act("open " + t) }
+func (f *fakeOS) ArrangeWindow(_ context.Context, id string, a host.WindowAction, _ string) error {
+	return f.act(string(a) + " " + id)
+}
+func (f *fakeOS) LaunchApp(_ context.Context, p string) error { return f.act("launch " + p) }
+func (f *fakeOS) Open(_ context.Context, t string) error      { return f.act("open " + t) }
 func (f *fakeOS) act(s string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -175,7 +178,7 @@ func TestChainedToolCalls(t *testing.T) {
 	cont := func(rs []ToolResult) (*Control, error) {
 		seen = append(seen, rs)
 		if len(seen) == 1 {
-			return &Control{StopReason: "tool_calls", ToolCalls: []ToolCall{call("c2", desktop.ToolMinimize, `{"window_id":"0x1"}`)}}, nil
+			return &Control{StopReason: "tool_calls", ToolCalls: []ToolCall{call("c2", desktop.ToolWindow, `{"window":"0x1","action":"minimize"}`)}}, nil
 		}
 		return complete("Minimised Firefox."), nil
 	}

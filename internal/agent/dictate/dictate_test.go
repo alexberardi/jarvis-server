@@ -904,12 +904,15 @@ type fakeBackend struct {
 	focused string
 }
 
-func (*fakeBackend) Platform() string                                 { return "linux" }
-func (f *fakeBackend) Capabilities(context.Context) []string          { return f.caps }
-func (*fakeBackend) GetVolume(context.Context) (int, error)           { return 0, nil }
-func (*fakeBackend) ApplyVolume(context.Context, int) error           { return nil }
-func (*fakeBackend) MinimizeWindow(context.Context, string) error     { return nil }
-func (*fakeBackend) CloseWindow(context.Context, string) error        { return nil }
+func (*fakeBackend) Platform() string                             { return "linux" }
+func (f *fakeBackend) Capabilities(context.Context) []string      { return f.caps }
+func (*fakeBackend) GetVolume(context.Context) (int, error)       { return 0, nil }
+func (*fakeBackend) ApplyVolume(context.Context, int) error       { return nil }
+func (*fakeBackend) MinimizeWindow(context.Context, string) error { return nil }
+func (*fakeBackend) CloseWindow(context.Context, string) error    { return nil }
+func (*fakeBackend) ArrangeWindow(context.Context, string, host.WindowAction, string) error {
+	return nil
+}
 func (*fakeBackend) Open(context.Context, string) error               { return nil }
 func (*fakeBackend) LaunchApp(context.Context, string) error          { return nil }
 func (f *fakeBackend) FocusWindow(_ context.Context, id string) error { f.focused = id; return nil }

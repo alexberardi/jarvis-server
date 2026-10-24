@@ -33,6 +33,11 @@ func RenderDesktopToolset() ([]byte, error) { return renderDesktop(allCaps{}) }
 // (`pipeline toolset desktop-windows`).
 func RenderDesktopWindowsToolset() ([]byte, error) { return renderDesktop(windowCaps{}) }
 
+// RenderDesktopHyprlandToolset is RenderDesktopToolset on Hyprland: window control with the
+// arranging actions (maximize, fullscreen, snap, workspaces), no minimise, one monitor:
+// toolsets/desktop-hyprland.json (`pipeline toolset desktop-hyprland`).
+func RenderDesktopHyprlandToolset() ([]byte, error) { return renderDesktop(hyprCaps{}) }
+
 func renderDesktop(caps host.Backend) ([]byte, error) {
 	ctx := context.Background()
 	ts := node.Multi{
@@ -75,14 +80,26 @@ func (windowCaps) Capabilities(ctx context.Context) []string {
 	return append(allCaps{}.Capabilities(ctx), host.AllWindowCaps...)
 }
 
+// hyprCaps is allCaps on Hyprland (host/wlcomp.go with one monitor).
+type hyprCaps struct{ allCaps }
+
+func (hyprCaps) Capabilities(ctx context.Context) []string {
+	return append(allCaps{}.Capabilities(ctx), host.CapWindowsList, host.CapWindowsFocus, host.CapWindowsClose,
+		host.CapWindowsMaximize, host.CapWindowsUnmaximize, host.CapWindowsFullscreen, host.CapWindowsSnap,
+		host.CapWindowsWorkspace)
+}
+
 func (allCaps) GetVolume(context.Context) (int, error)             { return 0, errRenderOnly }
 func (allCaps) ApplyVolume(context.Context, int) error             { return errRenderOnly }
 func (allCaps) ListWindows(context.Context) ([]host.Window, error) { return nil, errRenderOnly }
 func (allCaps) MinimizeWindow(context.Context, string) error       { return errRenderOnly }
 func (allCaps) FocusWindow(context.Context, string) error          { return errRenderOnly }
 func (allCaps) CloseWindow(context.Context, string) error          { return errRenderOnly }
-func (allCaps) Open(context.Context, string) error                 { return errRenderOnly }
-func (allCaps) LaunchApp(context.Context, string) error            { return errRenderOnly }
+func (allCaps) ArrangeWindow(context.Context, string, host.WindowAction, string) error {
+	return errRenderOnly
+}
+func (allCaps) Open(context.Context, string) error      { return errRenderOnly }
+func (allCaps) LaunchApp(context.Context, string) error { return errRenderOnly }
 
 // screen.Capturer and dictate.Keyboard.
 func (allCaps) Available(context.Context) (bool, string) { return true, "" }

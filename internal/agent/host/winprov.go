@@ -118,3 +118,9 @@ func (w *Windows) LaunchApp(_ context.Context, path string) error {
 	}
 	return nil
 }
+
+// ArrangeWindow: not on Windows yet (DESKTOP-COMMANDS.md L1: ShowWindow and SetWindowPos come
+// later), and never advertised, so Host never calls it.
+func (w *Windows) ArrangeWindow(context.Context, string, WindowAction, string) error {
+	return Errorf(ErrNotSupported, "arranging windows is not available on Windows yet")
+}

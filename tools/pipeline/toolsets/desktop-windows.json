@@ -172,7 +172,7 @@
       }
     ],
     "function": {
-      "description": "List the windows open on the user's computer: id, title, app, minimized. Call it to answer what's open on screen, and before minimizing, focusing or closing a window, to get its id. Never invent ids.",
+      "description": "List the windows open on the user's computer: id, title, app, minimized, focused (newest first where known). Call it to answer what's open or what's in front.",
       "name": "desktop_list_windows",
       "parameters": {
         "properties": {},
@@ -192,56 +192,62 @@
   },
   {
     "allow_direct_answer": false,
-    "examples": [],
-    "function": {
-      "description": "Minimize one window on the user's computer.",
-      "name": "desktop_minimize_window",
-      "parameters": {
-        "properties": {
-          "window_id": {
-            "description": "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')",
-            "type": "string"
-          }
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "focus",
+          "window": "firefox"
         },
-        "required": [
-          "window_id"
-        ],
-        "type": "object"
+        "is_primary": true,
+        "voice_command": "switch to firefox"
+      },
+      {
+        "expected_parameters": {
+          "action": "minimize",
+          "window": "the terminal"
+        },
+        "is_primary": false,
+        "voice_command": "minimize the terminal"
       }
-    },
-    "is_risky": false,
-    "keywords": [
-      "minimize",
-      "hide",
-      "window"
     ],
-    "run_without_confirmation": false,
-    "type": "function"
-  },
-  {
-    "allow_direct_answer": false,
-    "examples": [],
     "function": {
-      "description": "Bring one window on the user's computer to the front.",
-      "name": "desktop_focus_window",
+      "description": "Act on one window on the user's computer. Can: switch to it, minimize. Can't: unminimize, maximize, fullscreen, restore from maximize or fullscreen, snap it left or right, move it to another monitor, move it to another workspace, keep on top: for those call with action unsupported, never a different action.",
+      "name": "desktop_window",
       "parameters": {
         "properties": {
-          "window_id": {
-            "description": "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')",
+          "action": {
+            "description": "focus = switch to; unmaximize = restore to normal size (leaves maximize or fullscreen); unsupported = anything this computer can't do",
+            "enum": [
+              "focus",
+              "minimize",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "window": {
+            "description": "The app or window as the user said it ('Firefox', 'the terminal'), or an id from desktop_list_windows. Leave out for the window in front",
             "type": "string"
           }
         },
         "required": [
-          "window_id"
+          "action"
         ],
         "type": "object"
       }
     },
     "is_risky": false,
     "keywords": [
-      "focus",
+      "window",
       "switch to",
-      "window"
+      "focus",
+      "minimize",
+      "maximize",
+      "fullscreen",
+      "restore",
+      "snap",
+      "move",
+      "monitor",
+      "workspace"
     ],
     "run_without_confirmation": false,
     "type": "function"
