@@ -125,3 +125,51 @@ func TestFillAndClickOnAnOldExtension(t *testing.T) {
 		}
 	}
 }
+
+// #587: "search for cats instead" on Google's results page, with no field named and nothing
+// focused after the first search. The page's one search box is filled instead of failing with
+// field_not_found; a page without one still fails with the extension's own error.
+func TestFillWithNoFieldFallsBackToTheSearchBox(t *testing.T) {
+	h, path := startHub(t)
+	hasSearch := true
+	f := connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		if m.Cmd != "fill" {
+			return ok(map[string]any{})
+		}
+		if m.Args["field"] == "search" && hasSearch {
+			return ok(map[string]any{"field": "search", "chars": 4, "submitted": "form"})
+		}
+		return Message{OK: false, Code: "field_not_found", Error: "no visible field matches; the page has: search"}
+	})
+	ts := NewTools(h)
+	ctx := context.Background()
+	fills := func() []map[string]any {
+		var out []map[string]any
+		for _, m := range f.received() {
+			if m.Cmd == "fill" {
+				out = append(out, m.Args)
+			}
+		}
+		return out
+	}
+
+	out, _ := ts.Call(ctx, ToolFill, map[string]any{"text": "cats", "submit": true}, node.Request{})
+	if out["success"] != true || out["field"] != "search" {
+		t.Fatalf("fill: %v", out)
+	}
+	if fs := fills(); len(fs) != 2 || fs[0]["field"] != "" || fs[1]["field"] != "search" || fs[1]["text"] != "cats" || fs[1]["submit"] != true {
+		t.Errorf("fills sent: %v", fs)
+	}
+
+	hasSearch = false
+	out, _ = ts.Call(ctx, ToolFill, map[string]any{"text": "cats", "submit": true}, node.Request{})
+	if out["success"] != false || out["error_code"] != "field_not_found" || !strings.Contains(out["error"].(string), "the page has") {
+		t.Errorf("no search box: %v", out)
+	}
+	// A named field that isn't there is not retried as another field.
+	n := len(fills())
+	out, _ = ts.Call(ctx, ToolFill, map[string]any{"field": "email", "text": "x"}, node.Request{})
+	if out["error_code"] != "field_not_found" || len(fills()) != n+1 {
+		t.Errorf("named field: %v, %d fills", out, len(fills())-n)
+	}
+}

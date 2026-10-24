@@ -43,9 +43,14 @@ const (
 // chatWordPause is the fake-streaming pause per word (D32; a var for tests).
 var chatWordPause = 20 * time.Millisecond
 
-// chatToolWait bounds one headless node tool call (dispatch_node_command's 10 s; a var for
-// tests).
-var chatToolWait = 10 * time.Second
+// chatToolWait bounds one headless node tool call (a var for tests). It is longer than a node
+// tool's own budget (the desktop agent's browser_fill and browser_click: 10 s), so a slow tool
+// answers with its own error and error_code rather than racing this wait (#587).
+var chatToolWait = 15 * time.Second
+
+// chatTimeoutError is the synthetic timeout's error: the command may still be running on the node.
+const chatTimeoutError = "the node didn't respond in time; the command may still have run. " +
+	"For a browser task, read the task tab (browser_read_page, browser_list_tabs) before retrying, and don't open another tab"
 
 func (m *Module) registerMobileChat(mux *http.ServeMux) {
 	const v0 = "/api/v0"
@@ -572,7 +577,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 		var output *pyjson.Object
 		var imgs []chatImage
 		if !online {
-			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true)
+			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true, "error_code", "offline")
 		} else {
 			meta := map[string]any{"command": c.Function.Name}
 			end := tr.measure("mqtt_tool_"+c.Function.Name, "node", meta)
@@ -596,7 +601,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c parse.ToolCall, imgs imageArgs,
 	userID int64, message string) (*pyjson.Object, []chatImage) {
 	if !m.bus.Available() {
-		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error()), nil
+		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error(), "error_code", "no_broker"), nil
 	}
 	rid := uuid4()
 	args := wireArguments(c.Function.Arguments, imgs) // a JSON string (the node decodes it), or an object with photos
@@ -612,11 +617,11 @@ func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c 
 	defer cancel()
 	raw, err := m.bus.Await(wctx, rid)
 	if err != nil {
-		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true), nil
+		return servertools.Obj("success", false, "error", chatTimeoutError, "timeout", true, "error_code", "timeout"), nil
 	}
 	v, err := pyjson.Loads(string(raw))
 	if err != nil {
-		return servertools.Obj("success", false, "error", "malformed node result"), nil
+		return servertools.Obj("success", false, "error", "malformed node result", "error_code", "malformed"), nil
 	}
 	output := v
 	if o, ok := v.(*pyjson.Object); ok {
