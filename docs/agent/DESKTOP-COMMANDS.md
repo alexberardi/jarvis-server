@@ -27,6 +27,26 @@ default, not a party trick.
   "more") for a short window after a hot command, without the wake word. The user's reason:
   "that would give the impression of speed". Phrasing rule: no guessing in the grammar; an
   uncertain match goes to the LLM, so a wrong pre-route is rare and harmless.
+- **2026-10-24: one tool per layer, the action as a parameter, risky verbs separate** (Q3,
+  option B):
+  - `desktop_list_windows`: unchanged.
+  - `desktop_window {window, action, monitor?, workspace?}`, absorbing focus and minimize.
+  - `desktop_navigate {action, count?, window?}`: the same actions the pre-routes call.
+  - `desktop_click {target}`: by name, or an overlay number; "show numbers" included.
+  - `desktop_close_window {window, all_of_app?}`: stays its own tool because `Risky` is per tool.
+
+  **The action enum is computed per call from the host's capabilities** (the user's idea): each
+  action maps to one capability in the closed set (`windows.maximize`, `windows.snap`,
+  `windows.workspace`, `nav.scroll`, …), and `Available()` renders only the actions this host
+  can do right now. The model never sees `move_to_workspace` on macOS, and a tool whose enum is
+  empty isn't offered at all. `Call` still checks the action against the live set and answers
+  `not_supported`, because capabilities can change between rendering and calling (a revoked
+  Accessibility grant). Capabilities rarely change, so the per-call enum doesn't churn the
+  prompt cache.
+
+  Merge gate: the new utterances join the toolbench corpus. 4B and 9B accuracy must stay at or
+  above the current baseline, and the desktop node's prompt may grow by at most ~600 tokens
+  (starting number, to revisit with measurements).
 
 ## Where we are today (main @ 8c58f315)
 
@@ -64,9 +84,8 @@ Gaps against the north star:
 
 1. ~~Scope~~: answered, all three layers (see Decided).
 2. ~~Speed~~: answered, pre-routes + repeat mode (see Decided).
-3. **Tool shape against the token budget:** one `desktop_window {window, action, …}` tool vs.
-   one tool per verb, and how toolbench gates it. *(asked 2026-10-24)*
-4. Hyprland tiling semantics: what do "maximize", "snap left" and "move to the other monitor"
+3. ~~Tool shape~~: answered, per-layer tools with capability-filtered action enums.
+4. **Hyprland tiling** *(asked 2026-10-24)* semantics: what do "maximize", "snap left" and "move to the other monitor"
    mean in a tiling compositor (fullscreen 1 vs. a float, `movewindow l`)?
 5. Workspaces and Spaces: macOS Spaces and Windows virtual desktops have no public API. Ship
    per-platform, or leave them out?
