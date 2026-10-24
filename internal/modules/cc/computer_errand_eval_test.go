@@ -11,7 +11,7 @@ import (
 
 // TestComputerErrandLive plays #575's requests against a real model through the real turn
 // pipeline, with computer control on and the desktop agent's browser tools offered: "use the
-// computer to …" and "download my bank statement" must start run_errand (not browser tools,
+// computer to …" and "download my bank statement" must call run_errand first (not browser tools,
 // and not just say it will); a one-shot "open wikipedia.org" stays on browser_open.
 //
 //	JARVIS_ERRAND_EVAL_LLM=http://127.0.0.1:39555 \
@@ -27,8 +27,8 @@ func TestComputerErrandLive(t *testing.T) {
 		name, say, want, not string
 	}{
 		{"use_the_computer", "use the computer to find today's featured article on wikipedia.org and tell me what its lead image shows",
-			"run_errand", "desktop_open"},
-		{"bank_statement", "Download my bank statement for September.", "run_errand", "browser_open"},
+			"run_errand", ""},
+		{"bank_statement", "Download my bank statement for September.", "run_errand", ""},
 		{"open_site", "open wikipedia.org", "browser_open", "run_errand"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -68,8 +68,12 @@ func TestComputerErrandLive(t *testing.T) {
 				}
 			}
 			t.Logf("%q -> %s | stop=%v reply=%q", c.say, strings.Join(trail, " -> "), b["stop_reason"], b["assistant_message"])
-			if !called[c.want] || called[c.not] {
-				t.Errorf("called %v, want %s and not %s", trail, c.want, c.not)
+			// The first call is the routing; what the model does after the eval's stub results is not.
+			if len(trail) == 0 || trail[0] != c.want {
+				t.Errorf("called %v, want %s first", trail, c.want)
+			}
+			if c.not != "" && called[c.not] {
+				t.Errorf("called %v, want no %s", trail, c.not)
 			}
 		})
 	}

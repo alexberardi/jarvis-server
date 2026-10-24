@@ -73,6 +73,9 @@ var (
 		`(?:let\s+me|i(?:['’]ll|\s+will|['’]m\s+going\s+to|\s+am\s+going\s+to))\s+` +
 		`(?:(?:now|just|quickly|first|instead|go\s+ahead\s+and)\s+)*` +
 		`(?:open|run|start|try|search|look|check|find|navigate|go|head|download|use|pull|fetch|browse|launch|get|grab|visit|load|read)\b`)
+	// deferRE: a promise of later or conditional work ("I'll open the garage when you get home",
+	// "I'll check back every hour"): a tool that ran set it up, nothing is owed now.
+	deferRE = mustPyI(`\b(?:when|once|as\s+soon\s+as|every|after|later|if|tomorrow|tonight|until|at\s+(?:\d|noon|midnight))\b`)
 	// sentenceEndRE ends a sentence.
 	sentenceEndRE = mustPyI(`[.!?…]+\s+`)
 )
@@ -85,7 +88,8 @@ func PromisesAction(reply string) bool {
 		return false
 	}
 	parts := sentenceEndRE.split(s)
-	return promiseRE.search(parts[len(parts)-1])
+	last := parts[len(parts)-1]
+	return promiseRE.search(last) && !deferRE.search(last)
 }
 
 // claimsBeyondLegacy reports the follow-through claim shapes ResponseClaimsAction adds.
