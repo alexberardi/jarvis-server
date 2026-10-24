@@ -58,6 +58,34 @@ default, not a party trick.
     `movetoworkspacesilent`; Win32 and X11 geometry). Workspaces stay out on macOS (Spaces) and
     Windows (virtual desktops), which have no public API.
   - **keep_on_top:** not in v1.
+- **2026-10-24: which window a command means** (Q7). Resolved on the node, in the desktop tool
+  layer (it knows focus and what Jarvis just did). The model passes the words as said
+  (`window: "it"`) or leaves the field out. `host` stays policy-free. The user asked that these
+  rules be documented; the user-facing copy is in "Talking to windows" below.
+
+  | Said | Means |
+  |---|---|
+  | nothing, "this", "this window", "current" | the focused window |
+  | "it", "that" | the last window Jarvis acted on, if within ~60 s (the repeat-mode window); otherwise the focused window |
+  | "the other one", "the previous one" | the window focused before this one (Hyprland and X11 focus history; macOS and Windows stacking order) |
+  | a name ("Slack", "the terminal") | matched against the window list, as today (`winmatch`) |
+
+  Jarvis's own windows (tray, island, setup) never count as focused.
+
+## Talking to windows (user-facing; goes into the user guide when this ships)
+
+- "Maximize this" / "scroll down" act on **the window in front**.
+- "it" and "that" mean **the window Jarvis just touched**, for about a minute: "minimize Slack…
+  actually bring it back".
+- "The other one" means **the window you were in before**, like Alt-Tab.
+- Name an app or window ("the terminal", "Firefox") to pick something else.
+- Not every computer can do every action. Hyprland has no minimize, and Macs can't move
+  windows between Spaces. Jarvis says so rather than doing something close to it.
+
+## Ideas past this spec
+
+- **Eye tracking** for "this" (user, 2026-10-24: "would be cool… not in scope obviously"). The
+  "this" rule above is the place it would plug in: gaze target first, then focus.
 
 ## Where we are today (main @ 8c58f315)
 
@@ -101,10 +129,9 @@ Gaps against the north star:
    Windows.
 6. Named layouts ("work mode": Chrome left, Slack right on monitor 2): **proposed deferred
    past v1**, since snap and move are nice-to-haves themselves. Reopen if the user disagrees.
-7. **"This window", "it", "the other one":** pronoun and recency resolution, and whether the
-   last-acted window stays sticky. *(asked 2026-10-24)*
-8. Risk: which verbs need a confirmation (close all of an app, quit), and whether a voice
-   confirmation is enough.
+7. ~~"This", "it", "the other one"~~: answered (see Decided).
+8. **Risk:** which actions need a confirmation (close all of an app, clicks by name), and
+   whether a voice "yes" is enough. *(asked 2026-10-24)*
 9. Feedback: how the user knows it worked without looking: spoken reply, sound, or silent on
    success.
 10. Test plan: the contract suite per backend, live tests on this box (Hyprland), MBP and the
