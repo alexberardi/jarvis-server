@@ -202,6 +202,7 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	defer conv.mu.Unlock()
 	stashReferenced(conv, results)
 	m.notePendingConfirm(conv, results)
+	m.noteConfirmGate(conv, results)
 	results = m.prepareToolImages(ctx, results)
 	msgs := cloneMsgs(conv.messages)
 	for _, tr := range results {
@@ -271,6 +272,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 	}
 	stashReferenced(conv, results)
 	m.notePendingConfirm(conv, results)
+	m.noteConfirmGate(conv, results)
 	results = m.prepareToolImages(ctx, results)
 	msgs := m.visionGuard(ctx, cloneMsgs(conv.messages))
 	native := conv.mode.Native()
