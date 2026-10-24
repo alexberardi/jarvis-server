@@ -1310,19 +1310,19 @@ the same Zero 2 W):
 
 | | Go node, 24 h soak, Zero 2 W | Python node (§3.11, 5 min idle) |
 |---|---|---|
-| Date, agent version | | 2026-10-12 |
-| CPU, % of one core: mean / p95 / max | | 87.1% (mean) |
-| RSS MB: min / mean / max (first → last, for a leak) | | – |
-| Anonymous MB: mean / max (first → last) | | 129 MB |
-| Sidecar RSS MB: mean / max | | (in the process) |
-| Swap in use, max | | 106 MB |
-| SoC temperature max; throttling | | |
-| Unit restarts / pipeline restarts | | 0 / 0 (5 min) |
-| ALSA overruns / dropped chunks | | 0 (5 min) |
-| Wakes / false wakes | | |
-| Scripted turns passed (per family in `summary.md`) | | |
-| Errors / warnings / panics | | |
-| By hand: device control, Bluetooth, reminder, LEDs and button | | |
+| Date, agent version | 2026-10-22 23:12 → 10-23 23:12; v0.1.0-rc18, self-updated to rc18.4 at 22:36 (last 36 min) | 2026-10-12 |
+| CPU, % of one core: mean / p95 / max | 54.3 / 54.8 / 72.4 (max during the self-update) | 87.1% (mean) |
+| RSS MB: min / mean / max (first → last, for a leak) | 25.2 / 39.3 / 150.7 (55.4 → 89.6; the rise and max are the rc18.4 restart, not growth) | – |
+| Anonymous MB: mean / max (first → last) | 23.5 / 82.6 (25.2 → 24.3: no leak) | 129 MB |
+| Sidecar RSS MB: mean / max | 33.0 / 46.2 (packages installed during the run) | (in the process) |
+| Swap in use, max | 43.3 MB | 106 MB |
+| SoC temperature max; throttling | 58.0 °C; none | |
+| Unit restarts / pipeline restarts | 0 / 0 (plus one planned self-update restart through a transient unit, which NRestarts doesn't count) | 0 / 0 (5 min) |
+| ALSA overruns / dropped chunks | 0 / 0 | 0 (5 min) |
+| Wakes / false wakes | 2 / 1 (one non_speech) | |
+| Scripted turns passed (per family in `summary.md`) | none run (started with `--turns-every 48h`); real use during the run instead: package installs, ComfyUI requests | |
+| Errors / warnings / panics | 0 / 36 / 0 (all reactions to jarvisd restarts on the server: 20 heartbeat failed, 13 MQTT reconnects, 1 each update/reminders/devices) | |
+| By hand: device control, Bluetooth, reminder, LEDs and button | not done in this run | |
 
 **Pass bar to propose** (the user's to change): no unit or pipeline restarts; overruns at most 1
 an hour; the last hour's anonymous memory within 10% of the first hour's (no leak); a mean CPU at
