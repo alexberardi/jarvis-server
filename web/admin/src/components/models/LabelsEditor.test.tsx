@@ -208,6 +208,27 @@ describe('GPU fault (prod outage 2026-10-10)', () => {
   })
 })
 
+describe('one GPU, two copies (#562)', () => {
+  it("names the card when background doesn't fit next to live", async () => {
+    const reason = "NVIDIA GeForce RTX 3080 Ti (12288 MB) can't hold background (about 7560 MB) next to live (about 7560 MB): that would be two copies of q.gguf"
+    const bg = { ...status('background', ''), state: 'does_not_fit', reason, endpoint: undefined }
+    api.getLabels.mockResolvedValue({ labels: [status('live', ''), bg], voice: [], engines: [], proposal: {}, recommend: {}, warnings: null })
+    renderEditor()
+    const row = await screen.findByTestId('label-background')
+    expect(within(row).getByText("doesn't fit")).toBeInTheDocument()
+    expect(within(row).getByText(reason)).toBeInTheDocument()
+  })
+
+  it("says when background runs on live's engine", async () => {
+    const note = "Runs on llama-116034eb (live's engine, its context and slots): the card can't hold a second copy"
+    const bg = { ...status('background', ''), note }
+    api.getLabels.mockResolvedValue({ labels: [status('live', ''), bg], voice: [], engines: [], proposal: {}, recommend: {}, warnings: null })
+    renderEditor()
+    const row = await screen.findByTestId('label-background')
+    expect(within(row).getByText(note)).toBeInTheDocument()
+  })
+})
+
 describe('LabelsEditor vLLM GPU memory', () => {
   it('offers the GPU share for a vLLM label only and saves it as a fraction', async () => {
     const live = status('live', '')

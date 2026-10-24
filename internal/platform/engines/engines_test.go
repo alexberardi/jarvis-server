@@ -296,6 +296,40 @@ func TestErrorLineExplainsExit(t *testing.T) {
 	}
 }
 
+// A Fatal line (the GPU is out of memory) means restarting can't help: the engine fails at
+// once, with the line, and is not restarted (#562).
+func TestFatalLineFailsWithoutRestart(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false)
+	spec := f.spec(map[string]string{"HELPER_CRASH_AFTER": "0s",
+		"HELPER_ERROR_LINE": "ggml_backend_cuda_buffer_type_alloc_buffer: allocating 5120.00 MiB on device 0: cudaMalloc failed: out of memory"})
+	spec.Restart.MaxRestarts = 5
+	spec.Fatal = regexp.MustCompile(`cudaMalloc failed: out of memory`)
+	s := start(t, spec)
+	ctx, cancel := context.WithTimeout(context.Background(), hangGuard)
+	defer cancel()
+	if err := s.WaitHealthy(ctx); !errors.Is(err, ErrFailed) {
+		t.Fatalf("WaitHealthy = %v, want ErrFailed", err)
+	}
+	st := s.Status()
+	if st.State != Failed || st.Restarts != 0 || !strings.Contains(st.Fatal, "cudaMalloc failed: out of memory") ||
+		!strings.Contains(st.LastError, "cudaMalloc failed") {
+		t.Fatalf("status = %+v", st)
+	}
+	if n := f.startCount(); n != 1 {
+		t.Fatalf("starts = %d, want 1", n)
+	}
+	// Started again (Retry after freeing the card): the old line no longer counts.
+	f.health.set(true)
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Fatal != "" {
+		t.Fatalf("fatal kept across a start: %+v", st)
+	}
+}
+
 func TestBackoff(t *testing.T) {
 	p := RestartPolicy{BackoffMin: time.Second, BackoffMax: 5 * time.Second}
 	var got []time.Duration

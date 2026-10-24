@@ -131,6 +131,10 @@ type Spec struct {
 	// line since the start that matches (its first group, if it has one) is added to the
 	// exit's error, e.g. the root cause of a Python traceback the last lines no longer show.
 	ErrorLine *regexp.Regexp
+	// Fatal, if set, matches an output line that means restarting can't help (the GPU is out
+	// of memory): once the process exits after printing one, the engine fails at once, with
+	// the line in LastError and Status.Fatal, instead of restarting.
+	Fatal *regexp.Regexp
 	// OnHealthy, if set, runs (in its own goroutine) each time a start first passes its health
 	// check: after the first start and after every restart. The llm layer warms the engine
 	// there (decision 2026-10-20-prompt-diet).
@@ -248,6 +252,7 @@ type Status struct {
 	Started   time.Time // when the running process was launched; zero when none
 	LastError string    // why it last went down or unhealthy
 	Output    []string  // last lines of stdout and stderr
+	Fatal     string    // the Spec.Fatal line the last run printed, "" for none
 }
 
 const outputTail = 20
@@ -269,6 +274,7 @@ type Supervisor struct {
 	lastErr  string
 	tail     []string
 	reason   string // ErrorLine's match since the start
+	fatal    string // Fatal's first matching line since the start
 
 	cur *run // nil when the loop is not running
 }
@@ -318,7 +324,7 @@ func (s *Supervisor) Status() Status {
 	defer s.mu.Unlock()
 	st := Status{
 		Name: s.spec.Name, State: s.state, PID: s.pid, Restarts: s.restarts,
-		Since: s.since, LastError: s.lastErr, Output: slices.Clone(s.tail),
+		Since: s.since, LastError: s.lastErr, Output: slices.Clone(s.tail), Fatal: s.fatal,
 	}
 	if s.pid != 0 {
 		st.Started = s.started
@@ -454,6 +460,11 @@ func (s *Supervisor) loop(r *run, p *proc) {
 			cause = c
 		}
 		s.log.Warn("engine down", "cause", cause)
+		if f := s.fatalLine(); f != "" {
+			s.log.Error("engine failed: restarting can't help", "line", f, "cause", cause)
+			finish(Failed, fmt.Sprintf("%v: %s", cause, f))
+			return
+		}
 
 		now := time.Now()
 		recent = slices.DeleteFunc(recent, func(t time.Time) bool { return now.Sub(t) > pol.Window })
@@ -616,6 +627,13 @@ type proc struct {
 	err    error
 }
 
+// fatalLine is Fatal's match since the start, "" for none.
+func (s *Supervisor) fatalLine() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fatal
+}
+
 // explain adds ErrorLine's match to an exit's error.
 func (s *Supervisor) explain(err error) error {
 	s.mu.Lock()
@@ -635,7 +653,7 @@ func (p *proc) exitErr() error {
 
 // spawn launches the engine. Callers hold s.mu; the output goroutines take it per line.
 func (s *Supervisor) spawn() (*proc, error) {
-	s.reason = ""
+	s.reason, s.fatal = "", ""
 	cmd := exec.Command(s.spec.Path, s.spec.Args...)
 	cmd.Dir = s.spec.Dir
 	cmd.Env = s.spec.environ(os.Environ())
@@ -709,6 +727,9 @@ func (w *lineWriter) emit(line []byte) {
 		if m := re.FindStringSubmatch(l); m != nil {
 			w.s.reason = m[len(m)-1]
 		}
+	}
+	if re := w.s.spec.Fatal; re != nil && w.s.fatal == "" && re.MatchString(l) {
+		w.s.fatal = l
 	}
 	w.s.tail = append(w.s.tail, l)
 	if len(w.s.tail) > outputTail {

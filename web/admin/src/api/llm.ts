@@ -109,6 +109,8 @@ export interface EngineInstance {
   retries: number
   /** Retries ran out: the engine stays failed until Retry or a settings change. */
   gave_up: boolean
+  /** Why it gave up at once, when retrying can't help (out of GPU memory). */
+  gave_up_reason?: string
   output: string[] | null
   kind: string
   flavour: string
@@ -500,6 +502,8 @@ export interface LabelStatus {
   state: string
   reason?: string
   endpoint?: Endpoint
+  /** Why a ready label runs on an engine started for other settings (the GPU can't hold a second copy). */
+  note?: string
   /** A remote stt label's fallback state; absent for every other label. */
   fallback?: SpeechFallback
 }

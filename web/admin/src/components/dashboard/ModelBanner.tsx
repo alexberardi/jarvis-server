@@ -8,6 +8,7 @@ const STATE_TEXT: Record<string, string> = {
   not_configured: 'not configured',
   fetching_engine: 'fetching engine',
   no_engine_build: 'no engine build',
+  does_not_fit: 'too big for the GPU next to the other engines',
 }
 
 /**
