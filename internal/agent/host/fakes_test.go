@@ -170,6 +170,9 @@ type fakeX struct {
 	why     string
 	windows []x11.Window
 	err     error
+	// features and desktops: what Features reports; nil features: everything, 4 desktops.
+	features map[string]bool
+	desktops int
 }
 
 func (f *fakeX) rec(line string) {
@@ -197,6 +200,29 @@ func (f *fakeX) op(name string, id uint32) error {
 func (f *fakeX) Activate(_ context.Context, id uint32) error    { return f.op("activate", id) }
 func (f *fakeX) CloseWindow(_ context.Context, id uint32) error { return f.op("close", id) }
 func (f *fakeX) Iconify(_ context.Context, id uint32) error     { return f.op("iconify", id) }
+
+// ewmhAll is what openbox advertises: every arranging feature, four desktops.
+var ewmhAll = map[string]bool{"_NET_WM_STATE": true, "_NET_WM_STATE_MAXIMIZED_VERT": true, "_NET_WM_STATE_MAXIMIZED_HORZ": true,
+	"_NET_WM_STATE_FULLSCREEN": true, "_NET_MOVERESIZE_WINDOW": true, "_NET_WORKAREA": true, "_NET_WM_DESKTOP": true}
+
+func (f *fakeX) Features(context.Context) (map[string]bool, int, error) {
+	if f.features == nil {
+		return ewmhAll, 4, f.err
+	}
+	return f.features, f.desktops, f.err
+}
+func (f *fakeX) SetState(_ context.Context, id uint32, add bool, states ...string) error {
+	f.rec(fmt.Sprintf("state %s add=%v %s", x11.FormatID(id), add, strings.Join(states, ",")))
+	return f.err
+}
+func (f *fakeX) MoveToDesktop(_ context.Context, id uint32, n int) error {
+	f.rec(fmt.Sprintf("desktop %s %d", x11.FormatID(id), n))
+	return f.err
+}
+func (f *fakeX) Snap(_ context.Context, id uint32, left bool) error {
+	f.rec(fmt.Sprintf("snap %s left=%v", x11.FormatID(id), left))
+	return f.err
+}
 
 // hyprClients is `hyprctl -j clients`: the focused terminal, Firefox behind it, and an unmapped
 // client that must not be listed.
