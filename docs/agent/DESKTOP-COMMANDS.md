@@ -91,6 +91,22 @@ default, not a party trick.
   The desktop risky-label list starts from `browser/risk.go` and applies the same rule: pay,
   send/post, share and account changes stay. **Delete is dropped for desktop clicks**, because
   a UI delete goes to the trash. (The browser list keeps it: a web app's delete is often final.)
+- **2026-10-24: desktop commands don't talk; the island shows what happened** (Q9). User: "it
+  would get noisy… you'd then have to wait for it to finish speaking to do your next action."
+  - Successful actions (pre-route or LLM, window, navigation, click): **no speech.** The island
+    briefly shows the action ("Snapped Firefox left", "Tab 3").
+  - Failures: **no speech either.** The island shows the reason ("No tab 9", "Hyprland can't
+    minimize"); the error chime plays under the existing `chimes` setting, since a failure
+    shouldn't depend on a glance.
+  - Fuzzy matches: the island shows what was chosen ("Firefox (heard 'fire fax')").
+  - Ambiguous names: the island lists the candidates, numbered, and the user answers by voice
+    ("the second one"). That answer is a follow-up turn, inside the repeat-mode window.
+  - **Questions are still spoken** ("what's open?", "what's minimized?"), because the answer is
+    the point.
+  - Implementation note: a node tool result needs a way to say "the island said it, don't
+    speak", so CC ends the turn without a composing LLM call or TTS (like the not_for_me silent
+    path and the tool-loop's message fast path, `docs/cc/02-tool-loop.md`). Pre-routes never
+    reach CC, so they only need the island.
 
 ## Talking to windows (user-facing; goes into the user guide when this ships)
 
@@ -151,7 +167,7 @@ Gaps against the north star:
    past v1**, since snap and move are nice-to-haves themselves. Reopen if the user disagrees.
 7. ~~"This", "it", "the other one"~~: answered (see Decided).
 8. ~~Risk~~: answered (see Decided).
-9. **Feedback** *(asked 2026-10-24)*: how the user knows it worked without looking: spoken reply, sound, or silent on
+9. ~~Feedback~~: answered, island not speech (see Decided). *(was:)* how the user knows it worked without looking: spoken reply, sound, or silent on
    success.
-10. Test plan: the contract suite per backend, live tests on this box (Hyprland), MBP and the
+10. **Test plan** *(asked 2026-10-24)*: the contract suite per backend, live tests on this box (Hyprland), MBP and the
     Windows box, and the toolbench corpus for new utterances.
