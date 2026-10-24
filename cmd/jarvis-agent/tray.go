@@ -98,6 +98,9 @@ func (ic *trayIcon) state() tray.State {
 	s.StopHotkey = island.StopHotkey()
 	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
 	s.Record = ic.recorder != nil
+	if s.Record {
+		_, s.RecordDesktop = ic.recorder.Sources[computer.ModeDesktop]
+	}
 	return s
 }
 
@@ -117,14 +120,11 @@ func (ic *trayIcon) stopTaskFromMenu() {
 	ic.activity.Stop()
 }
 
-// recordFromMenu is "Record a macro…" (start) and "Stop recording": a stopped trace goes to jarvisd.
-func (ic *trayIcon) recordFromMenu(start bool) {
-	ic.log.Info("recording chosen in the menu", "start", start, "activity", ic.activity.String())
+// recordFromMenu is "Record a macro…" (computer.ModeBrowser), "Record the desktop…"
+// (computer.ModeDesktop) and "Stop recording" (""): a stopped trace goes to jarvisd.
+func (ic *trayIcon) recordFromMenu(mode string) {
+	ic.log.Info("recording chosen in the menu", "mode", mode, "activity", ic.activity.String())
 	if ic.recorder != nil {
-		mode := ""
-		if start {
-			mode = computer.ModeBrowser
-		}
 		_, _ = recordFromHere(context.Background(), ic.recorder, mode, ic.log)
 	}
 }
