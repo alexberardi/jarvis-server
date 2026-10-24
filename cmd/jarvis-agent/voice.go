@@ -31,6 +31,7 @@ type voiceFlags struct {
 	wakeAuto      bool
 	noChimes      bool
 	followUp      float64
+	choiceListen  float64
 	followSilence float64
 	bargeIn       bool
 	// Endpointing (#295): the app's silence_threshold, silence_duration,
@@ -62,6 +63,8 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	fs.BoolVar(&v.noChimes, "no-chimes", false, "don't play the wake and error chimes")
 	fs.Float64Var(&v.followUp, "follow-up", voice.DefaultFollowUp().ListenSecs,
 		"after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3; the Python node's follow_up_listen_seconds)")
+	fs.Float64Var(&v.choiceListen, "choice-listen", voice.DefaultFollowUp().ChoiceListenSecs,
+		"after the island lists choices (which window?), listen this many seconds for the answer (at most 30)")
 	fs.Float64Var(&v.followSilence, "follow-up-silence", voice.DefaultFollowUp().SilenceSecs,
 		"seconds of silence that end a follow-up answer (the Python node's follow_up_silence_duration is 0.5)")
 	ep, fu := voice.DefaultEndpointing(), voice.DefaultFollowUp()
@@ -151,6 +154,9 @@ func voiceConfig(f *voiceFlags) voice.Config {
 	cfg.Endpointing.OnsetWaitSecs = max(0, f.onsetWait.Seconds())
 	cfg.Endpointing.PreRollSecs = max(0, f.preRoll.Seconds())
 	cfg.FollowUp.ListenSecs = f.followUp
+	if f.choiceListen > 0 {
+		cfg.FollowUp.ChoiceListenSecs = voice.ClampChoiceListen(f.choiceListen)
+	}
 	cfg.BargeIn.Enabled = f.bargeIn
 	if f.followSilence > 0 {
 		cfg.FollowUp.SilenceSecs = f.followSilence

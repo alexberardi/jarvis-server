@@ -46,8 +46,11 @@ type Settings struct {
 	// A Pi node's settings, also written by the app's node settings (update_node_config).
 	FollowUp        *float64 `json:"follow_up,omitempty"`
 	FollowUpSilence *float64 `json:"follow_up_silence,omitempty"`
-	LEDs            *bool    `json:"leds,omitempty"`
-	LEDBrightness   *int     `json:"led_brightness,omitempty"`
+	// ChoiceListen: how long the island's numbered list waits for "the second one"
+	// (DESKTOP-COMMANDS.md Q9: choice_listen_seconds).
+	ChoiceListen  *float64 `json:"choice_listen_seconds,omitempty"`
+	LEDs          *bool    `json:"leds,omitempty"`
+	LEDBrightness *int     `json:"led_brightness,omitempty"`
 	// The voice pipeline's endpointing (#295).
 	SilenceThreshold      *float64 `json:"silence_threshold,omitempty"`
 	ListenSilence         *float64 `json:"listen_silence,omitempty"`
@@ -88,6 +91,8 @@ var Keys = []Key{
 	{"auto_update", "no-auto-update", true, "update to the server's version by itself, and accept updates sent from Jarvis Automation", func(s *Settings) any { return &s.AutoUpdate }},
 	{"follow_up", "follow-up", false, "after a reply, listen this many seconds for a follow-up without the wake word (0: off; at most 3)", func(s *Settings) any { return &s.FollowUp }},
 	{"follow_up_silence", "follow-up-silence", false, "seconds of silence that end a follow-up answer", func(s *Settings) any { return &s.FollowUpSilence }},
+	{"choice_listen_seconds", "choice-listen", false, "after the island lists choices (which window?), listen this many seconds for the answer (at most 30)",
+		func(s *Settings) any { return &s.ChoiceListen }},
 	{"leds", "no-leds", true, "light the ReSpeaker HAT's LEDs (a Pi)", func(s *Settings) any { return &s.LEDs }},
 	{"led_brightness", "led-brightness", false, "HAT LED brightness, percent (0 to 100)", func(s *Settings) any { return &s.LEDBrightness }},
 	{"silence_threshold", "silence-threshold", false, "RMS below which a command counts as silence, when the room's level before the wake word isn't known",
@@ -184,6 +189,9 @@ func (s Settings) Validate() error {
 	}
 	if s.FollowUp != nil && *s.FollowUp < 0 {
 		return fmt.Errorf("follow_up is %v; use 0 (off) or more seconds", *s.FollowUp)
+	}
+	if s.ChoiceListen != nil && *s.ChoiceListen <= 0 {
+		return fmt.Errorf("choice_listen_seconds is %v; use a number of seconds above 0 (at most 30)", *s.ChoiceListen)
 	}
 	if s.FollowUpSilence != nil && *s.FollowUpSilence <= 0 {
 		return fmt.Errorf("follow_up_silence is %v; use a number of seconds above 0", *s.FollowUpSilence)
