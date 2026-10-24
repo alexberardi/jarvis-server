@@ -194,7 +194,10 @@ func (b *evalBackend) ListWindows(context.Context) ([]host.Window, error) { retu
 func (b *evalBackend) MinimizeWindow(context.Context, string) error       { return nil }
 func (b *evalBackend) FocusWindow(context.Context, string) error          { return nil }
 func (b *evalBackend) CloseWindow(context.Context, string) error          { return nil }
-func (b *evalBackend) Open(context.Context, string) error                 { return nil }
+func (b *evalBackend) ArrangeWindow(context.Context, string, host.WindowAction, string) error {
+	return nil
+}
+func (b *evalBackend) Open(context.Context, string) error { return nil }
 func (b *evalBackend) LaunchApp(_ context.Context, p string) error {
 	name := strings.TrimSuffix(strings.TrimPrefix(p, "/apps/"), ".desktop")
 	b.d.launched = append(b.d.launched, name)

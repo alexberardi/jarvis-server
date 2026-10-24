@@ -13,10 +13,11 @@
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included) and,
 //	    for voiced turns, the audio.
-//	pipeline toolset desktop|desktop-windows
+//	pipeline toolset desktop|desktop-windows|desktop-hyprland
 //	    print the desktop agent's client tools as its own toolsets render them (the source of
 //	    toolsets/desktop.json: pipeline toolset desktop > tools/pipeline/toolsets/desktop.json;
-//	    desktop-windows adds window control, as on a Mac: toolsets/desktop-windows.json).
+//	    desktop-windows adds window control, as on a Mac: toolsets/desktop-windows.json;
+//	    desktop-hyprland is Hyprland's window control: toolsets/desktop-hyprland.json).
 //	pipeline tap [--listen ADDR] [--upstream URL] [--log FILE]
 //	    the LLM recording proxy scripts/sandbox starts in front of the installed jarvisd's LLM
 //	    API (:7704); JARVIS_TAP_APP_ID / JARVIS_TAP_APP_KEY are sent as its app credentials.
@@ -83,9 +84,9 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	case "run":
 		return runScenarios(ctx, args[1:], stdout)
 	case "toolset":
-		render := map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset}
+		render := map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset, "desktop-hyprland": RenderDesktopHyprlandToolset}
 		if len(args) != 2 || render[args[1]] == nil {
-			return errors.New("usage: pipeline toolset desktop|desktop-windows")
+			return errors.New("usage: pipeline toolset desktop|desktop-windows|desktop-hyprland")
 		}
 		b, err := render[args[1]]()
 		if err != nil {

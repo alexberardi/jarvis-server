@@ -201,8 +201,8 @@ func (f *fakeX) Iconify(_ context.Context, id uint32) error     { return f.op("i
 // hyprClients is `hyprctl -j clients`: the focused terminal, Firefox behind it, and an unmapped
 // client that must not be listed.
 const hyprClients = `[
- {"address":"0x55aa02","mapped":true,"class":"foot","title":"~","focusHistoryID":0},
- {"address":"` + hyprWinID + `","mapped":true,"class":"firefox","title":"Mozilla Firefox","focusHistoryID":1},
+ {"address":"0x55aa02","mapped":true,"class":"foot","title":"~","focusHistoryID":0,"fullscreen":0},
+ {"address":"` + hyprWinID + `","mapped":true,"class":"firefox","title":"Mozilla Firefox","focusHistoryID":1,"fullscreen":1},
  {"address":"0x55aa03","mapped":false,"class":"ghost","title":"","focusHistoryID":2}]`
 
 // linuxHyprland is a Hyprland session: hyprctl answers, and every dispatch in the classic
@@ -225,12 +225,16 @@ func hyprSys(luaOnly bool) *fakeSys {
 			return hyprClients, nil
 		case args[0] == "-j" && args[1] == "activewindow":
 			return `{"address":"0x55aa02"}`, nil
+		case args[0] == "-j" && args[1] == "monitors":
+			return `[{"name":"DP-1"},{"name":"HDMI-A-1"}]`, nil
 		case args[0] == "dispatch" && strings.HasPrefix(args[1], "hl.dsp."):
 			return "ok", nil
-		case args[0] == "dispatch" && luaOnly:
+		case (args[0] == "dispatch" || args[0] == "--batch") && luaOnly:
 			return "", &RunError{Name: "hyprctl", Msg: "')' expected near 'address'"}
 		case args[0] == "dispatch":
 			return "ok", nil
+		case args[0] == "--batch":
+			return "ok\n\nok", nil
 		}
 		return "", nil
 	}
@@ -259,6 +263,9 @@ func linuxSway() *fakeSys {
 		}
 		if args[0] == "-t" && args[1] == "get_tree" {
 			return swayTree, nil
+		}
+		if args[0] == "-t" && args[1] == "get_outputs" {
+			return `[{"name":"DP-1","active":true},{"name":"HDMI-A-1","active":true},{"name":"eDP-1","active":false}]`, nil
 		}
 		return `[{"success":true}]`, nil
 	}

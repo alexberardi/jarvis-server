@@ -104,7 +104,8 @@ cmd/jarvis-agentw/    Windows launcher (GUI subsystem, -H=windowsgui): starts ja
 internal/agent/
   host/               Backend interface + Host (gate, clamp, validate) + linux/darwin/windows backends
                       -- read host.go first
-  desktop/            the 8 client tools over Host, and the open policy
+  desktop/            the client tools over Host (desktop_window: one tool for the window verbs,
+                      its actions computed per call; window.go), and the open policy
   apps/               installed-app catalogue (per-OS scanners), name resolution, apps.json
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch

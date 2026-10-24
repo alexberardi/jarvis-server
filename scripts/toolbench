@@ -17,7 +17,10 @@ place of "hello" in the user message, the base's tools and parameters. A case is
     expected_parameters, or
   - the first turn of a tools/pipeline/scenarios/*.json scenario: its tool / server_tool /
     any_tool / no_tool / not_tool, args and args_match. Scenarios with settings, results,
-    another home or a voice-only node are skipped (single-turn, no setup, here).
+    another home or a voice-only node are skipped (single-turn, no setup, here). A scenario
+    whose "tools" is another desktop toolset (toolsets/desktop-hyprland.json) runs on the
+    desktop base with that toolset's client tools in place of desktop.json's; the server
+    tools and the prompt stay the base's.
 It scores the first tool call: right tool, then right arguments (args compared loosely: numbers
 by value, strings case-insensitively; args_match by regexp). Prompt tokens and latency come from
 the response. The endpoint is the installed jarvisd's LLM API by default (the harness env's
@@ -90,16 +93,21 @@ def cases():
             out.append(c)
     for path in sorted(glob.glob(os.path.join(ROOT, "tools/pipeline/scenarios/*.json"))):
         for sc in json.load(open(path)):
+            toolset = sc.get("tools")
+            if toolset and not re.fullmatch(r"\.\./toolsets/desktop-[a-z]+\.json", toolset):
+                continue
             if sc.get("skip") or sc.get("settings") or sc.get("results") or sc.get("voice") \
-                    or sc.get("home") not in (None, "", "avery") or sc.get("also_heard_by") is not None \
-                    or sc.get("tools") or sc.get("owner"):
+                    or sc.get("home") not in (None, "", "avery", "none") or sc.get("also_heard_by") is not None \
+                    or sc.get("owner"):
                 continue
             turn = sc["turns"][0]
             if turn.get("source") or turn.get("results") or turn.get("computer_activity"):
                 continue
             e = turn.get("expect", {})
             c = {"id": f"sc:{os.path.basename(path)}:{sc['name']}",
-                 "node": "desktop" if sc.get("node") == "desktop" else "voice", "say": turn["say"]}
+                 "node": "desktop" if sc.get("node") == "desktop" or toolset else "voice", "say": turn["say"]}
+            if toolset:
+                c["toolset"] = os.path.normpath(os.path.join(os.path.dirname(path), toolset))
             tool = e.get("tool") or e.get("server_tool")
             if tool:
                 c["tool"] = tool
@@ -114,6 +122,26 @@ def cases():
             c["args"] = e.get("args") or {}
             c["args_match"] = e.get("args_match") or {}
             out.append(c)
+    return out
+
+
+def client_tools(path):
+    ts = json.load(open(path))
+    return [t for t in (ts if isinstance(ts, list) else ts.get("tools", []))]
+
+
+def swap_toolset(tools, toolset):
+    """The base's tools with desktop.json's client tools replaced by toolset's: a tool both have
+    keeps the base's rendering (what command-center made of it), a new one goes in as the
+    function schema the agent sends."""
+    default = {t.get("function", t)["name"] for t in client_tools(os.path.join(ROOT, "tools/pipeline/toolsets/desktop.json"))}
+    new = {t.get("function", t)["name"]: t for t in client_tools(toolset)}
+    out = [t for t in tools if t["function"]["name"] not in default or t["function"]["name"] in new]
+    have = {t["function"]["name"] for t in out}
+    for name, t in new.items():
+        if name not in have:
+            fn = t.get("function", t)
+            out.append({"type": "function", "function": {k: fn[k] for k in ("name", "description", "parameters")}})
     return out
 
 
@@ -254,6 +282,8 @@ def run(args):
             msgs = [first] + rest
         body = {k: v for k, v in base.items() if k not in ("messages",)}
         body["messages"], body["model"], body["stream"] = msgs, model, False
+        if c.get("toolset"):
+            body["tools"] = swap_toolset(base.get("tools") or [], c["toolset"])
         for i in range(args.repeat):
             req = urllib.request.Request(url, data=json.dumps(body).encode(),
                                          headers={"Content-Type": "application/json", **hdr})

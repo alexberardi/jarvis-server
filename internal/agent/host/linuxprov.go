@@ -55,8 +55,7 @@ func (l *Linux) Capabilities(ctx context.Context) []string {
 	}
 	switch {
 	case l.compositor() != "":
-		// Hyprland and sway have no real minimise (Q4: no stand-ins).
-		caps = append(caps, CapWindowsList, CapWindowsFocus, CapWindowsClose)
+		caps = append(caps, l.compCapabilities(ctx, l.compositor())...)
 	case l.nativeX(ctx):
 		caps = append(caps, AllWindowCaps...)
 	case l.x11Available():
@@ -302,6 +301,14 @@ func (l *Linux) CloseWindow(ctx context.Context, id string) error {
 	}
 	_, err := l.run(ctx, "wmctrl", "-i", "-c", id)
 	return err
+}
+
+// ArrangeWindow: Hyprland and sway (wlcomp.go); X11 gets them in a later change.
+func (l *Linux) ArrangeWindow(ctx context.Context, id string, a WindowAction, target string) error {
+	if comp := l.compositor(); comp != "" {
+		return l.compArrange(ctx, comp, id, a, target)
+	}
+	return Errorf(ErrNotSupported, "%s is not available on X11 yet", a)
 }
 
 func (l *Linux) Open(_ context.Context, target string) error {
