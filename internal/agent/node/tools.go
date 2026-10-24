@@ -175,6 +175,9 @@ const SignalsKey = "_jarvis_node_signals"
 const (
 	IslandKey     = "island"
 	IslandOnlyKey = "island_only"
+	// ChoiceKey true: the island shows a numbered list to pick from; the node listens for the
+	// answer (choice_listen_seconds) and command-center keeps the exchange open.
+	ChoiceKey = "choice"
 )
 
 // Signals are the jarvis-command-sdk CommandResponse fields only the node acts on

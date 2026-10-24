@@ -326,8 +326,9 @@ func (m *Module) handleContinue(w http.ResponseWriter, r *http.Request, n *nodeC
 	}
 	msg, end := resultMessage(res), res.EndOfExchange
 	if res.IslandOnly {
-		// The node's island showed it: nothing to speak, and no follow-up window after it.
-		msg, end = "", true
+		// The node's island showed it: nothing to speak, and no follow-up window after it,
+		// unless it is a list to pick from, whose answer comes in the node's choice window.
+		msg, end = "", !res.IslandChoice
 	}
 	httpx.WriteJSON(w, http.StatusOK, voiceResponse(nil, info, wireStop(res.Stop), toolCallsList(res.ToolCalls),
 		validationObject(res.Validation), msg, nil, end))
