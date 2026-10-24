@@ -196,6 +196,15 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 			msg = listeningMessage
 		}
 	}
+	if last != nil && last.islandOnly {
+		// A desktop command: the island showed what happened (DESKTOP-COMMANDS.md Q9). Nothing
+		// is spoken; a failure still gets a sound, since it shouldn't depend on a glance.
+		if last.allFailed {
+			p.chime(ctx, errorChime)
+		}
+		ex.Outcome = OutcomeSilent
+		return EndOfExchange
+	}
 	switch {
 	case last != nil && last.allFailed && last.firstErr != "":
 		// Every tool failed: say so rather than trusting a reply that may claim success
