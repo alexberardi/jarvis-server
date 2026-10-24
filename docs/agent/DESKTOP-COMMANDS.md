@@ -107,6 +107,27 @@ default, not a party trick.
     speak", so CC ends the turn without a composing LLM call or TTS (like the not_for_me silent
     path and the tool-loop's message fast path, `docs/cc/02-tool-loop.md`). Pre-routes never
     reach CC, so they only need the island.
+- **2026-10-24: test plan** (Q10).
+  1. **Contract suite** (`host/contract_test.go`) on the Linux, macOS and Windows CI jobs, for
+     every new action, including the native-only rule: a backend that lists an action does it;
+     one that doesn't returns `not_supported`.
+  2. **Unit tests** for the pre-route grammar (exact only; near-misses go to the LLM), the
+     this/it/other-one rules, capability-filtered enums and the confirmation table. Fake clock,
+     no wall-clock waits.
+  3. **Toolbench gate** as in Q3.
+  4. **Live, by voice, through the product with the island visible:** this box (Hyprland
+     0.56), the MBP (macOS), X11 in a nested Xephyr with an EWMH window manager on this box
+     (proposed; not yet confirmed by the user), and **Windows 11 in a KVM VM on this box**.
+     The user has a license and chose a VM over a dual-boot partition.
+
+  **Windows VM shape:** QEMU/KVM as the user's own session (`qemu:///session`), not system
+  libvirt. That way the VM's audio goes straight to the user's PipeWire for mic and speaker
+  passthrough, and no group change (no re-login) is needed. Win11 needs OVMF with Secure Boot
+  plus an emulated TPM (`swtpm`). Planned size: 8 vCPU / 8 GB / 80 GB thin disk; this box
+  (i7-13700KF, 24 threads, 31 GB) can spare that. **Two virtual monitors** so
+  `move_to_monitor` gets tested. The jarvis-agent in the guest points at this box's jarvisd by
+  manual config URL: mDNS doesn't cross the VM's NAT (same as the Android emulator). Snapshot
+  "clean + agent installed", and revert before each run.
 
 ## Talking to windows (user-facing; goes into the user guide when this ships)
 
@@ -169,5 +190,5 @@ Gaps against the north star:
 8. ~~Risk~~: answered (see Decided).
 9. ~~Feedback~~: answered, island not speech (see Decided). *(was:)* how the user knows it worked without looking: spoken reply, sound, or silent on
    success.
-10. **Test plan** *(asked 2026-10-24)*: the contract suite per backend, live tests on this box (Hyprland), MBP and the
+10. ~~Test plan~~: answered (see Decided); open: Xephyr for X11. *(was:)* the contract suite per backend, live tests on this box (Hyprland), MBP and the
     Windows box, and the toolbench corpus for new utterances.
