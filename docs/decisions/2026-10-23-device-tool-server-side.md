@@ -47,7 +47,12 @@ tool for households with imported devices. **(b) was chosen**:
   "turn off the radio") and its timers, alarms, reminders and notifications ("turn off the
   timer", answered by `cancel_timer`). Nagging those would be the mirror of this bug: the
   model would call `control_device {device_name: "timer"}`, get "No device called 'timer'
-  here" and deny a change that did happen (found in review, `deviceTargetExcl`).
+  here" and deny a change that did happen (found in review, `deviceTargetExcl`). The same
+  goes for the targets that already have a guard and a tool of their own — computer control
+  (`[SWITCH_NOT_RUN]`), recordings and macros (the recording guards), watches
+  (`cancel_watch`) — and the device case sits after those guards in `followThroughNag`, so
+  the guard that owns a target wins even on a phrasing the filter doesn't list (found in
+  review: "turn off computer control" on a desktop node got `[DEVICE_NOT_DONE]`).
   The articles in front of the target repeat, because "turn off **all the** lights" stacks two
   of them and that is a top-frequency phrasing for this feature; an excluded target stays
   excluded through every way of splitting them, since the articles are in `deviceTargetExcl`
