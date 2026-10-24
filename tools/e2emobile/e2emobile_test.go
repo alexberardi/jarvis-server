@@ -94,7 +94,8 @@ func TestBrokenHeaderIsAnError(t *testing.T) {
 // any flow whose path has "fail" in it (and writes a JUnit report saying why), sleeps on
 // "slow", and on "drop" dies the way an adb transport drop kills it, the first time only
 // ("droptwice": the first two times, "dropall": every time). A drop leaves the device offline to
-// adb's next two get-state calls. The adb's /health probe answers 200 on the emulator's port 7700
+// adb's next two get-state calls; a "flaps" file (one "up" or "down" per line) answers get-state
+// first, line by line. The adb's /health probe answers 200 on the emulator's port 7700
 // only.
 func fakes(t *testing.T) (maestro, adb, calls string) {
 	d := t.TempDir()
@@ -115,6 +116,21 @@ while [ $# -gt 0 ]; do
 done
 case $flow in
   *slow*) sleep 3 ;;
+  *dropunknown*)
+    echo 2 >`+d+`/offline
+    echo "Exception in thread main maestro.android.DeviceServerDiedException: Device server died during viewHierarchy on emulator-5580 (523ms since last byte, connection age 8420ms): StatusRuntimeException: UNAVAILABLE: End of stream or IOException"
+    echo "	at maestro.drivers.AndroidDriver.viewHierarchy(AndroidDriver.kt:42)"
+    cat >"$out" <<X
+<?xml version="1.0"?><testsuites><testsuite name="Test Suite"><testcase name="unknown"><failure message="Unknown error"></failure></testcase></testsuite></testsuites>
+X
+    exit 1 ;;
+  *crash*)
+    echo "Exception in thread main java.lang.IllegalStateException: no such screen"
+    echo "	at maestro.Orchestra.run(Orchestra.kt:9)"
+    cat >"$out" <<X
+<?xml version="1.0"?><testsuites><testsuite name="Test Suite"><testcase name="crash"><failure message="Unknown error"></failure></testcase></testsuite></testsuites>
+X
+    exit 1 ;;
   *dropall*)
     echo 2 >`+d+`/offline
     echo "Exception in thread main dadb.DeviceServerDied: device offline"
@@ -147,6 +163,16 @@ echo "[Passed] ok"
 printf 'adb %s\n' "$*" >>`+calls+`
 case "$*" in
   *" get-state")
+    if [ -s `+d+`/flaps ]; then
+      s=$(head -n 1 `+d+`/flaps)
+      tail -n +2 `+d+`/flaps >`+d+`/flaps.next && mv `+d+`/flaps.next `+d+`/flaps
+      if [ "$s" = down ]; then
+        echo "error: device 'emulator-5580' not found" >&2
+        exit 1
+      fi
+      echo device
+      exit 0
+    fi
     n=$(cat `+d+`/offline 2>/dev/null || echo 0)
     if [ "$n" -gt 0 ]; then
       echo $((n - 1)) >`+d+`/offline
@@ -323,7 +349,7 @@ func dropConfig(t *testing.T, flows map[string]string) (*config, []Flow, string)
 	}
 	c := &config{flowsDir: d, rel: ".maestro", out: filepath.Join(t.TempDir(), "mobile"), maestro: maestro, adb: adb,
 		serial: "emulator-5580", flowTimeout: time.Minute, adbTimeout: 10 * time.Second, probePause: time.Millisecond,
-		retryPause: time.Millisecond, pollPause: time.Millisecond, recoverTimeout: 5 * time.Second,
+		retryPause: time.Millisecond, pollPause: time.Millisecond, settle: time.Millisecond, recoverTimeout: 5 * time.Second,
 		reverse: []string{"tcp:18710=tcp:18710", "tcp:7700=tcp:18700"}, healthPort: "7700"}
 	fl, err := Discover(d, ".maestro", nil)
 	if err != nil {
@@ -433,6 +459,72 @@ func TestRunRetriesUpToThreeTries(t *testing.T) {
 	if runs := prepCalls(t, calls); len(runs) != 6 {
 		t.Errorf("%d maestro runs, want 3 per flow", len(runs))
 	}
+}
+
+// The emulator drops its adb transport in bursts, a few seconds apart, and adb brings it back in
+// under a second: a device that answers twice is not back yet. The retry waits until it has
+// stayed up for the whole settle window.
+func TestRecoverDeviceWaitsOutABurstOfDrops(t *testing.T) {
+	c, _, calls := dropConfig(t, map[string]string{"a.yaml": "a"})
+	c.settle = 30 * time.Millisecond
+	flaps := filepath.Join(filepath.Dir(calls), "flaps")
+	write(t, flaps, "down\nup\nup\nup\ndown\nup\nup\ndown\n")
+	start := time.Now()
+	if err := c.recoverDevice(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := os.ReadFile(flaps); len(left) != 0 {
+		t.Errorf("back before the burst was over (%q left)", left)
+	}
+	if time.Since(start) < c.settle {
+		t.Errorf("back after %s, want at least the settle window", time.Since(start))
+	}
+	log, _ := os.ReadFile(calls)
+	if !strings.Contains(string(log), "force-stop dev.mobile.maestro") {
+		t.Error("the driver was not stopped once the device was back")
+	}
+}
+
+// Maestro writes "Unknown error" for any exception that is not its own (DeviceServerDiedException
+// included). A flow that drops on every try says so, with the exception, instead.
+func TestRunNamesTheDropWhenEveryTryDrops(t *testing.T) {
+	c, flows, _ := dropConfig(t, map[string]string{"dropunknown.yaml": "drops every time", "crash.yaml": "maestro crashes"})
+	res, err := run(context.Background(), c, flows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTitle := map[string]Record{}
+	for _, r := range res.Tests {
+		byTitle[r.Title] = r
+	}
+	r := byTitle["drops every time"]
+	if r.Status != "failed" || r.Error == nil {
+		t.Fatalf("drops every time: %+v", r)
+	}
+	first, _, _ := strings.Cut(*r.Error, "\n")
+	if !strings.HasPrefix(first, "the emulator's adb transport dropped on all 3 tries (harness, not the flow): ") ||
+		!strings.Contains(first, "maestro.android.DeviceServerDiedException: Device server died during viewHierarchy") {
+		t.Errorf("failure text: %q", *r.Error)
+	}
+	if strings.Contains(*r.Error, "Unknown error") {
+		t.Errorf("failure text still says Unknown error: %q", *r.Error)
+	}
+	if !strings.Contains(r.Note, "DeviceServerDiedException") {
+		t.Errorf("the note should name the exception, not Unknown error: %q", r.Note)
+	}
+	// Not a drop: one try, and the failure is Maestro's exception rather than "Unknown error".
+	r = byTitle["maestro crashes"]
+	if r.Status != "failed" || r.Note != "" || r.Error == nil ||
+		*r.Error != "java.lang.IllegalStateException: no such screen" {
+		t.Errorf("maestro crashes: %+v %q", r, deref(r.Error))
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // A device that never comes back: the retry is still played (and fails on its own), the run
