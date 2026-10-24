@@ -240,7 +240,8 @@ the agent (+~4.5 MB), the price of one verification path.
 5. **Capability names are a closed set** (`KnownCapabilities`); `Host` rejects others.
 6. **`open` is fire-and-forget.** No launch confirmation; it is unreliable everywhere. Linux
    refuses without a graphical session (xdg-open on a headless box exits 0 having done nothing).
-7. **Close is graceful, never a kill:** `WM_CLOSE`, `wmctrl -c`, the window's AXCloseButton.
+7. **Close is graceful, never a kill:** `WM_CLOSE`, `wmctrl -c`, the window's AXCloseButton,
+   Hyprland's `closewindow`, sway's `kill` (its close command: the app gets its close event, no signal).
 8. **Window ids are opaque** (decimal HWND, X11 `0x…`, macOS `pid/index`), but each backend
    validates its own format before an id reaches a subprocess or AppleScript. The Python
    macOS provider spliced ids into AppleScript unvalidated; don't regress that.
@@ -259,8 +260,11 @@ the agent (+~4.5 MB), the price of one verification path.
 12. **Every `tool_call` is verified** with `POST /commands/{rid}/verify` before running
     (single use). Broker ACLs already confine publishers; this is defence in depth for a node
     that can open things.
-13. **Wayland has no window control** (no cross-client API). XWayland's `DISPLAY` does not
-    count. Per-compositor backends are an open question.
+13. **Wayland has no cross-client window API**, so `host` drives windows only where a
+    compositor exposes its own IPC: Hyprland (`hyprctl`, classic dispatch then the Lua form) and
+    sway (`swaymsg`), in `host/wlcomp.go`: list (with `focused`), focus, close. Neither offers
+    minimise: there's no real one, and a stand-in is never offered (DESKTOP-COMMANDS.md Q4).
+    GNOME/KDE Wayland still have no window control. XWayland's `DISPLAY` does not count.
 14. **macOS window control needs Accessibility for "Jarvis Automation Agent.app"** (`net.jarvisautomation.agent`, `internal/agent/appid`; was `io.jarvis.agent`) plus
     an Automation grant for System Events. A bare binary added with "+" never shows in the list
     on macOS 26, so the agent ships as a bundle and calls `AXIsProcessTrustedWithOptions`
