@@ -9,7 +9,9 @@ already told the model to use run_errand and it still only said so, and a nudge 
 model call only when the reply's **last sentence** starts with a promise ("let me / I'll / I'm
 going to" + an action verb). "Let me know …", questions ("Want me to open it?"), what happens on
 its own ("I'll remind you at 5") and a promise followed by the answer ("Let me check. It's 72")
-don't fire it. It fires once per engine run, voice and chat alike.
+don't fire it, nor does a promise of later or conditional work ("I'll open the garage when you
+get home", "I'll check back every hour": a when / once / every / after / later / if / tomorrow /
+at <time> in that sentence), which a tool that ran already set up. It fires once per engine run, voice and chat alike.
 
 Mobile chat's tool cap (5 rounds, legacy MAX_TOOL_ITERATIONS) stays, but hitting it no longer
 ends in the raw "Too many tool iterations" error: the pending calls answer "not run, budget used
