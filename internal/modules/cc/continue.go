@@ -121,6 +121,18 @@ func islandNotes(results []toolResult) ([]string, bool) {
 	return notes, true
 }
 
+// islandChoice: one of the results is a list on the island to pick from (choice).
+func islandChoice(results []toolResult) bool {
+	for _, r := range results {
+		if o := outputObject(r.Output); o != nil {
+			if v, _ := o.Get("choice"); v == true {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // toolsFailedNote is added (transient, after the results) when every tool call of a round
 // failed. Small models have answered "Done, I've typed that" over a success:false result; this
 // says in so many words that nothing happened. A round with any success gets no note: the
@@ -235,13 +247,14 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	}
 	var res engineResult
 	if notes, ok := islandNotes(results); ok {
+		choice := islandChoice(results)
 		// A desktop command's result was shown on the node's island: no formatting call.
 		if !conv.mode.Native() {
 			msgs = withoutRole(msgs, "tool")
 		}
 		content := strings.Join(notes, "; ")
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
-		res = engineResult{Stop: stopComplete, Message: content, IslandOnly: true}
+		res = engineResult{Stop: stopComplete, Message: content, IslandOnly: true, IslandChoice: choice}
 	} else if native := conv.mode.Native(); native || typingPending(conv, msgs) {
 		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)

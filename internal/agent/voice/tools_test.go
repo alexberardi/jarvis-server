@@ -25,6 +25,7 @@ type fakeOS struct {
 	mu      sync.Mutex
 	volume  int
 	actions []string
+	windows []host.Window // nil: Firefox and a terminal
 }
 
 func (f *fakeOS) Platform() string { return "linux" }
@@ -40,6 +41,9 @@ func (f *fakeOS) ApplyVolume(_ context.Context, l int) error {
 	return f.act(fmt.Sprintf("volume %d", l))
 }
 func (f *fakeOS) ListWindows(context.Context) ([]host.Window, error) {
+	if f.windows != nil {
+		return f.windows, nil
+	}
 	return []host.Window{{ID: "0x1", Title: "Inbox", App: "firefox"}, {ID: "0x2", Title: "notes", App: "kitty"}}, nil
 }
 func (f *fakeOS) MinimizeWindow(_ context.Context, id string) error { return f.act("minimize " + id) }
@@ -386,5 +390,44 @@ func TestIslandOnlyFailureChimesInsteadOfSpeaking(t *testing.T) {
 	}
 	if got := os.did(); len(got) != 0 {
 		t.Fatalf("OS did %v", got)
+	}
+}
+
+// An ambiguous window name puts a numbered list on the island (Q9): nothing is spoken, and the
+// next window is the choice window, 8 s and listening at once, even with follow-ups off.
+func TestIslandChoiceOpensTheChoiceWindow(t *testing.T) {
+	os := &fakeOS{windows: []host.Window{{ID: "0x1", Title: "build", App: "Terminal"}, {ID: "0x2", Title: "logs", App: "Terminal"}}}
+	srv := newServer()
+	srv.reply, srv.speakPCM = toolCalls(call("c1", desktop.ToolWindow, `{"action":"focus","window":"terminal"}`)), pcmOf(300)
+	var posted []ToolResult
+	srv.cont = func(rs []ToolResult) (*Control, error) { posted = rs; return complete(""), nil }
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	r.p.Cfg.FollowUp.ListenSecs = 0 // follow-ups off: the choice window still opens
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || tr.Message != "" || tr.FollowUpEnd != EndTimeout {
+		t.Fatalf("turn %+v", tr)
+	}
+	if len(posted) != 1 || posted[0].Output["choice"] != true || posted[0].Output["island_only"] != true {
+		t.Fatalf("posted %s", outputs(posted))
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want the 8 s choice window", got)
+	}
+	if outs := r.spk.all(); len(outs) != 1 { // the wake chime only: no error chime, no speech
+		t.Fatalf("%d playbacks", len(outs))
+	}
+}
+
+func TestClampChoiceListen(t *testing.T) {
+	for _, c := range []struct{ in, want float64 }{{60, 30}, {30, 30}, {8, 8}} {
+		if got := ClampChoiceListen(c.in); got != c.want {
+			t.Errorf("ClampChoiceListen(%v) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }

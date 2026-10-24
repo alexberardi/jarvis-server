@@ -247,7 +247,36 @@
      }
     }
    }
-  ]
+  ],
+  "results": {
+   "desktop_list_windows": {
+    "success": true,
+    "windows": [
+     {
+      "id": "0xa",
+      "title": "build",
+      "app": "foot",
+      "minimized": false,
+      "focused": true
+     },
+     {
+      "id": "0xb",
+      "title": "Mozilla Firefox",
+      "app": "firefox",
+      "minimized": false,
+      "focused": false
+     },
+     {
+      "id": "0xc",
+      "title": "logs",
+      "app": "foot",
+      "minimized": false,
+      "focused": false
+     }
+    ]
+   }
+  },
+  "comment": "Listing the windows first is a fine start of the chain; with results, toolbench skips it and the pipeline run checks the close."
  },
  {
   "name": "desktop windows (Hyprland): the other one",
@@ -259,12 +288,12 @@
     "expect": {
      "tool": "desktop_window",
      "args_match": {
-      "action": "^focus$",
-      "window": "(?i)other|previous"
+      "action": "^focus$"
      }
     }
    }
-  ]
+  ],
+  "comment": "Models often leave the window out here; the node then resolves 'the other window' from what was said (desktop/window.go saidReference)."
  },
  {
   "name": "desktop windows (Hyprland): it, with nothing acted on yet (the focused window)",
@@ -277,6 +306,60 @@
      "tool": "desktop_window",
      "args_match": {
       "action": "^maximize$"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): the island's choice list, then 'the second one'",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "switch to the terminal",
+    "results": {
+     "desktop_window": {
+      "success": false,
+      "error_code": "ambiguous_window",
+      "error": "2 windows match \"the terminal\"; ask the user which one they mean (use words from its title)",
+      "candidates": [
+       "foot — build",
+       "foot — logs"
+      ],
+      "numbered": [
+       "foot — build",
+       "foot — logs"
+      ],
+      "island": "Which one?  1. foot — build  2. foot — logs",
+      "island_only": true,
+      "choice": true
+     }
+    },
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$"
+     }
+    }
+   },
+   {
+    "say": "the second one",
+    "results": {
+     "desktop_window": {
+      "success": true,
+      "action": "focus",
+      "window_id": "0xb",
+      "matched_window": "foot — logs",
+      "island": "Switched to foot",
+      "island_only": true
+     }
+    },
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$",
+      "window": "(?i)logs|^2$|second"
      }
     }
    }

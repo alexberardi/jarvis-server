@@ -52,3 +52,21 @@ func TestMixedRoundIsAnsweredAsUsual(t *testing.T) {
 		t.Fatal("no results counted as island-only")
 	}
 }
+
+// A list on the island to pick from (choice): still no LLM call and nothing to speak, but the
+// exchange stays open, so the node's choice window can send "the second one".
+func TestIslandChoiceKeepsTheExchangeOpen(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.start("c-choice", weatherTool)
+	ve.eng.push(engineReply{toolCalls: []map[string]any{{"id": "call_c1", "type": "function",
+		"function": map[string]any{"name": "get_weather", "arguments": `{}`}}}})
+	ve.turn("/api/v0/voice/command/stream", "c-choice", "switch to the terminal", nil).want(202)
+	before := len(ve.eng.requests())
+	b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "c-choice",
+		"tool_results": []any{map[string]any{"tool_call_id": "call_c1", "output": map[string]any{
+			"success": false, "error_code": "ambiguous_window", "island": "Which one?  1. Terminal — build  2. Terminal — logs",
+			"island_only": true, "choice": true, "numbered": []any{"Terminal — build", "Terminal — logs"}}}}}, ve.node.h()).want(200).json()
+	if b["assistant_message"] != "" || b["end_of_exchange"] == true || len(ve.eng.requests()) != before {
+		t.Fatalf("choice continue %v (%d LLM calls)", b, len(ve.eng.requests())-before)
+	}
+}

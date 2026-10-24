@@ -62,6 +62,7 @@ type roundResult struct {
 	// islandOnly: every call's result said the island showed it (island_only, a desktop
 	// command): nothing is spoken for the round, a failure gets the error chime instead.
 	islandOnly bool
+	choice     bool // one of them is a list on the island to pick from
 	// signals: wait_for_input and clear_history if any call set them; the last deferred step.
 	signals node.Signals
 }
@@ -85,6 +86,9 @@ func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls
 		ok, _ := out["success"].(bool)
 		if only, _ := out[node.IslandOnlyKey].(bool); !only {
 			r.islandOnly = false
+		}
+		if c, _ := out[node.ChoiceKey].(bool); c {
+			r.choice = true
 		}
 		run := ToolRun{Name: c.Function.Name, Args: args, Success: ok, Took: p.Now().Sub(start)}
 		if !ok && out["status"] == "awaiting_confirmation" {

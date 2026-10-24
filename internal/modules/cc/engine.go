@@ -63,6 +63,9 @@ type engineResult struct {
 	// (island_only, a desktop command): no LLM call; a voice node gets no reply to speak, other
 	// callers (mobile chat) get the island text as Message (DESKTOP-COMMANDS.md Q9).
 	IslandOnly bool
+	// IslandChoice: one of those results is a numbered list on the island for the user to pick
+	// from: the exchange stays open for the answer (no end_of_exchange).
+	IslandChoice bool
 	// KeepListening: a follow-up the gate rejected; the node keeps its window open
 	// (followup_gate.go). Sent as keep_listening only when true.
 	KeepListening bool

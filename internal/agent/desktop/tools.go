@@ -205,6 +205,11 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, req 
 				if len(we.match.Candidates) > 0 {
 					o["candidates"] = we.match.Candidates // ask the user which one
 				}
+				if (name == ToolWindow || name == ToolClose) && len(we.match.Candidates) > 1 {
+					// Q9: an ambiguous name lists the candidates on the island, numbered; the
+					// user answers "the second one" in the choice window.
+					t.choice(o, we.match.Candidates)
+				}
 				if we.windows != nil {
 					o["windows"] = we.windows // retry with an id from these, in the same turn
 				}

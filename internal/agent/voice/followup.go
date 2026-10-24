@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -43,7 +44,17 @@ type FollowUpConfig struct {
 	// was left of it, but at least this long, so the user can still answer once the room
 	// is quiet again.
 	IgnoredGraceSecs float64
+	// ChoiceListenSecs: the window after the island listed choices to pick from (choice_listen_seconds,
+	// default 8, at most MaxChoiceListenSecs): reading a list and answering takes longer than
+	// the 3 s follow-up (DESKTOP-COMMANDS.md Q9).
+	ChoiceListenSecs float64
 }
+
+// MaxChoiceListenSecs caps choice_listen_seconds.
+const MaxChoiceListenSecs = 30
+
+// ClampChoiceListen caps a choice window at MaxChoiceListenSecs.
+func ClampChoiceListen(secs float64) float64 { return min(secs, MaxChoiceListenSecs) }
 
 // MaxFollowUpListenSecs caps the follow-up window, wherever it is set (agent.json, --follow-up,
 // the app's follow_up_listen_seconds): 8 s left every turn hanging long after the reply (user,
@@ -61,7 +72,7 @@ func ClampFollowUpListen(secs float64) float64 { return min(secs, MaxFollowUpLis
 func DefaultFollowUp() FollowUpConfig {
 	return FollowUpConfig{ListenSecs: MaxFollowUpListenSecs, MaxIterations: 5,
 		QuietWaitSecs: 0.5, SilenceSecs: 1.2, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3,
-		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2}
+		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2, ChoiceListenSecs: 8}
 }
 
 // Fixed parts of the Python node's follow-up listening.
@@ -105,7 +116,7 @@ const (
 // our own speech.
 func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	cfg := p.Cfg.FollowUp
-	if cfg.ListenSecs <= 0 {
+	if cfg.ListenSecs <= 0 && !s.choice { // a list on the island is answered even with follow-ups off
 		t.FollowUpEnd = EndDisabled
 		return
 	}
@@ -126,6 +137,12 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		timeout := window
 		if ignored > 0 {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
+		}
+		if s.choice {
+			// The island lists choices: a longer window, listening at once (nothing was
+			// spoken, so there is no reply tail to drain).
+			s.choice = false
+			timeout, afterReply = ClampChoiceListen(cmp.Or(cfg.ChoiceListenSecs, DefaultFollowUp().ChoiceListenSecs)), false
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.

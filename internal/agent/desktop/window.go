@@ -300,6 +300,24 @@ func (t *Tools) island(out map[string]any, text string, failed bool) {
 	}
 }
 
+// choiceFor is how long the island shows a list to pick from (choice_listen_seconds' default).
+const choiceFor = 8 * time.Second
+
+// choice puts the candidates on the island, numbered, and marks the result as a choice: the
+// node then listens for the answer, and the model resolves "the second one" from this list.
+func (t *Tools) choice(out map[string]any, candidates []string) {
+	var b strings.Builder
+	b.WriteString("Which one?")
+	for i, c := range candidates {
+		fmt.Fprintf(&b, "  %d. %s", i+1, c)
+	}
+	out[node.IslandKey], out[node.IslandOnlyKey], out[node.ChoiceKey] = b.String(), true, true
+	out["numbered"] = candidates // the order the island shows, for "the second one"
+	if t.Show != nil {
+		t.Show(b.String(), choiceFor)
+	}
+}
+
 // shortName is how the island names a window: its app, else its title.
 func shortName(w host.Window) string {
 	if w.App != "" {
