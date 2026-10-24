@@ -1,6 +1,7 @@
 # Desktop commands: voice instead of the mouse
 
-Status: **spec in progress** (question rounds with the user, one at a time; queue at the bottom).
+Status: **approach agreed, not started** (2026-10-24). Question rounds are done; one small item is
+open at the bottom. Development waits on the prerequisites below.
 
 ## North star
 
@@ -117,17 +118,9 @@ default, not a party trick.
   3. **Toolbench gate** as in Q3.
   4. **Live, by voice, through the product with the island visible:** this box (Hyprland
      0.56), the MBP (macOS), X11 in a nested Xephyr with an EWMH window manager on this box
-     (proposed; not yet confirmed by the user), and **Windows 11 in a KVM VM on this box**.
-     The user has a license and chose a VM over a dual-boot partition.
+     (proposed; not yet confirmed by the user), and **Windows 11 in a KVM VM on this box**
+     (see Prerequisites). The user has a license and chose a VM over a dual-boot partition.
 
-  **Windows VM shape:** QEMU/KVM as the user's own session (`qemu:///session`), not system
-  libvirt. That way the VM's audio goes straight to the user's PipeWire for mic and speaker
-  passthrough, and no group change (no re-login) is needed. Win11 needs OVMF with Secure Boot
-  plus an emulated TPM (`swtpm`). Planned size: 8 vCPU / 8 GB / 80 GB thin disk; this box
-  (i7-13700KF, 24 threads, 31 GB) can spare that. **Two virtual monitors** so
-  `move_to_monitor` gets tested. The jarvis-agent in the guest points at this box's jarvisd by
-  manual config URL: mDNS doesn't cross the VM's NAT (same as the Android emulator). Snapshot
-  "clean + agent installed", and revert before each run.
 
 ## Talking to windows (user-facing; goes into the user guide when this ships)
 
@@ -164,31 +157,105 @@ Gaps against the north star:
    close every window of an app, show desktop.
 3. Nothing inside an app: scroll, tabs, back/forward, menus, "click Send".
 4. Token budget: the prompt diet (`docs/decisions/2026-10-20-prompt-diet.md`) halved prompt
-   size. One tool per verb would add back roughly 1–2k tokens on a desktop node.
+   size. One tool per action across all three layers would add back roughly 2–3k tokens on a desktop node.
 
-## Draft shape (will change as questions are answered)
+## Approach
 
-- **L1: windows.** Full verb set on all four backends (X11, Hyprland/sway, macOS, Windows),
-  with Hyprland/sway moved into `host` so `dictate` and `computer` share one implementation.
-- **L2: in-app navigation without targeting.** Scroll, page, tab next/previous/N, back/forward,
-  zoom, by sending keys or scroll events to the focused window.
-- **L3: targeting elements.** "Click Send", "open the File menu", by name from the
-  accessibility tree (AX / AT-SPI / UIA), with a numbered-overlay fallback ("show numbers",
-  "click 7") for apps that expose no tree.
+Build order is L1 → L2 → L3, and each layer ships on its own. Within a layer, the shared
+plumbing comes first, then the backends.
 
-## Question queue
+### Shared plumbing (before L1)
 
-1. ~~Scope~~: answered, all three layers (see Decided).
-2. ~~Speed~~: answered, pre-routes + repeat mode (see Decided).
-3. ~~Tool shape~~: answered, per-layer tools with capability-filtered action enums.
-4. ~~Hyprland tiling~~: answered, native only (see Decided).
-5. ~~Workspaces and Spaces~~: settled by the native-only rule: per platform, not on macOS or
-   Windows.
-6. Named layouts ("work mode": Chrome left, Slack right on monitor 2): **proposed deferred
-   past v1**, since snap and move are nice-to-haves themselves. Reopen if the user disagrees.
-7. ~~"This", "it", "the other one"~~: answered (see Decided).
-8. ~~Risk~~: answered (see Decided).
-9. ~~Feedback~~: answered, island not speech (see Decided). *(was:)* how the user knows it worked without looking: spoken reply, sound, or silent on
-   success.
-10. ~~Test plan~~: answered (see Decided); open: Xephyr for X11. *(was:)* the contract suite per backend, live tests on this box (Hyprland), MBP and the
-    Windows box, and the toolbench corpus for new utterances.
+- **Capabilities.** Add the new names to the closed set in `host/host.go` (`windows.maximize`,
+  `windows.fullscreen`, `windows.restore`, `windows.snap`, `windows.monitor`,
+  `windows.workspace`, `nav.*`, `click.*`), with one map from action to capability, the same
+  shape as `ActionCapability` today.
+- **Per-call enums.** `node.Param` already carries `Enum`. `desktop.Tools.Available()` builds
+  each tool's action enum from the live capabilities and drops a tool whose enum is empty.
+  `Call` re-checks the action.
+- **Window references.** A small resolver in `desktop` in front of `resolveWindow`:
+  focused, last-acted (60 s), previous-focus, then `winmatch` by name. Backends add `Focused()`
+  and a focus-history or stacking order call. Jarvis's own windows are filtered out.
+- **Island feedback.** Desktop results go to `island.Note`. A result field tells CC the island
+  covered the turn, so CC ends it with no composing call and no TTS. Questions keep speaking.
+- **Toolbench.** Add the new utterances to the corpus; the gate is from Q3.
+
+### L1: windows
+
+- **`desktop_window`** replaces `desktop_minimize_window` and `desktop_focus_window`.
+  `desktop_close_window` gains `all_of_app` (held by the confirmer) and loses `Risky`.
+- **Hyprland and sway move into `host`.** A Wayland-compositor backend inside `Linux`, chosen
+  per call by the environment checks `dictate/linuxwin.go` already does (Hyprland via
+  `hyprctl -j` and the 0.56 Lua dispatch form; sway via `swaymsg`). Then `dictate` and
+  `computer` switch to it, so there is one implementation.
+- **Backends get the new actions** where native (the Q4 rule): EWMH states and geometry on
+  X11; AX `AXMinimized` / `AXFullScreen` / position and size on macOS; `ShowWindow` /
+  `SetWindowPos` / `MonitorFromWindow` on Windows; `fullscreen`, `movewindow`,
+  `movetoworkspacesilent` on Hyprland.
+
+### L2: in-app navigation
+
+- **`desktop_navigate`** sends keys or scroll events to the focused window: scroll, page,
+  next/previous/go-to tab, back/forward, zoom. It is built on `internal/agent/input` (X11 XTEST,
+  wlroots virtual pointer and keyboard, macOS CGEvent).
+- **The pre-route grammar** runs on the node right after STT, before the CC request, and calls
+  the same actions. Exact phrases only.
+- **Repeat mode** comes after pre-routes: "keep scrolling" / "stop", "again" / "more", in a short
+  window without the wake word, built on the existing follow-up listening (`voice/followup.go`).
+
+### L3: pointing at things
+
+- **`desktop_click {target}`** finds an element by name in the accessibility tree (AX on macOS,
+  AT-SPI on Linux, UI Automation on Windows) and presses it, reusing what `computer` already
+  reads.
+- **"Show numbers"** draws a numbered overlay over clickable elements, or over a grid when an
+  app exposes no tree. "Click 7" clicks at that spot through `input`.
+- **Confirmation** follows the Q8 table through the existing `dictate.Confirmer`, with a
+  desktop risky-label list derived from `browser/risk.go` without delete.
+
+### Windows has more to build first
+
+On Windows the agent only has the four Win32 window actions today:
+
+- **no island**: `island/run_other.go` is a stub, so the feedback design has nowhere to show on
+  Windows;
+- **no input backend**: `input/other.go` returns nil, so L2 needs `SendInput`;
+- **no UI Automation client**, so L3 by name needs one, plus the overlay.
+
+L1 on Windows is cheap. L2 and L3 on Windows each start with that groundwork, and Windows can
+trail the other platforms without holding them back.
+
+## Prerequisites for development
+
+Nothing below has been done yet. The user chose to hold it until development starts
+(2026-10-24).
+
+### Windows 11 test VM on the dev box
+
+- **Install** (the user runs it; it needs sudo):
+  `sudo pacman -S --needed swtpm passt qemu-audio-pipewire qemu-ui-gtk qemu-hw-display-virtio-gpu`.
+  Already present: `qemu-base` 11.1, `qemu-system-x86`, `edk2-ovmf`, and `/dev/kvm`.
+- **Media:** the Windows 11 ISO from Microsoft's download page (needs a browser; the user has a
+  license) and the virtio-win driver ISO.
+- **Shape:** QEMU/KVM as the user's own session (`qemu:///session`), not system libvirt. Its
+  audio then goes straight to the user's PipeWire for mic and speaker passthrough, and no group
+  change (no re-login) is needed. OVMF with Secure Boot plus `swtpm` for Win11. 8 vCPU / 8 GB /
+  80 GB thin disk; the box (i7-13700KF, 24 threads, 31 GB, ~155 GB free) can spare it. **Two
+  virtual monitors** so `move_to_monitor` gets tested.
+- **Wiring:** the guest's jarvis-agent points at the host's jarvisd by manual config URL; mDNS
+  doesn't cross the VM's NAT (same as the Android emulator). jarvisd must listen on an address
+  the guest can reach.
+- **Reset:** snapshot "clean + agent installed", and revert before each run.
+- **Deliverable:** a launch script, plus a short runbook in this doc.
+
+### X11 test session
+
+A nested Xephyr with an EWMH window manager on the dev box (proposed; see Open).
+
+## Open
+
+- **Xephyr for X11 live checks:** proposed, not yet confirmed by the user.
+- **Named layouts** ("work mode"): proposed deferred past v1, since snap and move are
+  nice-to-haves themselves. Reopen if the user disagrees.
+
+All ten question rounds are answered; each answer is under Decided with its date.
