@@ -3,10 +3,12 @@
 package host
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -36,12 +38,21 @@ var (
 	procOpenInputDesktop    = user32.NewProc("OpenInputDesktop")
 	procCloseDesktop        = user32.NewProc("CloseDesktop")
 	procShellExecuteW       = shell32.NewProc("ShellExecuteW")
+	procIsZoomed            = user32.NewProc("IsZoomed")
+	procGetForegroundWindow = user32.NewProc("GetForegroundWindow")
+	procGetWindowRect       = user32.NewProc("GetWindowRect")
+	procSetWindowPos        = user32.NewProc("SetWindowPos")
+	procEnumDisplayMonitors = user32.NewProc("EnumDisplayMonitors")
+	procGetMonitorInfoW     = user32.NewProc("GetMonitorInfoW")
 	procCoInitializeEx      = ole32.NewProc("CoInitializeEx")
 	procCoUninitialize      = ole32.NewProc("CoUninitialize")
 	procCoCreateInstance    = ole32.NewProc("CoCreateInstance")
 )
 
 const (
+	swMaximize         = 3
+	swpNoZOrder        = 0x0004
+	swpNoActivate      = 0x0010
 	swMinimize         = 6
 	swRestore          = 9
 	swShowNormal       = 1
@@ -157,10 +168,13 @@ func (realWin32) DesktopAvailable() bool {
 }
 
 var (
-	enumMu     sync.Mutex
-	enumFound  []Window
-	enumCbOnce sync.Once
-	enumCb     uintptr
+	enumMu    sync.Mutex
+	enumFound []Window
+	// enumForeground is the foreground window during an EnumWindows (z-order top first, so the
+	// list is also newest first).
+	enumForeground uintptr
+	enumCbOnce     sync.Once
+	enumCb         uintptr
 )
 
 func windowText(proc *windows.LazyProc, hwnd uintptr, n int) string {
@@ -183,13 +197,15 @@ func (realWin32) EnumWindows() ([]Window, error) {
 			title := windowText(procGetWindowTextW, hwnd, int(n)+1)
 			class := windowText(procGetClassNameW, hwnd, 256)
 			iconic, _, _ := procIsIconic.Call(hwnd)
-			enumFound = append(enumFound, Window{ID: strconv.FormatUint(uint64(hwnd), 10), Title: title, App: class, Minimized: iconic != 0})
+			enumFound = append(enumFound, Window{ID: strconv.FormatUint(uint64(hwnd), 10), Title: title, App: class,
+				Minimized: iconic != 0, Focused: hwnd == enumForeground})
 			return 1
 		})
 	})
 	enumMu.Lock()
 	defer enumMu.Unlock()
 	enumFound = nil
+	enumForeground, _, _ = procGetForegroundWindow.Call()
 	if r, _, err := procEnumWindows.Call(enumCb, 0); r == 0 {
 		return nil, fmt.Errorf("EnumWindows: %v", err)
 	}
@@ -236,6 +252,81 @@ func (realWin32) ShellOpen(target string) error {
 	r, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)), 0, 0, swShowNormal)
 	if r <= 32 {
 		return fmt.Errorf("ShellExecute returned %d", r)
+	}
+	return nil
+}
+
+func (realWin32) Maximize(hwnd uintptr) error {
+	procShowWindow.Call(hwnd, swMaximize)
+	return nil
+}
+
+func (realWin32) Restore(hwnd uintptr) error {
+	procShowWindow.Call(hwnd, swRestore)
+	return nil
+}
+
+func (realWin32) IsZoomed(hwnd uintptr) bool {
+	r, _, _ := procIsZoomed.Call(hwnd)
+	return r != 0
+}
+
+func (realWin32) IsIconic(hwnd uintptr) bool {
+	r, _, _ := procIsIconic.Call(hwnd)
+	return r != 0
+}
+
+type rect32 struct{ L, T, R, B int32 }
+
+// monitorInfo is MONITORINFO.
+type monitorInfo struct {
+	Size    uint32
+	Monitor rect32
+	Work    rect32
+	Flags   uint32
+}
+
+var (
+	monMu     sync.Mutex
+	monFound  []Rect
+	monCbOnce sync.Once
+	monCb     uintptr
+)
+
+func (realWin32) WorkAreas() ([]Rect, error) {
+	monCbOnce.Do(func() {
+		monCb = windows.NewCallback(func(hmon, _, _, _ uintptr) uintptr {
+			mi := monitorInfo{Size: uint32(unsafe.Sizeof(monitorInfo{}))}
+			if r, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi))); r != 0 {
+				monFound = append(monFound, Rect{L: int(mi.Work.L), T: int(mi.Work.T), R: int(mi.Work.R), B: int(mi.Work.B)})
+			}
+			return 1
+		})
+	})
+	monMu.Lock()
+	defer monMu.Unlock()
+	monFound = nil
+	if r, _, err := procEnumDisplayMonitors.Call(0, 0, monCb, 0); r == 0 {
+		return nil, fmt.Errorf("EnumDisplayMonitors: %v", err)
+	}
+	out := monFound
+	monFound = nil
+	slices.SortFunc(out, func(a, b Rect) int { return cmp.Or(cmp.Compare(a.L, b.L), cmp.Compare(a.T, b.T)) })
+	return out, nil
+}
+
+func (realWin32) WindowRect(hwnd uintptr) (Rect, error) {
+	var r rect32
+	if ok, _, err := procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r))); ok == 0 {
+		return Rect{}, fmt.Errorf("GetWindowRect: %v", err)
+	}
+	return Rect{L: int(r.L), T: int(r.T), R: int(r.R), B: int(r.B)}, nil
+}
+
+func (realWin32) SetRect(hwnd uintptr, r Rect) error {
+	if ok, _, err := procSetWindowPos.Call(hwnd, 0, uintptr(int32(r.L)), uintptr(int32(r.T)), uintptr(int32(r.R-r.L)),
+		uintptr(int32(r.B-r.T)), swpNoZOrder|swpNoActivate); ok == 0 {
+		return fmt.Errorf("SetWindowPos: %v", err)
 	}
 	return nil
 }
