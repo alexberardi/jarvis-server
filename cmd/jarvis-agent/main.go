@@ -740,12 +740,16 @@ func runAgent(ctx context.Context, args []string) error {
 	if p.desktop {
 		// Computer tasks in the browser and on the desktop (plan P3 pieces 8 and 22): build
 		// adds the executor's tools after the browser's.
-		tf.computer = func(bt *browser.Tools, apps computer.Apps) node.Toolset {
+		tf.computer = func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset {
 			var b computer.Browser
 			if bt != nil {
 				b = computer.BrowserOf(bt)
 			}
-			return &computer.Tools{Browser: b, Desktop: computer.NativeDesktop(apps), Switch: computerSw, Activity: activity,
+			d := computer.NativeDesktop(apps)
+			if d != nil {
+				d.Focus = func(ctx context.Context, id string) error { return h.WindowDo(ctx, host.ActionFocus, id) }
+			}
+			return &computer.Tools{Browser: b, Desktop: d, Switch: computerSw, Activity: activity,
 				CC: func() computer.Approver {
 					if cc := liveCC.Load(); cc != nil {
 						return cc
@@ -1025,8 +1029,8 @@ type toolFlags struct {
 	live *sidecar.Live
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
-	// desktop_open's catalogue: build adds them after the browser tools.
-	computer func(bt *browser.Tools, apps computer.Apps) node.Toolset
+	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
+	computer func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -1098,7 +1102,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	if f.computer != nil {
 		// A desktop task's app that isn't running opens from desktop_open's catalogue, by name
 		// only: never a link or a path, whatever --allow-open-any says.
-		tools = append(tools, f.computer(bt, opener))
+		tools = append(tools, f.computer(bt, opener, h))
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
 	return h, tools, closeAll, err
