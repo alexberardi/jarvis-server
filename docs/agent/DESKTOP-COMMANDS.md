@@ -1,7 +1,7 @@
 # Desktop commands: voice instead of the mouse
 
-Status: **approach agreed, not started** (2026-10-24). Question rounds are done; a few proposed
-items wait for the user under Open at the bottom. Development waits on the prerequisites below.
+Status: **approach agreed, not started** (2026-10-24). All questions are answered. Development
+waits on the prerequisites below.
 
 ## North star
 
@@ -48,12 +48,16 @@ default, not a party trick.
   Accessibility grant). Capabilities rarely change, so the per-call enum doesn't churn the
   prompt cache.
 
-  A filtered enum means the model can't *call* an action this host lacks, so a request for one
-  ("minimize Slack" on Hyprland) never produces `not_supported` by itself. Without more, the
-  model would answer in text, which gets spoken and breaks Q9. Proposed (see Open): the tool
-  description lists the actions this host lacks in one short line ("not on this computer:
-  minimize, restore"), and the model calls the tool anyway. `Call` answers `not_supported` with
-  the reason, and the island shows it like any other failure.
+  **2026-10-24: an action this host lacks gets a generic island message.** A filtered enum
+  means the model can't *call* an action this host lacks, so "minimize Slack" on Hyprland would
+  otherwise come back as spoken text and break Q9. Every action enum therefore carries one
+  fixed extra value, `unsupported` ("the user asked for an action that isn't listed"). The
+  model calls e.g. `desktop_window {action: "unsupported"}`, and the island shows **"Action not
+  supported on this OS/Host"** with the error chime. The value is the same on every host, so it
+  costs a few tokens and doesn't change with capabilities. `Call` answers `not_supported` with
+  the same message when a real action vanished between rendering and calling. The toolbench
+  corpus gets "can't do that here" utterances and near-misses, so the gate catches a model
+  picking `unsupported` where it should ask or use a real action. (User, 2026-10-24.)
 
   Merge gate: the new utterances join the toolbench corpus. 4B and 9B accuracy must stay at or
   above the current baseline, and the desktop node's prompt may grow by at most ~600 tokens
@@ -62,24 +66,29 @@ default, not a party trick.
   of an action, that action isn't in its enum. User: "i don't like the idea of hacking together
   a minimize on a OS that doesn't support it."
 
-  "Native" here means the platform has a real window state or command for the action, done in
-  one call. Setting a window's position and size to look like that state doesn't count.
+  "Native" here means the platform's real window state or command where one exists. For pure
+  geometry (halves of the screen, another monitor) a resize counts: it is exactly what the OS
+  does behind the scenes (user, 2026-10-24). What stays out is a stand-in that behaves
+  differently from the real thing, like a scratchpad workspace posing as minimize.
   - **minimize / unminimize:** only where a true minimize exists (X11, macOS, Windows). Not on
     Hyprland or sway: no special-workspace or scratchpad stand-in.
   - **maximize / fullscreen, and leaving them (`unmaximize`):** a separate action from
     unminimize, because "restore" means both and Hyprland has one but not the other.
     Hyprland and sway: native fullscreen (Hyprland's fullscreen mode 1 is its maximize).
     X11: EWMH `_NET_WM_STATE_MAXIMIZED_*` / `_FULLSCREEN`. Windows: `ShowWindow`
-    `SW_MAXIMIZE` / `SW_RESTORE`. macOS: `AXFullScreen` for fullscreen. **macOS has no true
-    maximize**: its native analog is the zoom button (`AXZoomButton`), whose size each app
-    decides. Offer `maximize` there only as that zoom press, if the user accepts it (see Open);
-    otherwise macOS lists fullscreen only.
+    `SW_MAXIMIZE` / `SW_RESTORE`. macOS: `fullscreen` is `AXFullScreen`, the real
+    one that moves the app to its own Space. **macOS has no maximize state**, so `maximize`
+    resizes the window to the screen's visible frame (minus menu bar and Dock), which is what
+    macOS 15's own Window → Fill does. Not the zoom button: its size is up to each app. The node
+    remembers the frame from before, so `unmaximize` restores it; a window Jarvis didn't
+    maximize has nothing to restore and answers `not_supported` (user, 2026-10-24).
   - **snap_left / snap_right, move_to_monitor, move_to_workspace:** nice to have, not required.
     Ship each where it's cheap and native: Hyprland `movewindow l/r`, `movewindow mon:…`,
-    `movetoworkspacesilent`; sway's equivalents; `move_to_monitor` on Win32 and X11. Snap is
-    *not* native on Windows, X11 or macOS by the rule above (Windows' Snap Layouts and macOS
-    15 tiling have no public API; resizing to a half isn't snap), so it ships on Hyprland and
-    sway only unless the user relaxes the rule. Workspaces stay out on macOS (Spaces: no public
+    `movetoworkspacesilent`; sway's equivalents; geometry for snap and
+    `move_to_monitor` on Win32, X11 and macOS (AX position and size). Windows' Snap Layouts
+    and macOS 15 tiling have no public API, so a half-screen resize is how snap ships there;
+    the only visible difference is that Windows' snap assist doesn't offer the other half
+    (user, 2026-10-24). Workspaces stay out on macOS (Spaces: no public
     API) and Windows (`IVirtualDesktopManager::MoveWindowToDesktop` is public but can't list or
     create desktops, so "workspace 2" can't be resolved).
   - **keep_on_top:** not in v1.
@@ -111,7 +120,8 @@ default, not a party trick.
   | close one window | never. `Risky` comes off `desktop_close_window`'s single-window path |
   | close every window of an app (`all_of_app`) | yes |
   | `desktop_click` from the LLM | only for a risky label, under `--confirm-dictation=submit` |
-  | a click from a pre-route ("click 7", exact "click Send") | never: no LLM, nothing could have steered it. Accepted trade-off: STT can still mishear onto a risky label; the exact-match grammar keeps that rare (to confirm, see Open) |
+  | a click from a pre-route ("click 7", "click OK") | never: no LLM, nothing could have steered it |
+  | a pre-route click whose label is risky ("click Send", or an overlay number on a "Send" button) | yes, under `submit`: it isn't a pre-route. The grammar hands the turn to the LLM, whose `desktop_click` goes through the confirmer as usual (user, 2026-10-24) |
   | an overlay number with no readable label | never from a pre-route; from the LLM, asks in `submit` mode |
 
   A spoken "yes" through `desktop_confirm` is enough. Because `Risky` is per tool, `all_of_app`
@@ -129,15 +139,17 @@ default, not a party trick.
   would get noisy… you'd then have to wait for it to finish speaking to do your next action."
   - Successful actions (pre-route or LLM, window, navigation, click): **no speech.** The island
     briefly shows the action ("Snapped Firefox left", "Tab 3").
-  - Failures: **no speech either.** The island shows the reason ("No tab 9", "Hyprland can't
-    minimize"); the error chime plays under the existing `chimes` setting, since a failure
+  - Failures: **no speech either.** The island shows the reason ("No tab 9", "Action not
+    supported on this OS/Host"); the error chime plays under the existing `chimes` setting, since a failure
     shouldn't depend on a glance.
   - Fuzzy matches: the island shows what was chosen ("Firefox (heard 'fire fax')").
   - Ambiguous names: the island lists the candidates, numbered, and the user answers by voice
-    ("the second one"). That answer is a follow-up turn. The follow-up window is capped at 3 s
-    per listen (`MaxFollowUpListenSecs`, #296), which is short for reading a list, so this
-    window opens only once the island has drawn the list, and it may need longer than 3 s
-    (see Open).
+    ("the second one"). That answer is a follow-up turn, but with its own listen window: the
+    3 s follow-up cap (`MaxFollowUpListenSecs`, #296) is too short to read a list and answer.
+    **`choice_listen_seconds`**, default 8 s, capped at 30 s, set like
+    `follow_up_listen_seconds` (`agent.json`, a flag, the app's node settings). Configurable
+    because the right length varies by user (user, 2026-10-24). It opens once the island has
+    drawn the list, applies only while the list is up, and closes on the answer.
   - Failures and fuzzy matches also show in text, so a user who isn't looking still has the
     chime as a cue.
   - **Questions are still spoken** ("what's open?", "what's this?", "what's minimized?"),
@@ -157,7 +169,7 @@ default, not a party trick.
   3. **Toolbench gate** as in Q3.
   4. **Live, by voice, through the product with the island visible:** this box (Hyprland
      0.56), the MBP (macOS), X11 in a nested Xephyr with an EWMH window manager on this box
-     (**pending**: proposed, not yet confirmed by the user, see Open), and **Windows 11 in a
+     (user, 2026-10-24; an X11 desktop VM if Xephyr proves too annoying), and **Windows 11 in a
      KVM VM on this box**
      (see Prerequisites). The user has a license and chose a VM over a dual-boot partition.
 
@@ -176,6 +188,15 @@ default, not a party trick.
 
 - **Eye tracking** for "this" (user, 2026-10-24: "would be cool… not in scope obviously"). The
   "this" rule above is the place it would plug in: gaze target first, then focus.
+- **Named layouts** ("work mode": Chrome left, Slack right, terminal on monitor 2; Q6): not
+  in v1. Realistically a workflow built from the window primitives in this spec (snap,
+  move_to_monitor, focus, launch), not a feature of its own (user, 2026-10-24).
+- **Spoken key combos** ("press control shift T", "press Windows D"): modifiers on
+  `desktop_press_key`, which today takes single keys from a fixed list. The key senders exist
+  on every platform (SendInput in `dictate`, CGEvent, XTEST / wlroots virtual keyboard). A
+  combo can do anything (Ctrl+Enter sends), so it would follow the Q8 confirmation rules. It
+  would also give show desktop where its shortcut is fixed (Win+D on Windows); macOS's F11 is
+  rebindable and Linux depends on the desktop (user, 2026-10-24).
 
 ## Where we are today (main @ 8c58f315)
 
@@ -195,8 +216,8 @@ Gaps against the north star:
 2. Missing window verbs: unminimize, maximize/unmaximize, fullscreen, snap/tile
    (left/right/halves), move to another monitor, move to a workspace/desktop, always-on-top,
    active window ("what's this"), close every window of an app, show desktop. Q4 covers most of
-   these; always-on-top is out of v1, "what's this" is answered from `desktop_list_windows`
-   (Q9), and show desktop is still undecided (see Open).
+   these; always-on-top and show desktop are out of v1 (user, 2026-10-24: "no one really uses
+   that"), and "what's this" is answered from `desktop_list_windows` (Q9).
 3. Nothing inside an app: scroll, tabs, back/forward, menus, "click Send".
 4. Token budget: the prompt diet (`docs/decisions/2026-10-20-prompt-diet.md`) halved prompt
    size. One tool per action across all three layers would add back roughly 2–3k tokens on a desktop node.
@@ -209,7 +230,7 @@ plumbing comes first, then the backends.
 ### Shared plumbing (before L1)
 
 - **Capabilities.** Add the new names to the closed set in `host/host.go` (`windows.maximize`,
-  `windows.fullscreen`, `windows.restore`, `windows.snap`, `windows.monitor`,
+  `windows.fullscreen`, `windows.unminimize`, `windows.unmaximize`, `windows.snap`, `windows.monitor`,
   `windows.workspace`, `nav.*`, `click.*`), with one map from action to capability, the same
   shape as `ActionCapability` today.
 - **Per-call enums.** `node.Param` already carries `Enum`. `desktop.Tools.Available()` builds
@@ -231,9 +252,9 @@ plumbing comes first, then the backends.
   `hyprctl -j` and the 0.56 Lua dispatch form; sway via `swaymsg`). Then `dictate` and
   `computer` switch to it, so there is one implementation.
 - **Backends get the new actions** where native (the Q4 rule): EWMH states on X11, plus
-  geometry for `move_to_monitor`; AX `AXMinimized` / `AXFullScreen` (and `AXZoomButton` if
-  accepted) on macOS; `ShowWindow` and `SetWindowPos` / `MonitorFromWindow` for
-  `move_to_monitor` on Windows; `fullscreen`, `movewindow`, `movetoworkspacesilent` on
+  geometry for snap and `move_to_monitor`; AX `AXMinimized` / `AXFullScreen`, plus AX position and size for maximize (fill), snap and
+  `move_to_monitor`, on macOS; `ShowWindow`, and `SetWindowPos` / `MonitorFromWindow` for snap and
+  `move_to_monitor`, on Windows; `fullscreen`, `movewindow`, `movetoworkspacesilent` on
   Hyprland (classic, then Lua form).
 - **`desktop_list_windows`** gains each window's focused and minimized state (Q9's spoken
   questions).
@@ -271,11 +292,13 @@ plumbing comes first, then the backends.
 
 ### Windows has more to build first
 
-On Windows the agent only has the four Win32 window actions today:
+On Windows the desktop tools have only the four Win32 window actions today:
 
 - **no island**: `island/run_other.go` is a stub, so the feedback design has nowhere to show on
   Windows;
-- **no input backend**: `input/other.go` returns nil, so L2 needs `SendInput`;
+- **half an input backend**: `dictate` already sends keys with `SendInput`
+  (`dictate/sendinput_windows.go`), but `input/other.go` returns nil, so L2's scroll and
+  pointer events need `SendInput` mouse input in `input`, and keys should move there too;
 - **no UI Automation client**, so L3 by name needs one, plus the overlay.
 
 L1 on Windows is cheap. L2 and L3 on Windows each start with that groundwork, and Windows can
@@ -306,28 +329,17 @@ Nothing below has been done yet. The user chose to hold it until development sta
 
 ### X11 test session
 
-A nested Xephyr with an EWMH window manager on the dev box (proposed; see Open).
+A nested Xephyr with an EWMH window manager (openbox) on the dev box: `xorg-server-xephyr
+openbox`, a couple of apps inside, and the agent pointed at that display. It tests window
+actions on X11; voice and the island still come from the real session. If it proves too
+annoying, an X11 desktop VM (e.g. Xubuntu) instead (user, 2026-10-24).
 
 ## Open
 
-Proposed by the agent, not yet confirmed by the user:
-
-- **Xephyr for X11 live checks.**
-- **Named layouts** ("work mode", Q6): deferred past v1, since snap and move are nice-to-haves
-  themselves.
-- **Unsupported actions** (Q3): list them in one line of the tool description so the model
-  calls the tool and the island shows the reason, instead of the model speaking a refusal.
-- **macOS maximize** (Q4): the zoom button counts as native maximize, or macOS gets
-  fullscreen only.
-- **Snap** (Q4): Hyprland and sway only under the native rule, or relax it to allow
-  half-screen geometry on Windows, X11 and macOS.
-- **Show desktop:** native on Windows, macOS and EWMH (`_NET_SHOWING_DESKTOP`); add it to
-  `desktop_window` or leave it out of v1. Hyprland has no equivalent.
-- **Ambiguous-name answers** (Q9): a longer listen than the 3 s follow-up cap, only while a
-  numbered list is on the island.
-- **Pre-route "click Send" never confirming** (Q8): accept the STT-mishearing risk as stated,
-  or confirm risky labels even from a pre-route.
+Nothing. Every question is answered and under Decided with its date.
 
 Question rounds: Q1–Q4 and Q7–Q10 are under Decided. Q5 (workspaces and Spaces) was settled by
-Q4's native-only rule, and Q6 (named layouts) is the proposal above. The option-B decision came
-before the rounds were numbered.
+Q4's native-only rule, and Q6 (named layouts) is under Ideas past this spec. The option-B
+decision came before the rounds were numbered. A review round on 2026-10-24 settled the
+unsupported-action message, risky pre-route clicks, snap geometry, macOS maximize, show
+desktop, `choice_listen_seconds` and the X11 test session.
