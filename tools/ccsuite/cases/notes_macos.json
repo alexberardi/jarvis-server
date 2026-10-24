@@ -1,13 +1,14 @@
 {
   "name": "notes_macos",
-  "about": "The same task in Apple's Notes.app on the Mac test host (attended). Runs only on macOS; flipped by piece 22.",
+  "about": "The same task in Apple's Notes.app on the Mac test host. Runs only on macOS, and attended: macOS has no headless session, so it uses the Mac's own.",
   "phase": "desktop-mac",
-  "status": "pending",
-  "say": "In Notes, make a new note titled Groceries with milk, eggs and bread in it.",
+  "status": "required",
+  "say": "In the Notes app, make a new note titled Groceries with milk, eggs and bread in it.",
   "target": "desktop",
   "setup": {"login": []},
   "answers": [{"when": "confirm", "tap": "approve"}],
   "checks": [
+    {"kind": "note_exists", "title": "Groceries", "body": "eggs"},
     {"kind": "reply_matches", "pattern": "(?i)groceries"}
   ],
   "max_minutes": 10

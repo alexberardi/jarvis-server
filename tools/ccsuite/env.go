@@ -19,6 +19,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
+	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -53,21 +54,27 @@ type Env struct {
 	creds     string
 }
 
-// desktop is a running session: its kind (wlroots, x11), its processes and the environment its
-// clients get.
+// desktop is a running session: its kind (wlroots, x11, mac), its processes and the
+// environment its clients get. The mac kind is the Mac's own logged-in session, which the
+// suite joins rather than starts, so it has no session process of its own.
 type desktop struct {
 	kind    string
 	rt      string // its XDG_RUNTIME_DIR (short: unix socket paths)
 	env     []string
-	session *proc // sway or Xvfb, under dbus-run-session
+	session *proc // sway or Xvfb, under dbus-run-session; nil on the Mac
 	agent   *proc
 	browser *proc
 	cdp     *cdpPipe
 	cdpW    *os.File // the DevTools pipe's ends, for a kept browser's holder
 	cdpR    *os.File
 	notes   *proc
-	notesSt string // the notes app's state file
+	notesSt string          // the notes app's state file (not on the Mac: Notes.app has none)
+	macSeen map[string]bool // mac: the notes there before the case, so the checks see only new ones
 }
+
+// sessionAlive is whether the session is still there; the Mac's is the user's own, which the
+// suite neither starts nor watches.
+func (d *desktop) sessionAlive() bool { return d.session == nil || d.session.alive() }
 
 // proc is a started process group.
 type proc struct {
@@ -345,10 +352,10 @@ func (e *Env) baseEnv(rt string) []string {
 		"XDG_RUNTIME_DIR=" + rt, "LANG=C.UTF-8", "TZ=" + firstNonEmpty(os.Getenv("TZ"), "UTC")}
 }
 
-// Desktop makes sure a session of kind (wlroots, x11) is up with the agent in it, and a browser
-// when browser is set; a session of the other kind is stopped first.
+// Desktop makes sure a session of kind (wlroots, x11, mac) is up with the agent in it, and a
+// browser when browser is set; a session of another kind is stopped first.
 func (e *Env) Desktop(ctx context.Context, kind string, wantBrowser bool) (*desktop, error) {
-	if e.desk != nil && (e.desk.kind != kind || !e.desk.session.alive() || !e.desk.agent.alive()) {
+	if e.desk != nil && (e.desk.kind != kind || !e.desk.sessionAlive() || !e.desk.agent.alive()) {
 		e.stopDesktop()
 	}
 	if e.desk == nil {
@@ -447,16 +454,64 @@ func runtimeDir() (string, error) {
 	return "", errors.New("no temp dir for the session's XDG_RUNTIME_DIR")
 }
 
-// startSession starts sway (headless, Xwayland on) or Xvfb under its own dbus-run-session.
-func (e *Env) startSession(ctx context.Context, kind string) (*desktop, error) {
-	if _, err := exec.LookPath("dbus-run-session"); err != nil {
-		return nil, errors.New("dbus-run-session not found (Arch: sudo pacman -S dbus)")
+// macSession joins the Mac's own logged-in session: macOS has one window server per login
+// session and no headless one, so a desktop case there is attended (COMPUTER-CONTROL.md C9) and
+// the suite starts no session, only the agent in this one. It checks first what that needs, so
+// a missing grant says so in one line instead of failing as a vague case failure: macOS gives a
+// process started from a terminal that terminal's privacy grants, so the agent the suite builds
+// into the run dir inherits them and the run dir's path never needs a grant of its own.
+func (e *Env) macSession(ctx context.Context, d *desktop) error {
+	if runtime.GOOS != "darwin" {
+		return errors.New("the mac session is the Mac test host's own: this is not macOS")
 	}
+	out, err := exec.CommandContext(ctx, "launchctl", "managername").Output()
+	if name := strings.TrimSpace(string(out)); err != nil || name != "Aqua" {
+		return fmt.Errorf("no logged-in Mac session here (launchctl managername = %q, %v): run ccsuite "+
+			"from a terminal in the Mac's own window session, with someone at the Mac", name, err)
+	}
+	var missing []string
+	if !macax.Trusted() {
+		missing = append(missing, "Accessibility (the agent's clicks and keys)")
+	}
+	if !macax.ScreenTrusted() {
+		missing = append(missing, "Screen Recording (the agent's screen reads, and failure screenshots)")
+	}
+	auto := macax.AutomationStatus("com.apple.Notes")
+	if auto == macax.StatusDenied {
+		missing = append(missing, "Automation for Notes (the suite resets and reads Notes.app)")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the terminal running ccsuite needs, in System Settings > Privacy & Security: %s",
+			strings.Join(missing, "; "))
+	}
+	if auto != macax.StatusGranted {
+		e.logf("Automation for Notes is %s: macOS asks once, at this terminal, the first time the suite reads Notes.app", auto)
+	}
+	// TMPDIR as this session has it: macOS frameworks keep per-session state under it.
+	d.env = append(e.baseEnv(d.rt), "TMPDIR="+os.TempDir(), "XDG_SESSION_TYPE=aqua")
+	e.logf("the Mac's own session (none started; its screen is in use while a case runs)")
+	return nil
+}
+
+// startSession starts sway (headless, Xwayland on) or Xvfb under its own dbus-run-session; on
+// the Mac it starts nothing and joins the host's own logged-in session (macSession).
+func (e *Env) startSession(ctx context.Context, kind string) (*desktop, error) {
 	rt, err := runtimeDir()
 	if err != nil {
 		return nil, err
 	}
 	d := &desktop{kind: kind, rt: rt}
+	if kind == "mac" {
+		if err := e.macSession(ctx, d); err != nil {
+			os.RemoveAll(rt)
+			return nil, err
+		}
+		return d, nil
+	}
+	if _, err := exec.LookPath("dbus-run-session"); err != nil {
+		os.RemoveAll(rt)
+		return nil, errors.New("dbus-run-session not found (Arch: sudo pacman -S dbus)")
+	}
 	bus := filepath.Join(rt, "bus")
 	env := e.baseEnv(rt)
 	var server []string
@@ -753,12 +808,17 @@ func (e *Env) Login(ctx context.Context, sites []string) error {
 	return nil
 }
 
-// StartNotes (re)starts the notes app in the session with an empty state file.
-func (e *Env) StartNotes(ctx context.Context, layout string) error {
+// StartNotes puts the notes fixture back as the case starts it: on the Mac, Apple's Notes.app
+// (macnotes.go); elsewhere, a (re)started fixture notes app with an empty state file.
+func (e *Env) StartNotes(ctx context.Context, c Case) error {
 	d := e.desk
 	if d == nil {
 		return errors.New("no desktop session")
 	}
+	if d.kind == "mac" {
+		return e.startMacNotes(ctx, c)
+	}
+	layout := c.Setup.NotesLayout
 	d.notes.stop()
 	d.notesSt = e.path("notes.json")
 	os.Remove(d.notesSt)
@@ -878,17 +938,20 @@ func lastOutputLine(b []byte) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
-// Screenshot saves the session's screen to path (sway: grim; X11: ImageMagick's import), best
-// effort.
+// Screenshot saves the session's screen to path (sway: grim; X11: ImageMagick's import; mac:
+// screencapture, silently), best effort.
 func (e *Env) Screenshot(ctx context.Context, path string) error {
 	d := e.desk
 	if d == nil {
 		return errors.New("no desktop session")
 	}
 	var cmd *exec.Cmd
-	if d.kind == "wlroots" {
+	switch d.kind {
+	case "wlroots":
 		cmd = exec.CommandContext(ctx, "grim", "-t", "png", path)
-	} else {
+	case "mac":
+		cmd = exec.CommandContext(ctx, "screencapture", "-x", "-t", "png", path)
+	default:
 		cmd = exec.CommandContext(ctx, "import", "-window", "root", path)
 	}
 	cmd.Env = d.env
