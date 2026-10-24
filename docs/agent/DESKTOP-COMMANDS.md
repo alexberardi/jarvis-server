@@ -14,6 +14,11 @@ default, not a party trick.
 - **2026-10-24: first-party Go commands compiled into `jarvis-agent` (option B).** Go/WASM
   Pantry packages (A/C) are deferred. Keep the window API shaped so it could later be exposed to
   packages, but don't build that now.
+- **2026-10-24: scope is all three layers (L1 windows, L2 in-app navigation, L3 element
+  targeting), built in that order** (Q1, option B). Windows alone won't replace the mouse, and
+  the computer-control task loop plans every step with the LLM, which is too slow for "scroll
+  down". L3 reuses the AX / AT-SPI / input code `computer` already has. Each layer ships usable
+  on its own.
 
 ## Where we are today (main @ 8c58f315)
 
@@ -49,12 +54,11 @@ Gaps against the north star:
 
 ## Question queue
 
-1. **Scope:** does this spec cover L2 and L3 (in-app navigation and element targeting), or
-   windows only, leaving in-app work to computer control? *(asked 2026-10-24)*
-2. Tool shape against the token budget: one `desktop_window {window, action, …}` tool vs. one
+1. ~~Scope~~: answered, all three layers (see Decided).
+2. **Speed:** deterministic fast path (a grammar matched on the node, no LLM) for hot phrases
+   like "scroll down" and "next tab", or LLM for everything? *(asked 2026-10-24)*
+3. Tool shape against the token budget: one `desktop_window {window, action, …}` tool vs. one
    tool per verb, and how toolbench gates it.
-3. Speed: deterministic fast path (a grammar matched on the node, no LLM) for hot phrases like
-   "scroll down" and "next tab", or LLM for everything?
 4. Hyprland tiling semantics: what do "maximize", "snap left" and "move to the other monitor"
    mean in a tiling compositor (fullscreen 1 vs. a float, `movewindow l`)?
 5. Workspaces and Spaces: macOS Spaces and Windows virtual desktops have no public API. Ship
