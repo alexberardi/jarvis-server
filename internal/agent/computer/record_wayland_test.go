@@ -232,6 +232,8 @@ type wlEnv struct {
 	focus    map[int]*computeruse.Element
 	at       map[[3]int]*computeruse.Element // ElementAt's answers by pid and window point
 	offBus   map[int]bool                    // processes not on the accessibility bus
+	slow     map[int]bool                    // processes whose AT-SPI calls time out
+	atCalls  int                             // ElementAt calls
 	logs     bytes.Buffer
 	shots    int
 	stopped  bool
@@ -242,7 +244,7 @@ func newWLEnv(t *testing.T) *wlEnv {
 	t.Helper()
 	e := &wlEnv{recEnv: newRecEnv(t), hypr: newFakeHypr(), clock: newFakeDesk(),
 		focus: map[int]*computeruse.Element{42: {Role: "text", Name: "Document"}},
-		at:    map[[3]int]*computeruse.Element{}, offBus: map[int]bool{}}
+		at:    map[[3]int]*computeruse.Element{}, offBus: map[int]bool{}, slow: map[int]bool{}}
 	e.src = newWaylandSource(e.r.Dir, e.system(), slog.New(slog.NewTextHandler(&lockedWriter{w: &e.logs, mu: &e.mu}, nil)))
 	e.src.now = e.clock.now
 	e.r.Sources[ModeDesktop] = e.src
@@ -274,13 +276,20 @@ func (e *wlEnv) system() wlSystem {
 			if e.offBus[pid] {
 				return nil, &atspi.Error{Code: atspi.CodeNotFound, Msg: "no accessible app"}
 			}
+			if e.slow[pid] {
+				return nil, context.DeadlineExceeded
+			}
 			return e.focus[pid], nil
 		},
 		ElementAt: func(pid, x, y int) (*computeruse.Element, error) {
 			e.mu.Lock()
 			defer e.mu.Unlock()
+			e.atCalls++
 			if e.offBus[pid] {
 				return nil, &atspi.Error{Code: atspi.CodeNotFound, Msg: "no accessible app"}
+			}
+			if e.slow[pid] {
+				return nil, context.DeadlineExceeded
 			}
 			return e.at[[3]int{pid, x, y}], nil
 		},
@@ -458,6 +467,34 @@ func TestWaylandClickElement(t *testing.T) {
 	}
 	if el := evs[0].Element; el.Role != "button" || evs[0].Context != "" || evs[1].Context != "" {
 		t.Fatalf("clicks: %+v %+v", evs[0], evs[1])
+	}
+	e.mu.Lock()
+	calls := e.atCalls
+	e.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("ElementAt asked %d times, want once (not for the click outside the window)", calls)
+	}
+}
+
+// An AT-SPI failure that isn't a missing app (a timeout) leaves the event without an element
+// but doesn't mark it context none: the app is on the bus, it just didn't answer in time.
+func TestWaylandAccessError(t *testing.T) {
+	e := newWLEnv(t)
+	e.slow[42] = true
+	_, evs := e.record(t, func() {
+		e.hypr.set("", "1500, 250")
+		s := &evStream{at: evT0}
+		s.tap(evdev.BtnLeft)
+		s.tap(evKeyT)
+		e.feed(s)
+	})
+	if got := summary(evs); got != `click; input "t"` {
+		t.Fatalf("trace: %s", got)
+	}
+	for _, ev := range evs {
+		if ev.Context != "" {
+			t.Fatalf("a timeout marked context none: %+v", ev)
+		}
 	}
 }
 
