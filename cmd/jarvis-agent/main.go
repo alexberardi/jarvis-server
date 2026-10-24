@@ -277,7 +277,7 @@ func usage(w io.Writer) {
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
            off by default, and off stops a task going on)
   computer record start [--desktop] | stop   record what you do in the browser (the menu's
-           "Record a macro…"), or on the desktop (macOS), and send it to Jarvis when you stop
+           "Record a macro…"), or on the desktop ("Record the desktop…"), and send it to Jarvis when you stop
   computer click X Y       debug: a left click at X, Y (global logical coordinates) through
            this desktop's input backend
   restart  restart the running agent (through systemd or launchd when they run it), so it
