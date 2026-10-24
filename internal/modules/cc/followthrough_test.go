@@ -450,6 +450,14 @@ func TestFollowThroughDeviceNotDone(t *testing.T) {
 	if nag := followThroughNag(conv, "turn off all the lights", "All the lights are off.", all); nag != deviceNotDoneRetry {
 		t.Fatalf("all the lights: %q", nag)
 	}
+	// Computer control has its own switch guard, and it wins: a desktop node offered
+	// control_device (the registry fallback) still gets [SWITCH_NOT_RUN], not
+	// [DEVICE_NOT_DONE] (review of #512).
+	desk := &conversation{tools: conv.tools, serverNames: map[string]bool{toolDisableComputerControl: true}}
+	cc := []chatMsg{{Role: "user", Content: "turn off computer control"}}
+	if nag := followThroughNag(desk, "turn off computer control", "Computer control is now off.", cc); nag != switchNotRunRetry {
+		t.Fatalf("computer control: %q", nag)
+	}
 	// Without a device tool offered, nothing to nudge toward.
 	if nag := followThroughNag(&conversation{}, utt, reply, msgs); nag != "" {
 		t.Fatalf("no tool: %q", nag)

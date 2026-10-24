@@ -58,6 +58,17 @@ func TestIsDeviceChangeRequest(t *testing.T) {
 		"turn all the timers off",
 		"turn off all the music",
 		"turn off all my alarms",
+		// Targets with a guard and tool of their own: the computer-control switch, the
+		// recording and macro guards, cancel_watch (review of #512).
+		"turn off computer control",
+		"turn on computer control",
+		"turn off the computer",
+		"turn off the recording",
+		"turn off the recordings",
+		"turn off the macro",
+		"turn all the recordings off",
+		"turn off the watch",
+		"turn off the watches",
 	}
 	for _, s := range yes {
 		if !IsDeviceChangeRequest(s) {

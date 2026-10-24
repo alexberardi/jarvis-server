@@ -90,9 +90,6 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 	case conv.serverNames["cancel_watch"] && !calledThisTurn(msgs, "cancel_watch") && countNags(msgs, nagNotCancelled) < 1 &&
 		tf.IsStopWatchingRequest(utterance) && tf.ClaimsStoppedWatching(reply):
 		return notCancelledRetry
-	case conv.hasTool("control_device") && countNags(msgs, nagDeviceNotDone) < 1 &&
-		tf.IsDeviceChangeRequest(utterance) && tf.ClaimsDeviceChanged(reply) && !deviceDoneThisTurn(msgs):
-		return deviceNotDoneRetry
 	case !ran && conv.serverNames["recall"] && countNags(msgs, nagRecallFirst) < 1 &&
 		tf.AsksOwnFact(utterance) && tf.DeniesStoredFact(reply):
 		return recallFirstRetry
@@ -102,6 +99,11 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 		return recordingNotRunNag(conv, utterance, msgs)
 	case switchNotRunNag(conv, utterance, msgs) != "":
 		return switchNotRunRetry
+	// After the guards that own a target of their own (recordings, computer control), so they
+	// win on a phrasing the device filter doesn't exclude (review of #512).
+	case conv.hasTool("control_device") && countNags(msgs, nagDeviceNotDone) < 1 &&
+		tf.IsDeviceChangeRequest(utterance) && tf.ClaimsDeviceChanged(reply) && !deviceDoneThisTurn(msgs):
+		return deviceNotDoneRetry
 	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool):
 		if words := tf.TypeAfterOpenWords(utterance); words != "" {
 			return fmt.Sprintf(unfinishedTypeFormat, words)
