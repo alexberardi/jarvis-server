@@ -60,6 +60,9 @@ type Window struct {
 	Title     string `json:"title"`
 	App       string `json:"app"`
 	Minimized bool   `json:"minimized"`
+	// Focused: the window with keyboard focus, where the backend can tell (Hyprland, sway);
+	// false everywhere else for now.
+	Focused bool `json:"focused"`
 }
 
 // Errors. Every deliberate failure is one of these, so callers map conditions identically

@@ -54,6 +54,9 @@ func (l *Linux) Capabilities(ctx context.Context) []string {
 		caps = append(caps, CapVolumeGet, CapVolumeSet)
 	}
 	switch {
+	case l.compositor() != "":
+		// Hyprland and sway have no real minimise (Q4: no stand-ins).
+		caps = append(caps, CapWindowsList, CapWindowsFocus, CapWindowsClose)
 	case l.nativeX(ctx):
 		caps = append(caps, AllWindowCaps...)
 	case l.x11Available():
@@ -91,7 +94,7 @@ func (l *Linux) sessionAvailable() bool {
 
 // x11Available: window control needs X11 and wmctrl. A Wayland session never qualifies, even
 // with XWayland's DISPLAY set, because wmctrl would only see XWayland clients and lie about the
-// rest. (A per-compositor backend, e.g. hyprctl, is an open question in docs/agent/DESIGN.md.)
+// rest. Hyprland and sway are driven through their own IPC instead (wlcomp.go).
 func (l *Linux) x11Available() bool {
 	return l.x11Session() && l.Sys.LookPath("wmctrl")
 }
@@ -189,6 +192,9 @@ var (
 )
 
 func (l *Linux) ListWindows(ctx context.Context) ([]Window, error) {
+	if comp := l.compositor(); comp != "" {
+		return l.compListWindows(ctx, comp)
+	}
 	if l.nativeX(ctx) {
 		ws, err := l.X.Windows(ctx)
 		if err != nil {
@@ -253,6 +259,9 @@ func (l *Linux) xdo(err error) error {
 }
 
 func (l *Linux) MinimizeWindow(ctx context.Context, id string) error {
+	if comp := l.compositor(); comp != "" {
+		return Errorf(ErrNotSupported, "%s has no minimise", comp)
+	}
 	if err := l.requireWindow(ctx, id); err != nil {
 		return err
 	}
@@ -267,6 +276,9 @@ func (l *Linux) MinimizeWindow(ctx context.Context, id string) error {
 }
 
 func (l *Linux) FocusWindow(ctx context.Context, id string) error {
+	if comp := l.compositor(); comp != "" {
+		return l.compFocus(ctx, comp, id)
+	}
 	if err := l.requireWindow(ctx, id); err != nil {
 		return err
 	}
@@ -279,6 +291,9 @@ func (l *Linux) FocusWindow(ctx context.Context, id string) error {
 
 // CloseWindow: _NET_CLOSE_WINDOW (or wmctrl -c) is a graceful close request, never a kill.
 func (l *Linux) CloseWindow(ctx context.Context, id string) error {
+	if comp := l.compositor(); comp != "" {
+		return l.compClose(ctx, comp, id)
+	}
 	if err := l.requireWindow(ctx, id); err != nil {
 		return err
 	}
