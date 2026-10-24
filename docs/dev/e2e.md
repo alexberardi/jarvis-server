@@ -248,12 +248,16 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `DeviceServerDied`), or finds the device not ready, is played again, up to 3 tries with a
   growing pause (5 s, then 10 s), and before each retry the device is brought back:
   `adb -s <serial> reconnect` when adb does not list it as a `device` (that kicks this one
-  transport; `reconnect offline` is host-wide and is never used), then two good `get-state` +
-  `sys.boot_completed` checks in a row (3 s apart, at most 2 min), then
+  transport; `reconnect offline` is host-wide and is never used), then `get-state` +
+  `sys.boot_completed` good on every check (250 ms apart) for 30 s in a row (at most 2 min), then
   `am force-stop dev.mobile.maestro.test` and `dev.mobile.maestro` so the next `maestro test`
   starts a fresh driver. The report says so on the flow (`note`, with the host's load average
   and available memory at each drop; the earlier tries' artifacts stay in `<flow>.try1`, ...)
-  and `results.json` counts the retries (`device_retries`). Every adb call carries
+  and `results.json` counts the retries (`device_retries`). A flow that drops on all 3 tries
+  stays `failed`, and its failure text starts with `the emulator's adb transport dropped on
+  all 3 tries (harness, not the flow):` and the exception: Maestro writes `Unknown error` into
+  its JUnit report for any exception that is not its own (`DeviceServerDiedException`
+  included), so `e2emobile` takes the first exception line of Maestro's output instead. Every adb call carries
   `-s <serial>`: never `adb kill-server`, nor `reverse --remove-all` without `-s`, as other
   emulators may be attached.
   What we know of the cause (#428, 2026-10-21): the host's one adb server (1.0.41,
@@ -273,6 +277,20 @@ Why, and the contract the flows follow (which files run, the `skip` tag and
   `systemd-run --user --scope -p MemorySwapMax=0`, untried: the loop's agents may not run it)
   or keep the box from swapping while the lane runs. `boot_emulator` warns when the host has
   less than 6 GB available.
+  2026-10-24 (#563), with a quiet host (load 1.2-2.4, 14 GB available, no swap growth), in
+  the loop's harness fence (its own adb server): the drops are the emulator's. During the
+  drops one adb server (same pid throughout) held the only connection to port 5581, and
+  nothing else connected to it; the server's log says `connection terminated: read failed`
+  (qemu closed its end), adbd in the guest logs `host-N: connection terminated: write failed`,
+  and Maestro's driver process stays alive (its gRPC server only sees the channel close), so it
+  is neither a driver crash nor a big `viewHierarchy`. adb has the transport back in 0.5-0.8 s.
+  The drops come in bursts, 14-20 s apart for a minute or so, then none for minutes; the old
+  retry (5 s pause, two checks 3 s apart) started inside the burst, which is how one flow used
+  up all 3 tries. Emulator 37.1.11 carries adb over virtio-vsock (`VirtioVsockPipe = on` in
+  `emulator/lib/advancedFeatures.ini`, the `AdbVsockPipe` proxy), the likely place the socket
+  is closed; with `-feature -VirtioVsockPipe` the android-36 image never comes up on adb, so
+  that is not a way out. What `e2emobile` does instead is wait out the burst: the retry starts
+  only after the device has stayed up for 30 s.
 - Pushes: the superuser has a fake device token (`PUSH_TOKEN`); a flow checks
   `${FAKE_RELAY}/control/pushes?token=${PUSH_TOKEN}` from a `runScript` and can make a node
   event happen through `${CC_URL}` with `${NODE_API_KEY}` for `${USER_ID}`
