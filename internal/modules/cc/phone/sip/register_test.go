@@ -2,7 +2,9 @@ package sip
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,21 +151,26 @@ func TestBacksOffExponentially(t *testing.T) {
 	cfg := p.config(t, "secret")
 	cfg.RequestTimeout = 20 * time.Millisecond
 	cfg.BackoffMin, cfg.BackoffMax = 40*time.Millisecond, 320*time.Millisecond
+	// The waits the supervisor asks for, fired at once: the schedule itself, not packet timing
+	// on a busy runner (which flaked under -race in CI).
+	var mu sync.Mutex
+	var waits []time.Duration
+	cfg.After = func(d time.Duration) <-chan time.Time {
+		mu.Lock()
+		waits = append(waits, d)
+		mu.Unlock()
+		c := make(chan time.Time, 1)
+		c <- time.Time{}
+		return c
+	}
 	u := startUA(t, cfg)
-	eventually(t, 5*time.Second, "6 attempts", func() bool { return len(p.registers()) >= 6 })
-	p.mu.Lock()
-	at := append([]time.Time(nil), p.regAt...)
-	p.mu.Unlock()
-	var gaps []time.Duration
-	for i := 1; i < 6; i++ {
-		gaps = append(gaps, at[i].Sub(at[i-1]))
-	}
-	// timeout + 40, 80, 160, 320, 320 ms
-	if gaps[2] < 2*gaps[0] || gaps[3] < gaps[2] {
-		t.Fatalf("gaps %v do not grow", gaps)
-	}
-	if gaps[4] > cfg.BackoffMax+cfg.RequestTimeout+200*time.Millisecond {
-		t.Fatalf("gap %v beyond the cap %v", gaps[4], cfg.BackoffMax)
+	eventually(t, 5*time.Second, "6 waits", func() bool { mu.Lock(); defer mu.Unlock(); return len(waits) >= 6 })
+	mu.Lock()
+	got := append([]time.Duration(nil), waits[:6]...)
+	mu.Unlock()
+	ms := time.Millisecond
+	if want := []time.Duration{40 * ms, 80 * ms, 160 * ms, 320 * ms, 320 * ms, 320 * ms}; !slices.Equal(got, want) {
+		t.Fatalf("backoff waits %v, want %v (doubling from BackoffMin, capped at BackoffMax)", got, want)
 	}
 	_ = u
 }
