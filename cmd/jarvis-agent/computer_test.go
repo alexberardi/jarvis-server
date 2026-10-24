@@ -259,14 +259,14 @@ func TestComputerRecordStartStop(t *testing.T) {
 
 	// The menu.
 	ic := &trayIcon{log: slog.New(slog.DiscardHandler), sw: newFakeVoice().sw(false), activity: a, computer: sw, recorder: rec}
-	if s := ic.state(); !s.Record {
-		t.Fatalf("Record a macro… hidden: %+v", s)
+	if s := ic.state(); !s.Record || s.RecordDesktop {
+		t.Fatalf("Record a macro… hidden or Record the desktop… shown: %+v", s)
 	}
-	ic.recordFromMenu(true)
+	ic.recordFromMenu(computer.ModeBrowser)
 	if rec.Current() == "" {
 		t.Fatal("Record a macro… didn't start a recording")
 	}
-	ic.recordFromMenu(false)
+	ic.recordFromMenu("")
 	if tr := <-handed; tr.ID == "" || rec.Current() != "" {
 		t.Fatalf("Stop recording: %+v, still %q", tr, rec.Current())
 	}
@@ -282,6 +282,17 @@ func TestComputerRecordStartStop(t *testing.T) {
 	if _, err := run("record", "stop"); err != nil {
 		t.Fatal(err)
 	}
+	<-handed
+	// The menu's "Record the desktop…", shown now that there is a desktop source.
+	if s := ic.state(); !s.RecordDesktop {
+		t.Fatalf("Record the desktop… hidden: %+v", s)
+	}
+	desk.emit = nil
+	ic.recordFromMenu(computer.ModeDesktop)
+	if desk.emit == nil || rec.Current() == "" {
+		t.Fatal("Record the desktop… didn't start the desktop source")
+	}
+	ic.recordFromMenu("")
 	<-handed
 	desk.warning = ""
 	got, err = run("record", "start", "--desktop")

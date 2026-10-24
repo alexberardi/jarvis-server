@@ -18,6 +18,8 @@
 //	                                             saved in agent.json; off stops a running task)
 //	  Record a macro…                           (Teach Jarvis: records what you do; "Stop recording"
 //	                                             while recording; not gated by Computer control)
+//	  Record the desktop…                       (the same, for clicks and typing in any window, when
+//	                                             this computer can record its desktop)
 //	  Open Jarvis Automation                    (the server's web UI, when it is known)
 //	  Set up / Settings…                        (the agent's setup page in the browser)
 //	  Sign out of Jarvis Automation             (removes this computer; back to the setup page)
@@ -53,6 +55,8 @@ type State struct {
 	// whether computer control is on or off, and "Stop recording" in its place while recording
 	// (a computer that can record).
 	Record bool
+	// RecordDesktop also shows "Record the desktop…" next to it (a desktop recorder exists).
+	RecordDesktop bool
 	// OpenURL, when set, shows "Open Jarvis Automation" (the server's web UI).
 	OpenURL string
 	// Setup shows "Set up / Settings…" (the agent's own setup page).
@@ -122,8 +126,9 @@ type Actions struct {
 	StopTask func()
 	// SetComputer turns computer control on or off.
 	SetComputer func(on bool)
-	// Record starts a recording (start) or stops the one going on (State.Record).
-	Record func(start bool)
+	// Record starts a recording in mode ("browser" or "desktop") or, with "", stops the one
+	// going on (State.Record).
+	Record func(mode string)
 	// RetryNow tries the server again at once instead of after the backoff (State.Waiting).
 	RetryNow func()
 }
@@ -145,21 +150,23 @@ const (
 	IDRecord
 	IDRetry
 	IDVoiceWait
+	IDRecordDesktop
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
 const (
-	VoiceLabel    = `Listen for "Hey Jarvis"`
-	OpenLabel     = "Open Jarvis Automation"
-	SetupLabel    = "Set up / Settings…"
-	SignOutLabel  = "Sign out of Jarvis Automation"
-	QuitLabel     = "Quit " + appid.DisplayName
-	StopTaskLabel = "Stop Jarvis"
-	ComputerLabel = "Computer control"
-	RecordLabel   = "Record a macro…"
-	StopRecLabel  = "Stop recording"
-	RetryLabel    = "Retry now"
-	VoiceWaitText = "Listening starts once the server answers"
+	VoiceLabel         = `Listen for "Hey Jarvis"`
+	OpenLabel          = "Open Jarvis Automation"
+	SetupLabel         = "Set up / Settings…"
+	SignOutLabel       = "Sign out of Jarvis Automation"
+	QuitLabel          = "Quit " + appid.DisplayName
+	StopTaskLabel      = "Stop Jarvis"
+	ComputerLabel      = "Computer control"
+	RecordLabel        = "Record a macro…"
+	StopRecLabel       = "Stop recording"
+	RetryLabel         = "Retry now"
+	VoiceWaitText      = "Listening starts once the server answers"
+	RecordDesktopLabel = "Record the desktop…"
 )
 
 // Item is one menu entry.
@@ -230,6 +237,9 @@ func Items(s State) []Item {
 		switch s.Activity {
 		case "":
 			items = append(items, Item{ID: IDRecord, Label: RecordLabel, Enabled: true})
+			if s.RecordDesktop {
+				items = append(items, Item{ID: IDRecordDesktop, Label: RecordDesktopLabel, Enabled: true})
+			}
 		case ActivityRecording:
 			items = append(items, Item{ID: IDRecord, Label: StopRecLabel, Enabled: true})
 		}
@@ -343,10 +353,15 @@ func (t *Tray) clicked(id int32) {
 			}
 			if s.Activity == ActivityRecording {
 				t.log.Info("tray: Stop recording chosen")
-				t.act.Record(false)
+				t.act.Record("")
 			} else if s.Activity == "" && s.ComputerAvailable {
 				t.log.Info("tray: Record a macro chosen")
-				t.act.Record(true)
+				t.act.Record("browser")
+			}
+		case IDRecordDesktop:
+			if s.Record && s.RecordDesktop && s.Activity == "" && s.ComputerAvailable && t.act.Record != nil {
+				t.log.Info("tray: Record the desktop chosen")
+				t.act.Record("desktop")
 			}
 		case IDOpen:
 			if s.OpenURL != "" && t.act.Open != nil {
