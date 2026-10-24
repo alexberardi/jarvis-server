@@ -19,6 +19,14 @@ default, not a party trick.
   the computer-control task loop plans every step with the LLM, which is too slow for "scroll
   down". L3 reuses the AX / AT-SPI / input code `computer` already has. Each layer ships usable
   on its own.
+- **2026-10-24: node-side pre-routes plus repeat mode** (Q2, options B + C). A small, exact
+  grammar of hot phrases ("scroll down", "page down", "next tab", "tab 3", "go back", "zoom in",
+  "show numbers", "click 7", "undo") is matched on the node right after STT and runs without the
+  LLM. Anything that doesn't match exactly goes to the LLM as today, and the LLM tools accept
+  the same actions. Repeat mode follows: "keep scrolling" / "stop" and bare follow-ups ("again",
+  "more") for a short window after a hot command, without the wake word. The user's reason:
+  "that would give the impression of speed". Phrasing rule: no guessing in the grammar; an
+  uncertain match goes to the LLM, so a wrong pre-route is rare and harmless.
 
 ## Where we are today (main @ 8c58f315)
 
@@ -55,10 +63,9 @@ Gaps against the north star:
 ## Question queue
 
 1. ~~Scope~~: answered, all three layers (see Decided).
-2. **Speed:** deterministic fast path (a grammar matched on the node, no LLM) for hot phrases
-   like "scroll down" and "next tab", or LLM for everything? *(asked 2026-10-24)*
-3. Tool shape against the token budget: one `desktop_window {window, action, …}` tool vs. one
-   tool per verb, and how toolbench gates it.
+2. ~~Speed~~: answered, pre-routes + repeat mode (see Decided).
+3. **Tool shape against the token budget:** one `desktop_window {window, action, …}` tool vs.
+   one tool per verb, and how toolbench gates it. *(asked 2026-10-24)*
 4. Hyprland tiling semantics: what do "maximize", "snap left" and "move to the other monitor"
    mean in a tiling compositor (fullscreen 1 vs. a float, `movewindow l`)?
 5. Workspaces and Spaces: macOS Spaces and Windows virtual desktops have no public API. Ship
