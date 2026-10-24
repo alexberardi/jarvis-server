@@ -463,3 +463,30 @@ func TestFollowThroughDeviceNotDone(t *testing.T) {
 		t.Fatalf("no tool: %q", nag)
 	}
 }
+
+// #575 through the engine: "Let me check the weather instead." ended the turn with nothing
+// done; the nudge gets the call, once.
+func TestFollowThroughPromisedEngine(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	ve.start("p1", weatherTool)
+	ve.eng.say("Let me check the weather instead.")
+	ve.eng.push(nativeCall("call_p1", "get_weather", `{}`))
+	b := ve.turn("/api/v0/voice/command", "p1", "is it going to rain", nil).want(200).json()
+	nags := 0
+	for _, m := range messagesOf(ve.eng.requests()[len(ve.eng.requests())-1]) {
+		if s, _ := m["content"].(string); m["role"] == "system" && strings.HasPrefix(s, nagPromised) {
+			nags++
+		}
+	}
+	if nags != 1 || b["stop_reason"] != "tool_calls" {
+		t.Fatalf("nags %d, reply %v", nags, b)
+	}
+	// Asked once: a second promise is the answer.
+	msgs := []chatMsg{{Role: "user", Content: "x"}, sysMsg(promisedRetry)}
+	if nag := followThroughNag(&conversation{serverNames: map[string]bool{}}, "x", "Let me try again.", msgs); nag != "" {
+		t.Fatalf("second nag %q", nag)
+	}
+	if nag := followThroughNag(&conversation{serverNames: map[string]bool{}}, "x", "Let me know if you need more.", nil); nag != "" {
+		t.Fatalf("let me know: %q", nag)
+	}
+}

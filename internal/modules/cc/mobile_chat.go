@@ -40,6 +40,15 @@ const (
 	chatMessageMax        = 5000
 )
 
+// Beyond legacy (#575): a sixth round of tools ended the chat in a red "Too many tool
+// iterations". Now its calls answer toolBudgetOutput and the model replies from what it found;
+// one that calls a tool again gets toolBudgetFallback.
+const (
+	toolBudgetOutput = `{"success": false, "error": "Not run: this request's tool budget is used up. Answer the user ` +
+		`now with what you found so far; if the task needs more steps, offer to finish it as an errand."}`
+	toolBudgetFallback = "I ran out of steps before finishing that. Ask me to run it as an errand and I'll keep going."
+)
+
 // chatWordPause is the fake-streaming pause per word (D32; a var for tests).
 var chatWordPause = 20 * time.Millisecond
 
@@ -424,7 +433,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 	res := out.res
 
 	var st chatState
-	for iter := 0; iter < chatMaxToolIterations; iter++ {
+	for iter := 0; ; iter++ {
 		if res.Reasoning != "" {
 			st.reasoning = res.Reasoning
 		}
@@ -467,6 +476,23 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 		case stopToolCalls:
 			if len(res.ToolCalls) == 0 {
 				break
+			}
+			if iter > chatMaxToolIterations {
+				res = engineResult{Stop: stopComplete, Message: toolBudgetFallback}
+				continue
+			}
+			if iter == chatMaxToolIterations {
+				results := make([]toolResult, len(res.ToolCalls))
+				for i, c := range res.ToolCalls {
+					results[i] = toolResult{ToolCallID: c.ID, Output: toolBudgetOutput}
+				}
+				end := tr.measure("continue_conversation", "cc", nil)
+				res, _, err = m.continueBlocking(llmCtx, cid, results)
+				end(err)
+				if err != nil {
+					res = engineResult{Stop: stopComplete, Message: toolBudgetFallback}
+				}
+				continue
 			}
 			if intermediate := parse.PyStrip(res.Message); intermediate != "" {
 				sse.send(servertools.Obj("type", "delta", "text", intermediate+" "))

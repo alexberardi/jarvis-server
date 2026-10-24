@@ -65,6 +65,29 @@ var (
 		`|type(?!(?:s|d|r|rs|script|writer|writers|set|face|faces|cast)\b)(?=\w))\s*(?<words>\S[^\n]*)`)
 )
 
+var (
+	// promiseRE: a sentence that starts by promising a step ("Let me open it in the browser
+	// instead", "I'll run an errand to …"). Not "let me know", nor what happens later on its own
+	// ("I'll remind you at 5": the reminder tool already ran).
+	promiseRE = mustPyI(`^\W*(?:(?:ok(?:ay)?|sure|alright|all\s+right|got\s+it|right)\W+)?` +
+		`(?:let\s+me|i(?:['’]ll|\s+will|['’]m\s+going\s+to|\s+am\s+going\s+to))\s+` +
+		`(?:(?:now|just|quickly|first|instead|go\s+ahead\s+and)\s+)*` +
+		`(?:open|run|start|try|search|look|check|find|navigate|go|head|download|use|pull|fetch|browse|launch|get|grab|visit|load|read)\b`)
+	// sentenceEndRE ends a sentence.
+	sentenceEndRE = mustPyI(`[.!?…]+\s+`)
+)
+
+// PromisesAction reports a reply whose last sentence promises a step ("Let me open it in the
+// browser instead…"): said at the end of a turn, nothing will do it (#575). A question offers.
+func PromisesAction(reply string) bool {
+	s := strings.TrimRight(parse.PyStrip(reply), ".!… ")
+	if s == "" || strings.HasSuffix(s, "?") {
+		return false
+	}
+	parts := sentenceEndRE.split(s)
+	return promiseRE.search(parts[len(parts)-1])
+}
+
 // claimsBeyondLegacy reports the follow-through claim shapes ResponseClaimsAction adds.
 func claimsBeyondLegacy(s string) bool {
 	return claimBareRE.search(s)
