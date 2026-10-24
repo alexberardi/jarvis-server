@@ -17,6 +17,12 @@ with jarvis-node-mobile, which browses for it:
   pick, as jarvisd's `_jarvis-config._tcp`).
 - **TXT** `node_id` and `hardware` (same values as `/api/v1/info`). Clients should still call
   `/api/v1/info` at the resolved address before provisioning.
+- **`/api/v1/info` `setup_mode`** (#565) says which setup the agent chose: `"lan"` (no hotspot;
+  the node is on the user's network and found over this advertisement) or `"hotspot"` (the app
+  joins the node's SSID; the API is at 192.168.4.1). `state` stays `AP_MODE` in both while the
+  node waits for the app, so clients that only know `AP_MODE` keep working; clients that need to
+  tell the two apart read `setup_mode`. A node without the field (the Python node, older agents)
+  is in hotspot mode.
 
 It is withdrawn as soon as the node is provisioned (the provisioning server's `OnProvisioned`
 ends setup mode) or setup mode stops; a failed attempt leaves it up, as the API is. An
