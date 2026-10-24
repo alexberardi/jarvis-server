@@ -1,7 +1,7 @@
 # Desktop commands: voice instead of the mouse
 
-Status: **approach agreed, not started** (2026-10-24). Question rounds are done; one small item is
-open at the bottom. Development waits on the prerequisites below.
+Status: **approach agreed, not started** (2026-10-24). Question rounds are done; a few proposed
+items wait for the user under Open at the bottom. Development waits on the prerequisites below.
 
 ## North star
 
@@ -23,16 +23,19 @@ default, not a party trick.
 - **2026-10-24: node-side pre-routes plus repeat mode** (Q2, options B + C). A small, exact
   grammar of hot phrases ("scroll down", "page down", "next tab", "tab 3", "go back", "zoom in",
   "show numbers", "click 7", "undo") is matched on the node right after STT and runs without the
-  LLM. Anything that doesn't match exactly goes to the LLM as today, and the LLM tools accept
-  the same actions. Repeat mode follows: "keep scrolling" / "stop" and bare follow-ups ("again",
-  "more") for a short window after a hot command, without the wake word. The user's reason:
+  LLM. (The node already gets the transcript back from its own `Transcribe` call before it
+  posts the turn to CC, so this is a check between the two.) Anything that doesn't match exactly
+  goes to the LLM as today, and the LLM tools accept the same actions. Repeat mode follows:
+  "keep scrolling" / "stop" and bare follow-ups ("again", "more") for a short window after a hot
+  command, without the wake word. The user's reason:
   "that would give the impression of speed". Phrasing rule: no guessing in the grammar; an
   uncertain match goes to the LLM, so a wrong pre-route is rare and harmless.
 - **2026-10-24: one tool per layer, the action as a parameter, risky verbs separate** (Q3,
   option B):
   - `desktop_list_windows`: unchanged.
   - `desktop_window {window, action, monitor?, workspace?}`, absorbing focus and minimize.
-  - `desktop_navigate {action, count?, window?}`: the same actions the pre-routes call.
+  - `desktop_navigate {action, count?, window?}`: the same actions the pre-routes call
+    (scroll, page, tabs, back/forward, zoom, undo).
   - `desktop_click {target}`: by name, or an overlay number; "show numbers" included.
   - `desktop_close_window {window, all_of_app?}`: stays its own tool because `Risky` is per tool.
 
@@ -45,20 +48,45 @@ default, not a party trick.
   Accessibility grant). Capabilities rarely change, so the per-call enum doesn't churn the
   prompt cache.
 
+  A filtered enum means the model can't *call* an action this host lacks, so a request for one
+  ("minimize Slack" on Hyprland) never produces `not_supported` by itself. Without more, the
+  model would answer in text, which gets spoken and breaks Q9. Proposed (see Open): the tool
+  description lists the actions this host lacks in one short line ("not on this computer:
+  minimize, restore"), and the model calls the tool anyway. `Call` answers `not_supported` with
+  the reason, and the island shows it like any other failure.
+
   Merge gate: the new utterances join the toolbench corpus. 4B and 9B accuracy must stay at or
   above the current baseline, and the desktop node's prompt may grow by at most ~600 tokens
   (starting number, to revisit with measurements).
 - **2026-10-24: native actions only, never emulated** (Q4). If a platform has no real version
   of an action, that action isn't in its enum. User: "i don't like the idea of hacking together
   a minimize on a OS that doesn't support it."
-  - **minimize / restore:** only where a true minimize exists (X11, macOS, Windows). Not on
+
+  "Native" here means the platform has a real window state or command for the action, done in
+  one call. Setting a window's position and size to look like that state doesn't count.
+  - **minimize / unminimize:** only where a true minimize exists (X11, macOS, Windows). Not on
     Hyprland or sway: no special-workspace or scratchpad stand-in.
-  - **maximize / fullscreen:** native everywhere (Hyprland `fullscreen 1` / `fullscreen 0`).
+  - **maximize / fullscreen, and leaving them (`unmaximize`):** a separate action from
+    unminimize, because "restore" means both and Hyprland has one but not the other.
+    Hyprland and sway: native fullscreen (Hyprland's fullscreen mode 1 is its maximize).
+    X11: EWMH `_NET_WM_STATE_MAXIMIZED_*` / `_FULLSCREEN`. Windows: `ShowWindow`
+    `SW_MAXIMIZE` / `SW_RESTORE`. macOS: `AXFullScreen` for fullscreen. **macOS has no true
+    maximize**: its native analog is the zoom button (`AXZoomButton`), whose size each app
+    decides. Offer `maximize` there only as that zoom press, if the user accepts it (see Open);
+    otherwise macOS lists fullscreen only.
   - **snap_left / snap_right, move_to_monitor, move_to_workspace:** nice to have, not required.
-    Ship each where it's cheap and native (Hyprland `movewindow l/r`, `movewindow mon:…`,
-    `movetoworkspacesilent`; Win32 and X11 geometry). Workspaces stay out on macOS (Spaces) and
-    Windows (virtual desktops), which have no public API.
+    Ship each where it's cheap and native: Hyprland `movewindow l/r`, `movewindow mon:…`,
+    `movetoworkspacesilent`; sway's equivalents; `move_to_monitor` on Win32 and X11. Snap is
+    *not* native on Windows, X11 or macOS by the rule above (Windows' Snap Layouts and macOS
+    15 tiling have no public API; resizing to a half isn't snap), so it ships on Hyprland and
+    sway only unless the user relaxes the rule. Workspaces stay out on macOS (Spaces: no public
+    API) and Windows (`IVirtualDesktopManager::MoveWindowToDesktop` is public but can't list or
+    create desktops, so "workspace 2" can't be resolved).
   - **keep_on_top:** not in v1.
+
+  On a Hyprland configured in Lua (0.55+, as on this box), `hyprctl dispatch` takes Lua
+  (`hl.dsp.*`) and the classic dispatcher strings above are syntax errors. Each Hyprland action
+  is tried in the classic form, then the Lua one, as `dictate/linuxwin.go` does for focus.
 - **2026-10-24: which window a command means** (Q7). Resolved on the node, in the desktop tool
   layer (it knows focus and what Jarvis just did). The model passes the words as said
   (`window: "it"`) or leaves the field out. `host` stays policy-free. The user asked that these
@@ -67,7 +95,7 @@ default, not a party trick.
   | Said | Means |
   |---|---|
   | nothing, "this", "this window", "current" | the focused window |
-  | "it", "that" | the last window Jarvis acted on, if within ~60 s (the repeat-mode window); otherwise the focused window |
+  | "it", "that" | the last window Jarvis acted on, if within ~60 s; otherwise the focused window. (Its own memory, not the repeat-mode window, which is seconds long.) |
   | "the other one", "the previous one" | the window focused before this one (Hyprland and X11 focus history; macOS and Windows stacking order) |
   | a name ("Slack", "the terminal") | matched against the window list, as today (`winmatch`) |
 
@@ -83,15 +111,20 @@ default, not a party trick.
   | close one window | never. `Risky` comes off `desktop_close_window`'s single-window path |
   | close every window of an app (`all_of_app`) | yes |
   | `desktop_click` from the LLM | only for a risky label, under `--confirm-dictation=submit` |
-  | a click from a pre-route ("click 7", exact "click Send") | never: no LLM, nothing could have steered it |
+  | a click from a pre-route ("click 7", exact "click Send") | never: no LLM, nothing could have steered it. Accepted trade-off: STT can still mishear onto a risky label; the exact-match grammar keeps that rare (to confirm, see Open) |
   | an overlay number with no readable label | never from a pre-route; from the LLM, asks in `submit` mode |
 
   A spoken "yes" through `desktop_confirm` is enough. Because `Risky` is per tool, `all_of_app`
   is held by the node's confirmer, not by the flag.
 
   The desktop risky-label list starts from `browser/risk.go` and applies the same rule: pay,
-  send/post, share and account changes stay. **Delete is dropped for desktop clicks**, because
-  a UI delete goes to the trash. (The browser list keeps it: a web app's delete is often final.)
+  send/post, share and account changes stay. **Only the plain delete words are dropped for
+  desktop clicks** ("delete", "remove", "trash", "discard"), because those usually go to the
+  trash or an app's own undo or confirm dialog. The rest of `risk.go`'s `delete` category stays
+  risky, because it costs money or can't be undone: "unsubscribe", "deactivate", "cancel
+  subscription", "cancel membership", "cancel order", "close account", "empty trash", "erase",
+  "wipe", plus "delete permanently" / "delete forever". That means splitting the category, not
+  filtering it out whole. (The browser list keeps all of it: a web app's delete is often final.)
 - **2026-10-24: desktop commands don't talk; the island shows what happened** (Q9). User: "it
   would get noisy… you'd then have to wait for it to finish speaking to do your next action."
   - Successful actions (pre-route or LLM, window, navigation, click): **no speech.** The island
@@ -101,9 +134,15 @@ default, not a party trick.
     shouldn't depend on a glance.
   - Fuzzy matches: the island shows what was chosen ("Firefox (heard 'fire fax')").
   - Ambiguous names: the island lists the candidates, numbered, and the user answers by voice
-    ("the second one"). That answer is a follow-up turn, inside the repeat-mode window.
-  - **Questions are still spoken** ("what's open?", "what's minimized?"), because the answer is
-    the point.
+    ("the second one"). That answer is a follow-up turn. The follow-up window is capped at 3 s
+    per listen (`MaxFollowUpListenSecs`, #296), which is short for reading a list, so this
+    window opens only once the island has drawn the list, and it may need longer than 3 s
+    (see Open).
+  - Failures and fuzzy matches also show in text, so a user who isn't looking still has the
+    chime as a cue.
+  - **Questions are still spoken** ("what's open?", "what's this?", "what's minimized?"),
+    because the answer is the point. `desktop_list_windows` returns each window's focused and
+    minimized state so these can be answered.
   - Implementation note: a node tool result needs a way to say "the island said it, don't
     speak", so CC ends the turn without a composing LLM call or TTS (like the not_for_me silent
     path and the tool-loop's message fast path, `docs/cc/02-tool-loop.md`). Pre-routes never
@@ -118,7 +157,8 @@ default, not a party trick.
   3. **Toolbench gate** as in Q3.
   4. **Live, by voice, through the product with the island visible:** this box (Hyprland
      0.56), the MBP (macOS), X11 in a nested Xephyr with an EWMH window manager on this box
-     (proposed; not yet confirmed by the user), and **Windows 11 in a KVM VM on this box**
+     (**pending**: proposed, not yet confirmed by the user, see Open), and **Windows 11 in a
+     KVM VM on this box**
      (see Prerequisites). The user has a license and chose a VM over a dual-boot partition.
 
 
@@ -130,7 +170,7 @@ default, not a party trick.
 - "The other one" means **the window you were in before**, like Alt-Tab.
 - Name an app or window ("the terminal", "Firefox") to pick something else.
 - Not every computer can do every action. Hyprland has no minimize, and Macs can't move
-  windows between Spaces. Jarvis says so rather than doing something close to it.
+  windows between Spaces. Jarvis shows that on screen rather than doing something close to it.
 
 ## Ideas past this spec
 
@@ -152,9 +192,11 @@ Gaps against the north star:
 
 1. **Wayland/Hyprland has zero voice window control**, while the code to do it already sits in
    `dictate` and `computer`.
-2. Missing window verbs: restore, maximize, fullscreen, snap/tile (left/right/halves), move to
-   another monitor, move to a workspace/desktop, always-on-top, active window ("what's this"),
-   close every window of an app, show desktop.
+2. Missing window verbs: unminimize, maximize/unmaximize, fullscreen, snap/tile
+   (left/right/halves), move to another monitor, move to a workspace/desktop, always-on-top,
+   active window ("what's this"), close every window of an app, show desktop. Q4 covers most of
+   these; always-on-top is out of v1, "what's this" is answered from `desktop_list_windows`
+   (Q9), and show desktop is still undecided (see Open).
 3. Nothing inside an app: scroll, tabs, back/forward, menus, "click Send".
 4. Token budget: the prompt diet (`docs/decisions/2026-10-20-prompt-diet.md`) halved prompt
    size. One tool per action across all three layers would add back roughly 2–3k tokens on a desktop node.
@@ -188,10 +230,13 @@ plumbing comes first, then the backends.
   per call by the environment checks `dictate/linuxwin.go` already does (Hyprland via
   `hyprctl -j` and the 0.56 Lua dispatch form; sway via `swaymsg`). Then `dictate` and
   `computer` switch to it, so there is one implementation.
-- **Backends get the new actions** where native (the Q4 rule): EWMH states and geometry on
-  X11; AX `AXMinimized` / `AXFullScreen` / position and size on macOS; `ShowWindow` /
-  `SetWindowPos` / `MonitorFromWindow` on Windows; `fullscreen`, `movewindow`,
-  `movetoworkspacesilent` on Hyprland.
+- **Backends get the new actions** where native (the Q4 rule): EWMH states on X11, plus
+  geometry for `move_to_monitor`; AX `AXMinimized` / `AXFullScreen` (and `AXZoomButton` if
+  accepted) on macOS; `ShowWindow` and `SetWindowPos` / `MonitorFromWindow` for
+  `move_to_monitor` on Windows; `fullscreen`, `movewindow`, `movetoworkspacesilent` on
+  Hyprland (classic, then Lua form).
+- **`desktop_list_windows`** gains each window's focused and minimized state (Q9's spoken
+  questions).
 
 ### L2: in-app navigation
 
@@ -202,6 +247,17 @@ plumbing comes first, then the backends.
   the same actions. Exact phrases only.
 - **Repeat mode** comes after pre-routes: "keep scrolling" / "stop", "again" / "more", in a short
   window without the wake word, built on the existing follow-up listening (`voice/followup.go`).
+  Two things that code doesn't do today:
+  - **A new trigger.** Follow-up opens after a spoken reply, waiting for its tail to end. A
+    desktop command has no reply (pre-routes never reach CC; Q9 silences the rest), so the
+    window has to open when the action finishes, with no quiet-wait.
+  - **False-trigger guard.** "again" and "more" are common words, and a desktop often has a
+    video or call playing. In repeat mode, only an exact match against the repeat grammar acts;
+    anything else closes the window without going to CC. The node's existing self-hearing
+    check still applies, and if speaker ID is on, only the speaker who gave the hot command
+    counts.
+- **"Keep scrolling"** runs until "stop", the window closing, or a cap (proposed 30 s), so a
+  missed "stop" can't scroll forever.
 
 ### L3: pointing at things
 
@@ -211,7 +267,7 @@ plumbing comes first, then the backends.
 - **"Show numbers"** draws a numbered overlay over clickable elements, or over a grid when an
   app exposes no tree. "Click 7" clicks at that spot through `input`.
 - **Confirmation** follows the Q8 table through the existing `dictate.Confirmer`, with a
-  desktop risky-label list derived from `browser/risk.go` without delete.
+  desktop risky-label list derived from `browser/risk.go` minus the plain delete words (Q8).
 
 ### Windows has more to build first
 
@@ -254,8 +310,24 @@ A nested Xephyr with an EWMH window manager on the dev box (proposed; see Open).
 
 ## Open
 
-- **Xephyr for X11 live checks:** proposed, not yet confirmed by the user.
-- **Named layouts** ("work mode"): proposed deferred past v1, since snap and move are
-  nice-to-haves themselves. Reopen if the user disagrees.
+Proposed by the agent, not yet confirmed by the user:
 
-All ten question rounds are answered; each answer is under Decided with its date.
+- **Xephyr for X11 live checks.**
+- **Named layouts** ("work mode", Q6): deferred past v1, since snap and move are nice-to-haves
+  themselves.
+- **Unsupported actions** (Q3): list them in one line of the tool description so the model
+  calls the tool and the island shows the reason, instead of the model speaking a refusal.
+- **macOS maximize** (Q4): the zoom button counts as native maximize, or macOS gets
+  fullscreen only.
+- **Snap** (Q4): Hyprland and sway only under the native rule, or relax it to allow
+  half-screen geometry on Windows, X11 and macOS.
+- **Show desktop:** native on Windows, macOS and EWMH (`_NET_SHOWING_DESKTOP`); add it to
+  `desktop_window` or leave it out of v1. Hyprland has no equivalent.
+- **Ambiguous-name answers** (Q9): a longer listen than the 3 s follow-up cap, only while a
+  numbered list is on the island.
+- **Pre-route "click Send" never confirming** (Q8): accept the STT-mishearing risk as stated,
+  or confirm risky labels even from a pre-route.
+
+Question rounds: Q1–Q4 and Q7–Q10 are under Decided. Q5 (workspaces and Spaces) was settled by
+Q4's native-only rule, and Q6 (named layouts) is the proposal above. The option-B decision came
+before the rounds were numbered.
