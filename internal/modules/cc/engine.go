@@ -379,6 +379,20 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					m.deps.Log.Info("cc: typed_app_filled", "conversation_id", conv.id)
 				}
 			}
+			// 2c. desktop_confirm carries the user's answer, never the model's; without one it
+			// doesn't reach the node (confirm_gate.go).
+			confirmRefused := map[int]*pyjson.Object{}
+			for i := range calls {
+				if !isConfirmCall(conv, calls[i].Function.Name) {
+					continue
+				}
+				if out, refusal := conv.gateConfirm(calls[i].ID, calls[i].Function.Arguments); refusal != nil {
+					confirmRefused[i] = refusal
+					m.deps.Log.Warn("cc: confirm_refused", "conversation_id", conv.id, "reason", "no_user_answer")
+				} else {
+					calls[i].Function.Arguments = out
+				}
+			}
 			// The history keeps the calls as executed.
 			msgs[len(msgs)-1].ToolCalls = append([]parse.ToolCall(nil), calls...)
 
@@ -393,9 +407,14 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				names[i] = c.Function.Name
 			}
 			endExec := tr.measure("tool_exec_iter_"+strconv.Itoa(iter+1), "cc", map[string]any{"tools": names})
-			for _, c := range calls {
+			for i, c := range calls {
 				if c.Function.Name == "request_validation" {
 					validation = true
+				}
+				if refusal := confirmRefused[i]; refusal != nil {
+					serverResults = append(serverResults, chatMsg{Role: "tool", ToolCallID: c.ID, Name: c.Function.Name,
+						Content: pyjson.Dumps(refusal, true)})
+					continue
 				}
 				if !conv.serverNames[c.Function.Name] {
 					if params := conv.imageParams[c.Function.Name]; len(params) > 0 {
@@ -447,6 +466,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				}
 				qs, _ := q.(string)
 				ps, _ := pn.(string)
+				conv.confirmGate.shown()
 				return withReasoning(engineResult{Stop: stopValidation,
 					Validation: &validationRequest{Question: qs, ParameterName: ps, Options: ol}}), msgs
 			}

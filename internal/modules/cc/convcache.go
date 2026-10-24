@@ -177,6 +177,8 @@ type conversation struct {
 	// pendingConfirm is a client action parked behind the user's yes in the last results, for
 	// the next turn's hint (confirm_hint.go).
 	pendingConfirm *pendingConfirm
+	// confirmGate is the parked action desktop_confirm may answer, once the user has (confirm_gate.go).
+	confirmGate *confirmGate
 
 	// nextMsgID numbers committed messages (chatMsg.id).
 	nextMsgID uint64
