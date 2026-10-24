@@ -122,7 +122,7 @@ func (f *pushFakes) config(t *testing.T) *pushConfig {
 	login := filepath.Join(f.dir, "login.yaml")
 	write(t, login, "appId: com.jarvis.nodemobile\n---\n- tapOn: Sign in\n")
 	return &pushConfig{
-		config:    config{out: filepath.Join(f.dir, "out", "mobile-push"), maestro: f.maestro, adb: f.adb, serial: "emulator-5590", adbTimeout: 5 * time.Second, retryPause: time.Millisecond, pollPause: time.Millisecond, env: []string{"EMAIL=a@b"}},
+		config:    config{out: filepath.Join(f.dir, "out", "mobile-push"), maestro: f.maestro, adb: f.adb, serial: "emulator-5590", adbTimeout: 5 * time.Second, retryPause: time.Millisecond, pollPause: time.Millisecond, settle: time.Millisecond, env: []string{"EMAIL=a@b"}},
 		loginFlow: login, notifications: f.srv.URL, cc: f.srv.URL, userToken: "user-jwt", nodeKey: "node:key", userID: 7,
 		tokenWait: 2 * time.Second, shadeWait: 2 * time.Second, openWait: 2 * time.Second, poll: 10 * time.Millisecond,
 	}

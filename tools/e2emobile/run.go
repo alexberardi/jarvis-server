@@ -35,9 +35,10 @@ type config struct {
 	healthPort string
 	probePause time.Duration // between health probes (default 2 s)
 	// After a drop: the pause before a retry (default 5 s, then twice that), recoverDevice's
-	// poll (default 3 s) and how long it waits for the device (default 2 min).
-	retryPause, pollPause, recoverTimeout time.Duration
-	retries                               int // the retries after a drop this run (results.json)
+	// poll (default 250 ms), how long the device must stay up before the retry (default 30 s)
+	// and how long it waits for that (default 2 min).
+	retryPause, pollPause, settle, recoverTimeout time.Duration
+	retries                                       int // the retries after a drop this run (results.json)
 }
 
 // Record is one flow in results.json: the record shape of e2e/web/reporter.ts (merged into the
@@ -239,6 +240,9 @@ func (c *config) runFlow(ctx context.Context, f Flow) (Record, string) {
 	}
 
 	msg := junitFailure(junit)
+	if msg == "Unknown error" { // Maestro's text for any exception that is not its own
+		msg = exceptionLine(log.String())
+	}
 	if msg == "" {
 		msg = tail(log.String(), 20)
 	}
@@ -386,6 +390,12 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 		}
 		r, why = once()
 	}
+	if why != "" && len(notes) > 0 && r.Error != nil {
+		// Every try ended on a drop: the harness failed, not the flow, and the failure says so
+		// first (the report shows only the error text in its failure section).
+		e := fmt.Sprintf("%s on all %d tries (harness, not the flow): %s", why, len(notes)+1, *r.Error)
+		r.Error = &e
+	}
 	if len(notes) > 0 {
 		r.Note = fmt.Sprintf("retried %d× (tries %d of %d): %s", len(notes), len(notes)+1, maxTries, strings.Join(notes, "; "))
 	}
@@ -397,8 +407,10 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 //     transport (host-serial:<serial>:reconnect). Not `reconnect offline`: that is a host-wide
 //     command and would reset every offline device, the user's included;
 //   - then it waits until the device is up and its shell answers (get-state is device and
-//     sys.boot_completed is 1) on two checks in a row, a poll apart: a transport that comes back
-//     for a second and drops again would only fail the retry;
+//     sys.boot_completed is 1) on every check, a poll apart, for the settle window. The emulator
+//     drops its adb transport in bursts (docs/dev/e2e.md, adb transport drops): adb has it back
+//     in under a second, it drops again 15-20 s later, and a retry started inside the burst only
+//     fails again. One check that is not up starts the window over;
 //   - then it stops Maestro's on-device driver (its two packages, by name), which a drop leaves
 //     dead or half-connected (DeviceServerDied on the next run); the next `maestro test`
 //     installs and starts it afresh.
@@ -407,7 +419,11 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 func (c *config) recoverDevice(ctx context.Context) error {
 	poll := c.pollPause
 	if poll == 0 {
-		poll = 3 * time.Second
+		poll = 250 * time.Millisecond // a drop is gone again in 0.5-0.8 s
+	}
+	settle := c.settle
+	if settle == 0 {
+		settle = 30 * time.Second
 	}
 	limit := c.recoverTimeout
 	if limit == 0 {
@@ -415,8 +431,9 @@ func (c *config) recoverDevice(ctx context.Context) error {
 	}
 	deadline := time.Now().Add(limit)
 	stable, sinceKick := 0, -1
+	var upSince time.Time
 	var last string
-	for stable < 2 {
+	for {
 		state, err := c.adbCmd(ctx, "get-state")
 		up := err == nil && strings.TrimSpace(string(state)) == "device"
 		if up {
@@ -429,11 +446,14 @@ func (c *config) recoverDevice(ctx context.Context) error {
 			last = fmt.Sprintf("get-state: %q (%v)", strings.TrimSpace(string(state)), err)
 		}
 		if up {
+			if stable == 0 {
+				upSince = time.Now()
+			}
 			stable++
 		} else {
 			stable = 0
-			// Kick the transport at once, then again if it stays down for 5 polls.
-			if sinceKick < 0 || sinceKick >= 5 {
+			// Kick the transport at once, then again if it stays down for 20 polls.
+			if sinceKick < 0 || sinceKick >= 20 {
 				_, _ = c.adbCmd(ctx, "reconnect")
 				sinceKick = 0
 			}
@@ -441,10 +461,13 @@ func (c *config) recoverDevice(ctx context.Context) error {
 		if sinceKick >= 0 {
 			sinceKick++
 		}
-		if stable >= 2 {
+		if stable >= 2 && time.Since(upSince) >= settle {
 			break
 		}
 		if time.Now().After(deadline) {
+			if stable > 0 {
+				last = fmt.Sprintf("up for only %s of %s", time.Since(upSince).Round(time.Second), settle)
+			}
 			return fmt.Errorf("not back in %s: %s", limit, last)
 		}
 		select {
@@ -537,6 +560,25 @@ func junitFailure(path string) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// exceptionLine is the first line of Maestro's output that names an exception ("Exception in
+// thread "main" " cut off), or "" when there is none.
+func exceptionLine(log string) string {
+	for _, l := range strings.Split(log, "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "at ") || !strings.Contains(l, "Exception") {
+			continue
+		}
+		if i := strings.Index(l, "Exception in thread "); i >= 0 {
+			rest := l[i+len("Exception in thread "):]
+			if _, after, ok := strings.Cut(rest, " "); ok {
+				l = strings.TrimSpace(after)
+			}
+		}
+		return l
+	}
+	return ""
 }
 
 // jsErrors picks the app's JavaScript errors out of a logcat (threadtime format: the level
