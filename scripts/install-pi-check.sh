@@ -302,8 +302,8 @@ grep -q "enable --now jarvis-agent" "$R7/install-pi-commands.log" || fail "the a
 R --root "$R7" --keep-python >/dev/null
 tail -2 "$R7/install-pi-commands.log" | tr '\n' ';' | grep -qx 'systemctl disable --now jarvis-agent.service;systemctl enable --now jarvis-node.service;' ||
   fail "--keep-python: $(tail -2 "$R7/install-pi-commands.log")"
-[ "$(cat "$R7/opt/jarvis-node/config.json")" = '{"node_id":"pi-1"}' ] && [ -f "$R7/home/pi/.jarvis/.provisioned" ] ||
-  fail "the Python node's files changed"
+[ "$(cat "$R7/opt/jarvis-node/config.json")" = '{"node_id":"pi-1"}' ] || fail "the Python node's config.json changed"
+[ -f "$R7/home/pi/.jarvis/.provisioned" ] || fail "the Python node's .provisioned marker is gone"
 
 echo "--- refusals"
 R3=$T/root3
