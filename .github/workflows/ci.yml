@@ -136,6 +136,11 @@ jobs:
           python -m pip install
           "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/708193cc3e74d23294cf05625dabdac61336d57e.tar.gz"
           "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/550f3a95bbfb5864cb602329b182f8c88d281949.tar.gz"
+      # sqlcipher3 and cryptography, as the Python node's venv has them: the Go Pi node's adoption
+      # of a Python node reads its encrypted database with them (pinode TestAdoptPythonNode).
+      - name: Install sqlcipher3 (adoption test)
+        if: matrix.os == 'ubuntu-latest'
+        run: python -m pip install sqlcipher3-binary cryptography
       # desktop-file-validate checks the menu, autostart and URL-handler entries `install` writes.
       - name: Install desktop-file-utils
         if: matrix.os == 'ubuntu-latest'
@@ -144,6 +149,7 @@ jobs:
         env:
           CGO_ENABLED: "1"
           JARVIS_SIDECAR_PYTHON: python
+          JARVIS_ADOPT_PYTHON: ${{ matrix.os == 'ubuntu-latest' && 'python' || '' }}
           JARVIS_SHERPA_MODELS: ${{ github.workspace }}/.models
         run: go test -race -count=1 ./cmd/jarvis-agent ./internal/agent/... ./internal/audio/...
       - name: Native tests (this runner's own OS)

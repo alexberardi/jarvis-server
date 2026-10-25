@@ -1267,7 +1267,9 @@ ssh <user>@<dev-node>.local
 # The Pi, once: the Go node next to the Python node, NOT activated (the unit stays disabled).
 curl -fsSLo install-pi.sh https://github.com/alexberardi/jarvis-server/releases/download/<tag>/install-pi.sh && sudo sh install-pi.sh
 # Its own identity, as the node's user (pi, the unit's User=): approve the code it prints in the
-# app or the admin Nodes page. It is a new node, not the Python node's (the retirement proposal).
+# app or the admin Nodes page. For the soak it is a new node, next to the Python one; on a Pi that
+# retires its Python node, `install-pi.sh --activate` adopts that node's identity instead
+# (Retirement step 2), so skip this enroll there.
 /opt/jarvis-agent/jarvis-agent enroll --server <prod-host> --room lab
 
 # The turn recordings, once, with the Python node stopped so that the mic is free. Say each
@@ -1395,11 +1397,25 @@ is checked on the lab Pi 4 and the soak meets the pass bar:
    `jarvis-node.service`, `install-pi.sh` activates by default; on a Pi with one, it stays
    opt-in. After the kitchen node has run on Go for a week, `--activate` becomes the default
    everywhere, and `--keep-python` the way out.
-2. **The identity.** The Go node enrolls as a new node (`~/.config/jarvis-agent/node.json`). No
-   code takes over the Python node's node id, room or settings: there is none for this in
-   `internal/agent` or `cmd/jarvis-agent`. Either a migration is built (an item of its own:
-   read the Python node's credentials, keep the node id), or the swap is "enroll, move the room,
-   delete the old node" and the docs say so. **The user decides which.**
+2. **The identity: migrate (user, 2026-10-23; built in #586,
+   [decision](../decisions/2026-10-23-pi-node-adopts-python-identity.md)).** On a Pi with no
+   `~/.config/jarvis-agent/node.json` and a provisioned Python node (`~/.jarvis/.provisioned` and
+   a real `node_id`/`api_key` in `/opt/jarvis-node/config.json`, not the placeholders),
+   `install-pi.sh --activate` runs `jarvis-agent adopt-python` before it swaps the nodes (and the
+   agent does the same at start, for a unit started without it). It writes `node.json` from the
+   Python node's `node_id`, `api_key` (the node key: both send `X-API-Key: id:key`),
+   `jarvis_config_service_url` and `room`; the MQTT credentials are fetched from jarvisd at run
+   time as before. It also carries over, once, what the sidecar and host need from
+   `jarvis_node.db` (SQLCipher, key in `db.key`): command secrets, disabled commands and command
+   data (reminders and the rest) into `node-settings.json`, timers into `timers.json`, and K2
+   (`k2.enc`, sealed with K1) into `k2.json`, so the app pairing holds. Go has no SQLCipher, so
+   the DB is read by `internal/agent/pinode/pyexport.py` run with the Python node's own venv
+   (`/opt/jarvis-node/.venv`), read-only. Nothing is enrolled: jarvisd keeps the same node
+   (room, settings, devices, history, app pairing) and its heartbeat turns `runtime "go"`. Every
+   Python file (the marker, the secret dir, config.json, the DB) is left as it was, so
+   `--keep-python` (the same as `--deactivate`) brings the Python node back unchanged. A failed
+   adoption refuses `--activate` (setup mode would enroll a second node). Not carried over:
+   the agent registry, disabled fast paths and command_auth (re-checked by the commands).
 3. **The docs.** README's Raspberry Pi section (it still says there is no installer, hotspot,
    self-update or package support, and that jarvis-node-setup is the supported Pi node), §6's
    install as the one way to set up a Pi, docs/install's `00-installers.md` (the install-pi.sh

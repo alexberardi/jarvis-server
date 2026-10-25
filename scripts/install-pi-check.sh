@@ -64,7 +64,7 @@ seed() {
   mkdir -p "$1/etc/bluetooth"
   printf '[General]\n#Name = BlueZ\n#Class = 0x000100\n\n[Policy]\n#AutoEnable=true\n' >"$1/etc/bluetooth/main.conf"
 }
-R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} \
+R() { env -i HOME="$T" TMPDIR="$T" PATH="$T/bin:$PATH" ${FAKE_MINISIGN:+FAKE_MINISIGN=$FAKE_MINISIGN} ${FAKE_WLAN0:+FAKE_WLAN0=$FAKE_WLAN0} ${FAKE_ADOPT:+FAKE_ADOPT=$FAKE_ADOPT} \
   ${SSH_CONNECTION:+"SSH_CONNECTION=$SSH_CONNECTION"} ${FAKE_SSH_DEV:+FAKE_SSH_DEV=$FAKE_SSH_DEV} sh "$SCRIPT" "$@"; }
 
 # Release mode (release.yml's install-pi job, on arm64): the stamped DIST/install-pi.sh, as
@@ -117,8 +117,18 @@ fi
 
 # A release: the arm64 agent, and an amd64 one listed first (the script must pick arm64).
 mkdir -p "$T/stage/jarvis-agent-$V-linux-arm64" "$T/dist"
-# shellcheck disable=SC2016 # $1 is the fake agent's own argument
-printf '#!/bin/sh\n[ "$1" = version ] && echo %s\n' "$V" >"$T/stage/jarvis-agent-$V-linux-arm64/jarvis-agent"
+# The fake agent: its version, and adopt-python, which logs its arguments in $ADOPT_LOG next to
+# the --creds file and writes it (FAKE_ADOPT=fail: fails instead).
+cat >"$T/stage/jarvis-agent-$V-linux-arm64/jarvis-agent" <<AGENT
+#!/bin/sh
+case \$1 in
+  version) echo $V ;;
+  adopt-python)
+    [ "\${FAKE_ADOPT:-}" != fail ] || { echo "the database: no" >&2; exit 1; }
+    c=\$3; mkdir -p "\$(dirname "\$c")"; echo "\$*" >"\$(dirname "\$c")/adopt-args"; echo '{}' >"\$c"
+    echo "adopted the Python node's identity pi-1" ;;
+esac
+AGENT
 chmod 0755 "$T/stage/jarvis-agent-$V-linux-arm64/jarvis-agent"
 tar -C "$T/stage" -czf "$T/dist/jarvis-agent-$V-linux-arm64.tar.gz" "jarvis-agent-$V-linux-arm64"
 # The wake models ship with the release files.
@@ -269,6 +279,31 @@ FAKE_SSH_DEV=wlan0 S --root "$R6" --from-dir "$T/dist" --activate >"$T/out" 2>&1
   { cat "$T/out"; fail "--activate of an enrolled node over wlan0 was refused"; }
 grep -q "isn't enrolled" "$T/out" && { cat "$T/out"; fail "warned on an enrolled node"; }
 grep -q "enable --now jarvis-agent" "$R6/install-pi-commands.log" || fail "an enrolled node was not activated"
+
+echo "--- --activate on a Pi whose Python node is provisioned takes over its identity (#586)"
+R7=$T/root-python
+seed "$R7"
+mkdir -p "$R7/home/pi/.jarvis" "$R7/opt/jarvis-node"
+: >"$R7/home/pi/.jarvis/.provisioned"
+echo '{"node_id":"pi-1"}' >"$R7/opt/jarvis-node/config.json"
+if FAKE_ADOPT=fail FAKE_SSH_DEV=eth0 R --root "$R7" --from-dir "$T/dist" --activate >"$T/out" 2>&1; then
+  cat "$T/out"; fail "--activate went on after the adoption failed"
+fi
+grep -q "could not take over the Python node's identity" "$T/out" || { cat "$T/out"; fail "refused for another reason"; }
+grep -q "enable --now jarvis-agent" "$R7/install-pi-commands.log" && fail "a failed adoption enabled jarvis-agent"
+grep -q "disable --now jarvis-node" "$R7/install-pi-commands.log" && fail "a failed adoption stopped the Python node"
+FAKE_SSH_DEV=wlan0 R --root "$R7" --from-dir "$T/dist" --activate >"$T/out" 2>&1 ||
+  { cat "$T/out"; fail "--activate of a provisioned Python node over wlan0 was refused"; }
+grep -q "adopted the Python node's identity pi-1" "$T/out" || { cat "$T/out"; fail "no adoption"; }
+grep -q "isn't enrolled" "$T/out" && { cat "$T/out"; fail "warned about setup mode on an adopted node"; }
+[ "$(cat "$R7/home/pi/.config/jarvis-agent/adopt-args")" = "adopt-python --creds $R7/home/pi/.config/jarvis-agent/node.json --python-dir $R7/opt/jarvis-node --secret-dir $R7/home/pi/.jarvis" ] ||
+  fail "adopt-python's arguments: $(cat "$R7/home/pi/.config/jarvis-agent/adopt-args")"
+grep -q "enable --now jarvis-agent" "$R7/install-pi-commands.log" || fail "the adopted node was not activated"
+R --root "$R7" --keep-python >/dev/null
+tail -2 "$R7/install-pi-commands.log" | tr '\n' ';' | grep -qx 'systemctl disable --now jarvis-agent.service;systemctl enable --now jarvis-node.service;' ||
+  fail "--keep-python: $(tail -2 "$R7/install-pi-commands.log")"
+[ "$(cat "$R7/opt/jarvis-node/config.json")" = '{"node_id":"pi-1"}' ] && [ -f "$R7/home/pi/.jarvis/.provisioned" ] ||
+  fail "the Python node's files changed"
 
 echo "--- refusals"
 R3=$T/root3
