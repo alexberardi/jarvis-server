@@ -1470,7 +1470,7 @@ func (m *Manager) Residents(ctx context.Context) []Resident {
 		if c.Engine != engine.ModeLocal || c.Model == "" || c.GPULayers == 0 || c.GPUBackend == string(engine.FlavourCPU) {
 			continue
 		}
-		need, ok := m.residentNeed(ctx, c)
+		need, ok := m.residentNeed(ctx, c, false)
 		if !ok {
 			continue
 		}
@@ -1545,8 +1545,8 @@ func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Res
 
 // residentNeed estimates a label's engine in MB: its installed model (plus projector) at the
 // label's context, or an external file by its size. A vLLM engine needs the share of its
-// cards it preallocates, whatever the model weighs.
-func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64, bool) {
+// cards it preallocates, whatever the model weighs. floor: count a guessed KV as nothing (placement).
+func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig, floor bool) (int64, bool) {
 	if c.Kind == engine.KindVLLM {
 		frac, dev, err := engine.VLLMGPUMemory(c, m.hardware(ctx))
 		if err != nil {
@@ -1582,9 +1582,15 @@ func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64
 	} else {
 		return 0, false
 	}
-	need, _ := gpuNeed(c.ModelKind, weights, host, kv, max(n, 0))
 	if n <= 0 && c.ModelKind == engine.ModelLLM {
-		need, _ = gpuNeed(c.ModelKind, weights, host, kv, 8192)
+		n = 8192
+	}
+	need, guessed := gpuNeed(c.ModelKind, weights, host, kv, max(n, 0))
+	if guessed && floor {
+		// The KV guess assumes dense attention; a sliding-window model (Gemma 4: 18.9 GB measured,
+		// 32.6 GB guessed) needs far less. floor (placement) counts the weights alone then, a
+		// lower bound: only what certainly can't fit is refused, and a load-time OOM handles the rest.
+		need, _ = gpuNeed(c.ModelKind, weights, host, kv, 0)
 	}
 	return need / mb, true
 }

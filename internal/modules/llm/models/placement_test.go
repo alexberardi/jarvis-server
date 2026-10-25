@@ -95,6 +95,25 @@ func TestPlacementFit(t *testing.T) {
 	}
 }
 
+// A model outside the catalog has only a guessed (dense) KV size, which a sliding-window model
+// like Gemma 4 needs far less than: prod's whisper was refused next to Gemma 4 26B (18.9 GB
+// measured, 32.6 GB guessed). Placement judges such a model by its weights, so whisper starts
+// next to it, while two copies that can't fit even by weight are still refused (TestPlacementFit).
+func TestPlacementFitJudgesAGuessedKVByWeights(t *testing.T) {
+	e := newEnv(t)
+	oneRTX(t, e)
+	live := llmLabel("live", sizedFile(t, e, "gemma.gguf", 7<<30))
+	live.Context = 32768 // guessed KV ≈ 6 GB: ≈ 14 GB, more than the card
+	stt := llmLabel("stt", sizedFile(t, e, "whisper.bin", 600<<20))
+	if why := e.mgr.PlacementFit(e.ctx, stt, engine.FlavourCUDA, []engine.LabelConfig{live}); why != "" {
+		t.Fatalf("whisper next to a guessed-KV model: %q", why)
+	}
+	big := llmLabel("stt", sizedFile(t, e, "big.bin", 4<<30))
+	if why := e.mgr.PlacementFit(e.ctx, big, engine.FlavourCUDA, []engine.LabelConfig{live}); why == "" {
+		t.Fatal("7 GB of weights and a 4 GB whisper on a 12 GB card was let through")
+	}
+}
+
 // #562: Residents counts engines as the resolver runs them. Two labels on one model that differ
 // in parallel slots are two engines (and so overcommit the card) unless they run on one
 // (a running label's endpoint names its engine).

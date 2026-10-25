@@ -239,7 +239,7 @@ func (m *Manager) PlacementFit(ctx context.Context, c engine.LabelConfig, f engi
 	if len(devs) == 0 {
 		return ""
 	}
-	need, ok := m.residentNeed(ctx, c)
+	need, ok := m.residentNeed(ctx, c, true)
 	if !ok {
 		return ""
 	}
@@ -248,7 +248,7 @@ func (m *Manager) PlacementFit(ctx context.Context, c engine.LabelConfig, f engi
 		if !fullOffload(a) {
 			continue
 		}
-		if n, ok := m.residentNeed(ctx, a); ok {
+		if n, ok := m.residentNeed(ctx, a, true); ok {
 			residents = append(residents, Resident{Labels: []string{a.Label}, Model: modelFile(a), NeededMB: n, Devices: deviceList(a.GPUDevices)})
 		}
 	}
