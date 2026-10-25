@@ -51,6 +51,13 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   document, the email into the email body: you read it where it will live, and the app's undo
   covers a bad draft. No preview step: the island would get too big or show too little.
 
+- **2026-10-25: a draft is written in one step and pasted** (Q17, v1). A separate model call
+  writes the whole piece with a large output budget from what the task knows and has asked; it
+  goes in through the clipboard (newlines intact, about a second for a page), and the clipboard is
+  restored afterwards. Typing key by key is the fallback only where pasting is blocked. Landing at
+  once also means nobody tries to steer a half-typed draft mid-fill. Settles G6's output and
+  newline limits for drafts.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -71,8 +78,7 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q17 — getting the draft in:** written in one drafting step and pasted, or typed (G6).
-2. **Q18 — revising a draft:** changing it by voice ("make the summary shorter").
-3. **Q19 — files by name:** which folders, which kinds, and what "open X" may open.
-4. **Q20 — contacts and email:** where "James" comes from, and how mail is sent.
-5. **Q21 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q18 — revising a draft:** changing it by voice ("make the summary shorter").
+2. **Q19 — files by name:** which folders, which kinds, and what "open X" may open.
+3. **Q20 — contacts and email:** where "James" comes from, and how mail is sent.
+4. **Q21 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
