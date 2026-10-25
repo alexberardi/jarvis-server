@@ -47,6 +47,10 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   toolbench scenarios on both sides of the line, including near-misses ("write 'on my way' in
   Slack"). Settles G2.
 
+- **2026-10-25: a long draft lands straight in the app** (Q16). The resume goes into the Word
+  document, the email into the email body: you read it where it will live, and the app's undo
+  covers a bad draft. No preview step: the island would get too big or show too little.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -67,7 +71,8 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q16 — drafting long text:** draft-then-review, and where you see the draft.
-2. **Q17 — files by name:** which folders, which kinds, and what "open X" may open.
-3. **Q18 — contacts and email:** where "James" comes from, and how mail is sent.
-4. **Q19 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q17 — getting the draft in:** written in one drafting step and pasted, or typed (G6).
+2. **Q18 — revising a draft:** changing it by voice ("make the summary shorter").
+3. **Q19 — files by name:** which folders, which kinds, and what "open X" may open.
+4. **Q20 — contacts and email:** where "James" comes from, and how mail is sent.
+5. **Q21 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
