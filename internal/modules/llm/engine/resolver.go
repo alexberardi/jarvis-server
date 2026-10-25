@@ -744,6 +744,7 @@ func (r *Resolver) start(c LabelConfig, key instanceKey, h string) (*instance, e
 			DrainGrace: def(r.DrainGrace, 30*time.Second),
 		},
 		ErrorLine:    errorLine(c.Kind),
+		OutputTail:   outputTail(c.Kind),
 		Fatal:        gpuOOM,
 		OnHealthy:    func() { r.ready(h) },
 		StartTimeout: def(r.StartTimeout, 10*time.Minute),

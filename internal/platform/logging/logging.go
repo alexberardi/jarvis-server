@@ -222,7 +222,11 @@ func (h *handler) Handle(ctx context.Context, r slog.Record) error {
 				rec.Source = a.Value.String()
 				return
 			}
-			rec.Attrs[key] = a.Value.Resolve().Any()
+			v := a.Value.Resolve().Any()
+			if e, ok := v.(error); ok {
+				v = e.Error() // encoding/json writes most errors as {}
+			}
+			rec.Attrs[key] = v
 		}
 		for _, a := range h.attrs {
 			add(a)

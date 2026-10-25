@@ -83,7 +83,7 @@ func runFakeEngine(args []string) {
 	if dir := os.Getenv("FAKE_ENGINE_LOG"); dir != "" {
 		env := map[string]string{}
 		for _, k := range []string{"LLAMA_API_KEY", "CUDA_VISIBLE_DEVICES", "GGML_VK_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "HF_HUB_OFFLINE",
-			"VLLM_API_KEY", "VLLM_CACHE_ROOT"} {
+			"VLLM_API_KEY", "VLLM_CACHE_ROOT", "VLLM_USE_FLASHINFER_SAMPLER"} {
 			if v, ok := os.LookupEnv(k); ok {
 				env[k] = v
 			}

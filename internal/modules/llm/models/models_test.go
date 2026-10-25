@@ -1065,6 +1065,36 @@ func TestAssignDeleteRegister(t *testing.T) {
 	}
 }
 
+// A model path the system unit hides (ProtectHome, PrivateTmp) says so, not "no file" (#582).
+func TestMissingPathUnderSystemUnit(t *testing.T) {
+	e := newEnv(t)
+	e.start()
+	path := "/home/someone/models/Qwen3-0.6B.gguf"
+	msg := func(err error) string {
+		t.Helper()
+		if re, ok := err.(*RequestError); !ok || re.Status != http.StatusUnprocessableEntity {
+			t.Fatalf("err %v", err)
+		}
+		return err.Error()
+	}
+	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: path}); !strings.Contains(msg(err), "no file at "+path) {
+		t.Fatalf("outside the unit: %v", err)
+	}
+	old := systemUnit
+	systemUnit = func() bool { return true }
+	t.Cleanup(func() { systemUnit = old })
+	want := "jarvisd runs as a system service and can't see " + path + " (the service hides /home); put the model under /var/lib/jarvisd"
+	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: path}); !strings.Contains(msg(err), want) {
+		t.Fatalf("register: %v", err)
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"model": path}}); !strings.Contains(msg(err), want) {
+		t.Fatalf("label: %v", err)
+	}
+	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: "/var/lib/jarvisd/models/x.gguf"}); !strings.Contains(msg(err), "no file at") {
+		t.Fatalf("a path the unit sees: %v", err)
+	}
+}
+
 func TestUpdateLabelsValidation(t *testing.T) {
 	e := newEnv(t)
 	e.testCatalog()
