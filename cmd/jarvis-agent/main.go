@@ -199,6 +199,8 @@ func main() {
 		err = hatCmd(ctx, os.Args[2:])
 	case "provision":
 		err = provisionCmd(ctx, os.Args[2:])
+	case "adopt-python":
+		err = adoptPythonCmd(ctx, os.Args[2:])
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
 	case "computer":
@@ -256,6 +258,10 @@ func usage(w io.Writer) {
            setup hotspot is up), until the node is provisioned
            --wifi simulated (the NetworkManager backend is still to come) [--listen :8080]
            [--captive-listen :80] [--ap-ssid SSID] [--creds PATH]
+  adopt-python  a Pi with no node.json takes over its provisioned Python node's identity (node id
+           and key, room) and local state (command secrets, reminders, timers, K2), leaving the
+           Python node's files as they are; nothing when there is none
+           [--creds PATH] [--python-dir /opt/jarvis-node] [--secret-dir ~/.jarvis]
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   wake-compare  record Pulse sources side by side and score each for "hey Jarvis" (debug; on a
@@ -648,6 +654,17 @@ func runAgent(ctx context.Context, args []string) error {
 		return err
 	}
 	c, err := node.LoadCreds(path)
+	if errors.Is(err, node.ErrNotEnrolled) && !p.desktop {
+		// A Pi the Python node ran on: the same node, not a new one (install-pi.sh --activate
+		// adopts it first; this is for a unit started without it).
+		if py, perr := pinode.DefaultPythonNode(); perr == nil {
+			if ok, aerr := adoptPython(ctx, log, path, py); aerr != nil {
+				err = aerr
+			} else if ok {
+				c, err = node.LoadCreds(path)
+			}
+		}
+	}
 	if err != nil {
 		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && p.desktop {
 			// A login item on a computer that isn't set up: the status icon's "Set up", then
