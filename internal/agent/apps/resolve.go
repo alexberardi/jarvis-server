@@ -31,13 +31,22 @@ type NotFoundError struct {
 }
 
 func (e *NotFoundError) Error() string {
+	// Said aloud when every tool failed ("Sorry, that didn't work: …"), so it reads as a sentence.
 	if len(e.Suggestions) == 0 {
-		return fmt.Sprintf("%v %q", ErrNotFound, e.Query)
+		return fmt.Sprintf("there's no app called %q on this computer", e.Query)
 	}
-	return fmt.Sprintf("%v %q (closest: %s)", ErrNotFound, e.Query, strings.Join(e.Suggestions, ", "))
+	return fmt.Sprintf("there's no app called %q on this computer; did you mean %s?", e.Query, orList(e.Suggestions))
 }
 
 func (e *NotFoundError) Unwrap() error { return ErrNotFound }
+
+// orList is "A", "A or B", "A, B or C".
+func orList(s []string) string {
+	if len(s) < 2 {
+		return strings.Join(s, "")
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " or " + s[len(s)-1]
+}
 
 // norm lowercases and keeps letters and digits only: "Visual Studio Code" -> "visualstudiocode".
 func norm(s string) string {
@@ -238,5 +247,6 @@ func suggest(list []App, q string, n int) []string {
 	return out
 }
 
-// suggestScore: only names that are actually close are suggested.
-const suggestScore = 0.6
+// suggestScore: only names that are actually close are suggested ("calculator" is 0.63 from
+// "Google Photos" by sound).
+const suggestScore = 0.65
