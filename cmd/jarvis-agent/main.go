@@ -889,8 +889,23 @@ func runAgent(ctx context.Context, args []string) error {
 	end := nodeEnd{credsFile: path, nodeID: c.NodeID, desktop: p.desktop, noTray: *f.noTray, stop: quit, openSetup: setup, log: log}
 	runNode := func(ctx context.Context) error { return end.of(r.Run(ctx)) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
-		activity: activity, computer: computerSw, recorder: recorder}
+		activity: activity, computer: computerSw, recorder: recorder, reached: r.Reached, retryNow: r.RetryNow,
+		webUI: make(chan struct{}, 1)}
 	sw.changed = ic.voiceChanged
+	// The agent may be started before its server: while the server doesn't answer, the menu
+	// says what it is waiting for (and offers "Retry now") and the island says it in a line,
+	// instead of a menu that claims it runs and a microphone that never opens (#585).
+	wait := &serverWait{refresh: ic.refresh, log: log, note: func(text string) {
+		if n := note.Load(); n != nil {
+			(*n)(text)
+		}
+	}}
+	r.OnWaiting = wait.waiting
+	r.OnReached = func(url string) {
+		wait.reached(url)
+		ic.lookForWebUI() // "Open Jarvis Automation" too, without waiting out its own backoff
+	}
+	sw.waiting = wait.voiceWaiting
 	if computerSw != nil {
 		computerSw.Watch(func(bool) { ic.refresh() })
 	}

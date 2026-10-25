@@ -2031,9 +2031,11 @@ only shows it), `cmd/jarvis-agent/tray.go`, `voiceswitch.go`.
 
 ```
 Jarvis Automation Agent — Running          (disabled: the agent's state)
+Retry now                                   (only while the server hasn't answered yet)
 Updated to v0.2.0                           (disabled, only around a self-update, §13)
 ─────────────
 ✓ Listen for "Hey Jarvis"                   (Linux, macOS)
+  Listening starts once the server answers  (disabled, only while waiting with listening on)
   Computer control                          (off by default; COMPUTER-CONTROL.md C11)
   Open Jarvis Automation                    (once discovery names the web UI)
   Set up / Settings…                        (the setup page, §13)
@@ -2066,6 +2068,19 @@ Updated to v0.2.0                           (disabled, only around a self-update
   until someone removes it in Add-ons.
 - **Quit** is `jarvis-agent stop` from inside (§13): exit 0, so no supervisor restarts it, until
   the next login or `start`.
+- **Waiting for the server** (2026-10-24,
+  [decision](decisions/2026-10-24-agent-waits-for-its-server.md)). The agent starts at login,
+  its server may be started afterwards, and until discovery answers nothing works — listening
+  included, since the pipeline starts on the connection. So while it waits the header is
+  "Waiting for the Jarvis server at <config URL>" rather than "Running", the menu offers
+  **Retry now** (`node.Runner.RetryNow`: try again at once instead of after the backoff), the
+  island says it in a line once (the menu says it for as long as it lasts, so a server that
+  stays away doesn't keep a pill on screen) and says "Connected to the Jarvis server" when it
+  answers, and with listening on a disabled line says it starts once the server answers
+  (turning the toggle on while waiting logs and says that too, instead of doing nothing).
+  The waits double from a second up to five seconds for a server on this computer (127.0.0.1,
+  the bundled server app) and up to a minute for one on the network, so starting the server
+  after the agent is picked up within seconds (`node.Runner.backoffAt`, `maxBackoff`).
 - **The update line** (§13 "Self-update", 2026-10-14) shows the self-update's state: downloading,
   "Update available (vX), restarting…", "Updated to vX", or a failed update. Nothing to click.
 - **Hide the icon:** `--no-tray`, or agent.json `tray: false`. `status` prints a `menu icon:` line.

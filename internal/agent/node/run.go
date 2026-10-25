@@ -60,11 +60,26 @@ type Runner struct {
 	// OnBeat, if set, gets jarvisd's answer to every heartbeat that went through (a pending
 	// update, the server's version). It runs on Run's goroutine: it must not block.
 	OnBeat func(cc *CC, reply BeatReply)
+	// OnWaiting, if set, is called every time jarvisd can't be reached yet (it may be started
+	// after the node), with the config URL, the error and the wait before the next try;
+	// OnReached, if set, is called once it answers, before OnConnected. Both run on Run's
+	// goroutine and must not block. The desktop agent's status icon uses them to say what it
+	// is waiting for instead of looking like it runs (#585).
+	OnWaiting func(configURL string, err error, next time.Duration)
+	OnReached func(configURL string)
 
-	mqttUp atomic.Bool
+	// backoffFor is the wait before the nth try at reaching jarvisd (n counts from 1); nil is
+	// backoffAt's schedule. Tests set it to show that RetryNow doesn't wait for it.
+	backoffFor func(n int) time.Duration
+
+	mqttUp  atomic.Bool
+	reached atomic.Bool
 
 	kickOnce sync.Once
 	kick     chan struct{}
+
+	retryOnce sync.Once
+	retry     chan struct{} // RetryNow asks a waiting Run to try jarvisd again now
 
 	reqOnce   sync.Once
 	signOut   chan struct{} // SignOut asks Run to sign this node out
@@ -81,6 +96,21 @@ func (r *Runner) kicks() chan struct{} {
 func (r *Runner) BeatNow() {
 	select {
 	case r.kicks() <- struct{}{}:
+	default: // one is already due
+	}
+}
+
+func (r *Runner) retries() chan struct{} {
+	r.retryOnce.Do(func() { r.retry = make(chan struct{}, 1) })
+	return r.retry
+}
+
+// RetryNow asks a Run still waiting for jarvisd to try it again at once instead of after its
+// backoff (the status icon's "Retry now", for a server started after the node). Safe to call
+// from any goroutine, before or during Run; once jarvisd has been reached it does nothing.
+func (r *Runner) RetryNow() {
+	select {
+	case r.retries() <- struct{}{}:
 	default: // one is already due
 	}
 }
@@ -137,13 +167,17 @@ func brokerURL(raw string) (string, error) {
 // Run blocks until ctx is cancelled. Transient failures (jarvisd restarting, network) retry
 // with backoff rather than exiting, so a supervisor isn't needed for blips.
 //
+// jarvisd may not be up yet (a computer's agent starts at login, its server afterwards): until
+// discovery answers, the waits double from a second up to this server's cap (backoffAt),
+// OnWaiting says what is being waited for, and RetryNow tries again at once.
+//
 // Run returns ErrSignedOut when jarvisd refuses this node's key (the node was signed out or
 // removed) or after SignOut; the caller drops the credentials and shows the setup page.
 func (r *Runner) Run(ctx context.Context) error {
 	r.chans()
 	hc := &http.Client{Timeout: 15 * time.Second}
 	var svcs Services
-	backoff := time.Second
+	tries := 0
 	for {
 		var err error
 		svcs, err = Discover(ctx, hc, r.Creds.ConfigURL)
@@ -157,16 +191,28 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err == nil {
 			break
 		}
-		r.Log.Warn("jarvisd not reachable yet; retrying", "err", err, "in", backoff)
+		tries++
+		wait := r.backoffAt(tries)
+		r.Log.Warn("jarvisd not reachable yet; retrying", "err", err, "in", wait)
+		if r.OnWaiting != nil {
+			r.OnWaiting(r.Creds.ConfigURL, err, wait)
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-r.signOut:
 			r.Log.Warn("signing out without reaching jarvisd: the computer stays listed until it is removed in Add-ons")
 			return ErrSignedOut
-		case <-time.After(backoff):
+		case <-r.retries():
+			r.Log.Info("asked to try jarvisd again now", "url", r.Creds.ConfigURL)
+			tries = 0 // the next wait, if this try fails too, starts the schedule again
+		case <-time.After(wait):
 		}
-		backoff = min(backoff*2, time.Minute)
+	}
+	r.reached.Store(true)
+	defer r.reached.Store(false)
+	if r.OnReached != nil {
+		r.OnReached(r.Creds.ConfigURL)
 	}
 	ccURL, _ := svcs.Need(SvcCommandCenter)
 	mqURL, _ := svcs.Need(SvcMQTT)
@@ -332,6 +378,40 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// The caps on the wait between discovery tries (it doubles from a second up to one of them).
+// A server on this computer — the bundled server app, 127.0.0.1 — is often started after the
+// agent, and a minute of waiting looked like a hung agent to the user (#585), so its cap is a
+// few seconds; a server on the network keeps the long one.
+const (
+	localRetryCap  = 5 * time.Second
+	remoteRetryCap = time.Minute
+)
+
+// maxBackoff is the longest Run waits between discovery tries for a server at configURL.
+func maxBackoff(configURL string) time.Duration {
+	if u, err := url.Parse(configURL); err == nil && u.Host != "" && isLoopbackHost(u.Host) {
+		return localRetryCap
+	}
+	return remoteRetryCap
+}
+
+// backoffAt is the wait before the nth try at reaching jarvisd (n counts from 1): a second,
+// doubling, up to this server's cap.
+func (r *Runner) backoffAt(n int) time.Duration {
+	if r.backoffFor != nil {
+		return r.backoffFor(n)
+	}
+	if n < 1 {
+		n = 1
+	}
+	return min(time.Second<<uint(min(n-1, 20)), maxBackoff(r.Creds.ConfigURL))
+}
+
+// Reached reports whether Run has reached jarvisd (discovery answered). While it is false the
+// node is still waiting for its server: nothing that needs the server works yet, voice
+// included, and the desktop agent's status icon says so.
+func (r *Runner) Reached() bool { return r.reached.Load() }
 
 // MQTTConnected reports whether the node holds a session with jarvisd's broker right now (the
 // self-update's health check: a new version must get this far).

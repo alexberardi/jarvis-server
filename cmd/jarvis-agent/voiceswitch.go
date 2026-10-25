@@ -24,6 +24,10 @@ type voiceSwitch struct {
 	changed func(on bool)
 	// available: voice works on this OS (the control socket's voice-on/off refuses otherwise).
 	available bool
+	// waiting, if set, is called when listening is turned on before the agent has reached its
+	// server: the pipeline starts on the connection, so there is nothing to listen with yet
+	// and the user is told instead of nothing happening (#585).
+	waiting func()
 	// connected is closed once Serve has the agent's connection (tests wait on it).
 	connected chan struct{}
 
@@ -80,10 +84,24 @@ func (w *voiceSwitch) Set(on bool) {
 	if on {
 		w.log.Info("voice: turned on from the menu")
 		w.start()
+		if w.pending() {
+			w.log.Info("voice: listening starts once the Jarvis server answers")
+			if w.waiting != nil {
+				w.waiting()
+			}
+		}
 	} else {
 		w.log.Info("voice: turned off from the menu")
 		w.stop()
 	}
+}
+
+// pending: listening is on but can't start yet, because the agent hasn't reached its server
+// (Serve, the runner's OnConnected, hands the switch the connection).
+func (w *voiceSwitch) pending() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.on && w.ctx == nil
 }
 
 // Serve is the runner's OnConnected: it listens while on, until ctx ends.

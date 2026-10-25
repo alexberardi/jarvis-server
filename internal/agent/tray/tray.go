@@ -7,9 +7,13 @@
 //	Jarvis Automation Agent — Running          (a disabled header: the agent's state)
 //	Jarvis is controlling this computer         (a disabled line, only while Jarvis controls it,
 //	Stop Jarvis                                  is paused or records; Stop ends the task)
+//	Retry now                                   (only while the server hasn't been reached yet,
+//	                                             where the header says what it waits for)
 //	Updated to v0.2.0                           (a disabled line, only after/during a self-update)
 //	─────────────
 //	✓ Listen for "Hey Jarvis"                   (voice on/off, live; saved in agent.json)
+//	  Listening starts once the server answers  (a disabled line, only while listening is on
+//	                                             and the server hasn't been reached yet)
 //	  Computer control                          (lets Jarvis use this computer; off by default,
 //	                                             saved in agent.json; off stops a running task)
 //	  Record a macro…                           (Teach Jarvis: records what you do; "Stop recording"
@@ -65,6 +69,19 @@ type State struct {
 	// StopHotkey, when set, is the hotkey that stops it ("⌃⌥⎋"): the tooltip names it while
 	// there is an activity.
 	StopHotkey string
+	// Waiting says the agent hasn't reached its server yet (Status is WaitingFor(url)): the
+	// menu offers "Retry now", and while listening is on it says that listening starts once
+	// the server answers. Nothing else works until then, so the menu doesn't claim it runs.
+	Waiting bool
+}
+
+// WaitingFor is the header's state while the agent hasn't reached its server: the server may
+// simply not be started yet (#585).
+func WaitingFor(url string) string {
+	if url == "" {
+		return "Waiting for the Jarvis server"
+	}
+	return "Waiting for the Jarvis server at " + url
 }
 
 // The activities (computer.Kind's values).
@@ -107,6 +124,8 @@ type Actions struct {
 	SetComputer func(on bool)
 	// Record starts a recording (start) or stops the one going on (State.Record).
 	Record func(start bool)
+	// RetryNow tries the server again at once instead of after the backoff (State.Waiting).
+	RetryNow func()
 }
 
 // The menu items' ids (D-Bus menu ids, NSMenuItem tags, Win32 command ids). 0 is the root.
@@ -124,6 +143,8 @@ const (
 	IDStopTask
 	IDComputer
 	IDRecord
+	IDRetry
+	IDVoiceWait
 )
 
 // Labels (the naming rule: "Jarvis Automation" for the product, "Jarvis" for the assistant).
@@ -137,6 +158,8 @@ const (
 	ComputerLabel = "Computer control"
 	RecordLabel   = "Record a macro…"
 	StopRecLabel  = "Stop recording"
+	RetryLabel    = "Retry now"
+	VoiceWaitText = "Listening starts once the server answers"
 )
 
 // Item is one menu entry.
@@ -187,12 +210,18 @@ func Items(s State) []Item {
 		items = append(items, Item{ID: IDActivity, Label: l})
 		items = append(items, Item{ID: IDStopTask, Label: StopTaskLabel, Enabled: true})
 	}
+	if s.Waiting {
+		items = append(items, Item{ID: IDRetry, Label: RetryLabel, Enabled: true})
+	}
 	if s.Update != "" {
 		items = append(items, Item{ID: IDUpdate, Label: s.Update})
 	}
 	items = append(items, Item{ID: idSep1, Separator: true})
 	if s.VoiceAvailable {
 		items = append(items, Item{ID: IDVoice, Label: VoiceLabel, Enabled: true, Toggle: true, Checked: s.Voice})
+		if s.Voice && s.Waiting {
+			items = append(items, Item{ID: IDVoiceWait, Label: VoiceWaitText})
+		}
 	}
 	if s.ComputerAvailable {
 		items = append(items, Item{ID: IDComputer, Label: ComputerLabel, Enabled: true, Toggle: true, Checked: s.Computer})
@@ -336,6 +365,11 @@ func (t *Tray) clicked(id int32) {
 			if s.Activity != "" && t.act.StopTask != nil {
 				t.log.Info("tray: Stop Jarvis chosen")
 				t.act.StopTask()
+			}
+		case IDRetry:
+			if s.Waiting && t.act.RetryNow != nil {
+				t.log.Info("tray: Retry now chosen")
+				t.act.RetryNow()
 			}
 		case IDQuit:
 			if t.act.Quit != nil {
