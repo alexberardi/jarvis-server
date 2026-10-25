@@ -79,7 +79,7 @@ test('views and deletes a recording', async ({ page }) => {
   await page.getByRole('link', { name: 'Recordings' }).first().click()
   await expect(page.getByRole('heading', { name: 'Recordings', exact: true })).toBeVisible()
   const items = page.getByTestId('recording')
-  await expect(items).toHaveCount(2)
+  await expect(items).toHaveCount(3)
   await expect(items.nth(0)).toContainText('7 steps')
   await expect(items.nth(0)).toContainText('Deleted in')
 
@@ -87,15 +87,32 @@ test('views and deletes a recording', async ({ page }) => {
   await expect(items.nth(0).getByText('Opened bank.example.com')).toBeVisible()
   // A masked field shows no value.
   await expect(items.nth(0).getByText(/Typed \(hidden\) in/)).toBeVisible()
-  await expect(items.nth(0).getByText('3 keyframes, kept only on the computer that recorded it.')).toBeVisible()
+  await expect(items.nth(0).getByText('3 keyframes, 0 kept on the server.')).toBeVisible()
 
   page.once('dialog', (d) => void d.accept())
   await items.nth(1).getByRole('button', { name: /^Delete Recording from/ }).click()
   await expect(page.getByText('Recording deleted')).toBeVisible()
-  await expect(items).toHaveCount(1)
+  await expect(items).toHaveCount(2)
   const hh = (await must('GET', cc(`/workflows/${BANK}`), { token })).household_id
   const left = await must('GET', cc(`/recordings?household_id=${hh}`), { token })
-  expect(left.recordings.map((r: { id: string }) => r.id)).toEqual(['rec_5eed000000000001'])
+  expect(left.recordings.map((r: { id: string }) => r.id)).toEqual(['rec_5eed000000000001', 'rec_5eed000000000003'])
+})
+
+test("a desktop recording shows each step's app and window and its stored keyframes", async ({ page }) => {
+  await page.goto('/recordings')
+  const item = page.getByTestId('recording').filter({ hasText: 'Desktop' })
+  await item.getByRole('button', { expanded: false }).click()
+  await expect(item.getByText('2 keyframes, 2 kept on the server.')).toBeVisible()
+  await expect(item.getByText('in gnome-calculator — Calculator').first()).toBeVisible()
+  await expect(item.getByText('in gedit — notes.txt')).toBeVisible()
+  const thumb = item.getByRole('img', { name: 'Where you clicked in step 1: show the whole screen' })
+  await expect(thumb).toBeVisible()
+  await expect(item.getByRole('img', { name: /step 3/ })).toBeVisible()
+  await expect.poll(() => thumb.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(64)
+  await thumb.click()
+  const full = page.getByRole('dialog', { name: 'Step 1' }).getByRole('img', { name: 'The screen in step 1, the click marked' })
+  await expect(full).toBeVisible()
+  await expect.poll(() => full.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(320)
 })
 
 test('a household admin changes how long recordings are kept', async ({ page }) => {

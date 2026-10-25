@@ -96,6 +96,18 @@ func TestUploadRecordingKeyframes(t *testing.T) {
 		kfs[1].(map[string]any)["seq"] != 3.0 || kfs[1].(map[string]any)["crop"] != false {
 		t.Fatalf("keyframe_images %v", got["keyframe_images"])
 	}
+	// The owner reads them back (the Recordings page's thumbnails); no one else does.
+	for path, body := range map[string]string{kfPath(kfRecID, "1", false): frame, kfPath(kfRecID, "1", true): crop} {
+		path = strings.Replace(path, uploadPath, recBase, 1)
+		r := ve.do("GET", path, nil, bearer("tok-7")).want(200)
+		if string(r.body) != body || r.header.Get("Content-Type") != "image/jpeg" {
+			t.Fatalf("GET %s: %s, %d bytes", path, r.header.Get("Content-Type"), len(r.body))
+		}
+		ve.do("GET", path, nil, bearer("tok-8")).detail(404, "Recording not found")
+	}
+	ve.do("GET", recBase+"/"+kfRecID+"/keyframes/3/crop", nil, bearer("tok-7")).detail(404, "Keyframe not found")
+	ve.do("GET", recBase+"/"+kfRecID+"/keyframes/2", nil, bearer("tok-7")).detail(404, "Keyframe not found")
+	ve.do("GET", recBase+"/"+kfRecID+"/keyframes/x", nil, bearer("tok-7")).want(400)
 
 	// Not a click (the key at 2), no such event, a bad seq: refused.
 	ve.do("PUT", kfPath(kfRecID, "2", false), frame, jh).want(422)

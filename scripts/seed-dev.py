@@ -67,6 +67,7 @@ new keys (their rows are deleted directly, then provisioned again through the AP
 from __future__ import annotations
 
 import argparse
+import base64
 import pwd
 import shutil
 import subprocess
@@ -113,6 +114,71 @@ ROOMS = [
 ]
 
 STATE_FILE = "seed-dev-state.json"
+
+# A desktop recording's click keyframe (a mock window, the click ringed in red) and its crop,
+# small JPEGs for the Recordings page's thumbnails (internal/modules/cc/recording_keyframes.go).
+KEYFRAME_JPEG_B64 = (
+    "/9j/2wCEABcQERQRDhcUEhQaGBcbIjklIh8fIkYyNSk5UkhXVVFIUE5bZoNvW2F8Yk5QcptzfIeLkpSSWG2grJ+OqoOPko0B"
+    "GBoaIh4iQyUlQ41eUF6NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Njf/AABEIAMgB"
+    "QAMBIgACEQEDEQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFB"
+    "BhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0"
+    "dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz"
+    "9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIy"
+    "gQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqC"
+    "g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/"
+    "2gAMAwEAAhEDEQA/AMWiiiqEFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRR"
+    "RQAUUUUAFFFFABRRRQAUUUUAFFFFAHQf8Iv/ANPn/kL/AOvR/wAIv/0+f+Qv/r10NFIDnv8AhF/+nz/yF/8AXo/4Rf8A6fP/"
+    "ACF/9euhooA57/hF/wDp8/8AIX/16P8AhF/+nz/yF/8AXroaKAOe/wCEX/6fP/IX/wBej/hF/wDp8/8AIX/166GigDnv+EX/"
+    "AOnz/wAhf/Xo/wCEX/6fP/IX/wBeuhooA57/AIRf/p8/8hf/AF6P+EX/AOnz/wAhf/XroaKAOe/4Rf8A6fP/ACF/9ej/AIRf"
+    "/p8/8hf/AF66GigDnv8AhF/+nz/yF/8AXo/4Rf8A6fP/ACF/9euhooA57/hF/wDp8/8AIX/16P8AhF/+nz/yF/8AXroaKAOe"
+    "/wCEX/6fP/IX/wBej/hF/wDp8/8AIX/166GigDnv+EX/AOnz/wAhf/Xo/wCEX/6fP/IX/wBeuhooA57/AIRf/p8/8hf/AF6P"
+    "+EX/AOnz/wAhf/XroaKAOe/4Rf8A6fP/ACF/9ej/AIRf/p8/8hf/AF66GigDnv8AhF/+nz/yF/8AXo/4Rf8A6fP/ACF/9euh"
+    "ooA57/hF/wDp8/8AIX/16P8AhF/+nz/yF/8AXroaKAOe/wCEX/6fP/IX/wBej/hF/wDp8/8AIX/166GigDnv+EX/AOnz/wAh"
+    "f/Xo/wCEX/6fP/IX/wBeuhooA57/AIRf/p8/8hf/AF6P+EX/AOnz/wAhf/XroaKAOe/4Rf8A6fP/ACF/9ej/AIRf/p8/8hf/"
+    "AF66GigDnv8AhF/+nz/yF/8AXo/4Rf8A6fP/ACF/9euhooAKKKKAKv2v/Y/Wj7X/ALH60fZP9v8ASj7J/t/pTAPtf+x+tH2v"
+    "/Y/Wj7J/t/pR9k/2/wBKAD7X/sfrR9r/ANj9aPsn+3+lH2T/AG/0oAPtf+x+tH2v/Y/Wj7J/t/pR9k/2/wBKAD7X/sfrR9r/"
+    "ANj9aPsn+3+lH2T/AG/0oAPtf+x+tH2v/Y/Wj7J/t/pR9k/2/wBKAD7X/sfrR9r/ANj9aPsn+3+lH2T/AG/0oAPtf+x+tH2v"
+    "/Y/Wj7J/t/pR9k/2/wBKAD7X/sfrR9r/ANj9aPsn+3+lH2T/AG/0oAPtf+x+tH2v/Y/Wj7J/t/pR9k/2/wBKAD7X/sfrR9r/"
+    "ANj9aPsn+3+lH2T/AG/0oAPtf+x+tWqq/ZP9v9KtUgCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAq/a/wDY/Wj7"
+    "X/sfrR9k/wBv9KPsn+3+lMA+1/7H60fa/wDY/Wj7J/t/pR9k/wBv9KAD7X/sfrR9r/2P1o+yf7f6UfZP9v8ASgA+1/7H60fa"
+    "/wDY/Wj7J/t/pR9k/wBv9KAD7X/sfrR9r/2P1o+yf7f6UfZP9v8ASgA+1/7H60fa/wDY/Wj7J/t/pR9k/wBv9KAD7X/sfrR9"
+    "r/2P1o+yf7f6UfZP9v8ASgA+1/7H60fa/wDY/Wj7J/t/pR9k/wBv9KAD7X/sfrR9r/2P1o+yf7f6UfZP9v8ASgA+1/7H61PG"
+    "/mRhsYz2qD7J/t/pU8aeXGFznHekA+iiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigCr9r/2P1o+1/7H"
+    "60fZP9v9KPsn+3+lMA+1/wCx+tH2v/Y/Wj7J/t/pR9k/2/0oAPtf+x+tH2v/AGP1o+yf7f6UfZP9v9KAD7X/ALH60fa/9j9a"
+    "Psn+3+lH2T/b/SgA+1/7H60fa/8AY/Wj7J/t/pR9k/2/0oAPtf8AsfrR9r/2P1o+yf7f6UfZP9v9KAD7X/sfrR9r/wBj9aPs"
+    "n+3+lH2T/b/SgA+1/wCx+tH2v/Y/Wj7J/t/pR9k/2/0oAPtf+x+tH2v/AGP1o+yf7f6UfZP9v9KAD7X/ALH60fa/9j9aPsn+"
+    "3+lH2T/b/SgA+1/7H61PG/mRhsYz2qD7J/t/pU8aeXGFznHekA+iiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKK"
+    "KACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKK"
+    "KACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKK"
+    "KACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKK"
+    "KACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKK"
+    "KACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKK"
+    "KACiiigArA/tG7/56/8Ajo/wrfrlq0grkyZa/tG7/wCev/jo/wAKP7Ru/wDnr/46P8Kq0VdkRdlr+0bv/nr/AOOj/Cj+0bv/"
+    "AJ6/+Oj/AAqrSMcKT7UmktRq7dkWG1a5U483P0Uf4UDV7k9Zcf8AAR/hVWFQEz3NLIoKHPasrSa5tDqfslP2bT7Xv+hc/tG7"
+    "/wCev/jo/wAKP7Ru/wDnr/46P8KpxHMYp1aqzVzmmnGTj2LX9o3f/PX/AMdH+FH9o3f/AD1/8dH+FVaKdkTdlr+0bv8A56/+"
+    "Oj/Ct+uWrqaiasXFhRRRWZQUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAVy1dTVX+z"
+    "rT/nl/48f8auMrEyVzAorf8A7OtP+eX/AI8f8aP7OtP+eX/jx/xqudE8rMCgjII9a3/7OtP+eX/jx/xo/s60/wCeX/jx/wAa"
+    "OdDUWjm1Yx/Kw47UNJvG1Aea6T+zrT/nl/48f8aT+zbT/nl/48f8ay1ta+h0+0i3zuOvrp9xgIu1QKWt/wDs60/55f8Ajx/x"
+    "o/s60/55f+PH/GtFJJWOdpyd2YFFb/8AZ1p/zy/8eP8AjR/Z1p/zy/8AHj/jT50TyswK6mqv9nWn/PL/AMeP+NWqmUrlRVgo"
+    "ooqCgooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAC"
+    "iiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAC"
+    "iiigAooooAKKKKACiiigAooooA//2Q=="
+)
+KEYFRAME_CROP_JPEG_B64 = (
+    "/9j/2wCEABcQERQRDhcUEhQaGBcbIjklIh8fIkYyNSk5UkhXVVFIUE5bZoNvW2F8Yk5QcptzfIeLkpSSWG2grJ+OqoOPko0B"
+    "GBoaIh4iQyUlQ41eUF6NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2Njf/AABEIAEAA"
+    "QAMBIgACEQEDEQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFB"
+    "BhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0"
+    "dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz"
+    "9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIy"
+    "gQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqC"
+    "g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/"
+    "2gAMAwEAAhEDEQA/AOnooopiCiiigAooooAKKKKAMr+2f+mH/j//ANaj+2f+mH/j/wD9asuituVGfMzU/tn/AKYf+P8A/wBa"
+    "g60B1hA/4H/9assnAJ9KiRN43PzmokrOyRrTinFyk7JGwNbB6Qg/8D/+tS/2z/0w/wDH/wD61Y7xgLleCOaeh3ICaIrWzQ5x"
+    "XLzwehq/2z/0w/8AH/8A61H9s/8ATD/x/wD+tWXRV8qMeZhRWp/Y3/Tf/wAc/wDr0f2N/wBN/wDxz/69HMg5WZTDKketMicB"
+    "dp4I9a2P7G/6b/8Ajn/16RtDVjzN/wCOf/XqJPW6NqbXK4TWhkyOoUgHJPpSxjagB61qDQ1XpNz/ALn/ANenf2N/03/8c/8A"
+    "r0ovXmkE3Hk5IGXRWp/Y3/Tf/wAc/wDr0f2N/wBN/wDxz/69acyMeVmrRRRWJoFFFFABRRRQAUUUUAf/2Q=="
+)
 
 # Seed markers: what --reset and every rerun delete. Specific enough that nothing unseeded
 # can match, and deliberately not scoped by household (an earlier run against another
@@ -727,6 +793,13 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
     recordings = [
         ("rec_5eed000000000001", "browser", bank_trace, "this is how I get the bank statement", 3, 2),
         ("rec_5eed000000000002", "browser", bank_trace[:3], "", 0, 9),
+        ("rec_5eed000000000003", "desktop", [
+            {"seq": 1, "kind": "click", "app": "gnome-calculator", "window": {"title": "Calculator"},
+             "element": {"role": "button", "name": "Equals"}, "keyframe_point": {"x": 248, "y": 158}},
+            {"seq": 2, "kind": "key", "key": "ctrl+c", "app": "gnome-calculator", "window": {"title": "Calculator"}},
+            {"seq": 3, "kind": "click", "app": "gedit", "window": {"title": "notes.txt"},
+             "element": {"role": "button", "name": "Paste"}},
+        ], "", 2, 12),
     ]
     n = 0
     for rid, mode, trace, narration, keyframes, age in recordings:
@@ -737,6 +810,14 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
                         (rid, household_id, primary, node_id, mode, json.dumps(trace), narration, keyframes,
                          ts(made), ts(made + timedelta(days=30)))).rowcount
     counts["recordings"] = n
+    # Its keyframes, in jarvisd's blob store (its default, <home>/blobs; blob.FS's format: a JSON
+    # header line, then the bytes): seq 1's with its crop, seq 3's without.
+    blobs = os.path.join(os.path.dirname(db_path), "blobs", "recordings", "rec_5eed000000000003")
+    os.makedirs(blobs, mode=0o700, exist_ok=True)
+    for name, b64 in (("1.jpg", KEYFRAME_JPEG_B64), ("1.crop.jpg", KEYFRAME_CROP_JPEG_B64),
+                      ("3.jpg", KEYFRAME_JPEG_B64)):
+        with open(os.path.join(blobs, name), "wb") as f:
+            f.write(b'{"content_type":"image/jpeg"}\n' + base64.b64decode(b64))
 
     # Inbox: one item per screen the mobile app opens one with (jarvis-node-mobile
     # InboxListScreen routeForCategory), the primary's, for its Inbox flows. scripts/e2e passes

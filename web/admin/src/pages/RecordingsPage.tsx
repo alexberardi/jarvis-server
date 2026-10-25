@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Trash2, Video, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
 import { getHouseholdSettings, putHouseholdSetting } from '@/api/household'
-import { RETENTION_KEY, deleteRecording } from '@/api/workflows'
-import type { Recording } from '@/api/workflows'
-import { Button, Card, EmptyState, ErrorState, Input, List, PageHeader, Skeleton, SkeletonList } from '@/components/ui'
+import { RETENTION_KEY, deleteRecording, getRecordingKeyframe } from '@/api/workflows'
+import type { Recording, TraceEvent } from '@/api/workflows'
+import { Button, Card, Dialog, EmptyState, ErrorState, Input, List, PageHeader, Skeleton, SkeletonList } from '@/components/ui'
 import CrossLink from '@/components/workflows/CrossLink'
 import Sentence from '@/components/workflows/Sentence'
 import { useAuth } from '@/hooks/useAuth'
@@ -125,6 +125,7 @@ export default function RecordingsPage() {
 function RecordingView({ id, summary }: { id: string; summary: Recording }) {
   const rec = useRecording(id)
   const events = foldTrace(traceEvents(rec.data?.trace))
+  const stored = new Map((rec.data?.keyframe_images ?? []).map((k) => [k.seq, k.crop]))
   return (
     <div id={`rec-${id}`} className="mt-3 space-y-2 pl-6">
       {rec.isError ? (
@@ -143,6 +144,10 @@ function RecordingView({ id, summary }: { id: string; summary: Recording }) {
               {events.map((e, i) => (
                 <li key={i}>
                   <Sentence parts={eventSentence(e)} />
+                  <Where e={e} />
+                  {e.seq !== undefined && stored.has(e.seq) && (
+                    <Keyframe id={id} seq={e.seq} crop={!!stored.get(e.seq)} step={i + 1} />
+                  )}
                 </li>
               ))}
             </ol>
@@ -156,12 +161,74 @@ function RecordingView({ id, summary }: { id: string; summary: Recording }) {
           )}
           {summary.keyframes > 0 && (
             <p className="text-caption text-text-muted">
-              {summary.keyframes} {summary.keyframes === 1 ? 'keyframe' : 'keyframes'}, kept only on the computer that recorded it.
+              {summary.keyframes} {summary.keyframes === 1 ? 'keyframe' : 'keyframes'}, {stored.size} kept on the server.
             </p>
           )}
         </>
       )}
     </div>
+  )
+}
+
+/** Where is the app and window a desktop event happened in ("in Firefox — Statements"). */
+function Where({ e }: { e: TraceEvent }) {
+  const where = [e.app, e.window?.title].filter(Boolean).join(' — ')
+  return where ? <span className="block text-small text-text-muted">in {where}</span> : null
+}
+
+/** useKeyframeURL downloads a keyframe (or its crop) once wanted, as an object URL. */
+function useKeyframeURL(id: string, seq: number, crop: boolean, wanted = true) {
+  const [url, setURL] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (!wanted) return
+    let live = true
+    let made: string | null = null
+    getRecordingKeyframe(id, seq, crop)
+      .then((blob) => {
+        if (!live) return
+        made = URL.createObjectURL(blob)
+        setURL(made)
+      })
+      .catch(() => live && setFailed(true))
+    return () => {
+      live = false
+      if (made) URL.revokeObjectURL(made)
+    }
+  }, [id, seq, crop, wanted])
+  return { url, failed }
+}
+
+/** Keyframe is a click's stored keyframe: its crop as a thumbnail, the whole marked screen on click. */
+function Keyframe({ id, seq, crop, step }: { id: string; seq: number; crop: boolean; step: number }) {
+  const [open, setOpen] = useState(false)
+  const thumb = useKeyframeURL(id, seq, crop)
+  // Without a crop the thumbnail is the whole keyframe already.
+  const big = useKeyframeURL(id, seq, false, open && crop)
+  const full = crop ? big : thumb
+  if (thumb.failed) return <span className="block text-small text-text-muted">Couldn't load its keyframe.</span>
+  if (!thumb.url) return <Skeleton className="mt-1 h-20 w-20" />
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1 block rounded-control border border-border"
+      >
+        <img src={thumb.url} alt={`Where you clicked in step ${step}: show the whole screen`} className="h-20 w-auto rounded-control" />
+      </button>
+      <Dialog open={open} onClose={() => setOpen(false)} title={`Step ${step}`} className="md:max-w-4xl">
+        {full.failed ? (
+          <p role="alert" className="text-small text-danger">
+            Couldn't load the keyframe.
+          </p>
+        ) : full.url ? (
+          <img src={full.url} alt={`The screen in step ${step}, the click marked`} className="h-auto max-w-full" />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        )}
+      </Dialog>
+    </>
   )
 }
 
