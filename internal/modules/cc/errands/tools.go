@@ -3,6 +3,7 @@ package errands
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -46,6 +47,12 @@ type RunErrandTool struct {
 	NeedsComputer func(goal string) bool
 }
 
+// cutOffRE is a goal STT clipped mid-sentence: a trailing ellipsis, or one ending on a word
+// that can't end a request ("start the…" became an errand plan pushed to the phone).
+var cutOffRE = regexp.MustCompile(`(?i)(\.\.\.|…|\b(the|a|an|to|and|or|of|for|with|my|on|in|at))\W*$`)
+
+func cutOffGoal(goal string) bool { return cutOffRE.MatchString(goal) }
+
 // computerAck is run_errand's ack for a computer errand. It is said before the plan exists, so
 // it is true either way: a browser-only plan runs without a plan card, one that mixes in other
 // commands or a desktop task still posts one.
@@ -60,6 +67,9 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	goal := parse.PyStrip(call.Str("goal"))
 	if goal == "" {
 		return errObj("missing_goal", "I need to know what the errand should do."), nil
+	}
+	if cutOffGoal(goal) {
+		return errObj("unclear_goal", "That sounded cut off — what should I do?"), nil
 	}
 	if turn.ConversationID == "" {
 		return errObj("no_conversation", "No conversation context available"), nil
