@@ -164,3 +164,19 @@ func TestWhatWasSaidFillsAnOmittedWindow(t *testing.T) {
 		t.Fatalf("named: %s", got)
 	}
 }
+
+// Q9: an ambiguous name puts the candidates on the island, numbered, as a choice.
+func TestAmbiguousNameListsChoicesOnTheIsland(t *testing.T) {
+	var shown []string
+	ws := []host.Window{{ID: "1", Title: "build", App: "Terminal"}, {ID: "2", Title: "logs", App: "Terminal"}}
+	ts := New(host.New(&fakeBackend{caps: hypr, windows: ws}), OpenPolicy{}, catalogue)
+	ts.Show = func(text string, _ time.Duration) { shown = append(shown, text) }
+	out := call(t, ts, ToolWindow, map[string]any{"action": "focus", "window": "terminal"})
+	if out[node.ChoiceKey] != true || out[node.IslandOnlyKey] != true || out["error_code"] != "ambiguous_window" {
+		t.Fatalf("%v", out)
+	}
+	if text, _ := out[node.IslandKey].(string); !strings.HasPrefix(text, "Which one?  1. ") || !strings.Contains(text, "2. ") ||
+		len(shown) != 1 || shown[0] != text {
+		t.Fatalf("island %q, shown %q", text, shown)
+	}
+}
