@@ -14,6 +14,10 @@ prompt cap is re-checked with L2's measurement.
 
 ## North star
 
+**Deprecate the mouse altogether** (user, 2026-10-25): this spec covers the single actions;
+multi-step work said once ("write my resume, ask me questions along the way") is
+[VOICE-FLOWS.md](VOICE-FLOWS.md).
+
 A user can realistically **talk to Jarvis instead of using their mouse**. Every routine
 pointer action on the desktop (switch window, arrange windows, scroll, pick a tab, press a
 button, choose a menu item) has a spoken path that is fast and dependable enough to be the
