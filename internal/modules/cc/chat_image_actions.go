@@ -43,7 +43,7 @@ type keptPhotos struct {
 func (c *conversation) keepPhotos(msgs []chatMsg) {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		mm := msgs[i]
-		if len(mm.images) == 0 || mm.Role != "user" {
+		if len(mm.images) == 0 || mm.Role != "user" || mm.fromTool {
 			continue
 		}
 		if c.photos != nil && c.photos.msgID >= mm.id {

@@ -484,8 +484,8 @@ use it. Code: `tool_images.go`.
   routes and the result sink take bodies up to `chatBodyMax`.
 - **To the model:** `image_url` parts on that tool message (the text path, which drops tool
   messages, puts them on its formatting prompt). The output text keeps each label +
-  "(shown to you with this result; not kept after this turn)".
-- **Lifetime:** that turn only. `conversation.commit` drops images from tool messages; they are
-  never kept as photos for tools (CI8 is for user photos). No description job: the answer the
-  model gave is the record.
+  "(shown to you with this result; later turns keep a short description)".
+- **Lifetime:** until the description job (CI5) replaces them with `[image N: …]` text, queued
+  by `afterTurn` once the turn ends (#576: "what colours was it?" needs more than the answer the
+  model gave). They are never kept as photos for tools (CI8 is for user photos; `fromTool`).
 - **No vision on live:** local OCR text (`image_text`, `image_note`) instead; no OCR → a note.

@@ -46,6 +46,9 @@ type chatMsg struct {
 	// image_url parts until the description job replaces them with text (tools keep the bytes
 	// through conversation.photos). Memory only: never written to disk, traces or logs.
 	images []chatImage
+	// fromTool marks images from a tool result (a screenshot, tool_images.go): described after
+	// the turn (afterTurn), never kept as a chat photo.
+	fromTool bool
 	// summary marks the compaction summary message (compaction.go).
 	summary bool
 }
@@ -210,7 +213,6 @@ func (c *conversation) commit(msgs []chatMsg) {
 			msgs[i].id = c.nextMsgID
 		}
 	}
-	dropToolImages(msgs) // a tool result's image is for the turn that asked for it (tool_images.go)
 	c.messages = msgs
 	c.keepPhotos(msgs)
 }

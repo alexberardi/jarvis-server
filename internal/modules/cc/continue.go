@@ -76,7 +76,7 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 	}
 	msgs = withoutRole(m.visionGuard(ctx, msgs), "tool")
 	msgs = append(msgs, chatMsg{Role: "user", Content: tf.TextModeFormatPrompt(question, tctx, tf.IsKnowledgeDelegation(tctx)),
-		images: resultImages(results)})
+		images: resultImages(results), fromTool: true})
 
 	maxTok := 256
 	temp := 0.7
@@ -355,7 +355,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 		tctx := tf.ToolResultsContext(resultOutputs(results))
 		msgs = withoutRole(msgs, "tool")
 		msgs = append(msgs, chatMsg{Role: "user", Content: tf.ContinueToolResultsMessage(tctx, tf.IsKnowledgeDelegation(tctx)),
-			images: resultImages(results)})
+			images: resultImages(results), fromTool: true})
 		plan.llmMsgs = append(append(cloneMsgs(msgs), sysMsg(continueStreamOverride)), failedNote(results)...)
 	}
 	plan.commit = msgs
