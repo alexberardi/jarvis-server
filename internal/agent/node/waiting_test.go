@@ -1,6 +1,7 @@
 package node
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -62,7 +63,14 @@ func TestRunSaysItIsWaitingAndRetriesWhenAsked(t *testing.T) {
 	// Nothing listens here, so every try fails: all this test watches is the waiting itself.
 	const url = "http://127.0.0.1:9"
 	r := &Runner{Creds: Creds{ConfigURL: url, NodeID: "n1", NodeKey: "k"}, Tools: Multi{}, Log: quiet, Heartbeat: time.Hour}
-	r.backoffFor = func(int) time.Duration { return time.Hour } // only RetryNow can wake it
+	var mu sync.Mutex
+	var asked []int // the try number each wait was computed for
+	r.backoffFor = func(n int) time.Duration {
+		mu.Lock()
+		asked = append(asked, n)
+		mu.Unlock()
+		return time.Hour // only RetryNow can wake it
+	}
 	type waited struct {
 		url  string
 		err  error
@@ -93,6 +101,14 @@ func TestRunSaysItIsWaitingAndRetriesWhenAsked(t *testing.T) {
 	// Without RetryNow the next try would be an hour away; it comes at once.
 	r.RetryNow()
 	next("RetryNow didn't make Run try the server again")
+	// And the schedule starts over, so the try after a "Retry now" that fails waits a second
+	// again rather than carrying on where the backoff had got to.
+	mu.Lock()
+	got := append([]int(nil), asked...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != 1 || got[1] != 1 {
+		t.Errorf("waits computed for tries %v, want [1 1]: RetryNow didn't restart the schedule", got)
+	}
 	cancel()
 	<-done
 }
