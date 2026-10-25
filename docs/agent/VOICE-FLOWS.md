@@ -28,6 +28,14 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   attended (C9: pauses when you touch the mouse or keyboard). Tasks started from elsewhere (the
   phone, a Pi, a schedule), or with nobody at the computer, keep the phone path.
 
+- **2026-10-25: a running task asks you by voice, and you answer by voice** (Q14). On the
+  computer you're at, Jarvis speaks the question and shows it on the island, then listens
+  without the wake word for the answer: about 20 s, since real answers ("senior engineer, 2019
+  to 2023") run longer than a pick from a list. The answer resumes the task. With no answer in
+  time the task waits and the question also goes to the phone as a card, so nothing is lost.
+  Confirmations ("Send this email to James?") work the same way: a spoken yes or no. This closes
+  G1 for the computer you're at.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -48,9 +56,8 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q14 — questions mid-task by voice:** how a running task asks you something, and how you answer.
-2. **Q15 — routing:** how a request becomes a task rather than single actions.
-3. **Q16 — drafting long text:** draft-then-review, and where you see the draft.
-4. **Q17 — files by name:** which folders, which kinds, and what "open X" may open.
-5. **Q18 — contacts and email:** where "James" comes from, and how mail is sent.
-6. **Q19 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q15 — routing:** how a request becomes a task rather than single actions.
+2. **Q16 — drafting long text:** draft-then-review, and where you see the draft.
+3. **Q17 — files by name:** which folders, which kinds, and what "open X" may open.
+4. **Q18 — contacts and email:** where "James" comes from, and how mail is sent.
+5. **Q19 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
