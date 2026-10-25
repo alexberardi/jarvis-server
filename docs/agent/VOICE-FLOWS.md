@@ -58,6 +58,11 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   once also means nobody tries to steer a half-typed draft mid-fill. Settles G6's output and
   newline limits for drafts.
 
+- **2026-10-25: after a draft lands, Jarvis asks "anything to change?" and listens** (Q18). A
+  one-line summary ("Your resume's in: two pages, four roles. Anything to change?"), then about
+  20 s without the wake word, as in Q14. A change ("make the summary shorter") continues the same
+  task with the draft in context; "looks good" or silence ends it.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -78,7 +83,7 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q18 — revising a draft:** changing it by voice ("make the summary shorter").
-2. **Q19 — files by name:** which folders, which kinds, and what "open X" may open.
-3. **Q20 — contacts and email:** where "James" comes from, and how mail is sent.
-4. **Q21 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q19 — applying a change:** redraft and replace the whole piece, or edit only the part named.
+2. **Q20 — files by name:** which folders, which kinds, and what "open X" may open.
+3. **Q21 — contacts and email:** where "James" comes from, and how mail is sent.
+4. **Q22 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
