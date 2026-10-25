@@ -80,6 +80,12 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   code; apps still launch by name ("open Firefox"). The list is a node setting the user may
   extend with any extension, programs included: their install, their call.
 
+- **2026-10-25: email goes through your own mail app on screen** (Q22). The task opens what you
+  already use (Thunderbird, Outlook, Gmail in the browser), pastes the draft into a new message
+  (Q17), revises it there (Q18) and sends only on a spoken yes (Q14). Jarvis stores no mail
+  credentials and needs no mail API; you see exactly what goes out. A direct connection (SMTP,
+  Gmail/Graph API) is not built.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -100,5 +106,5 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q22 — contacts and email:** where "James" comes from, and how mail is sent.
-2. **Q23 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q23 — recipients:** where "James" comes from, and what happens with two Jameses.
+2. **Q24 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
