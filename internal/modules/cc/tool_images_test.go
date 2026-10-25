@@ -190,6 +190,12 @@ func TestToolResultImageWithoutVisionIsOCRText(t *testing.T) {
 	if !strings.Contains(text, `"image_text": "error: build failed at line 12"`) || !strings.Contains(text, "can't see images") {
 		t.Fatalf("tool text %s", text)
 	}
+	// History keeps the OCR text for a follow-up (#576).
+	ve.eng.say("Line 12.")
+	ve.turn("/api/v0/voice/command", "c2", "which line was it", map[string]any{"turn_source": "follow_up", "follow_up_iteration": 1}).want(200)
+	if _, text, _ := toolImageParts(ve.eng.last(), "call_s1"); !strings.Contains(text, `"image_text": "error: build failed at line 12"`) {
+		t.Fatalf("next turn tool text %s", text)
+	}
 	// No OCR either: the model is told, so it can tell the user.
 	ve2 := newVoiceEnv(t, prompts.Qwen3_5_9B)
 	ve2.eng.setVision(llm.LabelLive, false)
