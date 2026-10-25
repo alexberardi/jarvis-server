@@ -46,9 +46,10 @@ type streamOptions struct {
 // otherwise the chat template's enable_thinking kwarg (the only control Qwen3.5 honours) is
 // set, and reasoning_budget is forwarded for servers that read it (not to one that refuses it,
 // ep.NoReasoningBudget). N>0 is also sent as reasoning_budget_tokens, which llama-server
-// enforces by closing the thinking block after N tokens.
+// enforces by closing the thinking block after N tokens. A remote gets none of these: they are
+// llama-server's, and OpenAI answers 400 to an unknown parameter.
 func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
-	if budget == nil {
+	if budget == nil || ep.Remote {
 		return
 	}
 	p.ChatTemplateKwargs = map[string]bool{"enable_thinking": *budget != 0}

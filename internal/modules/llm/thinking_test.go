@@ -51,3 +51,19 @@ func TestPayloadReasoningBudgetTokens(t *testing.T) {
 		}
 	}
 }
+
+// A remote (OpenAI and its kin) refuses llama-server's thinking fields: "Unknown parameter:
+// 'chat_template_kwargs'".
+func TestPayloadRemoteSendsNoThinkingFields(t *testing.T) {
+	s := NewService(ServiceConfig{Log: quietLog()})
+	for _, budget := range []int{0, -1, 256} {
+		req := &ChatRequest{Messages: []Message{msg("user", "hi")}, ReasoningBudget: ptr(budget)}
+		b, err := json.Marshal(s.payload(context.Background(), Endpoint{Model: "gpt", Remote: true}, LabelLive, req, req.Messages, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "chat_template_kwargs") || strings.Contains(string(b), "reasoning_budget") {
+			t.Errorf("budget %d: %s", budget, b)
+		}
+	}
+}
