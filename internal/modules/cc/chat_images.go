@@ -44,7 +44,7 @@ const (
 // describeImagePrompt asks for the short factual description that replaces an image in
 // history (CI3).
 const describeImagePrompt = "Describe this image in one to three short, factual sentences for a conversation " +
-	"history: what it shows, any readable text (verbatim, briefly), names, dates, numbers and quantities. " +
+	"history: what it shows, its main colours, any readable text (verbatim, briefly), names, dates, numbers and quantities. " +
 	"No preamble, no speculation."
 
 // chatImage is one attached image as the data URL the live slot gets.

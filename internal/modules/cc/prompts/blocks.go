@@ -123,7 +123,9 @@ func AmbientBlock(ambient string) string {
 		"calculation, a joke, a web search, a general question — IGNORE this block entirely; " +
 		"do NOT mention the weather or their schedule. When an item genuinely is relevant, " +
 		"weave it into one natural line; if it's actionable (a due reminder, a refill), OFFER " +
-		"to take care of it. Never invent details that aren't listed here:\n" +
+		"to take care of it. A short follow-up with no subject of its own (\"what about now?\", " +
+		"\"and now?\") is about your previous request: do that again (call the same tool), " +
+		"never answer it from this block. Never invent details that aren't listed here:\n" +
 		ambient + "\n" +
 		"</ambient_context>"
 }

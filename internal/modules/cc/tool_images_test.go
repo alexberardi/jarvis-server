@@ -62,10 +62,11 @@ func readScreenTurn(t *testing.T, ve *voiceEnv, cid string) {
 	}
 }
 
-func TestToolResultImageReachesTheModelForThatTurnOnly(t *testing.T) {
+func TestToolResultImageReachesTheModelThenItsDescription(t *testing.T) {
 	var logBuf safeBuffer
 	withEnvExtra(t, envExtra{log: &logBuf})
-	ve := newVoiceEnv(t, prompts.Qwen3_5_9B)
+	jl := &jobLog{}
+	ve := newVoiceEnv(t, prompts.Qwen3_5_9B, func(m *Module) { m.convJobHook = jl.hook })
 	ve.eng.setVision(llm.LabelLive, true)
 	readScreenTurn(t, ve, "c1")
 	// A real screenshot is bigger than the usual 1 MiB body cap.
@@ -87,19 +88,27 @@ func TestToolResultImageReachesTheModelForThatTurnOnly(t *testing.T) {
 	if strings.Contains(text, "base64") || !strings.Contains(text, `screenshot of the window \"build.log\"`+toolImageNote) {
 		t.Fatalf("tool text %s", text)
 	}
-	// After the turn, history keeps the label, not the image.
+	// After the turn the describe job swaps the screenshot for a description in the tool
+	// message (#576): a follow-up ("what colours was it?") has something to answer from.
 	conv := ve.m.convs.get("c1")
-	for _, m := range conv.messages {
-		if len(m.images) > 0 {
-			t.Fatalf("an image outlived its turn in %s message %q", m.Role, m.Content)
-		}
-	}
 	if conv.photos != nil {
 		t.Fatal("a screenshot was kept as a chat photo")
 	}
-	ve.eng.say("You're welcome.")
-	ve.turn("/api/v0/voice/command", "c1", "thanks", map[string]any{"turn_source": "follow_up", "follow_up_iteration": 1}).want(200)
-	if parts, text, found := toolImageParts(ve.eng.last(), "call_s1"); !found || len(parts) != 0 || !strings.Contains(text, "build.log") {
+	js := jl.of(chatDescribeJob)
+	if len(js) != 1 {
+		t.Fatalf("describe jobs %v", js)
+	}
+	ve.eng.say("A build log in a dark terminal, red error text on line 12.")
+	ve.m.describeImages(context.Background(), js[0])
+	for _, m := range conv.messages {
+		if len(m.images) > 0 {
+			t.Fatalf("an image outlived its description in %s message %q", m.Role, m.Content)
+		}
+	}
+	ve.eng.say("Red.")
+	ve.turn("/api/v0/voice/command", "c1", "what colour was the error", map[string]any{"turn_source": "follow_up", "follow_up_iteration": 1}).want(200)
+	if parts, text, found := toolImageParts(ve.eng.last(), "call_s1"); !found || len(parts) != 0 ||
+		!strings.Contains(text, "[image 1: A build log in a dark terminal, red error text") || !strings.Contains(text, "build.log") {
 		t.Fatalf("next turn: found %v, %d image parts, text %s", found, len(parts), text)
 	}
 	b64 := base64.StdEncoding.EncodeToString(shot)
@@ -110,6 +119,41 @@ func TestToolResultImageReachesTheModelForThatTurnOnly(t *testing.T) {
 		if s, _ := json.Marshal(tr); bytes.Contains(s, []byte(b64[:200])) {
 			t.Fatal("a transcript holds the screenshot")
 		}
+	}
+}
+
+// The text path drops role=tool; the screenshot rides on its formatting message, and the
+// description replaces it there (not kept as a chat photo).
+func TestToolResultImageTextPathIsDescribed(t *testing.T) {
+	jl := &jobLog{}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.convJobHook = jl.hook })
+	ve.eng.setVision(llm.LabelLive, true)
+	ve.start("t1", screenTool)
+	ve.eng.say(`<tool_call>{"name": "desktop_read_screen", "arguments": {"scope": "window"}}</tool_call>`)
+	r := ve.turn("/api/v0/voice/command", "t1", "take a screenshot of the docs", nil).want(200).json()
+	id := r["tool_calls"].([]any)[0].(map[string]any)["id"].(string)
+	ve.eng.say("It's the Jarvis docs home page.")
+	ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "t1",
+		"tool_results": []any{screenshotResult(id, jpegBytes)}}, ve.node.h()).want(200)
+	conv := ve.m.convs.get("t1")
+	if conv.photos != nil {
+		t.Fatal("a screenshot was kept as a chat photo")
+	}
+	js := jl.of(chatDescribeJob)
+	if len(js) != 1 {
+		t.Fatalf("describe jobs %v", js)
+	}
+	ve.eng.say("A docs page with a navy header and orange links.")
+	ve.m.describeImages(context.Background(), js[0])
+	found := false
+	for _, m := range conv.messages {
+		if len(m.images) > 0 {
+			t.Fatalf("an image outlived its description in %s message %q", m.Role, m.Content)
+		}
+		found = found || strings.Contains(m.Content, "[image 1: A docs page with a navy header and orange links.]")
+	}
+	if !found {
+		t.Fatalf("no description in history %v", conv.messages)
 	}
 }
 
@@ -242,8 +286,7 @@ func servertools0() *pyjson.Object {
 // TestChatToolResultImageReachesTheModel: a mobile chat turn whose node tool (over MQTT) attaches
 // a screenshot shows it to the model; the generic redaction doesn't eat it.
 func TestChatToolResultImageReachesTheModel(t *testing.T) {
-	ce := newChatEnv(t, prompts.Qwen3_5_9B)
-	ce.eng.setVision(llm.LabelLive, true)
+	ce, jl := newImageChatEnv(t, prompts.Qwen3_5_9B)
 	ce.pub.tools = `{"client_tools": ` + screenTool + `, "available_commands": [], "installed_packages": []}`
 	res, _ := json.Marshal(map[string]any{"output": screenshotResult("x", jpegBytes)["output"]})
 	ce.pub.toolReply = string(res)
@@ -259,9 +302,9 @@ func TestChatToolResultImageReachesTheModel(t *testing.T) {
 	if !found || len(parts) != 1 || strings.Contains(text, "[image]\"") {
 		t.Fatalf("chat: found %v, %d image parts, text %s", found, len(parts), text)
 	}
-	for _, m := range ce.m.convs.get(cid).messages {
-		if m.Role == "tool" && len(m.images) > 0 {
-			t.Fatal("the screenshot outlived the chat turn")
-		}
+	js := jl.of(chatDescribeJob)
+	conv := ce.m.convs.get(cid)
+	if len(js) != 1 || conv.messages[findMsg(conv.messages, js[0].MessageID)].Role != "tool" {
+		t.Fatalf("the chat screenshot must be described: jobs %v", js)
 	}
 }
