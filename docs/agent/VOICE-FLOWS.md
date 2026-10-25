@@ -73,6 +73,13 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   (OneDrive, Dropbox, iCloud Drive); never app data, config or code trees. The folder list is
   configurable in the node's settings, to add or remove folders.
 
+- **2026-10-25: "open X" opens files whose extension is on an allow list you can extend**
+  (Q21). The default list is documents and media: office files (Word, Excel, PowerPoint,
+  LibreOffice), PDF, text, Markdown, CSV, images, audio and video, each opened in its default
+  app. Programs, scripts, installers and shortcuts are not on it, so a misheard name can't run
+  code; apps still launch by name ("open Firefox"). The list is a node setting the user may
+  extend with any extension, programs included: their install, their call.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -93,6 +100,5 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q21 — file kinds:** which kinds of files "open X" may find and open.
-2. **Q22 — contacts and email:** where "James" comes from, and how mail is sent.
-3. **Q23 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q22 — contacts and email:** where "James" comes from, and how mail is sent.
+2. **Q23 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
