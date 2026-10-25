@@ -72,6 +72,10 @@ type fakeWin32 struct {
 	volume  float32
 	windows map[uintptr]Window
 	calls   []string
+	zoomed  bool
+	iconic  bool
+	areas   []Rect // nil: two side-by-side monitors
+	rect    Rect   // the window's rect; zero: 800x600 at 100,100
 }
 
 func (f *fakeWin32) rec(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
@@ -113,6 +117,36 @@ func (f *fakeWin32) PostClose(h uintptr) error {
 	return nil
 }
 func (f *fakeWin32) ShellOpen(t string) error { f.rec("shellopen " + t); return nil }
+func (f *fakeWin32) Maximize(h uintptr) error {
+	f.rec(fmt.Sprintf("maximize %d", h))
+	f.zoomed = true
+	return nil
+}
+func (f *fakeWin32) Restore(h uintptr) error {
+	f.rec(fmt.Sprintf("restore %d", h))
+	f.zoomed, f.iconic = false, false
+	return nil
+}
+func (f *fakeWin32) IsZoomed(uintptr) bool { return f.zoomed }
+func (f *fakeWin32) IsIconic(uintptr) bool { return f.iconic }
+func (f *fakeWin32) WorkAreas() ([]Rect, error) {
+	if f.areas == nil {
+		// Two 1920x1080 monitors side by side, a 40 px taskbar on each.
+		return []Rect{{0, 0, 1920, 1040}, {1920, 0, 3840, 1040}}, nil
+	}
+	return f.areas, nil
+}
+func (f *fakeWin32) WindowRect(uintptr) (Rect, error) {
+	if f.rect == (Rect{}) {
+		return Rect{100, 100, 900, 700}, nil
+	}
+	return f.rect, nil
+}
+func (f *fakeWin32) SetRect(h uintptr, r Rect) error {
+	f.rec(fmt.Sprintf("setrect %d %d,%d %dx%d", h, r.L, r.T, r.w(), r.h()))
+	f.rect = r
+	return nil
+}
 
 func (f *fakeWin32) allCommands() string {
 	f.mu.Lock()

@@ -73,7 +73,7 @@ var subjects = []subject{
 		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }, arranging},
 	{"windows", "windows", winWinID,
 		func() (Backend, recorder) { w := winFull(); return NewWindows(w), w },
-		func() (Backend, recorder) { w := winEmpty(); return NewWindows(w), w }, arranging},
+		func() (Backend, recorder) { w := winEmpty(); return NewWindows(w), w }, []string{CapWindowsFullscreen, CapWindowsWorkspace}},
 }
 
 func forEach(t *testing.T, f func(t *testing.T, s subject)) {
