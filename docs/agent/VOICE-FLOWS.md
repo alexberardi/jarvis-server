@@ -68,6 +68,11 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   included), revises it changing only what you named, and pastes it back over. One step that
   works in any app; editing just the named passage in place is left for later.
 
+- **2026-10-25: files are found in your usual folders, and the list is a setting** (Q20). By
+  default Jarvis searches Documents, Desktop and Downloads plus synced folders in your home
+  (OneDrive, Dropbox, iCloud Drive); never app data, config or code trees. The folder list is
+  configurable in the node's settings, to add or remove folders.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -88,6 +93,6 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q20 — files by name:** which folders, which kinds, and what "open X" may open.
-2. **Q21 — contacts and email:** where "James" comes from, and how mail is sent.
-3. **Q22 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q21 — file kinds:** which kinds of files "open X" may find and open.
+2. **Q22 — contacts and email:** where "James" comes from, and how mail is sent.
+3. **Q23 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
