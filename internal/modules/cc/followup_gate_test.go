@@ -242,6 +242,10 @@ func TestFollowUpDoubleCheckIsHonestAboutTheWindow(t *testing.T) {
 		!strings.Contains(check, "NO wake word") {
 		t.Fatalf("follow-up double-check %q", check)
 	}
+	// The re-check thinks, but capped: llama-server enforces reasoning_budget_tokens.
+	if b, _ := reqs[1]["reasoning_budget_tokens"].(float64); b != doubleCheckThinkBudget {
+		t.Fatalf("double-check reasoning_budget_tokens %v, want %d", reqs[1]["reasoning_budget_tokens"], doubleCheckThinkBudget)
+	}
 }
 
 // A follow-up nobody was asked for reaches the model framed as speech the open mic heard;

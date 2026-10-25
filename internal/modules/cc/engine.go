@@ -41,7 +41,10 @@ const (
 const (
 	iterMaxTokens        = 256
 	doubleCheckMaxTokens = 1536
-	loopTemperature      = 0.4
+	// doubleCheckThinkBudget caps the re-check's thinking: uncapped, Gemma 4 thought for up
+	// to 16 s (1536 tokens, no answer) where Qwen 3.5 used ~200 tokens.
+	doubleCheckThinkBudget = 256
+	loopTemperature        = 0.4
 )
 
 // validationRequest is request_validation's payload.
@@ -193,7 +196,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		req := llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(msgs), MaxTokens: &maxTok, Temperature: &temp,
 			ReasoningBudget: budget}
 		if doubleChecked && maxTok == doubleCheckMaxTokens {
-			b := -1 // the double-check pass ends in /think: let it reason
+			b := doubleCheckThinkBudget // the double-check pass ends in /think: let it reason, briefly
 			req.ReasoningBudget = &b
 		}
 		if native {

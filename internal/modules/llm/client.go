@@ -33,6 +33,9 @@ type chatPayload struct {
 	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
 	ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs,omitempty"`
 	ReasoningBudget    *int            `json:"reasoning_budget,omitempty"`
+	// ReasoningBudgetTokens is llama-server's own name for a capped budget (N>0); it ignores
+	// reasoning_budget.
+	ReasoningBudgetTokens *int `json:"reasoning_budget_tokens,omitempty"`
 }
 
 type streamOptions struct {
@@ -42,7 +45,8 @@ type streamOptions struct {
 // applyThinking is _apply_reasoning: a nil budget leaves the server's launch flags in charge;
 // otherwise the chat template's enable_thinking kwarg (the only control Qwen3.5 honours) is
 // set, and reasoning_budget is forwarded for servers that read it (not to one that refuses it,
-// ep.NoReasoningBudget). N>0 means "on, uncapped".
+// ep.NoReasoningBudget). N>0 is also sent as reasoning_budget_tokens, which llama-server
+// enforces by closing the thinking block after N tokens.
 func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 	if budget == nil {
 		return
@@ -53,6 +57,9 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 	}
 	b := *budget
 	p.ReasoningBudget = &b
+	if b > 0 {
+		p.ReasoningBudgetTokens = &b
+	}
 }
 
 func endpointURL(base, path string) string {
