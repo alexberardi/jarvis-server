@@ -10,6 +10,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/textfilter"
 	lldates "github.com/alexberardi/jarvis-server/internal/modules/llm/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
@@ -159,10 +160,15 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	var ev gateEvidence
 	if gate {
 		ev = m.followUpEvidence(ctx, conv, in)
-		if ev.reject() {
+		// A bare exclamation ("oh my gosh") is the room reacting, never a turn.
+		if ev.reject() || textfilter.IsInterjectionShaped(in.VoiceCommand) {
+			stage := "acoustic"
+			if !ev.reject() {
+				stage = "interjection"
+			}
 			keep := m.ignoreFollowUp(ctx, conv)
 			m.deps.Log.Info("cc: follow-up gate rejected", append([]any{"conversation_id", conv.id, "node_id", conv.nodeID,
-				"stage", "acoustic", "keep_listening", keep, "transcript", in.VoiceCommand}, ev.fields()...)...)
+				"stage", stage, "keep_listening", keep, "transcript", in.VoiceCommand}, ev.fields()...)...)
 			return turnOutcome{res: engineResult{Stop: stopNotForMe, KeepListening: keep}, conv: conv}, nil
 		}
 	}
