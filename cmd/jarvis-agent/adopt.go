@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 )
 
@@ -22,6 +23,20 @@ func adoptPython(ctx context.Context, log *slog.Logger, path string, py pinode.P
 	}
 	log.Info("adopted the Python node's identity "+c.NodeID, "room", c.Room)
 	return true, nil
+}
+
+// loadOrAdopt is the agent start on an unenrolled Pi: the adopted Python node's credentials,
+// ErrNotEnrolled when there is none (setup mode), or the adoption's error, never setup mode,
+// so a failed adoption doesn't enroll a second node.
+func loadOrAdopt(ctx context.Context, log *slog.Logger, path string, py pinode.PythonNode) (node.Creds, error) {
+	ok, err := adoptPython(ctx, log, path, py)
+	if err != nil {
+		return node.Creds{}, err
+	}
+	if !ok {
+		return node.Creds{}, node.ErrNotEnrolled
+	}
+	return node.LoadCreds(path)
 }
 
 // adoptPythonCmd is `jarvis-agent adopt-python`, install-pi.sh --activate's first step.

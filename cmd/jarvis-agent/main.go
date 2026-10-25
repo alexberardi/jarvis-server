@@ -658,11 +658,7 @@ func runAgent(ctx context.Context, args []string) error {
 		// A Pi the Python node ran on: the same node, not a new one (install-pi.sh --activate
 		// adopts it first; this is for a unit started without it).
 		if py, perr := pinode.DefaultPythonNode(); perr == nil {
-			if ok, aerr := adoptPython(ctx, log, path, py); aerr != nil {
-				err = aerr
-			} else if ok {
-				c, err = node.LoadCreds(path)
-			}
+			c, err = loadOrAdopt(ctx, log, path, py)
 		}
 	}
 	if err != nil {
