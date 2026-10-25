@@ -274,3 +274,28 @@ func TestRestoreExampleWhereThereIsNoMinimise(t *testing.T) {
 		}
 	}
 }
+
+// The answer in the choice window is acted on by the node: the call that ended in the list
+// runs again on the window at that place.
+func TestAnswerChoiceRerunsTheCallOnTheChosenWindow(t *testing.T) {
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	ws := []host.Window{{ID: "0xa", Title: "build", App: "foot", Focused: true}, {ID: "0xb", Title: "logs", App: "foot"}}
+	b := &fakeBackend{caps: hypr, windows: ws}
+	ts := refTools(b, c)
+	call(t, ts, ToolWindow, map[string]any{"action": "maximize", "window": "the terminal"})
+	if _, ok := ts.AnswerChoice(context.Background(), "Small product bottles."); ok {
+		t.Fatal("garbage taken as an answer")
+	}
+	out, ok := ts.AnswerChoice(context.Background(), "The second one, please.")
+	if !ok || out["success"] != true || strings.Join(b.actions, ";") != "maximize 0xb" || out[node.IslandOnlyKey] != true {
+		t.Fatalf("%v %v %v", ok, out, b.actions)
+	}
+	if _, ok := ts.AnswerChoice(context.Background(), "the first one"); ok {
+		t.Fatal("answered twice")
+	}
+	for said, want := range map[string]int{"number 2": 2, "two": 2, "one": 1, "number one": 1, "the last one": -1, "3": 3, "that one": 0} {
+		if got := answerOrdinal(said); got != want {
+			t.Errorf("answerOrdinal(%q) = %d, want %d", said, got, want)
+		}
+	}
+}

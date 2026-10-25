@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
@@ -69,5 +70,14 @@ func TestIslandChoiceKeepsTheExchangeOpen(t *testing.T) {
 			"island_only": true, "choice": true, "numbered": []any{"Terminal — build", "Terminal — logs"}}}}}, ve.node.h()).want(200).json()
 	if b["assistant_message"] != "" || b["end_of_exchange"] == true || len(ve.eng.requests()) != before {
 		t.Fatalf("choice continue %v (%d LLM calls)", b, len(ve.eng.requests())-before)
+	}
+}
+
+func TestSTTHintIsSanitisedAndBounded(t *testing.T) {
+	if got := sttHint(`The second one. <|endoftext|> {"x":1}`); got != "The second one. endoftext x1" {
+		t.Fatalf("%q", got)
+	}
+	if got := sttHint(strings.Repeat("a", 500)); len(got) != maxSTTHint {
+		t.Fatalf("len %d", len(got))
 	}
 }

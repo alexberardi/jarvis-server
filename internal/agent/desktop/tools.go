@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net/url"
 	"strconv"
@@ -116,6 +117,10 @@ type Tools struct {
 	// one" picks a window by its place even when titles repeat; choicesAt dates it.
 	choices   []host.Window
 	choicesAt time.Time
+	// choiceCall is the call that ended in the list (tool and arguments), re-run on the chosen
+	// window when the answer comes in the choice window (AnswerChoice).
+	choiceTool string
+	choiceArgs map[string]any
 	// closing is a close-all of this app waiting for the user's yes, and its question: further
 	// closes of the same app in that turn get the same question instead of closing.
 	closing     string
@@ -217,6 +222,9 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, req 
 					// Q9: an ambiguous name lists the candidates on the island, numbered; the
 					// user answers "the second one" in the choice window.
 					t.choice(o, we.match.Candidates, we.windows)
+					t.mu.Lock()
+					t.choiceTool, t.choiceArgs = name, maps.Clone(args)
+					t.mu.Unlock()
 				}
 				if we.windows != nil {
 					o["windows"] = we.windows // retry with an id from these, in the same turn

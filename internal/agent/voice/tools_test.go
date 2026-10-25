@@ -454,3 +454,35 @@ func TestIslandOnlySuccessKeepsListening(t *testing.T) {
 		t.Fatalf("windows %v, want one 3 s follow-up", got)
 	}
 }
+
+// "The second one" in the choice window switches windows on the node: no follow-up turn goes to
+// command-center for it, and whisper got the list's hint.
+func TestChoiceAnswerIsActedOnByTheNode(t *testing.T) {
+	os := &fakeOS{windows: []host.Window{{ID: "0x1", Title: "build", App: "Terminal"}, {ID: "0x2", Title: "logs", App: "Terminal"}}}
+	srv := newServer()
+	srv.reply, srv.speakPCM = toolCalls(call("c1", desktop.ToolWindow, `{"action":"focus","window":"terminal"}`)), pcmOf(300)
+	srv.cont = func([]ToolResult) (*Control, error) { return complete(""), nil }
+	srv.texts = []string{"The second one."}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if got := os.did(); !slices.Equal(got, []string{"focus 0x2"}) {
+		t.Fatalf("OS did %v (turn %+v)", got, tr)
+	}
+	if len(tr.FollowUps) == 0 || tr.FollowUps[0].Outcome != OutcomeSilent {
+		t.Fatalf("follow-ups %+v", tr.FollowUps)
+	}
+	srv.mu.Lock()
+	n, hint := len(srv.commands), srv.hint
+	srv.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d follow-up turns went to command-center", n)
+	}
+	if !strings.Contains(hint, "The second one") {
+		t.Fatalf("transcribe hint %q", hint)
+	}
+}

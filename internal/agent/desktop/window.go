@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -410,6 +411,59 @@ func ordinal(s string) int {
 		return n
 	}
 	return ordinals[strings.ToLower(m[1])]
+}
+
+// reAnyOrdinal finds an answer to a list inside a longer phrase ("the second one please",
+// "number 2"): ordinal words and digits first; "one" only as "number one" or alone.
+var (
+	reOrdinalWord = regexp.MustCompile(`(?i)\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|last)\b`)
+	reDigit       = regexp.MustCompile(`\b([1-9])\b`)
+	reNumberWord  = regexp.MustCompile(`(?i)\b(two|three|four|five|six|seven|eight|nine)\b|\bnumber\s+(one)\b|^\s*(one)[.!?]*\s*$`)
+)
+
+// answerOrdinal is the place an answer names (0: none).
+func answerOrdinal(said string) int {
+	if m := reOrdinalWord.FindStringSubmatch(said); m != nil {
+		return ordinals[strings.ToLower(m[1])]
+	}
+	if m := reDigit.FindStringSubmatch(said); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	if m := reNumberWord.FindStringSubmatch(said); m != nil {
+		return ordinals[strings.ToLower(m[1]+m[2]+m[3])]
+	}
+	return 0
+}
+
+// AnswerChoice acts on an answer to the island's list in the choice window, on the node: the
+// call that ended in the list runs again on the window at that place. A short answer heard
+// cold is the least reliable thing STT does, and the model then often only *said* it would
+// switch (voice test, 2026-10-24); a place in a list needs neither.
+func (t *Tools) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
+	t.mu.Lock()
+	list, at, tool, args := t.choices, t.choicesAt, t.choiceTool, t.choiceArgs
+	t.mu.Unlock()
+	if len(list) == 0 || tool == "" || t.now().Sub(at) > choiceValidFor {
+		return nil, false
+	}
+	n := answerOrdinal(said)
+	if n == -1 {
+		n = len(list)
+	}
+	if n < 1 || n > len(list) {
+		return nil, false
+	}
+	call := maps.Clone(args)
+	key := "window"
+	if tool == ToolClose {
+		key = "window_id"
+	}
+	call[key] = list[n-1].ID
+	t.mu.Lock()
+	t.choices, t.choiceTool, t.choiceArgs = nil, "", nil
+	t.mu.Unlock()
+	return t.Call(ctx, tool, call, node.Request{})
 }
 
 // pickChoice: when the island's last list is fresh and the call or what was said is just an

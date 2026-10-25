@@ -34,6 +34,25 @@ type Toolset interface {
 // Multi chains toolsets; the first that knows a name handles it.
 type Multi []Toolset
 
+// ChoiceAnswerer is a Toolset that put a numbered list on the island (an ambiguous window name)
+// and can act on the user's answer itself: said is what was heard in the choice window; ok is
+// false when it isn't an answer to the list (then the turn goes to command-center as usual).
+type ChoiceAnswerer interface {
+	AnswerChoice(ctx context.Context, said string) (out map[string]any, ok bool)
+}
+
+// AnswerChoice asks each Toolset that can answer a choice.
+func (m Multi) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
+	for _, t := range m {
+		if a, ok := t.(ChoiceAnswerer); ok {
+			if out, ok := a.AnswerChoice(ctx, said); ok {
+				return out, true
+			}
+		}
+	}
+	return nil, false
+}
+
 func (m Multi) Available(ctx context.Context) []ToolDef {
 	var out []ToolDef
 	seen := map[string]bool{}
