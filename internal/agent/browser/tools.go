@@ -96,7 +96,7 @@ func NewTools(h *Hub) *Tools {
 	required := tabParam
 	required.Required = true
 	t.tools = []tool{
-		{node.Spec{Name: ToolListTabs, Description: "List the browser's open tabs: answers 'what's open' or 'is X open', and gives the tab_id to switch or close one. "+
+		{node.Spec{Name: ToolListTabs, Description: "List the browser's open tabs: answers 'what's open' or 'is X open', and gives the tab_id to switch or close one. " +
 			"A spoken tab name may be misheard ('COD' for 'Claude'): take the tab whose title sounds like it; if none or several could be meant, read those titles back and ask which.",
 			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional filter word"}},
 			Keywords: []string{"browser", "tabs", "tab", "open", "website", "firefox", "chrome"},
