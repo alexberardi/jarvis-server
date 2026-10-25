@@ -372,3 +372,32 @@ func IsAcknowledgementShaped(text string) bool {
 	}
 	return closer
 }
+
+// interjectionWords are exclamations that never ask for or answer anything. "no", "wait" and
+// "what" are left out: each can answer a question or ask to hear it again.
+var interjectionWords = wordSetOf("oh ooh my gosh god goodness wow whoa woah ugh huh hmm hm ah aah aw man " +
+	"jeez geez gee damn dang darn oops whoops yikes ha haha lol omg holy cow crap shoot")
+
+func wordSetOf(s string) map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		m[w] = true
+	}
+	return m
+}
+
+// IsInterjectionShaped reports a bare exclamation ("Oh my gosh", "wow"): up to four words, all
+// interjections. Heard in a follow-up window it is the room reacting, not a turn (2026-10-25:
+// "Oh my gosh" got "Sounds like you're surprised about something!").
+func IsInterjectionShaped(text string) bool {
+	words := strings.FieldsFunc(parse.PyLower(text), func(r rune) bool { return !(r >= 'a' && r <= 'z') })
+	if len(words) == 0 || len(words) > 4 {
+		return false
+	}
+	for _, w := range words {
+		if !interjectionWords[w] {
+			return false
+		}
+	}
+	return true
+}
