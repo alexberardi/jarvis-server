@@ -14,7 +14,10 @@ with jarvis-node-mobile, which browses for it:
 - **Instance name** the node id the API's `/api/v1/info` reports (`jarvis-<last 8 hex of the MAC>`
   on a reset node).
 - **Port** the API's listener (8080), on the host's LAN addresses (`mdns.Advertise`'s interface
-  pick, as jarvisd's `_jarvis-config._tcp`).
+  pick, as jarvisd's `_jarvis-config._tcp`). The SRV target is `<hostname>-jarvis.local.`, not
+  the host's own name (#567): the Go responder's unique A/AAAA records for `<hostname>.local`
+  made avahi see a conflict and rename the Pi to `<hostname>-2.local`. Clients use the
+  addresses the resolve returns, not the target name.
 - **TXT** `node_id` and `hardware` (same values as `/api/v1/info`). Clients should still call
   `/api/v1/info` at the resolved address before provisioning.
 - **`/api/v1/info` `setup_mode`** (#565) says which setup the agent chose: `"lan"` (no hotspot;

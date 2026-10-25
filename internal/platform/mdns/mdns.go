@@ -55,7 +55,9 @@ type Options struct {
 	// LAN filter. Ignored when Interfaces is set.
 	Allow []string
 	// HostName is the host the SRV record points at; ".local" is stripped (see HostLabel).
-	// Default: os.Hostname().
+	// Default: "<first label of os.Hostname()>-jarvis", never the host's own name: zeroconf
+	// multicasts unique A/AAAA records for it, which avahi or mDNSResponder, owning that name,
+	// takes as a conflict and renames the host to "<host>-2" (#567).
 	HostName string
 	// Logger; nil uses slog.Default.
 	Logger *slog.Logger
@@ -102,7 +104,8 @@ func Advertise(ctx context.Context, opts Options) (stop func(), err error) {
 		if err != nil {
 			return nil, fmt.Errorf("mdns: hostname: %w", err)
 		}
-		opts.HostName = h
+		h, _, _ = strings.Cut(HostLabel(h), ".")
+		opts.HostName = h + "-jarvis"
 	}
 	host := HostLabel(opts.HostName)
 	if host == "" {
