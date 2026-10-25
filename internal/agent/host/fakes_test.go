@@ -261,8 +261,8 @@ func (f *fakeX) Snap(_ context.Context, id uint32, left bool) error {
 // hyprClients is `hyprctl -j clients`: the focused terminal, Firefox behind it, and an unmapped
 // client that must not be listed.
 const hyprClients = `[
- {"address":"0x55aa02","mapped":true,"class":"foot","title":"~","focusHistoryID":0,"fullscreen":0},
- {"address":"` + hyprWinID + `","mapped":true,"class":"firefox","title":"Mozilla Firefox","focusHistoryID":1,"fullscreen":1},
+ {"address":"0x55aa02","mapped":true,"class":"foot","title":"~","focusHistoryID":0,"fullscreen":0,"workspace":{"id":1,"name":"1"}},
+ {"address":"` + hyprWinID + `","mapped":true,"class":"firefox","title":"Mozilla Firefox","focusHistoryID":1,"fullscreen":1,"workspace":{"id":2,"name":"2"}},
  {"address":"0x55aa03","mapped":false,"class":"ghost","title":"","focusHistoryID":2}]`
 
 // linuxHyprland is a Hyprland session: hyprctl answers, and every dispatch in the classic

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"regexp"
 	"slices"
 	"strings"
@@ -49,6 +50,9 @@ type FollowUpConfig struct {
 	// the 3 s follow-up (DESKTOP-COMMANDS.md Q9).
 	ChoiceListenSecs float64
 }
+
+// choiceHint biases whisper toward an answer to a numbered list in the choice window.
+const choiceHint = "The first one. The second one. The third one. Number four. The last one."
 
 // MaxChoiceListenSecs caps choice_listen_seconds.
 const MaxChoiceListenSecs = 30
@@ -138,11 +142,16 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if ignored > 0 {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
 		}
+		choosing := s.choice
 		if s.choice {
 			// The island lists choices: a longer window, listening at once (nothing was
 			// spoken, so there is no reply tail to drain).
 			s.choice = false
 			timeout, afterReply = ClampChoiceListen(cmp.Or(cfg.ChoiceListenSecs, DefaultFollowUp().ChoiceListenSecs)), false
+		}
+		if s.quietTurn {
+			s.quietTurn = false
+			afterReply = false
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
@@ -167,7 +176,11 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		ex := Exchange{RecordedSecs: float64(len(pcm)) / CaptureRate}
 		level := levelVsWake(s, pcm)
 		cmd := Normalize(pcm)
-		tr, err := p.Server.Transcribe(ctx, wavBytes(cmd), wavBytes(slices.Concat(s.wakeClip, cmd)), s.id)
+		tctx := ctx
+		if choosing {
+			tctx = WithTranscribeHint(ctx, choiceHint)
+		}
+		tr, err := p.Server.Transcribe(tctx, wavBytes(cmd), wavBytes(slices.Concat(s.wakeClip, cmd)), s.id)
 		if err != nil {
 			// The Python node gives up on the window quietly here.
 			ex.Outcome, ex.Err = OutcomeError, fmt.Errorf("transcribe: %w", err)
@@ -182,7 +195,32 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUps, t.FollowUpEnd = append(t.FollowUps, ex), EndNonSpeech
 			return
 		}
-		if IsFollowUpNoise(text, prev) {
+		if choosing {
+			// An answer to the island's list is acted on here, without command-center: "the
+			// second one" heard cold is the least reliable thing STT does, and a model
+			// may only *say* it switched.
+			if a, ok := p.Tools.(node.ChoiceAnswerer); ok {
+				if out, ok := a.AnswerChoice(ctx, text); ok {
+					ok, _ := out["success"].(bool)
+					ex.Outcome = OutcomeSilent
+					ex.Tools = append(ex.Tools, ToolRun{Name: "choice", Args: map[string]any{"answer": text}, Success: ok})
+					t.FollowUps = append(t.FollowUps, ex)
+					s.log.Info("follow-up: answered the island's list on the node", "transcript", text, "success", ok)
+					if !ok {
+						p.chime(ctx, errorChime)
+					}
+					if c, _ := out[node.ChoiceKey].(bool); c {
+						s.choice = true // still ambiguous: the next list
+					} else {
+						s.quietTurn = true
+					}
+					noise, prev, used = 0, text, 0
+					it++
+					continue
+				}
+			}
+		}
+		if IsFollowUpNoise(text, prev) && !(choosing && text != "") { // a repeated answer to a list is still an answer
 			noise++
 			ex.Outcome = OutcomeNoise
 			t.FollowUps = append(t.FollowUps, ex)

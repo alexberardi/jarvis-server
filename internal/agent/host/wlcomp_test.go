@@ -20,9 +20,9 @@ func TestCompositorListsMostRecentFirstAndMarksFocus(t *testing.T) {
 				if w.Focused {
 					f = "*"
 				}
-				got = append(got, w.App+f)
+				got = append(got, w.App+f+"@"+w.Workspace)
 			}
-			want := map[string][]string{"hyprland": {"foot*", "firefox"}, "sway": {"firefox*", "foot"}}[name]
+			want := map[string][]string{"hyprland": {"foot*@1", "firefox@2"}, "sway": {"firefox*@1", "foot@1"}}[name]
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("windows = %v, want %v (unmapped clients dropped, newest first, focus marked)", got, want)
 			}

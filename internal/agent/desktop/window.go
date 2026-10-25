@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -54,6 +55,11 @@ func windowSpec(have map[string]bool) (node.Spec, bool) {
 		if slices.Contains(actions, e.Params["action"].(string)) {
 			examples = append(examples, e)
 		}
+	}
+	if !have[host.CapWindowsUnminimize] && have[host.CapWindowsUnmaximize] {
+		// Without a minimise, "restore" can only mean back from maximize or fullscreen; the
+		// model picked focus for it (voice test, 2026-10-24).
+		examples = append(examples, node.Example{VoiceCommand: "restore firefox", Params: map[string]any{"window": "firefox", "action": "unmaximize"}})
 	}
 	params := []node.Param{
 		{Name: "action", Type: "string", Required: true, Enum: append(actions, actionUnsupported),
@@ -161,6 +167,11 @@ func (t *Tools) appWindow(ctx context.Context, args map[string]any) (host.Window
 	if err != nil {
 		return host.Window{}, err
 	}
+	for _, w := range ws {
+		if w.ID == name { // an id: that window's app
+			return w, nil
+		}
+	}
 	var apps []host.Window // the first window of each app
 	var cands []winmatch.Candidate
 	for i, w := range ws {
@@ -202,6 +213,7 @@ var (
 type saidKey struct{}
 
 var (
+	reSaidAll   = regexp.MustCompile(`(?i)\b(all|every|each)\b(\s+\w+){0,3}\s+windows?\b|\bclose\s+(all|every)(thing)?\b`)
 	reSaidOther = regexp.MustCompile(`(?i)\b(the other (one|window)|the previous (one|window)|switch back)\b`)
 	reSaidIt    = regexp.MustCompile(`(?i)\b(it|that)\b`)
 )
@@ -230,6 +242,12 @@ func (t *Tools) targetWindow(ctx context.Context, args map[string]any) (host.Win
 		name, _ = args["window_id"].(string)
 	}
 	name = strings.TrimSpace(name)
+	if w, ok := t.pickChoice(ctx, name); ok {
+		t.mu.Lock()
+		t.choices = nil // answered
+		t.mu.Unlock()
+		return w, nil
+	}
 	word := strings.ToLower(name)
 	if word == "" {
 		word = saidReference(ctx)
@@ -300,22 +318,175 @@ func (t *Tools) island(out map[string]any, text string, failed bool) {
 	}
 }
 
-// choiceFor is how long the island shows a list to pick from (choice_listen_seconds' default).
+// choiceFor is how long the island shows a list to pick from (choice_listen_seconds' default),
+// and how long "the second one" refers to it.
 const choiceFor = 8 * time.Second
 
+// choiceValidFor: an ordinal answer counts against the last list for this long (the answer comes
+// in the choice window, but STT and the turn take a few seconds more).
+const choiceValidFor = 45 * time.Second
+
 // choice puts the candidates on the island, numbered, and marks the result as a choice: the
-// node then listens for the answer, and the model resolves "the second one" from this list.
-func (t *Tools) choice(out map[string]any, candidates []string) {
+// node then listens for the answer, and "the second one" resolves against this list (here, by
+// window id, so repeated titles don't matter; the model gets the ids too).
+func (t *Tools) choice(out map[string]any, candidates []string, ws []host.Window) {
+	// The windows behind the candidates, in the candidates' order (each name taken once).
+	used := map[string]bool{}
+	var list []host.Window
+	for _, c := range candidates {
+		for _, w := range ws {
+			if !used[w.ID] && strings.EqualFold(windowName(w), c) { // winmatch capitalises app names
+				used[w.ID] = true
+				list = append(list, w)
+				break
+			}
+		}
+	}
+	if len(list) != len(candidates) {
+		list = nil // can't line them up: the model asks by name as before
+	}
+	labels := candidates
+	if list != nil {
+		labels = choiceLabels(list)
+	}
 	var b strings.Builder
 	b.WriteString("Which one?")
-	for i, c := range candidates {
-		fmt.Fprintf(&b, "  %d. %s", i+1, c)
+	numbered := make([]map[string]any, len(labels))
+	for i, l := range labels {
+		fmt.Fprintf(&b, "  %d. %s", i+1, l)
+		numbered[i] = map[string]any{"n": i + 1, "name": l}
+		if list != nil {
+			numbered[i]["window_id"] = list[i].ID
+		}
 	}
 	out[node.IslandKey], out[node.IslandOnlyKey], out[node.ChoiceKey] = b.String(), true, true
-	out["numbered"] = candidates // the order the island shows, for "the second one"
+	out["numbered"] = numbered // "the second one" is window_id of n 2
+	t.mu.Lock()
+	t.choices, t.choicesAt = list, t.now()
+	t.mu.Unlock()
 	if t.Show != nil {
 		t.Show(b.String(), choiceFor)
 	}
+}
+
+// choiceLabels names each window so the list tells them apart: its name, plus the workspace
+// when another has the same name, plus a count when even that repeats.
+func choiceLabels(ws []host.Window) []string {
+	names := map[string]int{}
+	for _, w := range ws {
+		names[windowName(w)]++
+	}
+	out := make([]string, len(ws))
+	full := map[string]int{}
+	for i, w := range ws {
+		out[i] = windowName(w)
+		if names[out[i]] > 1 && w.Workspace != "" {
+			out[i] += " · workspace " + w.Workspace
+		}
+		full[out[i]]++
+	}
+	seen := map[string]int{}
+	for i, l := range out {
+		if full[l] > 1 { // the same even with its workspace: number every one of them
+			seen[l]++
+			out[i] = fmt.Sprintf("%s (%d)", l, seen[l])
+		}
+	}
+	return out
+}
+
+var ordinals = map[string]int{"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+	"seventh": 7, "eighth": 8, "ninth": 9, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+	"six": 6, "seven": 7, "eight": 8, "nine": 9, "last": -1}
+
+var reOrdinal = regexp.MustCompile(`(?i)^\s*(?:the\s+|number\s+|no\.?\s*)?([a-z]+|[1-9])(?:\s+(?:one|window))?\s*[.!?]*\s*$`)
+
+// ordinal reads "the second one", "number 2", "2", "two", "the last one" (0: not an ordinal).
+func ordinal(s string) int {
+	m := reOrdinal.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0
+	}
+	if n, err := strconv.Atoi(m[1]); err == nil {
+		return n
+	}
+	return ordinals[strings.ToLower(m[1])]
+}
+
+// reAnyOrdinal finds an answer to a list inside a longer phrase ("the second one please",
+// "number 2"): ordinal words and digits first; "one" only as "number one" or alone.
+var (
+	reOrdinalWord = regexp.MustCompile(`(?i)\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|last)\b`)
+	reDigit       = regexp.MustCompile(`\b([1-9])\b`)
+	reNumberWord  = regexp.MustCompile(`(?i)\b(two|three|four|five|six|seven|eight|nine)\b|\bnumber\s+(one)\b|^\s*(one)[.!?]*\s*$`)
+)
+
+// answerOrdinal is the place an answer names (0: none).
+func answerOrdinal(said string) int {
+	if m := reOrdinalWord.FindStringSubmatch(said); m != nil {
+		return ordinals[strings.ToLower(m[1])]
+	}
+	if m := reDigit.FindStringSubmatch(said); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	if m := reNumberWord.FindStringSubmatch(said); m != nil {
+		return ordinals[strings.ToLower(m[1]+m[2]+m[3])]
+	}
+	return 0
+}
+
+// AnswerChoice acts on an answer to the island's list in the choice window, on the node: the
+// call that ended in the list runs again on the window at that place. A short answer heard
+// cold is the least reliable thing STT does, and the model then often only *said* it would
+// switch (voice test, 2026-10-24); a place in a list needs neither.
+func (t *Tools) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
+	t.mu.Lock()
+	list, at, tool, args := t.choices, t.choicesAt, t.choiceTool, t.choiceArgs
+	t.mu.Unlock()
+	if len(list) == 0 || tool == "" || t.now().Sub(at) > choiceValidFor {
+		return nil, false
+	}
+	n := answerOrdinal(said)
+	if n == -1 {
+		n = len(list)
+	}
+	if n < 1 || n > len(list) {
+		return nil, false
+	}
+	call := maps.Clone(args)
+	key := "window"
+	if tool == ToolClose {
+		key = "window_id"
+	}
+	call[key] = list[n-1].ID
+	t.mu.Lock()
+	t.choices, t.choiceTool, t.choiceArgs = nil, "", nil
+	t.mu.Unlock()
+	return t.Call(ctx, tool, call, node.Request{})
+}
+
+// pickChoice: when the island's last list is fresh and the call or what was said is just an
+// ordinal ("the second one"), the window at that place.
+func (t *Tools) pickChoice(ctx context.Context, name string) (host.Window, bool) {
+	t.mu.Lock()
+	list, at := t.choices, t.choicesAt
+	t.mu.Unlock()
+	if len(list) == 0 || t.now().Sub(at) > choiceValidFor {
+		return host.Window{}, false
+	}
+	n := ordinal(name)
+	if n == 0 {
+		said, _ := ctx.Value(saidKey{}).(string)
+		n = ordinal(said)
+	}
+	if n == -1 {
+		n = len(list)
+	}
+	if n < 1 || n > len(list) {
+		return host.Window{}, false
+	}
+	return list[n-1], true
 }
 
 // shortName is how the island names a window: its app, else its title.
@@ -365,6 +536,11 @@ func islandText(a host.WindowAction, w host.Window, target string) string {
 // every window of its app, which asks first when confirmation is on.
 func (t *Tools) close(ctx context.Context, args map[string]any) (map[string]any, error) {
 	all, _ := args["all_of_app"].(bool)
+	if said, _ := ctx.Value(saidKey{}).(string); !all && reSaidAll.MatchString(said) {
+		// "close all my Firefox windows": the model may list them and close each one; the
+		// words say every window of the app, so it asks first all the same (Q8).
+		all = true
+	}
 	var w host.Window
 	var err error
 	if all {
@@ -406,7 +582,14 @@ func (t *Tools) close(ctx context.Context, args map[string]any) (map[string]any,
 		return out, nil
 	}
 	if t.Confirm.On() {
-		return t.Confirm.Ask(fmt.Sprintf("Close all %d %s windows?", len(same), w.App), act), nil
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.closing != "" && strings.EqualFold(t.closing, w.App) && t.Confirm.Pending(t.closingWait["confirmation_id"]) {
+			return t.closingWait, nil // the same question again: nothing closes before the yes
+		}
+		t.closing = w.App
+		t.closingWait = t.Confirm.Ask(fmt.Sprintf("Close all %d %s windows?", len(same), w.App), act)
+		return t.closingWait, nil
 	}
 	return act(ctx)
 }

@@ -1,13 +1,15 @@
 package cc
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 )
 
 // A desktop command whose result the node's island showed (island_only): the continue makes no
-// LLM call, a voice node gets nothing to speak and no follow-up window, and the history keeps
+// LLM call, a voice node gets nothing to speak but the exchange stays open (its follow-up
+// window: "…restore it"), and the history keeps
 // what was shown, so "it" in the next turn has something to refer to (DESKTOP-COMMANDS.md Q9).
 func TestIslandOnlyResultsEndTheTurnSilently(t *testing.T) {
 	for _, model := range []string{prompts.Qwen3_5_9B, prompts.Qwen3_8B} { // native, text
@@ -25,7 +27,7 @@ func TestIslandOnlyResultsEndTheTurnSilently(t *testing.T) {
 		b := ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "c-island",
 			"tool_results": []any{map[string]any{"tool_call_id": id, "output": map[string]any{
 				"success": true, "action": "maximize", "island": "Maximized Firefox", "island_only": true}}}}, ve.node.h()).want(200).json()
-		if b["assistant_message"] != "" || b["end_of_exchange"] != true || b["stop_reason"] != "complete" {
+		if b["assistant_message"] != "" || b["end_of_exchange"] == true || b["stop_reason"] != "complete" {
 			t.Fatalf("%s: continue %v", model, b)
 		}
 		if n := len(ve.eng.requests()); n != before {
@@ -68,5 +70,14 @@ func TestIslandChoiceKeepsTheExchangeOpen(t *testing.T) {
 			"island_only": true, "choice": true, "numbered": []any{"Terminal — build", "Terminal — logs"}}}}}, ve.node.h()).want(200).json()
 	if b["assistant_message"] != "" || b["end_of_exchange"] == true || len(ve.eng.requests()) != before {
 		t.Fatalf("choice continue %v (%d LLM calls)", b, len(ve.eng.requests())-before)
+	}
+}
+
+func TestSTTHintIsSanitisedAndBounded(t *testing.T) {
+	if got := sttHint(`The second one. <|endoftext|> {"x":1}`); got != "The second one. endoftext x1" {
+		t.Fatalf("%q", got)
+	}
+	if got := sttHint(strings.Repeat("a", 500)); len(got) != maxSTTHint {
+		t.Fatalf("len %d", len(got))
 	}
 }

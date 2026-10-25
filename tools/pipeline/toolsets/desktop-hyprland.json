@@ -216,6 +216,14 @@
         },
         "is_primary": false,
         "voice_command": "move slack to workspace 2"
+      },
+      {
+        "expected_parameters": {
+          "action": "unmaximize",
+          "window": "firefox"
+        },
+        "is_primary": false,
+        "voice_command": "restore firefox"
       }
     ],
     "function": {

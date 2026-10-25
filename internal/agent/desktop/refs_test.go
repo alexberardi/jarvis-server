@@ -180,3 +180,122 @@ func TestAmbiguousNameListsChoicesOnTheIsland(t *testing.T) {
 		t.Fatalf("island %q, shown %q", text, shown)
 	}
 }
+
+// Voice test, 2026-10-24: six terminals shared the title "alex@omarchy:~/jarvis". The list tells
+// them apart by workspace, and "the second one" picks the second entry by its place, whatever
+// the model passes as the window.
+func TestTheSecondOneOfRepeatedTitles(t *testing.T) {
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	ws := []host.Window{
+		{ID: "0xa", Title: "alex@omarchy:~/jarvis", App: "foot", Workspace: "1", Focused: true},
+		{ID: "0xb", Title: "alex@omarchy:~/jarvis", App: "foot", Workspace: "2"},
+		{ID: "0xc", Title: "alex@omarchy:~/jarvis", App: "foot", Workspace: "2"},
+	}
+	b := &fakeBackend{caps: hypr, windows: ws}
+	ts := refTools(b, c)
+	out, _ := ts.Call(context.Background(), ToolWindow, map[string]any{"action": "focus", "window": "terminal"}, node.Request{VoiceCommand: "switch to the terminal"})
+	text, _ := out[node.IslandKey].(string)
+	for _, want := range []string{"1. foot — alex@omarchy:~/jarvis · workspace 1", "2. foot — alex@omarchy:~/jarvis · workspace 2 (1)", "3. foot — alex@omarchy:~/jarvis · workspace 2 (2)"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("island %q lacks %q", text, want)
+		}
+	}
+	if n := out["numbered"].([]map[string]any); len(n) != 3 || n[1]["window_id"] != "0xb" {
+		t.Fatalf("numbered %v", out["numbered"])
+	}
+	c.t = c.t.Add(10 * time.Second)
+	// The model passes the repeated title back; what was said decides.
+	b.actions = nil
+	out, _ = ts.Call(context.Background(), ToolWindow, map[string]any{"action": "focus", "window": "alex@omarchy:~/jarvis"}, node.Request{VoiceCommand: "The second one."})
+	if out["success"] != true || strings.Join(b.actions, ";") != "focus 0xb" {
+		t.Fatalf("the second one: %v %v", out, b.actions)
+	}
+	for _, said := range []string{"number 3", "the third one", "3", "the last one"} {
+		call(t, ts, ToolWindow, map[string]any{"action": "focus", "window": "terminal"}) // the list again
+		b.actions = nil
+		out, _ = ts.Call(context.Background(), ToolWindow, map[string]any{"action": "focus"}, node.Request{VoiceCommand: said})
+		if out["success"] != true || strings.Join(b.actions, ";") != "focus 0xc" {
+			t.Fatalf("%q: %v %v", said, out, b.actions)
+		}
+	}
+	// A list gone stale is no longer what "the second one" means.
+	call(t, ts, ToolWindow, map[string]any{"action": "focus", "window": "terminal"})
+	c.t = c.t.Add(time.Minute)
+	b.actions = nil
+	out, _ = ts.Call(context.Background(), ToolWindow, map[string]any{"action": "focus", "window": "terminal"}, node.Request{VoiceCommand: "the second one"})
+	if out[node.ChoiceKey] != true || len(b.actions) != 0 {
+		t.Fatalf("stale list: %v %v", out, b.actions)
+	}
+}
+
+// Voice test, 2026-10-24: "close all my Firefox windows" was done as a list and three single
+// closes, with no question. The words say all: the first close asks, the others get the same
+// question, and nothing closes before the yes.
+func TestSayingAllClosesOnlyAfterTheYes(t *testing.T) {
+	ws := []host.Window{{ID: "0xa", App: "firefox"}, {ID: "0xb", App: "firefox"}, {ID: "0xc", App: "foot", Focused: true}}
+	b := &fakeBackend{caps: hypr, windows: ws}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	ts.Confirm = &dictate.Confirmer{Mode: dictate.ConfirmSubmit}
+	said := node.Request{VoiceCommand: "Close all my Firefox windows."}
+	first, _ := ts.Call(context.Background(), ToolClose, map[string]any{"window_id": "0xa"}, said)
+	second, _ := ts.Call(context.Background(), ToolClose, map[string]any{"window_id": "0xb"}, said)
+	if first["status"] != "awaiting_confirmation" || second["confirmation_id"] != first["confirmation_id"] || len(b.actions) != 0 {
+		t.Fatalf("first %v second %v closed %v", first, second, b.actions)
+	}
+	if _, err := ts.Confirm.Answer(context.Background(), first["confirmation_id"].(string), "yes"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(b.actions, ";") != "close 0xa;close 0xb" {
+		t.Fatalf("after yes %v", b.actions)
+	}
+	// Without "all" in the words, one window closes at once.
+	b.actions = nil
+	call(t, ts, ToolClose, map[string]any{"window_id": "0xc"})
+	if strings.Join(b.actions, ";") != "close 0xc" {
+		t.Fatalf("single %v", b.actions)
+	}
+}
+
+func TestRestoreExampleWhereThereIsNoMinimise(t *testing.T) {
+	spec, _ := windowSpec(map[string]bool{"windows.focus": true, "windows.unmaximize": true})
+	found := false
+	for _, e := range spec.Examples {
+		if e.VoiceCommand == "restore firefox" && e.Params["action"] == "unmaximize" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no restore → unmaximize example on a host without minimise")
+	}
+	spec, _ = windowSpec(map[string]bool{"windows.focus": true, "windows.unmaximize": true, "windows.unminimize": true})
+	for _, e := range spec.Examples {
+		if e.VoiceCommand == "restore firefox" {
+			t.Fatal("restore is ambiguous where minimise exists")
+		}
+	}
+}
+
+// The answer in the choice window is acted on by the node: the call that ended in the list
+// runs again on the window at that place.
+func TestAnswerChoiceRerunsTheCallOnTheChosenWindow(t *testing.T) {
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	ws := []host.Window{{ID: "0xa", Title: "build", App: "foot", Focused: true}, {ID: "0xb", Title: "logs", App: "foot"}}
+	b := &fakeBackend{caps: hypr, windows: ws}
+	ts := refTools(b, c)
+	call(t, ts, ToolWindow, map[string]any{"action": "maximize", "window": "the terminal"})
+	if _, ok := ts.AnswerChoice(context.Background(), "Small product bottles."); ok {
+		t.Fatal("garbage taken as an answer")
+	}
+	out, ok := ts.AnswerChoice(context.Background(), "The second one, please.")
+	if !ok || out["success"] != true || strings.Join(b.actions, ";") != "maximize 0xb" || out[node.IslandOnlyKey] != true {
+		t.Fatalf("%v %v %v", ok, out, b.actions)
+	}
+	if _, ok := ts.AnswerChoice(context.Background(), "the first one"); ok {
+		t.Fatal("answered twice")
+	}
+	for said, want := range map[string]int{"number 2": 2, "two": 2, "one": 1, "number one": 1, "the last one": -1, "3": 3, "that one": 0} {
+		if got := answerOrdinal(said); got != want {
+			t.Errorf("answerOrdinal(%q) = %d, want %d", said, got, want)
+		}
+	}
+}

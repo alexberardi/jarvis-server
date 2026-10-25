@@ -39,6 +39,9 @@ type session struct {
 	// (an ambiguous window name): the next follow-up window is ChoiceListenSecs long and
 	// starts listening at once, since nothing was spoken.
 	choice bool
+	// quietTurn: the last turn spoke nothing (a desktop command the island showed): the next
+	// follow-up window listens at once, with no reply tail to drain.
+	quietTurn bool
 	// The wake's pre_wake_speech_seconds and self-playback snapshot, sent with the woken command.
 	preWakeSpeech float64
 	selfPlaying   bool
@@ -212,7 +215,10 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 		if last.allFailed {
 			p.chime(ctx, errorChime)
 		}
-		return EndOfExchange
+		// Keep listening as after any reply, so "maximize Firefox… restore it" needs one wake
+		// word (voice test, 2026-10-24).
+		s.quietTurn = true
+		return ""
 	}
 	switch {
 	case last != nil && last.allFailed && last.firstErr != "":
