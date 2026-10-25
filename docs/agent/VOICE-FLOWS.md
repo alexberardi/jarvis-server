@@ -86,6 +86,11 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   credentials and needs no mail API; you see exactly what goes out. A direct connection (SMTP,
   Gmail/Graph API) is not built.
 
+- **2026-10-25: a recipient comes from the mail app's own autocomplete** (Q23). Jarvis types
+  the name into the To field and reads the app's suggestions; with no match it checks memory
+  ("James's email is …"), and only then asks you, offering to remember the answer. No contact
+  sync or contact store in Jarvis. Settles G5.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -99,12 +104,12 @@ dictation. What breaks:
 | G2 | **Routing.** `cc/computer_control.go` needsComputer returns false for "write"/"type" (what follows is text to type), so "write an email to James" never becomes a task. "use the computer to …" (#575) is on an unmerged branch. Settled by Q15; to build. | cc | A, B |
 | G3 | **A phone tap to start**, unless household autonomy is on; a non-autorun task may run on another computer than the one spoken to. Settled by Q13; to build. | cc errands | A, B, C |
 | G4 | **No file by name.** `desktop_open` refuses paths; `computer_files` reads two folders and four text types; a workflow's `file` parameter is only text. | agent, cc | C |
-| G5 | **No contacts with email, no email tool.** Phone contacts have no email; memory knows James's address only if told. | cc | B |
+| G5 | **No contacts with email, no email tool.** Phone contacts have no email; memory knows James's address only if told. Settled by Q22–Q23 (mail app on screen, its autocomplete); to build. | cc | B |
 | G6 | **Long writing.** 1024 output tokens per round, 2000 runes per action; the live typing path flattens newlines; no draft-then-review. | computer loop, dictate | A, B |
 | G7 | **Platforms.** No desktop tasks on Windows or GNOME/KDE Wayland. | agent | all, there |
 | G8 | **Desktop replay fixes** (#581, each step opens its app) unmerged; file parameters don't resolve. | computer replay | C |
 
 ## Open (asked one at a time, in this order)
 
-1. **Q23 — recipients:** where "James" comes from, and what happens with two Jameses.
-2. **Q24 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q24 — two Jameses:** what happens when the name matches more than one person.
+2. **Q25 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
