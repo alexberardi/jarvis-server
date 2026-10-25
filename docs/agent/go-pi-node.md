@@ -810,6 +810,11 @@ silence window (after the 2 s minimum) cut the speaker off. With a wait set, sil
 recording only once speech has been heard (a chunk at or above the threshold) or the wait is
 over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
 
+**Defaults raised 2026-10-25** (deliberate, off the Python node): `--listen-onset-wait` 1.5 s
+and `--listen-silence` 1.2 s (was 0 and 0.8). Real use on the desktop cut commands off after two
+words ("start the…", "Oh, Firefox." for "open Firefox and YouTube"); 1.2 s is what a follow-up
+answer already gets. The app's `listen_silence` setting still overrides it.
+
 **`--listen-preroll DURATION`** (default 1s; `Endpointing.PreRollSecs`; loop #229). The wake
 chime plays synchronously after the fire, and everything the microphone captured meanwhile used
 to be flushed (the Python node's `history_secs=0`). A command said right after "hey Jarvis"
