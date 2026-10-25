@@ -63,6 +63,11 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   20 s without the wake word, as in Q14. A change ("make the summary shorter") continues the same
   task with the draft in context; "looks good" or silence ends it.
 
+- **2026-10-25: a change rewrites and replaces the whole draft** (Q19, v1). Jarvis selects all
+  and copies first, so the redraft starts from what is on the page now (your own typed edits
+  included), revises it changing only what you named, and pastes it back over. One step that
+  works in any app; editing just the named passage in place is left for later.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -83,7 +88,6 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q19 — applying a change:** redraft and replace the whole piece, or edit only the part named.
-2. **Q20 — files by name:** which folders, which kinds, and what "open X" may open.
-3. **Q21 — contacts and email:** where "James" comes from, and how mail is sent.
-4. **Q22 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q20 — files by name:** which folders, which kinds, and what "open X" may open.
+2. **Q21 — contacts and email:** where "James" comes from, and how mail is sent.
+3. **Q22 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
