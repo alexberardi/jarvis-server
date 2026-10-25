@@ -426,9 +426,11 @@ func TestSIPAccountsFollowTheSettingsAndUnregisterOnShutdown(t *testing.T) {
 	// Started with cc: registered before any call.
 	waitFor(t, "the household's UA", func() bool { return len(farm.all()) == 1 })
 	first := farm.all()[0]
-	if st := e.s.SIPStatuses(); len(st) != 1 || st[0].Status.State != sip.StateRegistered || st[0].Account.Extension != "100" {
-		t.Fatalf("statuses %+v", st)
-	}
+	// The UA exists before the reconciler lists it: wait for the registered status itself.
+	waitFor(t, "the account registered", func() bool {
+		st := e.s.SIPStatuses()
+		return len(st) == 1 && st[0].Status.State == sip.StateRegistered && st[0].Account.Extension == "100"
+	})
 	// A new password is a new account: the old UA goes (unregistering), a new one starts.
 	e.set(SettingSIPPassword, "new-secret", settings.Scope{HouseholdID: hh})
 	waitFor(t, "the new UA", func() bool { return len(farm.all()) == 2 })
