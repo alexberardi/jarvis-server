@@ -431,3 +431,26 @@ func TestClampChoiceListen(t *testing.T) {
 		}
 	}
 }
+
+// Voice test, 2026-10-24: "maximize Firefox… restore it" needs one wake word. A silent desktop
+// command keeps listening like a spoken reply, starting at once.
+func TestIslandOnlySuccessKeepsListening(t *testing.T) {
+	os := &fakeOS{}
+	srv := newServer()
+	srv.reply, srv.speakPCM = toolCalls(call("c1", desktop.ToolWindow, `{"action":"minimize","window":"firefox"}`)), pcmOf(300)
+	srv.cont = func([]ToolResult) (*Control, error) { return complete(""), nil }
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || tr.FollowUpEnd != EndTimeout {
+		t.Fatalf("turn %+v", tr)
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{3 * time.Second}) {
+		t.Fatalf("windows %v, want one 3 s follow-up", got)
+	}
+}

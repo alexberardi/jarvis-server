@@ -271,6 +271,9 @@ type hyprClient struct {
 	Mapped         *bool  `json:"mapped"`
 	FocusHistoryID int    `json:"focusHistoryID"`
 	Fullscreen     int    `json:"fullscreen"` // 0 none, 1 maximized, 2 fullscreen
+	Workspace      struct {
+		Name string `json:"name"`
+	} `json:"workspace"`
 }
 
 func (l *Linux) hyprClients(ctx context.Context) ([]hyprClient, error) {
@@ -303,7 +306,8 @@ func (l *Linux) hyprList(ctx context.Context) ([]Window, error) {
 		if !reHyprAddr.MatchString(c.Address) || (c.Mapped != nil && !*c.Mapped) {
 			continue
 		}
-		out = append(out, Window{ID: c.Address, Title: c.Title, App: c.Class, Focused: c.Address == active.Address})
+		out = append(out, Window{ID: c.Address, Title: c.Title, App: c.Class, Focused: c.Address == active.Address,
+			Workspace: c.Workspace.Name})
 	}
 	return out, nil
 }
@@ -351,11 +355,17 @@ func (n *swayNode) window() bool {
 }
 
 type swayLeaf struct {
-	n    *swayNode
-	path []int // position in each ancestor's focus list: smaller was focused more recently
+	n         *swayNode
+	path      []int // position in each ancestor's focus list: smaller was focused more recently
+	workspace string
 }
 
-func (n *swayNode) leaves(path []int, out *[]swayLeaf) {
+func (n *swayNode) leaves(path []int, out *[]swayLeaf) { n.leavesIn("", path, out) }
+
+func (n *swayNode) leavesIn(ws string, path []int, out *[]swayLeaf) {
+	if n.Type == "workspace" {
+		ws = n.Name
+	}
 	kids := make([]*swayNode, 0, len(n.Nodes)+len(n.FloatingNodes))
 	for i := range n.Nodes {
 		kids = append(kids, &n.Nodes[i])
@@ -365,7 +375,7 @@ func (n *swayNode) leaves(path []int, out *[]swayLeaf) {
 	}
 	if len(kids) == 0 {
 		if n.window() {
-			*out = append(*out, swayLeaf{n: n, path: path})
+			*out = append(*out, swayLeaf{n: n, path: path, workspace: ws})
 		}
 		return
 	}
@@ -377,7 +387,7 @@ func (n *swayNode) leaves(path []int, out *[]swayLeaf) {
 				break
 			}
 		}
-		k.leaves(append(append([]int(nil), path...), pos), out)
+		k.leavesIn(ws, append(append([]int(nil), path...), pos), out)
 	}
 }
 
@@ -408,7 +418,7 @@ func (l *Linux) swayList(ctx context.Context) ([]Window, error) {
 		if app == "" && lf.n.WindowProperties != nil {
 			app = lf.n.WindowProperties.Class
 		}
-		out[i] = Window{ID: strconv.FormatInt(lf.n.ID, 10), Title: lf.n.Name, App: app, Focused: lf.n.Focused}
+		out[i] = Window{ID: strconv.FormatInt(lf.n.ID, 10), Title: lf.n.Name, App: app, Focused: lf.n.Focused, Workspace: lf.workspace}
 	}
 	return out, nil
 }

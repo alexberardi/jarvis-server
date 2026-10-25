@@ -138,11 +138,16 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if ignored > 0 {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
 		}
+		choosing := s.choice
 		if s.choice {
 			// The island lists choices: a longer window, listening at once (nothing was
 			// spoken, so there is no reply tail to drain).
 			s.choice = false
 			timeout, afterReply = ClampChoiceListen(cmp.Or(cfg.ChoiceListenSecs, DefaultFollowUp().ChoiceListenSecs)), false
+		}
+		if s.quietTurn {
+			s.quietTurn = false
+			afterReply = false
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
@@ -182,7 +187,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUps, t.FollowUpEnd = append(t.FollowUps, ex), EndNonSpeech
 			return
 		}
-		if IsFollowUpNoise(text, prev) {
+		if IsFollowUpNoise(text, prev) && !(choosing && text != "") { // a repeated answer to a list is still an answer
 			noise++
 			ex.Outcome = OutcomeNoise
 			t.FollowUps = append(t.FollowUps, ex)

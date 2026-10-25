@@ -112,6 +112,14 @@ type Tools struct {
 	mu        sync.Mutex
 	lastActed host.Window
 	actedAt   time.Time
+	// choices is the numbered list the island last showed (an ambiguous name), so "the second
+	// one" picks a window by its place even when titles repeat; choicesAt dates it.
+	choices   []host.Window
+	choicesAt time.Time
+	// closing is a close-all of this app waiting for the user's yes, and its question: further
+	// closes of the same app in that turn get the same question instead of closing.
+	closing     string
+	closingWait map[string]any
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).
@@ -208,7 +216,7 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, req 
 				if (name == ToolWindow || name == ToolClose) && len(we.match.Candidates) > 1 {
 					// Q9: an ambiguous name lists the candidates on the island, numbered; the
 					// user answers "the second one" in the choice window.
-					t.choice(o, we.match.Candidates)
+					t.choice(o, we.match.Candidates, we.windows)
 				}
 				if we.windows != nil {
 					o["windows"] = we.windows // retry with an id from these, in the same turn

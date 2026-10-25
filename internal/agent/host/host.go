@@ -76,6 +76,9 @@ type Window struct {
 	// Focused: the window with keyboard focus, where the backend can tell (Hyprland, sway);
 	// false everywhere else for now.
 	Focused bool `json:"focused"`
+	// Workspace names the window's workspace where the backend knows it (Hyprland, sway), so
+	// two windows with the same title can be told apart; "" elsewhere.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // Errors. Every deliberate failure is one of these, so callers map conditions identically

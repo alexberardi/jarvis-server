@@ -123,6 +123,18 @@ func (c *Confirmer) Ask(question string, act func(ctx context.Context) (map[stri
 	}
 }
 
+// Pending reports whether the question with this id (an Ask output's confirmation_id) is still
+// waiting for its answer.
+func (c *Confirmer) Pending(id any) bool {
+	s, _ := id.(string)
+	if c == nil || s == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pending != nil && c.pending.id == s && !c.now().After(c.pending.deadline)
+}
+
 // Answer resolves the pending question with the user's words. It returns the action's output on
 // a yes, a cancelled output otherwise, and an error for an unknown or already used id.
 func (c *Confirmer) Answer(ctx context.Context, id, answer string) (map[string]any, error) {
