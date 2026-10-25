@@ -812,7 +812,8 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
     counts["recordings"] = n
     # Its keyframes, in jarvisd's blob store (its default, <home>/blobs; blob.FS's format: a JSON
     # header line, then the bytes): seq 1's with its crop, seq 3's without.
-    blobs = os.path.join(os.path.dirname(db_path), "blobs", "recordings", "rec_5eed000000000003")
+    db_file = cx.execute("PRAGMA database_list").fetchone()[2]
+    blobs = os.path.join(os.path.dirname(db_file), "blobs", "recordings", "rec_5eed000000000003")
     os.makedirs(blobs, mode=0o700, exist_ok=True)
     for name, b64 in (("1.jpg", KEYFRAME_JPEG_B64), ("1.crop.jpg", KEYFRAME_CROP_JPEG_B64),
                       ("3.jpg", KEYFRAME_JPEG_B64)):
