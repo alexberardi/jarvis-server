@@ -36,6 +36,17 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   Confirmations ("Send this email to James?") work the same way: a spoken yes or no. This closes
   G1 for the computer you're at.
 
+- **2026-10-25: the model routes, through one task tool** (Q15). On a computer with computer
+  control on, the model is offered `computer_task {goal}` for anything that needs several steps
+  or content Jarvis has to make up, and needsComputer stops excluding "write"/"type". The line:
+  **you give the words** ("type hello world", "tell Slack I'm running late") → dictation and
+  single actions, as today; **Jarvis makes the content or plans the steps** ("write my resume",
+  "write an email to James", "open spreadsheet X and run the budget workflow") → a task, started
+  at once and attended (Q13). A taught workflow's name still goes to the workflow runner. No
+  "use the computer to …" prefix is needed (#575's approach, rejected as unnatural). Ships behind
+  toolbench scenarios on both sides of the line, including near-misses ("write 'on my way' in
+  Slack"). Settles G2.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -46,7 +57,7 @@ dictation. What breaks:
 | # | Gap | Where | Blocks |
 |---|---|---|---|
 | G1 | **Questions, confirmations and results mid-task go to phone cards.** The loop can `ask` (`computer/loop.go` StateAsk), but it parks on a card (`errands/computer_handler.go` postComputerCard); the desktop node is never told a task waits, and no voice path resumes it. | cc errands, agent activity | A outright; B and C at any confirmation |
-| G2 | **Routing.** `cc/computer_control.go` needsComputer returns false for "write"/"type" (what follows is text to type), so "write an email to James" never becomes a task. "use the computer to …" (#575) is on an unmerged branch. | cc | A, B |
+| G2 | **Routing.** `cc/computer_control.go` needsComputer returns false for "write"/"type" (what follows is text to type), so "write an email to James" never becomes a task. "use the computer to …" (#575) is on an unmerged branch. Settled by Q15; to build. | cc | A, B |
 | G3 | **A phone tap to start**, unless household autonomy is on; a non-autorun task may run on another computer than the one spoken to. Settled by Q13; to build. | cc errands | A, B, C |
 | G4 | **No file by name.** `desktop_open` refuses paths; `computer_files` reads two folders and four text types; a workflow's `file` parameter is only text. | agent, cc | C |
 | G5 | **No contacts with email, no email tool.** Phone contacts have no email; memory knows James's address only if told. | cc | B |
@@ -56,8 +67,7 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q15 — routing:** how a request becomes a task rather than single actions.
-2. **Q16 — drafting long text:** draft-then-review, and where you see the draft.
-3. **Q17 — files by name:** which folders, which kinds, and what "open X" may open.
-4. **Q18 — contacts and email:** where "James" comes from, and how mail is sent.
-5. **Q19 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q16 — drafting long text:** draft-then-review, and where you see the draft.
+2. **Q17 — files by name:** which folders, which kinds, and what "open X" may open.
+3. **Q18 — contacts and email:** where "James" comes from, and how mail is sent.
+4. **Q19 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
