@@ -19,6 +19,25 @@ This lifts the earlier "single bounded actions, no planning" rule
 in the computer-task loop (COMPUTER-CONTROL.md C6), started by voice on the computer you're at.
 Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
 
+## Principles (from the decisions below)
+
+The three requests are examples, not the scope. Every flow follows these:
+
+1. **You're there, so it just starts** (Q13). Said at the computer, it runs at once, attended.
+2. **It talks to you, not your phone** (Q14). Questions, confirmations and results by voice and
+   island, with a wake-free answer window; the phone is only the fallback.
+3. **The model decides what is a task** (Q15). You give the words → single actions; Jarvis has
+   to make the content or plan the steps → a task. No magic phrase.
+4. **Your apps are the tools** (Q16, Q22, Q23). Work happens in the apps you already use, on
+   screen, where you can see and undo it. Jarvis stores no app credentials and adds no parallel
+   API, and leans on what the app already knows (its autocomplete, its recent files).
+5. **Write whole, revise whole** (Q17–Q19). Content is written in one step and pasted; changes
+   start from what's on the page now and replace it; after each, "anything to change?".
+6. **Ask, don't guess** (Q24). Anything ambiguous is a spoken choice, every time.
+7. **Nothing irreversible without a spoken yes** (Q14). Sending, overwriting, deleting.
+8. **Safe defaults you can widen** (Q20, Q21). Where it looks and what it may open default to the
+   ordinary, and the user can extend them in settings.
+
 ## Decided
 
 - **2026-10-25: a multi-step request you say to your computer starts there at once, attended**
@@ -91,6 +110,11 @@ Single actions keep the direct path (DESKTOP-COMMANDS.md): fast, no planning.
   ("James's email is …"), and only then asks you, offering to remember the answer. No contact
   sync or contact store in Jarvis. Settles G5.
 
+- **2026-10-25: anything ambiguous is asked, every time** (Q24). When a reference matches more
+  than one thing (two Jameses, two files called "budget", two terminals) Jarvis reads the
+  choices and shows them on the island, and you pick by voice. It never guesses, and does not
+  learn a default from past picks.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -111,5 +135,7 @@ dictation. What breaks:
 
 ## Open (asked one at a time, in this order)
 
-1. **Q24 — two Jameses:** what happens when the name matches more than one person.
-2. **Q25 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+1. **Q25 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
+2. **Q26 — interrupting:** stopping, pausing or taking over a running task by voice.
+3. **Q27 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
+4. **Q28 — stuck:** what a task does when the screen isn't what it expected.
