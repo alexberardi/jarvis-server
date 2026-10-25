@@ -283,7 +283,9 @@ func TestResolveVLLM(t *testing.T) {
 		t.Fatalf("%d starts", len(st))
 	}
 	s := st[0]
+	// No FlashInfer sampler: it JIT-compiles with a CUDA toolkit most hosts don't have (#582).
 	if s.Env["HF_HUB_OFFLINE"] != "1" || s.Env["CUDA_VISIBLE_DEVICES"] != "0" || s.Env["VLLM_API_KEY"] != ep.APIKey ||
+		s.Env["VLLM_USE_FLASHINFER_SAMPLER"] != "0" ||
 		s.Env["VLLM_CACHE_ROOT"] != filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(bin))), "cache", "vllm") {
 		t.Errorf("env %v", s.Env)
 	}
