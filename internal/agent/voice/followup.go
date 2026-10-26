@@ -49,7 +49,15 @@ type FollowUpConfig struct {
 	// default 8, at most MaxChoiceListenSecs): reading a list and answering takes longer than
 	// the 3 s follow-up (DESKTOP-COMMANDS.md Q9).
 	ChoiceListenSecs float64
+	// ChainListenSecs: the window after a silent desktop command (the island showed it), so
+	// the user can say the next step of a process ("switch to the Claude tab… now the budget
+	// sheet… maximize it"): the 3 s after a spoken reply was too short to think of it (voice
+	// test, 2026-10-25). Such steps don't count toward MaxIterations; maxChainSteps bounds them.
+	ChainListenSecs float64
 }
+
+// maxChainSteps bounds one wake word's follow-up turns, silent desktop steps included.
+const maxChainSteps = 30
 
 // choiceHint biases whisper toward an answer to a numbered list in the choice window.
 const choiceHint = "The first one. The second one. The third one. Number four. The last one."
@@ -76,7 +84,7 @@ func ClampFollowUpListen(secs float64) float64 { return min(secs, MaxFollowUpLis
 func DefaultFollowUp() FollowUpConfig {
 	return FollowUpConfig{ListenSecs: MaxFollowUpListenSecs, MaxIterations: 5,
 		QuietWaitSecs: 0.5, SilenceSecs: 1.2, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3,
-		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2, ChoiceListenSecs: 8}
+		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2, ChoiceListenSecs: 8, ChainListenSecs: 8}
 }
 
 // Fixed parts of the Python node's follow-up listening.
@@ -130,11 +138,13 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	ignored := 0
 	used := 0          // chunks of this iteration's window already heard (ignored answers included)
 	afterReply := true // the last thing that happened was us speaking (or the wake exchange)
+	steps := 0
 	for it := 1; ; {
-		if it > cfg.MaxIterations {
+		if it > cfg.MaxIterations || steps >= maxChainSteps {
 			t.FollowUpEnd = EndMaxIterations
 			return
 		}
+		steps++
 		window := max(min(cfg.MinTimeoutSecs, cfg.ListenSecs), cfg.ListenSecs-float64(it-1)*cfg.DecaySecs)
 		// Speech that wasn't for us doesn't buy the room a new window: after an ignored
 		// answer, only what is left of this one (but at least IgnoredGraceSecs).
@@ -152,6 +162,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if s.quietTurn {
 			s.quietTurn = false
 			afterReply = false
+			if !choosing {
+				timeout = cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs)
+			}
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
@@ -215,7 +228,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 						s.quietTurn = true
 					}
 					noise, prev, used = 0, text, 0
-					it++
+					if !s.quietTurn {
+						it++ // a silent step of a process doesn't use up the window count
+					}
 					continue
 				}
 			}
@@ -283,7 +298,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		}
 		ignored, used = 0, 0
 		afterReply = true
-		it++
+		if !s.quietTurn {
+			it++ // a silent step of a process doesn't use up the window count
+		}
 	}
 }
 
