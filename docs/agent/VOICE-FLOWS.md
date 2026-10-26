@@ -37,6 +37,8 @@ The three requests are examples, not the scope. Every flow follows these:
 7. **Nothing irreversible without a spoken yes** (Q14). Sending, overwriting, deleting.
 8. **Safe defaults you can widen** (Q20, Q21). Where it looks and what it may open default to the
    ordinary, and the user can extend them in settings.
+9. **Views inside apps are switched by name, matched by our code** (Q26). Tabs, worksheets,
+   editor and terminal tabs, channels: one way for all of them, never one tool per app.
 
 ## Decided
 
@@ -115,6 +117,23 @@ The three requests are examples, not the scope. Every flow follows these:
   choices and shows them on the island, and you pick by voice. It never guesses, and does not
   learn a default from past picks.
 
+- **2026-10-25: views inside an app come from the accessibility tree** (Q26). Real use: a
+  misheard tab name ("Claude pad", "Cloud Fair" for the Claude tab) matched nothing, the model
+  saw an empty list and improvised; Excel worksheets, editor and terminal tabs would fail the
+  same way. Design:
+  - **Two generic tools**, `desktop_views` (the focused or named app's views) and `desktop_view`
+    (switch by the name said), not per-app tools.
+  - **Our code matches, not the model**: spelling and sound (winmatch, as for windows and apps);
+    one match switches, several or none become a spoken choice on the island (Q24).
+  - **View names are STT hints** for the turn, as app names are, so the name is heard right.
+  - **Source: the accessibility tree** (AT-SPI on Linux, AX on macOS, UI Automation on Windows):
+    tabs are standard tab elements in browsers, spreadsheets, editors and terminals, and
+    switching is the element's own press action: no pointer, no screenshot. One backend per OS
+    covers every well-behaved app. Richer per-app sources stay where they exist (the browser
+    extension for tabs: URLs, audio). Apps that expose little (Electron without its flag, custom
+    UIs) get nothing from it; vision stays the computer-task fallback.
+  The list-tabs "closest first" fallback (#506) is the stopgap until this lands.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -132,10 +151,11 @@ dictation. What breaks:
 | G6 | **Long writing.** 1024 output tokens per round, 2000 runes per action; the live typing path flattens newlines; no draft-then-review. | computer loop, dictate | A, B |
 | G7 | **Platforms.** No desktop tasks on Windows or GNOME/KDE Wayland. | agent | all, there |
 | G8 | **Desktop replay fixes** (#581, each step opens its app) unmerged; file parameters don't resolve. | computer replay | C |
+| G9 | **Views inside apps.** Only browser tabs are switchable (extension); no worksheets, editor or terminal tabs; a misheard name matches nothing. Settled by Q26; to build. | agent | all |
 
 ## Open (asked one at a time, in this order)
 
 1. **Q25 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
-2. **Q26 — interrupting:** stopping, pausing or taking over a running task by voice.
-3. **Q27 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
-4. **Q28 — stuck:** what a task does when the screen isn't what it expected.
+2. **Q27 — interrupting:** stopping, pausing or taking over a running task by voice.
+3. **Q28 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
+4. **Q29 — stuck:** what a task does when the screen isn't what it expected.
