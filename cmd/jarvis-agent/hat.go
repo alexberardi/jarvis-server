@@ -23,6 +23,7 @@ type hatFlags struct {
 	mode       string
 	brightness int
 	noLEDs     bool
+	noLEDIdle  bool
 	poweroff   bool
 }
 
@@ -31,6 +32,7 @@ func addHatFlags(fs *flag.FlagSet) *hatFlags {
 	fs.StringVar(&h.mode, "hat", "auto", `ReSpeaker 2-mics HAT LEDs and button: "auto" (a Raspberry Pi with the HAT), "on" or "off"`)
 	fs.IntVar(&h.brightness, "led-brightness", 100, "HAT LED brightness, percent (the Python node's led_brightness_percent)")
 	fs.BoolVar(&h.noLEDs, "no-leds", false, "keep the HAT LEDs dark (the Python node's led_enabled false)")
+	fs.BoolVar(&h.noLEDIdle, "no-led-idle", false, "keep the HAT LEDs dark while idle: they light only when responding (wake, listening, thinking, speaking, errors, alerts)")
 	fs.BoolVar(&h.poweroff, "button-poweroff", true, "holding the HAT button 3 s powers the Pi off (sudo -n systemctl poweroff), as the Python node does")
 	return h
 }
@@ -74,6 +76,7 @@ func openHat(f *hatFlags, press func(leds *hat.LEDs), log *slog.Logger) *hatDevi
 	}
 	h := &hatDevices{leds: hat.NewLEDs(strip, log)}
 	h.leds.SetBrightness(f.brightness)
+	h.leds.SetIdleDark(f.noLEDIdle)
 	h.leds.SetEnabled(!f.noLEDs)
 	h.button = &hat.Button{LEDs: h.leds, Log: log,
 		OnShortPress: func() {
@@ -111,6 +114,7 @@ func openACT(f *hatFlags, log *slog.Logger) *hatDevices {
 		return nil
 	}
 	leds.SetEnabled(!f.noLEDs) // brightness has no effect on the ACT LED
+	leds.SetIdleDark(f.noLEDIdle)
 	log.Info("hat: no HAT, showing state on the ACT LED", "dir", dir)
 	return &hatDevices{leds: leds, act: true}
 }
@@ -293,7 +297,7 @@ func hatCmd(ctx context.Context, args []string) error {
 // piState is the node settings the Pi starts with: its flags, after agent.json.
 func piState(vf *voiceFlags, hf *hatFlags) pinode.State {
 	return pinode.State{WakeThreshold: vf.threshold, WakeAuto: vf.wakeAuto, WakeAck: !vf.noChimes, FollowUpListen: vf.followUp,
-		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDBrightness: hf.brightness,
+		FollowUpSilence: vf.followSilence, LEDEnabled: hf.mode != "off" && !hf.noLEDs, LEDIdle: !hf.noLEDIdle, LEDBrightness: hf.brightness,
 		SilenceThreshold: vf.silenceThreshold, SilenceSecs: vf.listenSilence,
 		FollowUpMinAfterOnset: vf.followMinAfterOnset, FollowUpMinSpeech: vf.followMinSpeech}
 }
@@ -359,6 +363,7 @@ func piNodeConfig(state func() pinode.State, bargeIn bool, hd *hatDevices, audio
 			"maintenance_restart_enabled":           st.Maintenance.Enabled,
 			"maintenance_restart_at_time":           st.Maintenance.At,
 			"led_enabled":                           st.LEDEnabled,
+			"led_idle_enabled":                      st.LEDIdle,
 			"led_brightness_percent":                st.LEDBrightness,
 			"hardware": map[string]any{
 				"hat_detected":        detected || chain,

@@ -27,6 +27,7 @@ import (
 type LEDs interface {
 	Preview(name string, d time.Duration)
 	SetEnabled(on bool)
+	SetIdleDark(dark bool)
 	SetBrightness(percent int)
 }
 
@@ -52,6 +53,7 @@ type State struct {
 	FollowUpListen  float64 // follow_up_listen_seconds
 	FollowUpSilence float64 // follow_up_silence_duration
 	LEDEnabled      bool    // led_enabled
+	LEDIdle         bool    // led_idle_enabled: false lights the LEDs only while responding
 	LEDBrightness   int     // led_brightness_percent
 	// The voice pipeline's endpointing.
 	SilenceThreshold      float64 // silence_threshold (the static one; the room's level wins when known)
@@ -60,6 +62,18 @@ type State struct {
 	FollowUpMinSpeech     float64 // follow_up_min_speech_secs
 	// maintenance_restart_enabled, _at_time and _rss_ceiling_mb: read at every poll.
 	Maintenance maintenance.Settings
+}
+
+// LEDMode is the LEDs as one setting for the admin page: "off", "responding" (lit only while the
+// node responds) or "always" (the dim idle glow too).
+func (s State) LEDMode() string {
+	switch {
+	case !s.LEDEnabled:
+		return "off"
+	case !s.LEDIdle:
+		return "responding"
+	}
+	return "always"
 }
 
 // Node handles the verbs. Set LEDs, Voice and Audio after New when the Pi has them.
@@ -176,6 +190,10 @@ func parse(key string, v any) (change, string) {
 		b := truthy(v)
 		return change{state: func(s *State) { s.LEDEnabled = b }, save: func(s *settings.Settings) { s.LEDs = &b },
 			leds: func(l LEDs) { l.SetEnabled(b) }}, ""
+	case "led_idle_enabled":
+		b := truthy(v)
+		return change{state: func(s *State) { s.LEDIdle = b }, save: func(s *settings.Settings) { s.LEDIdle = &b },
+			leds: func(l LEDs) { l.SetIdleDark(!b) }}, ""
 	case "led_brightness_percent":
 		f, ok := number(v)
 		if !ok {

@@ -1,14 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Cpu, Laptop, RefreshCw } from 'lucide-react'
 import PendingPairings from '@/components/nodes/PendingPairings'
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonList } from '@/components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, toast } from '@/components/ui'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
 import { formatVersion } from '@/lib/format'
 import { timeAgo } from '@/lib/time'
 import type { AdminNode } from '@/api/admin'
-import { computerControlState, extensionState, websiteAccessState } from '@/api/nodes'
-import type { NodeLiveness } from '@/api/nodes'
+import { computerControlState, extensionState, ledModeState, setLedMode, websiteAccessState } from '@/api/nodes'
+import type { LedMode, NodeLiveness } from '@/api/nodes'
 
 const extensionText = { connected: 'connected', disconnected: 'not connected', disabled: 'off' } as const
 
@@ -21,12 +21,54 @@ function Detail({ label, children, title }: { label: string; children: ReactNode
   )
 }
 
+const ledModeOptions = [
+  { value: 'always', label: 'Always on' },
+  { value: 'responding', label: 'Only when responding' },
+  { value: 'off', label: 'Off' },
+]
+
+/**
+ * LedModeField is one voice node's LED setting: the HAT's LEDs always on, lit only while the node
+ * responds (wake, listening, thinking, speaking, errors, alerts), or off. It is per node: it goes
+ * to that node alone, and the node keeps it across restarts. The node reports the value back with
+ * its next heartbeat, so the choice shows at once and settles on what the node says (the field starts again whenever the reported value changes).
+ */
+function LedModeField({ nodeId, reported, online }: { nodeId: string; reported: LedMode; online: boolean }) {
+  const [mode, setMode] = useState<LedMode>(reported)
+  const [saving, setSaving] = useState(false)
+  const change = async (next: string) => {
+    const previous = mode
+    setMode(next as LedMode)
+    setSaving(true)
+    try {
+      await setLedMode(nodeId, next as LedMode)
+      toast.success('LED setting sent')
+    } catch {
+      setMode(previous)
+      toast.error("Couldn't send the LED setting to this node")
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <Select
+      label="LEDs"
+      hint={online ? undefined : 'The node is offline; it applies the setting when it is back.'}
+      options={ledModeOptions}
+      value={mode}
+      disabled={saving}
+      onValueChange={change}
+    />
+  )
+}
+
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const desktop = live?.node_kind === 'desktop'
   const ext = extensionState(live)
   // Website access off: the browser is connected but Jarvis can't read or act on its pages.
   const accessOff = ext === 'connected' && websiteAccessState(live) === 'off'
   const computerControl = computerControlState(live)
+  const ledMode = ledModeState(live)
   const Icon = desktop ? Laptop : Cpu
   return (
     <Card as="article" data-testid={`node-${node.node_id}`}>
@@ -72,6 +114,7 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
             {computerControl}
           </Detail>
         )}
+        {ledMode && live && <LedModeField key={ledMode} nodeId={node.node_id} reported={ledMode} online={live.online} />}
         {node.services.length > 0 && <Detail label="Services">{node.services.join(', ')}</Detail>}
         <Detail label="ID">
           <code className="font-mono break-all text-text-muted">{node.node_id}</code>

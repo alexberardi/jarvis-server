@@ -126,7 +126,8 @@ func TestPiNodeConfig(t *testing.T) {
 		"follow_up_listen_seconds": 4.0, "follow_up_silence_duration": 0.5, "barge_in_enabled": true,
 		"silence_threshold": 1000, "silence_duration": 0.5,
 		"follow_up_min_record_after_onset_secs": 0.9, "follow_up_min_speech_secs": 0.45,
-		"led_enabled": true, "led_brightness_percent": 40,
+		"led_enabled":      true,
+		"led_idle_enabled": true, "led_brightness_percent": 40,
 		// The ceiling in effect: max(320 MB, 35% of 4 GB).
 		"maintenance_restart_enabled": true, "maintenance_restart_at_time": "03:00", "maintenance_restart_rss_ceiling_mb": 1433,
 		"hardware": map[string]any{"hat_detected": false, "led_chain_available": false, "button_available": false},

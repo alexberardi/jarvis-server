@@ -50,6 +50,7 @@ type Settings struct {
 	// (DESKTOP-COMMANDS.md Q9: choice_listen_seconds).
 	ChoiceListen  *float64 `json:"choice_listen_seconds,omitempty"`
 	LEDs          *bool    `json:"leds,omitempty"`
+	LEDIdle       *bool    `json:"led_idle,omitempty"`
 	LEDBrightness *int     `json:"led_brightness,omitempty"`
 	// The voice pipeline's endpointing (#295).
 	SilenceThreshold      *float64 `json:"silence_threshold,omitempty"`
@@ -94,6 +95,7 @@ var Keys = []Key{
 	{"choice_listen_seconds", "choice-listen", false, "after the island lists choices (which window?), listen this many seconds for the answer (at most 30)",
 		func(s *Settings) any { return &s.ChoiceListen }},
 	{"leds", "no-leds", true, "light the ReSpeaker HAT's LEDs (a Pi)", func(s *Settings) any { return &s.LEDs }},
+	{"led_idle", "no-led-idle", true, "light the HAT's LEDs while idle (off: only while the node responds)", func(s *Settings) any { return &s.LEDIdle }},
 	{"led_brightness", "led-brightness", false, "HAT LED brightness, percent (0 to 100)", func(s *Settings) any { return &s.LEDBrightness }},
 	{"silence_threshold", "silence-threshold", false, "RMS below which a command counts as silence, when the room's level before the wake word isn't known",
 		func(s *Settings) any { return &s.SilenceThreshold }},
