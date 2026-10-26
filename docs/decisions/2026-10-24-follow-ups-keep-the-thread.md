@@ -18,7 +18,7 @@ summary) and "what colors was it?" went to `recall`. The G1 prompt goldens are r
 from the Go builder (`tools/golden/rebaseline.py`), as in
 [2026-10-20-prompt-diet](2026-10-20-prompt-diet.md).
 
-**Not changed:** the cross-turn `[TOOL_DEDUPE]` (120 s, [02-tool-loop.md](../cc/02-tool-loop.md)
-§3.2 j.8) still answers a repeated identical `browser_read_page` from the earlier result, so a
-"what about now" within two minutes repeats the old text. Whether read tools should be exempt is
-left for its own item.
+**Read tools (item #598):** the cross-turn `[TOOL_DEDUPE]` (120 s, [02-tool-loop.md](../cc/02-tool-loop.md)
+§3.2 j.8) used to answer a repeated identical `browser_read_page` from the earlier result, so a
+"what about now" within two minutes repeated the old text. Read tools (`browser_read_page`,
+`desktop_read_screen`) are now exempt from it: a repeat re-reads the current state.

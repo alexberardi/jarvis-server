@@ -775,9 +775,13 @@ func toolFailedThisTurn(msgs []chatMsg) bool {
 	return false
 }
 
+// readTools return the current state (a page, the screen), so a repeat re-reads it rather than
+// being answered from the earlier result: findDuplicate never holds them back.
+var readTools = map[string]bool{"browser_read_page": true, "desktop_read_screen": true}
+
 // findDuplicate is _find_duplicate_issued_call: the first client call identical (name +
 // canonical args) to one issued in this conversation within voice.tool_dedupe_window_seconds
-// and not already nudged this turn. Every failure passes the call through.
+// and not already nudged this turn; read tools are exempt. Every failure passes the call through.
 func (m *Module) findDuplicate(ctx context.Context, conv *conversation, calls []parse.ToolCall, nudged map[[2]string]bool) (string, string, time.Duration, bool) {
 	window := m.settings.Float(ctx, settingDedupeWindow, settings.Scope{})
 	if window <= 0 || len(conv.issued) == 0 {
@@ -785,6 +789,9 @@ func (m *Module) findDuplicate(ctx context.Context, conv *conversation, calls []
 	}
 	now := m.now()
 	for _, c := range calls {
+		if readTools[c.Function.Name] {
+			continue
+		}
 		key, ok := canonicalArgsKey(c.Function.Arguments)
 		if !ok || nudged[[2]string{c.Function.Name, key}] {
 			continue
