@@ -116,7 +116,8 @@ func Resolve(list []App, query string) (App, error) {
 
 // Find picks exactly one app for a spoken name, in tiers, stopping at the first tier with
 // any match: exact (name or desktop id, ignoring case and punctuation), then the name starts
-// with the query, then every query word appears in the name, then a small edit distance (typos,
+// with the query, then every query word appears in the name, then the app's GenericName or a
+// Keyword (desktop files), then a small edit distance (typos,
 // mishearings), then the same sound (winmatch.SoundsLike: "oh my right" for Omawrite). A tier
 // with several matches is ambiguous rather than a guess. Names that only sound close
 // (winmatch.SoundsNear: "the oven" for Neovim) are never picked; they come back as suggestions.
@@ -152,6 +153,23 @@ func Find(list []App, query string) (Pick, error) {
 		if len(hits) > 1 {
 			return Pick{}, &AmbiguousError{Query: query, Candidates: names(hits, 8)}
 		}
+	}
+	// What the app is (GenericName, Keywords): "calculator" for Omacalc. Before any fuzzy
+	// tier: an exact word the app describes itself with beats a near spelling of another name.
+	var also []App
+	for _, a := range list {
+		for _, w := range a.Also {
+			if norm(w) == nq {
+				also = append(also, a)
+				break
+			}
+		}
+	}
+	if len(also) == 1 {
+		return Pick{App: also[0]}, nil
+	}
+	if len(also) > 1 {
+		return Pick{}, &AmbiguousError{Query: query, Candidates: names(also, 8)}
 	}
 	fuzzy := func(a App) Pick { return Pick{App: a, Fuzzy: true, HeardAs: strings.TrimSpace(query)} }
 	// Spelling: allow 1 edit for short names, 2 for longer; the best distance must be unique.
