@@ -18,14 +18,18 @@ func TestTabsAndSelectTab(t *testing.T) {
 		{role: rolePageTabList, kids: []*fakeNode{claude, yt}},
 		{role: roleDocumentWeb, kids: []*fakeNode{{role: rolePageTabList, kids: []*fakeNode{inPage}}}},
 	}}
-	fakeDesktop(t, &fakeNode{role: roleApplication, name: "Firefox", kids: []*fakeNode{win}})
+	other := &fakeNode{role: roleFrame, name: "Discord — Firefox", kids: []*fakeNode{
+		{role: rolePageTabList, kids: []*fakeNode{{role: rolePageTab, name: "Discord", actions: []string{"switch"}}}},
+	}}
+	// The inactive window comes first in the tree; its tabs are listed after the active one's.
+	fakeDesktop(t, &fakeNode{role: roleApplication, name: "Firefox", kids: []*fakeNode{other, win}})
 	ctx := context.Background()
 
 	got, err := Tabs(ctx, os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Tab{{0, "New session - Claude", false}, {1, "YouTube", true}}; !slices.Equal(got, want) {
+	if want := []Tab{{0, "New session - Claude", false, "Firefox"}, {1, "YouTube", true, "Firefox"}, {2, "Discord", false, "Discord — Firefox"}}; !slices.Equal(got, want) {
 		t.Fatalf("tabs %+v, want %+v (a document's tabs aren't the window's)", got, want)
 	}
 	if err := SelectTab(ctx, os.Getpid(), 0, "New session - Claude"); err != nil {

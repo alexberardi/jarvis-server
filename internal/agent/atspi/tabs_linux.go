@@ -4,6 +4,7 @@ package atspi
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -54,24 +55,53 @@ func (w *tabWalk) visit(o obj, depth int) {
 	}
 }
 
-func windowTabs(ctx context.Context, pid int) ([]obj, error) {
-	win, err := activeWindow(ctx, pid)
+// appTabs are the page tabs of every window of the app with pid, the active window's first:
+// a tab the user names may be in another window of the same browser.
+func appTabs(ctx context.Context, pid int) ([]obj, []string, error) {
+	c, err := bus(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	w := &tabWalk{ctx: ctx}
-	w.visit(win, 0)
-	return w.tabs, nil
+	app, err := findApp(ctx, c, pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	wins, err := app.children(ctx)
+	if err != nil {
+		return nil, nil, callErr("GetChildren", err)
+	}
+	slices.SortStableFunc(wins, func(a, b obj) int {
+		aa, ba := a.state(ctx).has(stateActive), b.state(ctx).has(stateActive)
+		switch {
+		case aa && !ba:
+			return -1
+		case ba && !aa:
+			return 1
+		}
+		return 0
+	})
+	var tabs []obj
+	var windows []string
+	for _, win := range wins {
+		w := &tabWalk{ctx: ctx}
+		w.visit(win, 0)
+		title := win.name(ctx)
+		for _, t := range w.tabs {
+			tabs = append(tabs, t)
+			windows = append(windows, title)
+		}
+	}
+	return tabs, windows, nil
 }
 
 func tabs(ctx context.Context, pid int) ([]Tab, error) {
-	objs, err := windowTabs(ctx, pid)
+	objs, windows, err := appTabs(ctx, pid)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Tab, 0, len(objs))
 	for i, o := range objs {
-		out = append(out, Tab{Index: i, Name: o.name(ctx), Selected: o.state(ctx).has(stateSelected)})
+		out = append(out, Tab{Index: i, Name: o.name(ctx), Selected: o.state(ctx).has(stateSelected), Window: windows[i]})
 	}
 	return out, nil
 }
@@ -80,7 +110,7 @@ func tabs(ctx context.Context, pid int) ([]Tab, error) {
 // (a GTK notebook). The tab must still be at index with the same name: the strip may have
 // changed since it was listed.
 func selectTab(ctx context.Context, pid, index int, name string) error {
-	objs, err := windowTabs(ctx, pid)
+	objs, _, err := appTabs(ctx, pid)
 	if err != nil {
 		return err
 	}

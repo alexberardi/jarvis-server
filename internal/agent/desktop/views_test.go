@@ -12,12 +12,12 @@ import (
 
 // Tonight's Firefox (2026-10-25), as AT-SPI listed it.
 var firefoxTabs = []View{
-	{0, "New session - Claude", false},
-	{1, "Web analytics | Alexmberardi@gmail.com's Account | Cloudflare", false},
-	{2, "Jarvis Automation", false},
-	{3, "Usage - OpenAI API", false},
-	{4, "Discord | #general | Jarvis Automation", false},
-	{5, "YouTube", true},
+	{0, "New session - Claude", false, ""},
+	{1, "Web analytics | Alexmberardi@gmail.com's Account | Cloudflare", false, ""},
+	{2, "Jarvis Automation", false, ""},
+	{3, "Usage - OpenAI API", false, ""},
+	{4, "Discord | #general | Jarvis Automation", false, ""},
+	{5, "YouTube", true, ""},
 }
 
 type fakeViews struct {
