@@ -41,6 +41,18 @@ type trayIcon struct {
 	computer *computer.Switch
 	// recorder records what the user does (the menu's "Record a macro…"); nil hides it.
 	recorder *computer.Recorder
+	// reached says the agent has reached its server (node.Runner.Reached); while it hasn't,
+	// the menu says what it is waiting for and offers "Retry now". nil: always reached.
+	reached func() bool
+	// retryNow tries the server again at once (node.Runner.RetryNow).
+	retryNow func()
+	// webUI wakes findWebUI's own retry loop (the server has just answered, or "Retry now"):
+	// without it "Open Jarvis Automation" can be up to two minutes behind the server. Buffered
+	// 1; nil leaves the loop to its backoff.
+	webUI chan struct{}
+	// webUIEvery is findWebUI's first wait between tries (it doubles up to two minutes); 0 is
+	// two seconds. Tests set it long to show that the wake-up doesn't wait for it.
+	webUIEvery time.Duration
 
 	t      atomic.Pointer[tray.Tray]
 	update atomic.Pointer[string] // the self-update's status line
@@ -63,7 +75,8 @@ func (ic *trayIcon) show(ctx context.Context) func() {
 	}
 	t, err := tray.Start(tray.Options{Log: ic.log, State: ic.state(), MainLoop: ic.mainLoop,
 		Actions: tray.Actions{SetVoice: ic.sw.Set, Open: ic.open, Setup: ic.setup, Quit: ic.quitFromMenu, SignOut: ic.signOutFromMenu,
-			StopTask: ic.stopTaskFromMenu, SetComputer: ic.setComputerFromMenu, Record: ic.recordFromMenu}})
+			StopTask: ic.stopTaskFromMenu, SetComputer: ic.setComputerFromMenu, Record: ic.recordFromMenu,
+			RetryNow: ic.retryNowFromMenu}})
 	if err != nil {
 		ic.log.Info("tray: no status icon", "reason", err)
 		return func() {}
@@ -87,7 +100,12 @@ func (ic *trayIcon) withWebUI(s tray.State, u string) tray.State { s.OpenURL = u
 func (ic *trayIcon) state() tray.State {
 	s := tray.State{Status: "Running", VoiceAvailable: voice.Supported, Voice: ic.sw.On(), Setup: ic.setup != nil,
 		SignOut: ic.signOut != nil}
-	if !s.Voice && ic.sw.lastErr() != "" {
+	switch {
+	case ic.reached != nil && !ic.reached():
+		// The server isn't there yet (it may be started after the agent): say so rather than
+		// claim the agent runs, since nothing works until it answers (#585).
+		s.Waiting, s.Status = true, tray.WaitingFor(ic.configURL)
+	case !s.Voice && ic.sw.lastErr() != "":
 		s.Status = "Running, couldn't start listening"
 	}
 	if u := ic.update.Load(); u != nil {
@@ -151,6 +169,23 @@ func (ic *trayIcon) signOutFromMenu() {
 	}
 }
 
+// retryNowFromMenu is "Retry now": try the server again without waiting for the backoff.
+func (ic *trayIcon) retryNowFromMenu() {
+	ic.log.Info("Retry now chosen in the menu", "url", ic.configURL)
+	if ic.retryNow != nil {
+		ic.retryNow()
+	}
+	ic.lookForWebUI()
+}
+
+// lookForWebUI asks findWebUI to try the server again now rather than after its backoff.
+func (ic *trayIcon) lookForWebUI() {
+	select {
+	case ic.webUI <- struct{}{}:
+	default: // no loop listening, or one is already due
+	}
+}
+
 func (ic *trayIcon) open(u string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -163,7 +198,7 @@ func (ic *trayIcon) open(u string) {
 // "Open Jarvis Automation" once known.
 func (ic *trayIcon) findWebUI(ctx context.Context) {
 	hc := &http.Client{Timeout: 10 * time.Second}
-	backoff := 2 * time.Second
+	backoff := ic.webUIBackoff()
 	for {
 		if svcs, err := node.Discover(ctx, hc, ic.configURL); err == nil {
 			if u := webUIURL(svcs); u != "" {
@@ -176,10 +211,20 @@ func (ic *trayIcon) findWebUI(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ic.webUI: // the server has just answered: look now
+			backoff = ic.webUIBackoff()
 		case <-time.After(backoff):
+			backoff = min(2*backoff, 2*time.Minute)
 		}
-		backoff = min(2*backoff, 2*time.Minute)
 	}
+}
+
+// webUIBackoff is findWebUI's first wait between tries.
+func (ic *trayIcon) webUIBackoff() time.Duration {
+	if ic.webUIEvery > 0 {
+		return ic.webUIEvery
+	}
+	return 2 * time.Second
 }
 
 // webUIURL is the web UI's http(s) address from discovery, or "".
