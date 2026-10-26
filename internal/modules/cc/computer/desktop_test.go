@@ -2,6 +2,7 @@ package computer
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -128,5 +129,123 @@ func TestDesktopNewAppAndClipboard(t *testing.T) {
 	}
 	if strings.Contains(userText(e.llm.reqs[2]), "clipboard: ") {
 		t.Error("an old clipboard read is shown again")
+	}
+}
+
+func click(x, y int, intent string) string {
+	b, _ := json.Marshal(map[string]any{"kind": "click", "x": x, "y": y, "intent": intent})
+	return string(b)
+}
+
+func chord(intent string, keys ...string) string {
+	b, _ := json.Marshal(map[string]any{"kind": "keypress", "keys": keys, "intent": intent})
+	return string(b)
+}
+
+// A desktop batch that only re-clicks where the last one clicked is going nowhere (a small
+// button missed gives no error, #528): the next prompt steers to the button's shortcut or menu.
+func TestDesktopRepeatedClickNudgesToShortcut(t *testing.T) {
+	e := newEnv(t, notesWindow())
+	e.script(
+		actions(click(200, 760, "Save the note")),
+		actions(click(205, 765, "Save the note")),
+		actions(chord("Save the note", "ctrl", "s")),
+		`{"done": true, "summary": "Saved.", "verify": {"text_present": ["Body"]}}`)
+	out := e.loop.Run(context.Background(), desktopTask())
+	if out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if txt := userText(e.llm.reqs[1]); strings.Contains(txt, "shortcut or menu") {
+		t.Errorf("the first click got the nudge already:\n%s", txt)
+	}
+	if txt := userText(e.llm.reqs[2]); !strings.Contains(txt, "shortcut or menu") {
+		t.Errorf("the repeated click got no nudge:\n%s", txt)
+	}
+}
+
+// Clicks that land somewhere new, or a batch that also types or presses keys, are progress, not
+// a spiral: no nudge.
+func TestDesktopFreshClicksGetNoNudge(t *testing.T) {
+	for name, second := range map[string]string{
+		"elsewhere": actions(click(600, 300, "Open the body")),
+		"mixed":     actions(click(205, 765, "Focus the title"), `{"kind": "type", "text": "Groceries", "intent": "Title it"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, notesWindow())
+			e.script(
+				actions(click(200, 760, "Save the note")),
+				second,
+				`{"done": true, "summary": "Saved.", "verify": {"text_present": ["Body"]}}`)
+			out := e.loop.Run(context.Background(), desktopTask())
+			if out.State != StateDone {
+				t.Fatalf("outcome %+v", out)
+			}
+			if txt := userText(e.llm.reqs[2]); strings.Contains(txt, "shortcut or menu") {
+				t.Errorf("a batch making progress got the nudge:\n%s", txt)
+			}
+		})
+	}
+}
+
+// The nudge is a desktop idiom: a browser batch re-clicking a screenshot gets none.
+func TestBrowserRepeatedClickGetsNoNudge(t *testing.T) {
+	e := newEnv(t)
+	e.script(
+		actions(click(200, 760, "Add to cart")),
+		actions(click(205, 765, "Add to cart")),
+		`{"done": true, "summary": "Done.", "verify": {"text_present": ["soap"]}}`)
+	out := e.run()
+	if out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if txt := userText(e.llm.reqs[2]); strings.Contains(txt, "shortcut or menu") {
+		t.Errorf("a browser batch got the desktop nudge:\n%s", txt)
+	}
+}
+
+func typeText(text, intent string) string {
+	b, _ := json.Marshal(map[string]any{"kind": "type", "text": text, "intent": intent})
+	return string(b)
+}
+
+// Everything a desktop batch types goes to the focused field: two type actions with nothing
+// moving the focus between them land in the same field (#528: the title got the body's text).
+// The batch is sent back unrun, with feedback.
+func TestDesktopTwoTypesOneFocusSentBack(t *testing.T) {
+	e := newEnv(t, notesWindow())
+	e.script(
+		actions(typeText("Groceries", "Title it"), typeText("milk, eggs and bread", "Fill the body")),
+		actions(typeText("Groceries", "Title it"), click(600, 300, "Focus the body"), typeText("milk, eggs and bread", "Fill the body")),
+		`{"done": true, "summary": "Saved.", "verify": {"text_present": ["Body"]}}`)
+	out := e.loop.Run(context.Background(), desktopTask())
+	if out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, "moves the focus") {
+		t.Errorf("no feedback about the second type:\n%s", txt)
+	}
+	if len(e.exec.batches) != 1 {
+		t.Fatalf("batches %d, want only the corrected batch acted on", len(e.exec.batches))
+	}
+	if b := e.exec.batches[0]; len(b.Actions) != 3 {
+		t.Errorf("acted batch %+v, want the corrected one", b.Actions)
+	}
+}
+
+// A type after a click (or any focus move) is fine, as is one type: no feedback, the batch runs.
+func TestDesktopTypeAfterFocusMoveRuns(t *testing.T) {
+	e := newEnv(t, notesWindow())
+	e.script(
+		actions(typeText("Groceries", "Title it"), chord("Next field", "tab"), typeText("milk", "Fill the body")),
+		`{"done": true, "summary": "Saved.", "verify": {"text_present": ["Body"]}}`)
+	out := e.loop.Run(context.Background(), desktopTask())
+	if out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.exec.batches) != 1 {
+		t.Errorf("batches %d, want the batch acted on", len(e.exec.batches))
+	}
+	if txt := userText(e.llm.reqs[1]); strings.Contains(txt, "moves the focus") {
+		t.Errorf("a fine batch got the feedback:\n%s", txt)
 	}
 }

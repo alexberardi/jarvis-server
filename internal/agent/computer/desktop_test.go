@@ -153,6 +153,7 @@ type desktopFixture struct {
 	shots []DesktopWindow
 	lock  bool
 	os    *fakeOS
+	slept []time.Duration
 }
 
 func newDesktop(t *testing.T) *desktopFixture {
@@ -190,6 +191,7 @@ func newDesktop(t *testing.T) *desktopFixture {
 			return screen.Shot{Image: image.NewRGBA(image.Rect(0, 0, 2*w.W, 2*w.H)), App: w.App, Title: w.Title, Geometry: g}, nil
 		},
 		Locked: func(context.Context) (bool, error) { return f.lock, nil },
+		Sleep:  func(_ context.Context, d time.Duration) { f.slept = append(f.slept, d) },
 	}
 	// desktop_open's own catalogue and policy, even with --allow-open-any.
 	f.os = &fakeOS{}
@@ -679,6 +681,37 @@ func TestWindowByTitle(t *testing.T) {
 	f.wins.ws = []DesktopWindow{term}
 	if out, _ := f.observe(t, "Notes"); out["error_code"] != "denied" {
 		t.Errorf("a terminal titled Notes = %v, want denied", out)
+	}
+}
+
+// A ref action on an app whose snapshot lists no elements (Tk: screenshots only) must say to
+// act by coordinates — "take a new one" sent the model into a snapshot → press loop (#528).
+func TestNoElementsRefSaysCoordinates(t *testing.T) {
+	f := newDesktop(t)
+	f.ax.snap = computeruse.Snapshot{Gen: 4, Title: "Groceries"}
+	f.observe(t, "Notes")
+	res := f.act(t, "Notes", map[string]any{"kind": "press", "intent": "new note", "ref": "New note"})
+	r := firstResult(t, res)
+	if r["code"] != "stale_ref" || !strings.Contains(r["error"].(string), "coordinates") {
+		t.Errorf("press with no elements = %v, want stale_ref pointing at coordinates", r)
+	}
+}
+
+// A click's focus change reaches the app after the click returns (a Tk field under Xwayland takes
+// keys into whichever widget holds focus when they arrive), so typing on the click's heels lands
+// in the old field (#528): the batch settles between a click and the type or keys that follow it.
+func TestDesktopClickThenTypeSettles(t *testing.T) {
+	f := newDesktop(t)
+	_, capID := f.observe(t, "Notes")
+	res := f.act(t, "Notes", click(capID, 400, 300),
+		map[string]any{"kind": "type", "intent": "title it", "text": "Groceries"},
+		map[string]any{"kind": "keypress", "intent": "save", "keys": []any{"ctrl", "s"}},
+		click(capID, 400, 300))
+	if res["success"] != true {
+		t.Fatalf("act = %v", res)
+	}
+	if len(f.slept) != 1 || f.slept[0] != focusSettle {
+		t.Errorf("slept %v, want one settle of %v between the click and the type", f.slept, focusSettle)
 	}
 }
 

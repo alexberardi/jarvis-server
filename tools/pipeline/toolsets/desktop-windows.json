@@ -18,7 +18,7 @@
       }
     ],
     "function": {
-      "description": "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text.",
+      "description": "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text. A job inside an app ('in X, make a note and save it') is an errand: run_errand.",
       "name": "desktop_open",
       "parameters": {
         "properties": {
@@ -405,7 +405,7 @@
       }
     ],
     "function": {
-      "description": "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill.",
+      "description": "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill. A job inside an app ('make a note titled X and save it') is an errand: run_errand.",
       "name": "desktop_type_text",
       "parameters": {
         "properties": {

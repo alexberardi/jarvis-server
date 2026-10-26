@@ -783,8 +783,9 @@ per call, like the capture above:
 - **Verified** (`TestDesktopNotesLive`, `JARVIS_DESKTOP_LIVE=1`, a headless session only): the
   fixture notes app under Xvfb with no window manager and under headless sway (Xwayland): the
   window found by its title, captured, a move, the title typed, a click in the body, its text
-  and Ctrl+S, and the note saved. The suite's `notes_x11` and `notes_wlroots` stay pending: the
-  model routes "in the notes app, make a note" to `desktop_open`, not to a computer task.
+  and Ctrl+S, and the note saved. The suite's `notes_x11` and `notes_wlroots` are required (#528):
+  the fixture's `.desktop` entry is installed in the agent's `XDG_DATA_HOME`, so `desktop_open`
+  resolves it, and the open result steers the job inside the app to `run_errand`.
 
 
 ## 13. Install and pairing without a terminal (plan, 2026-10-12)

@@ -146,7 +146,7 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	winID := node.Param{Name: "window_id", Type: "string",
 		Description: "The app or window as the user said it ('TextEdit', 'the terminal', 'it'), or an id from desktop_list_windows. Leave out for the window in front"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text.",
+		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text. A job inside an app ('in X, make a note and save it') is an errand: run_errand.",
 			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "The app's name as said, or a URL"}},
 			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
 			Examples: []node.Example{
@@ -335,7 +335,10 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{"launched": app.Name, "matched_app": app.Name, "note": "requested; launch is not confirmed"}
+	out := map[string]any{"launched": app.Name, "matched_app": app.Name,
+		"note": "requested; launch is not confirmed. For work inside the app (make, edit or save something), " +
+			"call run_errand with the whole request, the app named in the goal (\"in " + app.Name + ", …\"): " +
+			"desktop_type_text only types into the focused window and cannot work the app's controls"}
 	if p.Fuzzy {
 		out["fuzzy_match"], out["heard_as"] = true, p.HeardAs
 	}

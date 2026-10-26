@@ -160,6 +160,11 @@ func TestOpenLaunchesInstalledAppsByName(t *testing.T) {
 	if strings.Join(b.launched, ";") != "/Applications/Steam.app" || len(b.opened) != 0 {
 		t.Fatalf("launched %v opened %v", b.launched, b.opened)
 	}
+	// The result steers work inside the app to run_errand, and the errand goal must keep the
+	// app's name, or the errand planner has no app to route the job to (#528).
+	if note, _ := out["note"].(string); !strings.Contains(note, "run_errand") || !strings.Contains(note, `"in Steam, …"`) {
+		t.Fatalf("note %q, want it steering to run_errand with the app named", note)
+	}
 	out = call(t, ts, ToolOpen, map[string]any{"target": "microsoft"})
 	if out["error_code"] != "ambiguous" || len(out["candidates"].([]string)) != 2 {
 		t.Fatalf("ambiguous: %v", out)
