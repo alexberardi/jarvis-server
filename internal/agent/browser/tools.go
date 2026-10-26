@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/winmatch"
 )
 
 // Tool names, in the desktop_* style.
@@ -533,6 +535,9 @@ func (t *Tools) listTabs(ctx context.Context, args map[string]any) (map[string]a
 		}
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
+	if q, _ := extra["query"].(string); q != "" && len(tabs) == 0 && len(errs) == 0 {
+		return t.allTabsClosestTo(ctx, q)
+	}
 	out := map[string]any{"tabs": tabs, "count": count}
 	if truncated {
 		out["truncated"] = true
@@ -540,6 +545,26 @@ func (t *Tools) listTabs(ctx context.Context, args map[string]any) (map[string]a
 	if len(errs) > 0 {
 		out["errors"] = errs
 	}
+	return out, nil
+}
+
+// allTabsClosestTo is every tab, the titles most like q first, for a query that matched none:
+// a spoken name is often misheard ("Claude pad", "Cloud Fair" for the Claude tab), and an
+// empty list left the model guessing (2026-10-25: it opened an add-on page instead).
+func (t *Tools) allTabsClosestTo(ctx context.Context, q string) (map[string]any, error) {
+	out, err := t.listTabs(ctx, map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	tabs, _ := out["tabs"].([]any)
+	score := func(e any) float64 {
+		m, _ := e.(map[string]any)
+		title, _ := m["title"].(string)
+		return winmatch.Similarity(q, title)
+	}
+	sort.SliceStable(tabs, func(i, j int) bool { return score(tabs[i]) > score(tabs[j]) })
+	out["no_match"] = fmt.Sprintf("No tab title contains %q; it may be misheard. These are all open tabs, "+
+		"closest first: switch to the one that sounds like it, or read the likely ones back and ask.", q)
 	return out, nil
 }
 
