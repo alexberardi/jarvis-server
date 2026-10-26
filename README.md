@@ -75,7 +75,7 @@ so read them before you run them. The install scripts check the archive they dow
 
 While only pre-releases exist, use the release's own URL. GitHub's `releases/latest` skips
 pre-releases, so `releases/latest/download/...` links give a 404. The commands below use
-`v0.1.0-rc18.8` as the example tag: replace it with the newest tag. Each install script installs
+`v0.1.0-rc18.9` as the example tag: replace it with the newest tag. Each install script installs
 the release it came from.
 
 ### The server
@@ -107,7 +107,7 @@ Removing the package stops the service and keeps the data in `/var/lib/jarvisd`;
 **From a terminal, Linux and macOS:**
 
 ```sh
-curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.8/install.sh
+curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.9/install.sh
 less install.sh          # read it first
 sh install.sh            # asks for sudo
 ```
@@ -124,7 +124,7 @@ Options (`sh install.sh --help`):
 **From a terminal, Windows** (PowerShell, as Administrator or it asks for elevation):
 
 ```powershell
-irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.8/install.ps1 | iex
+irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.9/install.ps1 | iex
 ```
 
 Options (`-StopLegacy`, `-Yes`, `-Uninstall`, `-Purge`, `-Version`) need the downloaded file:
@@ -187,7 +187,7 @@ permissions it needs).
 - **Any other Linux** (Fedora, Bazzite, Arch, …), as yourself, not with sudo:
 
   ```sh
-  curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.8/install-agent.sh
+  curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.9/install-agent.sh
   sh install-agent.sh      # --no-start, --version <tag>, --uninstall [--purge]
   ```
 
@@ -201,7 +201,7 @@ Python node's installer does (HAT overlay, ALSA, PulseAudio, networking) and ins
 `jarvis-agent.service`, **disabled**: only one node may own the HAT.
 
 ```sh
-curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.8/install-pi.sh
+curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.9/install-pi.sh
 sudo sh install-pi.sh                 # --user NAME (default pi), --version <tag>
 /opt/jarvis-agent/jarvis-agent enroll --server <server> --room kitchen   # as the node's user; approve the code in the app or admin
 sudo sh install-pi.sh --activate      # make the Go node the one that runs (--deactivate goes back)
@@ -227,7 +227,7 @@ advertises itself over mDNS (`_jarvis-config._tcp`).
 ```sh
 jarvisd service status            # also: sudo jarvisd service start|stop|restart
 jarvisd doctor                    # can nodes and phones reach it? (sudo jarvisd doctor --fix)
-sudo jarvisd upgrade --version v0.1.0-rc18.8   # signed upgrade with a DB snapshot and rollback
+sudo jarvisd upgrade --version v0.1.0-rc18.9   # signed upgrade with a DB snapshot and rollback
 jarvisd --help
 ```
 
