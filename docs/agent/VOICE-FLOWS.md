@@ -152,6 +152,13 @@ The three requests are examples, not the scope. Every flow follows these:
   code and string/sound matching over a few dozen names, no model, no download, microseconds.
   It starts once STT (on the server) returns the words.
 
+- **2026-10-25: funnel stage 2 narrows by embedding similarity, to start** (Q28). The server's
+  small embedding model (all-MiniLM, already loaded; milliseconds, CPU-only servers too)
+  compares the request to each tool's example phrases; the closest tool groups go to the model
+  with what's on screen. Nothing clearly close: every tool, as today. New tools feed it through
+  their examples. A model classification pass and keyword rules were rejected for now (an extra
+  model call per request; brittle and hand-kept). Revisit with toolbench numbers.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -174,7 +181,6 @@ dictation. What breaks:
 ## Open (asked one at a time, in this order)
 
 1. **Q25 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
-2. **Q28 — narrowing (funnel stage 2):** how the server picks the request's kind and its tools.
-3. **Q29 — interrupting:** stopping, pausing or taking over a running task by voice.
-4. **Q30 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
-5. **Q31 — stuck:** what a task does when the screen isn't what it expected.
+2. **Q29 — interrupting:** stopping, pausing or taking over a running task by voice.
+3. **Q30 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
+4. **Q31 — stuck:** what a task does when the screen isn't what it expected.
