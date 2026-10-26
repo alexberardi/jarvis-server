@@ -57,7 +57,7 @@ func TestTurnLockWaitGivesUpWithCaller(t *testing.T) {
 }
 
 func TestProcessTurnBusyWhenCallerGone(t *testing.T) {
-	ve := newVoiceEnv(t, prompts.ChatGPT)
+	ve := newVoiceEnv(t, prompts.Cloud)
 	ve.start("tl1", weatherTool)
 	conv := ve.m.convs.get("tl1")
 	conv.mu.Lock()
@@ -73,7 +73,7 @@ func TestProcessTurnBusyWhenCallerGone(t *testing.T) {
 }
 
 func TestVoiceRoutesBusyIs409(t *testing.T) {
-	ve := newVoiceEnv(t, prompts.ChatGPT)
+	ve := newVoiceEnv(t, prompts.Cloud)
 	ve.start("tl2", weatherTool)
 	conv := ve.m.convs.get("tl2")
 	conv.mu.Lock()
@@ -105,7 +105,7 @@ func TestVoiceRoutesBusyIs409(t *testing.T) {
 }
 
 func TestMobileChatWaitGivesUpWithClient(t *testing.T) {
-	ce := newChatEnv(t, prompts.ChatGPT)
+	ce := newChatEnv(t, prompts.Cloud)
 	cid := ce.warm("tok-7")
 	conv := ce.m.convs.get(cid)
 	before := len(history(conv))

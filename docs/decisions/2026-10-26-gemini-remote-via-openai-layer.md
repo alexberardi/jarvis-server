@@ -8,5 +8,5 @@ existing OpenAI dialect to it. No native `generateContent` translator was writte
 layer covers chat, streaming, tools, images and embeddings, which is everything a label uses,
 whereas Anthropic's needed the Messages API
 ([2026-10-12-remote-labels-can-speak-the-anthropic-messages-api.md](2026-10-12-remote-labels-can-speak-the-anthropic-messages-api.md)).
-Gemini models get no token cap and `reasoning_effort: "minimal"` for thinking off, for the same
+Gemini models get no token cap and `reasoning_effort: "low"` for thinking off, for the same
 reason as OpenAI's reasoning models (#508). Details: `../llm/06-model-manager-api.md`, "Gemini remote".

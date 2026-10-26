@@ -182,7 +182,7 @@ func TestSaveRecipeToolOffered(t *testing.T) {
 		}
 	})
 	t.Run("chat without vision", func(t *testing.T) {
-		ce, _ := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+		ce, _ := newRecipeChatEnv(t, prompts.Cloud, imp)
 		ce.eng.setVision(llm.LabelLive, false)
 		ce.warm("tok-7")
 		if names := toolNamesOf(ce.eng.last()); has(names, saveRecipeToolName) {
@@ -190,15 +190,15 @@ func TestSaveRecipeToolOffered(t *testing.T) {
 		}
 	})
 	t.Run("voice conversation", func(t *testing.T) {
-		ce, _ := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+		ce, _ := newRecipeChatEnv(t, prompts.Cloud, imp)
 		ce.start("conv-voice", weatherTool)
 		if names := toolNamesOf(ce.eng.last()); has(names, saveRecipeToolName) || len(names) == 0 {
 			t.Fatalf("voice tools %v", names)
 		}
 	})
 	t.Run("no recipes module", func(t *testing.T) {
-		ce, _ := newImageChatEnv(t, prompts.ChatGPT)
-		withTraits(ce.m, localTraits(prompts.ChatGPT))
+		ce, _ := newImageChatEnv(t, prompts.Cloud)
+		withTraits(ce.m, localTraits(prompts.Cloud))
 		ce.warm("tok-7")
 		if names := toolNamesOf(ce.eng.last()); has(names, saveRecipeToolName) {
 			t.Fatalf("offered without recipes: %v", names)
@@ -223,7 +223,7 @@ func TestSaveRecipeFromImage(t *testing.T) {
 	var logBuf safeBuffer
 	withEnvExtra(t, envExtra{log: &logBuf})
 	imp := &fakeImporter{}
-	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	ce, jobs := newRecipeChatEnv(t, prompts.Cloud, imp)
 	cid := ce.warm("tok-7")
 	before := len(ce.eng.requests())
 	ce.eng.push(saveCall(`{"images": [2, 1]}`))
@@ -276,7 +276,7 @@ func TestSaveRecipeFromImage(t *testing.T) {
 // it from the bytes the conversation keeps, and the model is not re-sent the image (CI3).
 func TestSaveRecipeAfterDescription(t *testing.T) {
 	imp := &fakeImporter{}
-	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	ce, jobs := newRecipeChatEnv(t, prompts.Cloud, imp)
 	cid := ce.warm("tok-7")
 	j := chatWithImage(t, ce, jobs, cid, "", "A pancake recipe card. Want me to save it as a recipe?")
 	ce.eng.say("A recipe card for pancakes.")
@@ -311,7 +311,7 @@ func TestSaveRecipeAfterDescription(t *testing.T) {
 // a fresh conversation with no photo → no_image. Either way the importer is not called.
 func TestSaveRecipeFromImageExpired(t *testing.T) {
 	imp := &fakeImporter{}
-	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	ce, jobs := newRecipeChatEnv(t, prompts.Cloud, imp)
 	cid := ce.warm("tok-7")
 	j := chatWithImage(t, ce, jobs, cid, "what is this?", "A pancake recipe card.")
 	ce.eng.say("A recipe card for pancakes.")
@@ -357,7 +357,7 @@ func TestSaveRecipeFromImageExpired(t *testing.T) {
 // they survive the message being compacted away.
 func TestKeptPhotosLatestOnly(t *testing.T) {
 	imp := &fakeImporter{}
-	ce, jobs := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	ce, jobs := newRecipeChatEnv(t, prompts.Cloud, imp)
 	cid := ce.warm("tok-7")
 	j1 := chatWithImage(t, ce, jobs, cid, "what is this?", "A mug.")
 	ce.eng.say("Here.")
@@ -442,7 +442,7 @@ func TestPhotoActionsBlock(t *testing.T) {
 	}
 
 	// No photo tool offered (no recipes module): no block, photos or not.
-	ce2, _ := newImageChatEnv(t, prompts.ChatGPT)
+	ce2, _ := newImageChatEnv(t, prompts.Cloud)
 	cid2 := ce2.warm("tok-7")
 	ce2.eng.say("A mug.")
 	ce2.chat("tok-7", map[string]any{"message": "", "conversation_id": cid2, "images": []any{img("image/png", pngBytes)}})
@@ -453,7 +453,7 @@ func TestPhotoActionsBlock(t *testing.T) {
 
 func TestSaveRecipeFromImageRefusals(t *testing.T) {
 	imp := &fakeImporter{err: photoErr("image 1 is not a readable photo")}
-	ce, _ := newRecipeChatEnv(t, prompts.ChatGPT, imp)
+	ce, _ := newRecipeChatEnv(t, prompts.Cloud, imp)
 	cid := ce.warm("tok-7")
 
 	// No photo at all.

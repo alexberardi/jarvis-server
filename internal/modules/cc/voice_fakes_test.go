@@ -423,7 +423,7 @@ const voiceHH = "hh-voice"
 // template with the thinking switch, the 8B/14B a local text one with it.
 func providerTraits(provider string) llm.ModelTraits {
 	switch provider {
-	case prompts.ChatGPT:
+	case prompts.Cloud, "ChatGPTOpenAI": // the goldens' legacy name
 		return llm.ModelTraits{ToolCalling: string(prompts.ToolsNative), ToolCallingFrom: ModeSourceRemote}
 	case prompts.Qwen3_5_9B:
 		return llm.ModelTraits{ToolCalling: string(prompts.ToolsNative), ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true}

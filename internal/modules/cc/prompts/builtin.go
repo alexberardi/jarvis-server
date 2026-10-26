@@ -23,11 +23,17 @@ func init() {
 	}
 }
 
+// renamed are built-ins' old names, still accepted (stored settings, the legacy goldens).
+var renamed = map[string]string{"ChatGPTOpenAI": Cloud}
+
 // Builtin is the text of the built-in prompt name, or false when there is none. Only the
 // exact name: a path form of one ("./x", "a/../x") is not a name.
 func Builtin(name string) (string, bool) {
 	if name == "" || strings.ContainsAny(name, `/\`) {
 		return "", false
+	}
+	if n, ok := renamed[name]; ok {
+		name = n
 	}
 	b, err := builtinFS.ReadFile(path.Join("builtin", name+".txt"))
 	if err != nil {
