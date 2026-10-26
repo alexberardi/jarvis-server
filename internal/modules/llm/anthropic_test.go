@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -278,8 +279,7 @@ func TestAnthropicNonStream(t *testing.T) {
 		{ID: "toolu_1", Type: "function", Function: FunctionCall{Name: "get_weather", Arguments: `{"city":"Paris"}`}},
 		{ID: "toolu_2", Type: "function", Function: FunctionCall{Name: "now", Arguments: `{}`}},
 	}
-	if resp.Content != "Let me check both." || resp.FinishReason != "tool_calls" || len(resp.ToolCalls) != 2 ||
-		resp.ToolCalls[0] != want[0] || resp.ToolCalls[1] != want[1] {
+	if resp.Content != "Let me check both." || resp.FinishReason != "tool_calls" || !reflect.DeepEqual(resp.ToolCalls, want) {
 		t.Fatalf("%+v", resp)
 	}
 	if resp.Usage != (Usage{PromptTokens: 130, CompletionTokens: 7, TotalTokens: 137}) {

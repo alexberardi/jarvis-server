@@ -125,3 +125,27 @@ func TestEndpointURLKeepsGooglesBase(t *testing.T) {
 		}
 	}
 }
+
+// Gemini 3 refuses a history tool call without a thought signature: one it sent is kept,
+// any other gets Google's stand-in, and the caller's messages are left alone.
+func TestPayloadGeminiThoughtSignatures(t *testing.T) {
+	s := NewService(ServiceConfig{Log: quietLog()})
+	real := json.RawMessage(`{"google":{"thought_signature":"abc"}}`)
+	msgs := []Message{msg("user", "add milk"),
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "1", Type: "function", Function: FunctionCall{Name: "remember", Arguments: "{}"}},
+			{ID: "2", Type: "function", Function: FunctionCall{Name: "todo", Arguments: "{}"}, ExtraContent: real}}},
+		{Role: "tool", ToolCallID: "1", Content: TextContent("ok")}}
+	req := &ChatRequest{Messages: msgs}
+	b, _ := json.Marshal(s.payload(context.Background(), Endpoint{Model: "gemini-3.1-flash-lite", Remote: true}, LabelLive, req, msgs, false))
+	if !strings.Contains(string(b), `"extra_content":{"google":{"thought_signature":"skip_thought_signature_validator"}}`) ||
+		!strings.Contains(string(b), `"thought_signature":"abc"`) {
+		t.Fatalf("%s", b)
+	}
+	if msgs[1].ToolCalls[0].ExtraContent != nil {
+		t.Fatal("caller's history was changed")
+	}
+	b, _ = json.Marshal(s.payload(context.Background(), Endpoint{Model: "gpt-4o", Remote: true}, LabelLive, req, msgs, false))
+	if strings.Contains(string(b), "skip_thought_signature_validator") {
+		t.Fatalf("non-Gemini got a signature: %s", b)
+	}
+}

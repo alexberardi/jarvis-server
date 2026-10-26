@@ -164,6 +164,9 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent is a vendor's opaque per-call data, sent back as is: Gemini 3's
+	// {"google":{"thought_signature":…}}, which it requires on tool calls in the history.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 // Message is a chat message. Tool history (ToolCalls on assistant turns, ToolCallID on tool
