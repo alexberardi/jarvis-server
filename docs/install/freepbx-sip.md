@@ -11,9 +11,8 @@ Jarvis its details. Design and limits: [../cc/phone-sip.md](../cc/phone-sip.md).
 > is tested against an Asterisk 22 configured with FreePBX 17's defaults (the L1 lane,
 > `tools/siplane`).
 
-Inbound calls (Jarvis as a receptionist that takes messages) are not built yet: today Jarvis
-refuses every call the PBX sends it, and the PBX moves on to the call's next destination. Step 5
-prepares for them and is optional.
+Jarvis can also answer the calls the PBX sends it, as a receptionist that takes messages and puts
+approved callers through (step 5, optional).
 
 ## 1. Add a PJSIP extension for Jarvis
 
@@ -93,8 +92,8 @@ its UDP ports in Windows Defender Firewall.
 
 ## 5. Optional: route calls to Jarvis
 
-For when inbound calls are built (Jarvis answers, says it is an automated assistant, asks who is
-calling and why, and sends you a message):
+Jarvis answers, says it is an automated assistant, asks who is calling and why, and sends you a
+notification with the caller, the reason and a summary (the recording is kept). On the PBX:
 
 - To screen a number: **Connectivity → Inbound Routes**, the route for that number, **Set
   Destination → Extensions →** Jarvis's extension.
@@ -103,14 +102,17 @@ calling and why, and sends you a message):
 - Do not put Jarvis in a ring group that rings everyone at once: it would answer first and take
   every call.
 
-Today Jarvis refuses these calls (480), and the PBX moves on to the next destination, voicemail
-usually.
+In Jarvis, turn on `phone.inbound.enabled` in the same **Settings → Command center → phone_calls**
+(the default; on an install with several households sharing one extension, a household that should
+not get the calls sets its own value off). Until it is on, Jarvis refuses these calls (480) and the
+PBX moves on to the next destination, voicemail usually. The limits (`phone.inbound.answer_delay_seconds`,
+`max_call_seconds`, `calls_per_day`, `max_concurrent_calls`) are on the same page.
 
 ### Letting Jarvis put callers through (transfer)
 
 Jarvis can hand a call it answered to one of a few people you choose, with a blind transfer
 (SIP REFER). It only ever transfers to the targets you list, and the caller never picks the
-number. In Jarvis, set the household's `phone.inbound.transfer_targets` to a list of up to 5:
+number. In Jarvis, set `phone.inbound.transfer_targets` (Settings → Command center → phone_calls) to a list of up to 5:
 
 ```json
 [{"label": "Alex", "number": "101", "when": "the caller is from Alex's school"},
