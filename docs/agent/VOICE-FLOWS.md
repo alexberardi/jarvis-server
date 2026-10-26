@@ -39,6 +39,8 @@ The three requests are examples, not the scope. Every flow follows these:
    ordinary, and the user can extend them in settings.
 9. **Views inside apps are switched by name, matched by our code** (Q26). Tabs, worksheets,
    editor and terminal tabs, channels: one way for all of them, never one tool per app.
+10. **A funnel, cheapest stage first** (Q27). Each stage settles what it is sure of and passes
+    the rest down with what it learned; any stage may ask instead of guessing.
 
 ## Decided
 
@@ -134,6 +136,22 @@ The three requests are examples, not the scope. Every flow follows these:
     UIs) get nothing from it; vision stays the computer-task fallback.
   The list-tabs "closest first" fallback (#506) is the stopgap until this lands.
 
+- **2026-10-25: requests go through a funnel; its first stage runs on the computer, on any
+  CPU** (Q27). Real use: a 9B model got every request with 53 tools (22 server, 31 desktop)
+  and picked wrong ones ("switch to Discord" launched the Discord app instead of the tab).
+  Stages, each settling what it is sure of and passing the rest down with what it learned:
+  1. **On the computer, no model:** a small grammar for clear one-step commands (switch to,
+     close, maximize, minimize X; "the second one"; go back) matched against the live names
+     (tabs, windows, apps) with winmatch. Sure: act. Several: ask. Else: pass down.
+  2. **Narrow before the model** (server): only the tools for the request's kind, plus what's
+     on screen ("open tabs: …").
+  3. **The model with every tool**, as today.
+  4. **A computer task** (Q15) for multi-step work and content Jarvis makes up.
+  Each stage logs its decision, so a bad route names its stage. **Stage 1 must run on any PC**
+  (no GPU, an older CPU, Windows, macOS or Linux, the server elsewhere on the network): plain
+  code and string/sound matching over a few dozen names, no model, no download, microseconds.
+  It starts once STT (on the server) returns the words.
+
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
 None of the three examples works end to end by voice yet. What exists: the computer-task loop on
@@ -156,6 +174,7 @@ dictation. What breaks:
 ## Open (asked one at a time, in this order)
 
 1. **Q25 — wake arbitration:** when another node wins the wake word on a request only this computer can do.
-2. **Q27 — interrupting:** stopping, pausing or taking over a running task by voice.
-3. **Q28 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
-4. **Q29 — stuck:** what a task does when the screen isn't what it expected.
+2. **Q28 — narrowing (funnel stage 2):** how the server picks the request's kind and its tools.
+3. **Q29 — interrupting:** stopping, pausing or taking over a running task by voice.
+4. **Q30 — after a task:** follow-ups that refer back to it ("send it to Sarah too").
+5. **Q31 — stuck:** what a task does when the screen isn't what it expected.
