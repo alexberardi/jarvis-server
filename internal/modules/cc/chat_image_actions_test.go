@@ -54,7 +54,7 @@ func (e photoErr) UserMessage() string { return string(e) }
 func newRecipeChatEnv(t *testing.T, provider string, imp RecipeImporter) (*chatEnv, *jobLog) {
 	t.Helper()
 	pub := &chatNodePub{tools: `{"client_tools": ` + weatherTool + `, "available_commands": [], "installed_packages": []}`}
-	ve := newVoiceEnv(t, provider, func(m *Module) { m.Publisher = pub; pub.m = m; m.Recipes = imp })
+	ve := newVoiceEnv(t, provider, func(m *Module) { m.Publisher = pub; pub.m = m; m.Recipes = imp; withTraits(m, localTraits(provider)) })
 	ce := &chatEnv{voiceEnv: ve, pub: pub}
 	ce.setOnline(true)
 	old := chatWordPause
@@ -198,6 +198,7 @@ func TestSaveRecipeToolOffered(t *testing.T) {
 	})
 	t.Run("no recipes module", func(t *testing.T) {
 		ce, _ := newImageChatEnv(t, prompts.ChatGPT)
+		withTraits(ce.m, localTraits(prompts.ChatGPT))
 		ce.warm("tok-7")
 		if names := toolNamesOf(ce.eng.last()); has(names, saveRecipeToolName) {
 			t.Fatalf("offered without recipes: %v", names)

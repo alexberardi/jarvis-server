@@ -329,8 +329,10 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	m.convs.put(conv)
 
 	// The warmup inference primes the engine's prefix cache with exactly the bytes the first
-	// turn sends (01 §7.1-2). Native: same tools payload, max_tokens=1 (D40 01.Q10).
-	if m.LLM != nil {
+	// turn sends (01 §7.1-2). Native: same tools payload, max_tokens=1 (D40 01.Q10). A remote
+	// live has no cache of ours to prime, and an OpenAI reasoning model gets no cap (it counts
+	// hidden reasoning): there a warmup is a whole paid reply.
+	if m.LLM != nil && (m.LiveModelTraits == nil || m.LiveModelTraits(ctx).Local) {
 		wctx, cancel := context.WithTimeout(ctx, warmupTimeout)
 		defer cancel()
 		one := 1
