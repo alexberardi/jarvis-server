@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -595,13 +596,18 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 
 // NormalizeBaseURL turns a pasted endpoint into a base URL: trailing slashes and a trailing
 // /chat/completions (CI's legacy JARVIS_REST_MODEL_URL), /embeddings or Anthropic's /messages
-// are dropped.
+// are dropped. Google's host (googleHost) is pointed at its OpenAI-compatible base.
 func NormalizeBaseURL(u string) string {
 	u = strings.TrimRight(strings.TrimSpace(u), "/")
 	for _, suf := range []string{"/chat/completions", "/embeddings", "/completions", "/messages", "/audio/transcriptions", "/audio/speech"} {
 		u = strings.TrimSuffix(u, suf)
 	}
-	return strings.TrimRight(u, "/")
+	u = strings.TrimRight(u, "/")
+	if pu, err := url.Parse(u); err == nil && strings.EqualFold(pu.Hostname(), googleHost) && !strings.HasSuffix(pu.Path, "/openai") {
+		pu.Path = googleOpenAIPath
+		return pu.String()
+	}
+	return u
 }
 
 // flavour picks the build for a label: the configured backend, or detection's proposal when

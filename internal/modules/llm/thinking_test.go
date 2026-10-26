@@ -95,3 +95,33 @@ func TestPayloadRemoteReasoningModelSendsNoSampling(t *testing.T) {
 		t.Errorf("local: %s", b)
 	}
 }
+
+// Gemini counts thinking against the cap and 2.5 Pro / 3.x can't turn thinking off, so a
+// remote Gemini gets no cap and "minimal" effort for thinking off; sampling is kept.
+func TestPayloadRemoteGemini(t *testing.T) {
+	s := NewService(ServiceConfig{Log: quietLog()})
+	for budget, effort := range map[int]string{0: `"reasoning_effort":"minimal"`, -1: ""} {
+		req := &ChatRequest{Messages: []Message{msg("user", "hi")}, Temperature: ptr(0.4), MaxTokens: ptr(256), ReasoningBudget: ptr(budget)}
+		b, err := json.Marshal(s.payload(context.Background(), Endpoint{Model: "models/gemini-2.5-flash", Remote: true}, LabelLive, req, req.Messages, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(b)
+		if strings.Contains(body, "max_completion_tokens") || strings.Contains(body, `"max_tokens"`) || !strings.Contains(body, `"temperature":0.4`) ||
+			strings.Contains(body, "reasoning_effort") != (effort != "") || !strings.Contains(body, effort) {
+			t.Errorf("budget %d: %s", budget, body)
+		}
+	}
+}
+
+func TestEndpointURLKeepsGooglesBase(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://generativelanguage.googleapis.com/v1beta/openai": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+		"https://api.openai.com/v1":                               "https://api.openai.com/v1/chat/completions",
+		"http://127.0.0.1:8080":                                   "http://127.0.0.1:8080/v1/chat/completions",
+	} {
+		if got := endpointURL(base, "/chat/completions"); got != want {
+			t.Errorf("%s → %s", base, got)
+		}
+	}
+}

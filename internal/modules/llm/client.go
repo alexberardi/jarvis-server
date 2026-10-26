@@ -67,6 +67,13 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 				p.ReasoningEffort = "low" // the lowest every family (o-series, gpt-5.x) accepts
 			}
 		}
+		if gemini(p.Model) {
+			// Gemini's cap counts thinking too, and 2.5 Pro and 3.x can't turn thinking off.
+			p.MaxCompletionTokens = nil
+			if budget != nil && *budget == 0 {
+				p.ReasoningEffort = "minimal" // the lowest every family (2.5, 3.x) accepts
+			}
+		}
 		return
 	}
 	if budget == nil {
@@ -91,9 +98,15 @@ func fixedSampling(model string) bool {
 	return slices.ContainsFunc([]string{"gpt-5", "o1", "o3", "o4"}, func(p string) bool { return strings.HasPrefix(m, p) })
 }
 
+// gemini is a Google model name (models/gemini-2.5-flash, gemini-3-flash).
+func gemini(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m[strings.LastIndex(m, "/")+1:], "gemini")
+}
+
 func endpointURL(base, path string) string {
 	base = strings.TrimRight(base, "/")
-	if !strings.HasSuffix(base, "/v1") {
+	if !strings.HasSuffix(base, "/v1") && !strings.HasSuffix(base, "/openai") { // Google's is /v1beta/openai
 		base += "/v1"
 	}
 	return base + path

@@ -149,6 +149,11 @@ func TestNormalizeBaseURL(t *testing.T) {
 		"https://api.openai.com/v1/chat/completions": "https://api.openai.com/v1",
 		"https://api.openai.com/v1/":                 "https://api.openai.com/v1",
 		" http://host:8080/v1 ":                      "http://host:8080/v1",
+		// Gemini: a bare or native host goes to the OpenAI-compatible layer.
+		"https://generativelanguage.googleapis.com":                                "https://generativelanguage.googleapis.com/v1beta/openai",
+		"https://generativelanguage.googleapis.com/v1beta":                         "https://generativelanguage.googleapis.com/v1beta/openai",
+		"generativelanguage.googleapis.com/v1beta/openai/":                         "generativelanguage.googleapis.com/v1beta/openai",
+		"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions": "https://generativelanguage.googleapis.com/v1beta/openai",
 	} {
 		if got := NormalizeBaseURL(in); got != want {
 			t.Errorf("%q → %q, want %q", in, got, want)
