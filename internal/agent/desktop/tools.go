@@ -12,6 +12,7 @@ import (
 	"maps"
 	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,9 @@ type OpenPolicy struct {
 }
 
 var openSchemes = map[string]bool{"http": true, "https": true, "mailto": true}
+
+// reDomain is a bare site name, "google.com" or "news.ycombinator.com".
+var reDomain = regexp.MustCompile(`(?i)^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$`)
 
 // targetKind classifies a desktop_open target.
 type targetKind int
@@ -309,6 +313,14 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		return nil, err
 	}
 	p, err := apps.Find(list, target)
+	if errors.Is(err, apps.ErrNotFound) && reDomain.MatchString(strings.TrimSpace(target)) {
+		// "open google.com": no app has that name, so it's the site.
+		link := "https://" + strings.TrimSpace(target)
+		if err := t.Host.Open(ctx, link); err != nil {
+			return nil, err
+		}
+		return map[string]any{"opened": link, "note": "requested; launch is not confirmed"}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
