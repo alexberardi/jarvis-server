@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -73,7 +75,9 @@ func inboundDefinitions() []settings.Definition {
 		{Key: SettingInboundEnabled, Category: "phone_calls", Type: settings.Bool, Default: false,
 			Description: "Inbound calls: Jarvis answers the calls the PBX routes to the household's SIP extension as a " +
 				"receptionist (says it is an AI, asks who is calling and why, takes a message or hangs up on spam). " +
-				"Set per household (default off); phone_calls.enabled must be on too. Callers get nothing of the household's."},
+				"Default off; a household's own value wins over this default, which on a one-household install is all it takes. " +
+				"Two households on one SIP account with inbound on get no calls. phone_calls.enabled must be on too. " +
+				"Callers get nothing of the household's."},
 		{Key: SettingInboundAnswerDelay, Category: "phone_calls", Type: settings.Int, Default: int64(0), Validate: intBetween(0, 60),
 			Description: "Inbound calls: seconds an incoming call rings before Jarvis answers, so people in a ring group " +
 				"can pick up first (0 answers at once; for a direct route)."},
@@ -267,8 +271,8 @@ func (s *Service) admitInbound(ctx context.Context, acct SIPAccount, in sip.Inco
 }
 
 // inboundHousehold is the household whose calls acct's extension answers: the one household
-// that turned inbound on (its own phone.inbound.enabled) and whose SIP account is acct. None, or
-// more than one sharing the account (whose message would it be?), is "".
+// with inbound on (its own phone.inbound.enabled, else the install's default) whose SIP account
+// is acct. None, or more than one sharing the account (whose message would it be?), is "".
 func (s *Service) inboundHousehold(ctx context.Context, acct SIPAccount) string {
 	if s.Settings == nil {
 		return ""
@@ -278,19 +282,32 @@ func (s *Service) inboundHousehold(ctx context.Context, acct SIPAccount) string 
 		s.log().Warn("phone: reading inbound households failed", "err", err)
 		return ""
 	}
-	var match []string
+	// Every household, not only those with their own value: the default (the admin's Settings
+	// page) is enough on a one-household install.
+	seen := map[string]bool{}
 	for _, v := range vals {
-		if on, _ := v.Value.(bool); !on {
+		seen[v.HouseholdID] = true
+	}
+	if n, ok := s.Names.(householdNamer); ok {
+		if names, err := n.HouseholdNames(ctx); err == nil {
+			for id := range names {
+				seen[id] = true
+			}
+		}
+	}
+	var match []string
+	for _, h := range slices.Sorted(maps.Keys(seen)) {
+		if !s.boolSetting(ctx, SettingInboundEnabled, h) {
 			continue
 		}
-		if kind, err := s.providerKind(ctx, v.HouseholdID); err != nil || kind != ProviderSIP {
+		if kind, err := s.providerKind(ctx, h); err != nil || kind != ProviderSIP {
 			continue
 		}
-		a, _, err := s.sipAccount(ctx, v.HouseholdID)
+		a, _, err := s.sipAccount(ctx, h)
 		if err != nil || a.Server != acct.Server || a.Extension != acct.Extension || a.LocalPort != acct.LocalPort {
 			continue
 		}
-		match = append(match, v.HouseholdID)
+		match = append(match, h)
 	}
 	if len(match) > 1 {
 		s.log().Error("phone: inbound calls refused: several households turned inbound on for one SIP account; "+
