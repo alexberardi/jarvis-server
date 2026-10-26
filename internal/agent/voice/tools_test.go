@@ -486,3 +486,28 @@ func TestChoiceAnswerIsActedOnByTheNode(t *testing.T) {
 		t.Fatalf("transcribe hint %q", hint)
 	}
 }
+
+// Funnel stage 1 (VOICE-FLOWS.md Q27): "switch to the terminal" is done on the node, with no
+// command-center turn, and the next window waits 8 s for the next step.
+func TestDirectCommandSkipsCommandCenter(t *testing.T) {
+	os := &fakeOS{}
+	srv := newServer()
+	srv.text = "Switch to the terminal."
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || !slices.Contains(os.did(), "focus 0x2") {
+		t.Fatalf("turn %+v, did %v", tr, os.did())
+	}
+	if slices.Contains(srv.callList(), "stream") || slices.Contains(srv.callList(), "command") {
+		t.Fatalf("command-center was asked: %v", srv.callList())
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want the 8 s next-step window", got)
+	}
+}

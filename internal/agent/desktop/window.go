@@ -362,7 +362,7 @@ func (t *Tools) choice(out map[string]any, candidates []string, ws []host.Window
 	out[node.IslandKey], out[node.IslandOnlyKey], out[node.ChoiceKey] = b.String(), true, true
 	out["numbered"] = numbered // "the second one" is window_id of n 2
 	t.mu.Lock()
-	t.choices, t.choicesAt, t.viewChoices = list, t.now(), nil
+	t.choices, t.choicesAt, t.viewChoices, t.mixedChoices = list, t.now(), nil, nil
 	t.mu.Unlock()
 	if t.Show != nil {
 		t.Show(b.String(), choiceFor)
@@ -441,6 +441,9 @@ func answerOrdinal(said string) int {
 // cold is the least reliable thing STT does, and the model then often only *said* it would
 // switch (voice test, 2026-10-24); a place in a list needs neither.
 func (t *Tools) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
+	if out, ok := t.answerMixed(ctx, said); ok {
+		return out, true
+	}
 	if out, ok := t.answerView(ctx, said); ok {
 		return out, true
 	}

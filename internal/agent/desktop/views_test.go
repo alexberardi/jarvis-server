@@ -62,8 +62,12 @@ func TestMatchViewHeardNames(t *testing.T) {
 	if v, cands := matchView(firefoxTabs, "zebra"); v != nil || cands != nil {
 		t.Errorf("zebra: got %+v / %v", v, cands)
 	}
-	// Two tabs carry "Jarvis Automation": ask, never pick one.
-	if v, cands := matchView(firefoxTabs, "Jarvis Automation"); v != nil || len(cands) < 2 {
+	// Said exactly, a title is that tab even though another contains it.
+	if v, _ := matchView(firefoxTabs, "Jarvis Automation"); v == nil || v.Name != "Jarvis Automation" {
+		t.Errorf("exact: got %+v", v)
+	}
+	// Two tabs carry "Jarvis": ask, never pick one.
+	if v, cands := matchView(firefoxTabs, "Jarvis"); v != nil || len(cands) < 2 {
 		t.Errorf("ambiguous: got %+v / %v", v, cands)
 	}
 }
@@ -85,7 +89,7 @@ func TestViewToolsSwitchAskAndAnswer(t *testing.T) {
 		t.Fatalf("switch: %v, switched %v", out, fv.switched)
 	}
 
-	out, _ = ts.Call(ctx, ToolView, map[string]any{"name": "Jarvis Automation"}, node.Request{})
+	out, _ = ts.Call(ctx, ToolView, map[string]any{"name": "Jarvis"}, node.Request{})
 	if out[node.ChoiceKey] != true || out["error_code"] != "ambiguous_view" || !strings.Contains(out[node.IslandKey].(string), "2.") {
 		t.Fatalf("ambiguous: %v", out)
 	}

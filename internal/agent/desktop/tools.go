@@ -132,6 +132,8 @@ type Tools struct {
 	// a window list clears it and the other way round), for the app as said.
 	viewChoices   []View
 	viewChoiceApp string
+	// mixedChoices: a funnel-stage-1 list of different kinds (a window or a tab), each a call.
+	mixedChoices []func(context.Context) (map[string]any, error)
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).

@@ -94,6 +94,17 @@ func matchView(views []View, heard string) (*View, []View) {
 	for _, v := range views {
 		all = append(all, scored{v, viewScore(heard, v.Name)})
 	}
+	// A title said exactly is that view, however many others contain it ("Jarvis Automation"
+	// beside "Discord | #general | Jarvis Automation", 2026-10-25).
+	var exact []View
+	for _, v := range views {
+		if strings.Join(viewWords(v.Name), " ") == strings.Join(viewWords(heard), " ") {
+			exact = append(exact, v)
+		}
+	}
+	if len(exact) == 1 {
+		return &exact[0], nil
+	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].s > all[j].s })
 	if len(all) == 0 || all[0].s < viewMaybe {
 		return nil, nil
@@ -197,7 +208,7 @@ func (t *Tools) viewChoice(out map[string]any, app string, cands []View) {
 	out["numbered"] = numbered
 	t.mu.Lock()
 	t.viewChoices, t.viewChoiceApp, t.choicesAt = cands, app, t.now()
-	t.choices, t.choiceTool, t.choiceArgs = nil, "", nil // one list at a time
+	t.choices, t.choiceTool, t.choiceArgs, t.mixedChoices = nil, "", nil, nil // one list at a time
 	t.mu.Unlock()
 	if t.Show != nil {
 		t.Show(b.String(), choiceFor)

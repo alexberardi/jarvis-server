@@ -41,6 +41,25 @@ type ChoiceAnswerer interface {
 	AnswerChoice(ctx context.Context, said string) (out map[string]any, ok bool)
 }
 
+// Director is a Toolset that can carry out a clear one-step command itself, with no model
+// (VOICE-FLOWS.md Q27, funnel stage 1): said is the transcript; ok is false to pass it on to
+// command-center.
+type Director interface {
+	Direct(ctx context.Context, said string) (out map[string]any, ok bool)
+}
+
+// Direct asks each Toolset that can carry out a command itself.
+func (m Multi) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	for _, t := range m {
+		if d, ok := t.(Director); ok {
+			if out, ok := d.Direct(ctx, said); ok {
+				return out, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // AnswerChoice asks each Toolset that can answer a choice.
 func (m Multi) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
 	for _, t := range m {
