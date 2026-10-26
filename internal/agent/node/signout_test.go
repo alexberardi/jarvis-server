@@ -7,13 +7,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 // fakeJarvisd answers discovery and the node routes; beat decides each heartbeat's status.
 type fakeJarvisd struct {
-	srv      *httptest.Server
+	srv *httptest.Server
+	// down makes discovery fail, as a server that isn't started yet does.
+	down     atomic.Bool
 	mu       sync.Mutex
 	beat     func(n int) int
 	beats    int
@@ -26,6 +29,10 @@ func newFakeJarvisd(t *testing.T, beat func(n int) int) *fakeJarvisd {
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/services":
+			if f.down.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"services": []map[string]string{
 				{"name": SvcCommandCenter, "url": f.srv.URL},
 				{"name": SvcMQTT, "url": "mqtt://127.0.0.1:1"}, // nothing listens; paho retries quietly

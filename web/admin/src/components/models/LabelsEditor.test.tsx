@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import * as llm from '@/api/llm'
+import * as speech from '@/api/speech'
 import LabelsEditor, { ImageInputToggle } from './LabelsEditor'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
@@ -12,8 +14,14 @@ vi.mock('@/api/llm', async (orig) => ({
   getHardware: vi.fn(),
   putLabels: vi.fn(),
 }))
+vi.mock('@/api/speech', async (orig) => ({
+  ...(await orig<typeof import('@/api/speech')>()),
+  getSpeechPresets: vi.fn(),
+  testSTT: vi.fn(),
+}))
 
 const api = vi.mocked(llm)
+const speechApi = vi.mocked(speech)
 
 function config(label: string, mmproj: string): llm.LabelConfig {
   return {
@@ -200,6 +208,27 @@ describe('GPU fault (prod outage 2026-10-10)', () => {
   })
 })
 
+describe('one GPU, two copies (#562)', () => {
+  it("names the card when background doesn't fit next to live", async () => {
+    const reason = "NVIDIA GeForce RTX 3080 Ti (12288 MB) can't hold background (about 7560 MB) next to live (about 7560 MB): that would be two copies of q.gguf"
+    const bg = { ...status('background', ''), state: 'does_not_fit', reason, endpoint: undefined }
+    api.getLabels.mockResolvedValue({ labels: [status('live', ''), bg], voice: [], engines: [], proposal: {}, recommend: {}, warnings: null })
+    renderEditor()
+    const row = await screen.findByTestId('label-background')
+    expect(within(row).getByText("doesn't fit")).toBeInTheDocument()
+    expect(within(row).getByText(reason)).toBeInTheDocument()
+  })
+
+  it("says when background runs on live's engine", async () => {
+    const note = "Runs on llama-116034eb (live's engine, its context and slots): the card can't hold a second copy"
+    const bg = { ...status('background', ''), note }
+    api.getLabels.mockResolvedValue({ labels: [status('live', ''), bg], voice: [], engines: [], proposal: {}, recommend: {}, warnings: null })
+    renderEditor()
+    const row = await screen.findByTestId('label-background')
+    expect(within(row).getByText(note)).toBeInTheDocument()
+  })
+})
+
 describe('LabelsEditor vLLM GPU memory', () => {
   it('offers the GPU share for a vLLM label only and saves it as a fraction', async () => {
     const live = status('live', '')
@@ -374,7 +403,9 @@ describe('LabelsEditor speech to text', () => {
     expect(within(card).getByText(/audio of every voice turn/)).toBeInTheDocument()
     expect(within(card).getByText(/Speaker recognition stays on this machine/)).toBeInTheDocument()
     // No LLM-only fields, and none of whisper-server's local ones.
-    for (const f of ['API', 'Context window', 'Model', 'GPU layers']) expect(within(card).queryByLabelText(f)).not.toBeInTheDocument()
+    for (const f of ['Context window', 'Model', 'GPU layers']) expect(within(card).queryByLabelText(f)).not.toBeInTheDocument()
+    // The dialect select (openai | elevenlabs) is STT's own, defaulting to OpenAI-compatible.
+    expect(within(card).getByLabelText('API')).toHaveValue('openai')
     expect(within(card).queryByText(/accepts images/)).not.toBeInTheDocument()
     expect((within(card).getByLabelText('API key') as HTMLInputElement).type).toBe('password')
     fireEvent.change(within(card).getByLabelText('Base URL'), { target: { value: 'https://api.groq.com/openai/v1' } })
@@ -393,5 +424,115 @@ describe('LabelsEditor speech to text', () => {
         },
       }),
     )
+  })
+})
+
+describe('LabelsEditor Speech section (STT, docs/llm/07-remote-speech.md §4)', () => {
+  function sttStatus(over: Partial<llm.LabelConfig> = {}, fallback?: llm.SpeechFallback): llm.LabelStatus {
+    const s = status('stt', '')
+    s.config = {
+      ...s.config,
+      kind: 'whisper-server',
+      model_kind: 'stt',
+      engine: 'remote',
+      model: '',
+      model_path: '',
+      remote_url: 'http://127.0.0.1:9/v1',
+      remote_model: 'whisper-large-v3-turbo',
+      remote_api: 'openai',
+      remote_api_effective: 'openai',
+      remote_timeout_ms: 8000,
+      fallback: 'off',
+      ...over,
+    }
+    s.state = 'remote'
+    s.endpoint = undefined
+    s.fallback = fallback
+    return s
+  }
+
+  function renderSTT(fallback?: llm.SpeechFallback) {
+    const labels: llm.LabelsResponse = {
+      labels: [sttStatus({}, fallback)],
+      voice: null,
+      engines: null,
+      proposal: {},
+      recommend: {},
+      warnings: null,
+    }
+    api.getLabels.mockResolvedValue(labels)
+    api.putLabels.mockResolvedValue(labels)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <LabelsEditor labels={['stt']} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('fills URL, API and model from a preset, which stay editable, and saves the fields', async () => {
+    speechApi.getSpeechPresets.mockResolvedValue({
+      stt: [
+        { id: 'groq', name: 'Groq', url: 'https://api.groq.com/openai/v1', api: 'openai', stt_model: 'whisper-large-v3-turbo' },
+        { id: 'elevenlabs', name: 'ElevenLabs', url: 'https://api.elevenlabs.io', api: 'elevenlabs', stt_model: 'scribe_v2', note: 'Logging off.' },
+      ],
+      tts: [],
+    })
+    renderSTT()
+    const card = await screen.findByTestId('label-stt')
+    const picker = await within(card).findByLabelText('Provider')
+    await within(card).findByRole('option', { name: 'ElevenLabs' })
+    fireEvent.change(picker, { target: { value: 'elevenlabs' } })
+    expect(within(card).getByText('Logging off.')).toBeInTheDocument()
+    expect(within(card).getByLabelText('Base URL')).toHaveValue('https://api.elevenlabs.io')
+    expect(within(card).getByLabelText('API')).toHaveValue('elevenlabs')
+    const model = within(card).getByLabelText('Model name')
+    expect(model).toHaveValue('scribe_v2')
+    fireEvent.change(model, { target: { value: 'scribe_v2_custom' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() =>
+      expect(api.putLabels).toHaveBeenCalledWith({
+        stt: { remote_url: 'https://api.elevenlabs.io', remote_api: 'elevenlabs', remote_model: 'scribe_v2_custom' },
+      }),
+    )
+  })
+
+  it('saves the fallback setting', async () => {
+    speechApi.getSpeechPresets.mockResolvedValue({ stt: [], tts: [] })
+    renderSTT()
+    const card = await screen.findByTestId('label-stt')
+    fireEvent.change(within(card).getByLabelText('If the provider fails'), { target: { value: 'cpu' } })
+    fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(api.putLabels).toHaveBeenCalledWith({ stt: { fallback: 'cpu' } }))
+  })
+
+  it('shows the fallback warning with a link to the catalog, and the fallback counts', async () => {
+    speechApi.getSpeechPresets.mockResolvedValue({ stt: [], tts: [] })
+    renderSTT({ mode: 'cpu', fallbacks: 3, last_remote_error: 'remote stt: 429', warning: 'fallback=cpu, but no whisper model is installed' })
+    const card = await screen.findByTestId('label-stt')
+    expect(await within(card).findByText(/no whisper model is installed/)).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: 'Install one from the catalog' })).toHaveAttribute(
+      'href',
+      '/admin/models?job=stt&tab=catalog',
+    )
+    expect(within(card).getByText(/The CPU fallback answered 3 requests/)).toBeInTheDocument()
+    expect(within(card).getByText(/remote stt: 429/)).toBeInTheDocument()
+  })
+
+  it('tests the saved settings and says what was heard and which engine answered', async () => {
+    speechApi.getSpeechPresets.mockResolvedValue({ stt: [], tts: [] })
+    speechApi.testSTT.mockResolvedValue({ text: 'Tell me a joke.', engine: 'remote', latency_ms: 412, clip_says: 'tell me a joke' })
+    renderSTT()
+    const card = await screen.findByTestId('label-stt')
+    fireEvent.click(within(card).getByRole('button', { name: 'Test transcription' }))
+    const result = await within(card).findByRole('status')
+    expect(result).toHaveTextContent('Heard “Tell me a joke.” in 412 ms, by the remote provider.')
+
+    // A dirty form disables the test: it runs what is saved.
+    fireEvent.change(within(card).getByLabelText('Model name'), { target: { value: 'other' } })
+    expect(within(card).getByRole('button', { name: 'Test transcription' })).toBeDisabled()
+    expect(within(card).getByText(/Save first/)).toBeInTheDocument()
   })
 })

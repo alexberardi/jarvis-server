@@ -266,7 +266,7 @@ func TestVoiceSettingsReachThePipelineAtStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c, d := voiceConfig(vf), voice.DefaultConfig(); c.Endpointing.SilenceThreshold != d.Endpointing.SilenceThreshold ||
-		c.Endpointing.SilenceSecs != d.Endpointing.SilenceSecs || c.FollowUp.MinAfterOnsetSecs != d.FollowUp.MinAfterOnsetSecs ||
+		c.Endpointing.SilenceSecs != defaultListenSilence || c.FollowUp.MinAfterOnsetSecs != d.FollowUp.MinAfterOnsetSecs ||
 		c.FollowUp.MinSpeechSecs != d.FollowUp.MinSpeechSecs {
 		t.Fatalf("defaults changed: %+v %+v", c.Endpointing, c.FollowUp)
 	}

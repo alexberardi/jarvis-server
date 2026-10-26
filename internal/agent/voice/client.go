@@ -302,8 +302,17 @@ func (s *HTTPServer) EndConversation(ctx context.Context, id string) error {
 	return s.postJSON(ctx, "/api/v0/conversation/end", map[string]any{"conversation_id": id}, nil)
 }
 
+type hintKey struct{}
+
+// WithTranscribeHint asks the Transcribe in ctx to bias whisper toward these words (sent as
+// prompt_hint; command-center puts it at the end of the initial prompt, where it weighs most).
+func WithTranscribeHint(ctx context.Context, hint string) context.Context {
+	return context.WithValue(ctx, hintKey{}, hint)
+}
+
 // Transcribe is POST /media/whisper/transcribe: multipart file (the command), speaker_audio
-// (wake clip + command; must start with the wake audio) and conversation_id.
+// (wake clip + command; must start with the wake audio), conversation_id and an optional
+// prompt_hint (WithTranscribeHint).
 func (s *HTTPServer) Transcribe(ctx context.Context, command, speaker []byte, id string) (Transcript, error) {
 	ctx, cancel := context.WithTimeout(ctx, sttTimeout)
 	defer cancel()
@@ -325,6 +334,11 @@ func (s *HTTPServer) Transcribe(ctx context.Context, command, speaker []byte, id
 	}
 	if id != "" {
 		if err := mw.WriteField("conversation_id", id); err != nil {
+			return Transcript{}, err
+		}
+	}
+	if hint, _ := ctx.Value(hintKey{}).(string); hint != "" {
+		if err := mw.WriteField("prompt_hint", hint); err != nil {
 			return Transcript{}, err
 		}
 	}

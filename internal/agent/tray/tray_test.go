@@ -66,6 +66,17 @@ func TestItems(t *testing.T) {
 			`(Jarvis Automation Agent — Running) | (Jarvis is controlling this computer) | Stop Jarvis | -- | [x] Computer control | -- | Quit Jarvis Automation Agent`},
 		{State{Status: "Running", ComputerAvailable: true, Record: true, Activity: ActivityRecording},
 			`(Jarvis Automation Agent — Running) | (Recording) | Stop Jarvis | -- | [ ] Computer control | Stop recording | -- | Quit Jarvis Automation Agent`},
+		// The server hasn't answered yet (it may not be started): the header says what the
+		// agent waits for and the menu offers "Retry now"; with listening on, a line says it
+		// starts once the server answers (#585).
+		{State{Status: WaitingFor("http://127.0.0.1:7700"), Waiting: true, VoiceAvailable: true, Voice: true, Setup: true, SignOut: true},
+			`(Jarvis Automation Agent — Waiting for the Jarvis server at http://127.0.0.1:7700) | Retry now | -- | ` +
+				`[x] Listen for "Hey Jarvis" | (Listening starts once the server answers) | Set up / Settings… | ` +
+				`Sign out of Jarvis Automation | -- | Quit Jarvis Automation Agent`},
+		// Listening off: nothing to explain, and no "Open Jarvis Automation" while waiting.
+		{State{Status: WaitingFor("http://jarvis.example:7700"), Waiting: true, VoiceAvailable: true, ComputerAvailable: true},
+			`(Jarvis Automation Agent — Waiting for the Jarvis server at http://jarvis.example:7700) | Retry now | -- | ` +
+				`[ ] Listen for "Hey Jarvis" | [ ] Computer control | -- | Quit Jarvis Automation Agent`},
 		// Windows (no voice yet), server URL unknown: only Quit.
 		{State{Status: "Running"}, `(Jarvis Automation Agent — Running) | -- | Quit Jarvis Automation Agent`},
 	} {
@@ -115,6 +126,7 @@ func TestClicksRunActions(t *testing.T) {
 				rec("record stop")
 			}
 		},
+		RetryNow: func() { rec("retry now") },
 		SetComputer: func(on bool) {
 			if on {
 				rec("computer on")
@@ -170,14 +182,20 @@ func TestClicksRunActions(t *testing.T) {
 	tr.clicked(IDRecord) // Stop recording
 	tr.wait()
 	tr.Update(func(s *State) { s.Activity, s.Record = "", false })
+	tr.clicked(IDRetry) // not waiting: nothing
+	tr.wait()
+	tr.Update(func(s *State) { s.Waiting = true })
+	tr.clicked(IDRetry)
+	tr.wait()
+	tr.Update(func(s *State) { s.Waiting = false })
 	tr.clicked(IDHeader) // the header does nothing
 	tr.clicked(IDActivity)
 	tr.clicked(IDQuit)
 	tr.wait()
-	if strings.Join(got, ", ") != "voice on, voice off, computer on, computer off, open http://jarvis.example/, setup, sign out, stop task, record start, record stop, quit" {
+	if strings.Join(got, ", ") != "voice on, voice off, computer on, computer off, open http://jarvis.example/, setup, sign out, stop task, record start, record stop, retry now, quit" {
 		t.Fatalf("actions %q", got)
 	}
-	if len(be.shown) != 12 || !strings.Contains(be.shown[7], "Stop Jarvis") || strings.Contains(be.shown[8], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") ||
+	if len(be.shown) != 14 || !strings.Contains(be.shown[7], "Stop Jarvis") || strings.Contains(be.shown[8], "Stop Jarvis") || !strings.Contains(be.shown[1], "[x] Listen") ||
 		!strings.Contains(be.shown[2], "[ ] Computer control") || !strings.Contains(be.shown[3], "[x] Computer control") || !strings.Contains(be.shown[5], "Set up / Settings…") ||
 		!strings.Contains(be.shown[6], "Sign out of Jarvis Automation") {
 		t.Fatalf("shown %q", be.shown)
@@ -186,7 +204,7 @@ func TestClicksRunActions(t *testing.T) {
 	tr.Close()
 	tr.clicked(IDQuit) // after Close: ignored
 	tr.wait()
-	if !be.closed || len(got) != 11 {
+	if !be.closed || len(got) != 12 {
 		t.Fatalf("closed %v, actions %q", be.closed, got)
 	}
 }

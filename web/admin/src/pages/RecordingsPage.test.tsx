@@ -7,7 +7,7 @@ import type { Recording } from '@/api/workflows'
 import { expiresIn } from '@/lib/workflows'
 import RecordingsPage from './RecordingsPage'
 
-const api = vi.hoisted(() => ({ listRecordings: vi.fn(), getRecording: vi.fn(), deleteRecording: vi.fn() }))
+const api = vi.hoisted(() => ({ listRecordings: vi.fn(), getRecording: vi.fn(), deleteRecording: vi.fn(), getRecordingKeyframe: vi.fn() }))
 const household = vi.hoisted(() => ({ getHouseholdSettings: vi.fn(), putHouseholdSetting: vi.fn() }))
 const auth = vi.hoisted(() => ({ listHouseholds: vi.fn() }))
 vi.mock('@/api/workflows', async (orig) => ({ ...(await orig<typeof import('@/api/workflows')>()), ...api }))
@@ -87,7 +87,48 @@ describe('RecordingsPage', () => {
     expect(within(items[1]).getByText('Download CSV').tagName).toBe('STRONG')
     expect(within(items[1]).getByText(/Typed \(hidden\) in/)).toBeInTheDocument()
     expect(within(items[1]).getByText(/this is how I get the statement/)).toBeInTheDocument()
-    expect(within(items[1]).getByText('2 keyframes, kept only on the computer that recorded it.')).toBeInTheDocument()
+    expect(within(items[1]).getByText('2 keyframes, 0 kept on the server.')).toBeInTheDocument()
+  })
+
+  it("shows a desktop step's app, window and stored keyframe, the whole screen on click", async () => {
+    URL.createObjectURL = vi.fn((b: Blob) => `blob:${(b as unknown as { name: string }).name}`)
+    URL.revokeObjectURL = vi.fn()
+    api.getRecordingKeyframe.mockImplementation(async (_id: string, seq: number, crop: boolean) => ({ name: `${seq}${crop ? '-crop' : ''}` }))
+    const summary = rec({ id: 'rec_d', mode: 'desktop', steps: 3, keyframes: 3 })
+    api.listRecordings.mockResolvedValue([summary])
+    api.getRecording.mockResolvedValue({
+      ...summary,
+      keyframe_images: [
+        { seq: 1, crop: true },
+        { seq: 3, crop: false },
+      ],
+      trace: [
+        { seq: 1, kind: 'click', app: 'firefox', window: { title: 'Statements' }, element: { name: 'Download CSV' } },
+        { seq: 2, kind: 'key', key: 'Return', app: 'firefox' },
+        { seq: 3, kind: 'click', element: { name: 'Save' } },
+      ],
+    })
+    renderPage()
+    const [item] = await screen.findAllByTestId('recording')
+    fireEvent.click(within(item).getAllByRole('button')[0])
+    const thumb = await within(item).findByRole('img', { name: 'Where you clicked in step 1: show the whole screen' })
+    expect(within(item).getByText('3 keyframes, 2 kept on the server.')).toBeInTheDocument()
+    const steps = within(item).getAllByRole('listitem')
+    expect(steps[0]).toHaveTextContent('in firefox — Statements')
+    expect(steps[1]).toHaveTextContent('in firefox')
+    expect(within(steps[1]).queryByRole('img')).not.toBeInTheDocument()
+    expect(await within(steps[2]).findByRole('img', { name: /step 3/ })).toBeInTheDocument()
+    // Step 1 shows its crop; step 3 has none, so its whole keyframe.
+    expect(api.getRecordingKeyframe).toHaveBeenCalledWith('rec_d', 1, true)
+    expect(api.getRecordingKeyframe).toHaveBeenCalledWith('rec_d', 3, false)
+    expect(api.getRecordingKeyframe).not.toHaveBeenCalledWith('rec_d', 1, false)
+
+    fireEvent.click(thumb)
+    const dialog = await screen.findByRole('dialog', { name: 'Step 1' })
+    const full = await within(dialog).findByRole('img', { name: 'The screen in step 1, the click marked' })
+    expect(api.getRecordingKeyframe).toHaveBeenCalledWith('rec_d', 1, false)
+    expect(thumb).toHaveAttribute('src', 'blob:1-crop')
+    expect(full).toHaveAttribute('src', 'blob:1')
   })
 
   it('deletes a recording after confirming', async () => {

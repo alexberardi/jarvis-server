@@ -11,7 +11,9 @@ would otherwise rediscover.
 household on `phone.provider = sip` without one). An inbound call belongs to the one household
 whose own `phone.inbound.enabled` is true and whose resolved SIP account is the line's (same
 server, extension and local port), and which has `phone_calls.enabled` on too. A system-level
-`phone.inbound.enabled` turns it on for nobody: inbound is per household, as asked. Two households
+`phone.inbound.enabled` turns it on for nobody: inbound is per household, as asked. (**Superseded
+2026-10-26:** the default now counts; see
+[2026-10-26-phone-inbound-default.md](2026-10-26-phone-inbound-default.md).) Two households
 sharing one account with inbound on get no calls (480, and an error in the log): there is no way
 to tell whose message it would be. No household: 480, today's answer, so the PBX goes on to its
 next destination.

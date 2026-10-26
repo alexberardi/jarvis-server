@@ -1,9 +1,11 @@
 package voice
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"regexp"
 	"slices"
 	"strings"
@@ -43,7 +45,28 @@ type FollowUpConfig struct {
 	// was left of it, but at least this long, so the user can still answer once the room
 	// is quiet again.
 	IgnoredGraceSecs float64
+	// ChoiceListenSecs: the window after the island listed choices to pick from (choice_listen_seconds,
+	// default 8, at most MaxChoiceListenSecs): reading a list and answering takes longer than
+	// the 3 s follow-up (DESKTOP-COMMANDS.md Q9).
+	ChoiceListenSecs float64
+	// ChainListenSecs: the window after a silent desktop command (the island showed it), so
+	// the user can say the next step of a process ("switch to the Claude tab… now the budget
+	// sheet… maximize it"): the 3 s after a spoken reply was too short to think of it (voice
+	// test, 2026-10-25). Such steps don't count toward MaxIterations; maxChainSteps bounds them.
+	ChainListenSecs float64
 }
+
+// maxChainSteps bounds one wake word's follow-up turns, silent desktop steps included.
+const maxChainSteps = 30
+
+// choiceHint biases whisper toward an answer to a numbered list in the choice window.
+const choiceHint = "The first one. The second one. The third one. Number four. The last one."
+
+// MaxChoiceListenSecs caps choice_listen_seconds.
+const MaxChoiceListenSecs = 30
+
+// ClampChoiceListen caps a choice window at MaxChoiceListenSecs.
+func ClampChoiceListen(secs float64) float64 { return min(secs, MaxChoiceListenSecs) }
 
 // MaxFollowUpListenSecs caps the follow-up window, wherever it is set (agent.json, --follow-up,
 // the app's follow_up_listen_seconds): 8 s left every turn hanging long after the reply (user,
@@ -61,7 +84,7 @@ func ClampFollowUpListen(secs float64) float64 { return min(secs, MaxFollowUpLis
 func DefaultFollowUp() FollowUpConfig {
 	return FollowUpConfig{ListenSecs: MaxFollowUpListenSecs, MaxIterations: 5,
 		QuietWaitSecs: 0.5, SilenceSecs: 1.2, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3,
-		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2}
+		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2, ChoiceListenSecs: 8, ChainListenSecs: 8}
 }
 
 // Fixed parts of the Python node's follow-up listening.
@@ -105,7 +128,7 @@ const (
 // our own speech.
 func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	cfg := p.Cfg.FollowUp
-	if cfg.ListenSecs <= 0 {
+	if cfg.ListenSecs <= 0 && !s.choice { // a list on the island is answered even with follow-ups off
 		t.FollowUpEnd = EndDisabled
 		return
 	}
@@ -115,17 +138,33 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	ignored := 0
 	used := 0          // chunks of this iteration's window already heard (ignored answers included)
 	afterReply := true // the last thing that happened was us speaking (or the wake exchange)
+	steps := 0
 	for it := 1; ; {
-		if it > cfg.MaxIterations {
+		if it > cfg.MaxIterations || steps >= maxChainSteps {
 			t.FollowUpEnd = EndMaxIterations
 			return
 		}
+		steps++
 		window := max(min(cfg.MinTimeoutSecs, cfg.ListenSecs), cfg.ListenSecs-float64(it-1)*cfg.DecaySecs)
 		// Speech that wasn't for us doesn't buy the room a new window: after an ignored
 		// answer, only what is left of this one (but at least IgnoredGraceSecs).
 		timeout := window
 		if ignored > 0 {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
+		}
+		choosing := s.choice
+		if s.choice {
+			// The island lists choices: a longer window, listening at once (nothing was
+			// spoken, so there is no reply tail to drain).
+			s.choice = false
+			timeout, afterReply = ClampChoiceListen(cmp.Or(cfg.ChoiceListenSecs, DefaultFollowUp().ChoiceListenSecs)), false
+		}
+		if s.quietTurn {
+			s.quietTurn = false
+			afterReply = false
+			if !choosing {
+				timeout = cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs)
+			}
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
@@ -150,7 +189,11 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		ex := Exchange{RecordedSecs: float64(len(pcm)) / CaptureRate}
 		level := levelVsWake(s, pcm)
 		cmd := Normalize(pcm)
-		tr, err := p.Server.Transcribe(ctx, wavBytes(cmd), wavBytes(slices.Concat(s.wakeClip, cmd)), s.id)
+		tctx := ctx
+		if choosing {
+			tctx = WithTranscribeHint(ctx, choiceHint)
+		}
+		tr, err := p.Server.Transcribe(tctx, wavBytes(cmd), wavBytes(slices.Concat(s.wakeClip, cmd)), s.id)
 		if err != nil {
 			// The Python node gives up on the window quietly here.
 			ex.Outcome, ex.Err = OutcomeError, fmt.Errorf("transcribe: %w", err)
@@ -165,7 +208,34 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 			t.FollowUps, t.FollowUpEnd = append(t.FollowUps, ex), EndNonSpeech
 			return
 		}
-		if IsFollowUpNoise(text, prev) {
+		if choosing {
+			// An answer to the island's list is acted on here, without command-center: "the
+			// second one" heard cold is the least reliable thing STT does, and a model
+			// may only *say* it switched.
+			if a, ok := p.Tools.(node.ChoiceAnswerer); ok {
+				if out, ok := a.AnswerChoice(ctx, text); ok {
+					ok, _ := out["success"].(bool)
+					ex.Outcome = OutcomeSilent
+					ex.Tools = append(ex.Tools, ToolRun{Name: "choice", Args: map[string]any{"answer": text}, Success: ok})
+					t.FollowUps = append(t.FollowUps, ex)
+					s.log.Info("follow-up: answered the island's list on the node", "transcript", text, "success", ok)
+					if !ok {
+						p.chime(ctx, errorChime)
+					}
+					if c, _ := out[node.ChoiceKey].(bool); c {
+						s.choice = true // still ambiguous: the next list
+					} else {
+						s.quietTurn = true
+					}
+					noise, prev, used = 0, text, 0
+					if !s.quietTurn {
+						it++ // a silent step of a process doesn't use up the window count
+					}
+					continue
+				}
+			}
+		}
+		if IsFollowUpNoise(text, prev) && !(choosing && text != "") { // a repeated answer to a list is still an answer
 			noise++
 			ex.Outcome = OutcomeNoise
 			t.FollowUps = append(t.FollowUps, ex)
@@ -190,6 +260,14 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		noise, prev = 0, text
 		if tr.Speaker != nil && tr.Speaker.UserID != nil {
 			s.userID = tr.Speaker.UserID
+		}
+		if p.direct(ctx, s, &ex, text) { // funnel stage 1: done here, no command-center turn
+			t.FollowUps = append(t.FollowUps, ex)
+			ignored, used = 0, 0
+			if !s.quietTurn {
+				it++
+			}
+			continue
 		}
 
 		// A follow_up turn of the same conversation, on the blocking route as the Python node
@@ -228,7 +306,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		}
 		ignored, used = 0, 0
 		afterReply = true
-		it++
+		if !s.quietTurn {
+			it++ // a silent step of a process doesn't use up the window count
+		}
 	}
 }
 

@@ -7,11 +7,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 )
 
 // The OpenAI-compatible engine client: llama-server and remote endpoints speak
@@ -21,18 +24,26 @@ import (
 
 // chatPayload is the upstream request body.
 type chatPayload struct {
-	Model              string          `json:"model"`
-	Messages           []Message       `json:"messages"`
-	Temperature        float64         `json:"temperature"`
-	Stream             bool            `json:"stream"`
-	StreamOptions      *streamOptions  `json:"stream_options,omitempty"`
-	MaxTokens          *int            `json:"max_tokens,omitempty"`
-	TopP               *float64        `json:"top_p,omitempty"`
-	Seed               *int64          `json:"seed,omitempty"`
-	Tools              []Tool          `json:"tools,omitempty"`
-	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
-	ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs,omitempty"`
-	ReasoningBudget    *int            `json:"reasoning_budget,omitempty"`
+	Model         string         `json:"model"`
+	Messages      []Message      `json:"messages"`
+	Temperature   *float64       `json:"temperature,omitempty"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	MaxTokens     *int           `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens replaces max_tokens for a remote: OpenAI's newer models refuse
+	// max_tokens.
+	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
+	TopP                *float64        `json:"top_p,omitempty"`
+	Seed                *int64          `json:"seed,omitempty"`
+	Tools               []Tool          `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
+	ChatTemplateKwargs  map[string]bool `json:"chat_template_kwargs,omitempty"`
+	ReasoningBudget     *int            `json:"reasoning_budget,omitempty"`
+	// ReasoningBudgetTokens is llama-server's own name for a capped budget (N>0); it ignores
+	// reasoning_budget.
+	ReasoningBudgetTokens *int `json:"reasoning_budget_tokens,omitempty"`
+	// ReasoningEffort is OpenAI's thinking control for its reasoning models (fixedSampling).
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -42,8 +53,32 @@ type streamOptions struct {
 // applyThinking is _apply_reasoning: a nil budget leaves the server's launch flags in charge;
 // otherwise the chat template's enable_thinking kwarg (the only control Qwen3.5 honours) is
 // set, and reasoning_budget is forwarded for servers that read it (not to one that refuses it,
-// ep.NoReasoningBudget). N>0 means "on, uncapped".
+// ep.NoReasoningBudget). N>0 is also sent as reasoning_budget_tokens, which llama-server
+// enforces by closing the thinking block after N tokens. A remote gets none of these: they are
+// llama-server's, and OpenAI answers 400 to an unknown parameter.
 func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
+	if ep.Remote {
+		if ep.API != APIAnthropic { // anthropicBody reads MaxTokens
+			p.MaxCompletionTokens, p.MaxTokens = p.MaxTokens, nil
+		}
+		if fixedSampling(p.Model) {
+			// The cap counts hidden reasoning too: a chat turn's 256 went on thinking and the
+			// answer came back empty.
+			p.Temperature, p.TopP, p.MaxCompletionTokens = nil, nil, nil
+			if budget != nil && *budget == 0 {
+				p.ReasoningEffort = "low" // the lowest every family (o-series, gpt-5.x) accepts
+			}
+		}
+		if gemini(p.Model) {
+			// Gemini's cap counts thinking too, and 2.5 Pro and 3.x can't turn thinking off.
+			p.MaxCompletionTokens = nil
+			if budget != nil && *budget == 0 {
+				p.ReasoningEffort = "low" // minimal is a 400 on some (3 Pro); low works on every family
+			}
+			p.Messages = withThoughtSignatures(p.Messages)
+		}
+		return
+	}
 	if budget == nil {
 		return
 	}
@@ -53,11 +88,57 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 	}
 	b := *budget
 	p.ReasoningBudget = &b
+	if b > 0 {
+		p.ReasoningBudgetTokens = &b
+	}
+}
+
+// fixedSampling: OpenAI's reasoning models answer 400 to any temperature or top_p but the
+// default. shortcut: matched by name (also behind a router's "openai/" prefix); add new families here.
+func fixedSampling(model string) bool {
+	m := strings.ToLower(model)
+	m = m[strings.LastIndex(m, "/")+1:]
+	return slices.ContainsFunc([]string{"gpt-5", "o1", "o3", "o4"}, func(p string) bool { return strings.HasPrefix(m, p) })
+}
+
+// skipThoughtSignature is Google's documented stand-in for a tool call whose signature is
+// unknown (history from another model, or cc's own, which keeps no signatures).
+// shortcut: real signatures don't survive cc's history (parse.ToolCall), so Gemini 3 may reason
+// a little worse across tool rounds; carry ExtraContent through cc if that shows.
+var skipThoughtSignature = json.RawMessage(`{"google":{"thought_signature":"skip_thought_signature_validator"}}`)
+
+// withThoughtSignatures gives every history tool call without one the stand-in signature
+// (Gemini 3 answers 400 "Function call is missing a thought_signature"). Copies on write: the
+// caller's messages are not changed.
+func withThoughtSignatures(msgs []Message) []Message {
+	out := msgs
+	for i, m := range msgs {
+		if !slices.ContainsFunc(m.ToolCalls, func(tc ToolCall) bool { return len(tc.ExtraContent) == 0 }) {
+			continue
+		}
+		if len(out) > 0 && &out[0] == &msgs[0] { // first change: copy
+			out = slices.Clone(msgs)
+		}
+		calls := slices.Clone(m.ToolCalls)
+		for j := range calls {
+			if len(calls[j].ExtraContent) == 0 {
+				calls[j].ExtraContent = skipThoughtSignature
+			}
+		}
+		out[i].ToolCalls = calls
+	}
+	return out
+}
+
+// gemini is a Google model name (models/gemini-2.5-flash, gemini-3-flash).
+func gemini(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m[strings.LastIndex(m, "/")+1:], "gemini")
 }
 
 func endpointURL(base, path string) string {
 	base = strings.TrimRight(base, "/")
-	if !strings.HasSuffix(base, "/v1") {
+	if !strings.HasSuffix(base, "/v1") && !strings.HasSuffix(base, "/openai") { // Google's is /v1beta/openai
 		base += "/v1"
 	}
 	return base + path
@@ -84,6 +165,7 @@ type wireToolCall struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	} `json:"function"`
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 type wireUsage struct {
@@ -120,7 +202,17 @@ func (c *wireToolCall) toolCall() ToolCall {
 	if id == "" {
 		id = "call_" + newHex(12)
 	}
-	return ToolCall{ID: id, Type: "function", Function: FunctionCall{Name: c.Function.Name, Arguments: argumentsString(c.Function.Arguments)}}
+	return ToolCall{ID: id, Type: "function", Function: FunctionCall{Name: c.Function.Name, Arguments: argumentsString(c.Function.Arguments)},
+		ExtraContent: c.ExtraContent}
+}
+
+// remoteRetryDelays are the waits before retrying a remote's transient refusal (429, or a 5xx
+// such as Gemini's 503 "This model is currently experiencing high demand"). A var for tests.
+var remoteRetryDelays = []time.Duration{time.Second, 3 * time.Second}
+
+func retryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests || code == http.StatusInternalServerError || code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
 }
 
 func (s *Service) post(ctx context.Context, ep Endpoint, path string, body any) (*http.Response, error) {
@@ -128,6 +220,22 @@ func (s *Service) post(ctx context.Context, ep Endpoint, path string, body any) 
 	if err != nil {
 		return nil, err
 	}
+	for attempt := 0; ; attempt++ {
+		resp, err := s.postOnce(ctx, ep, path, raw)
+		var apiErr *APIError
+		if !ep.Remote || attempt >= len(remoteRetryDelays) || !errors.As(err, &apiErr) || !retryableStatus(apiErr.Status) {
+			return resp, err
+		}
+		s.log.Info("llm: remote refused, retrying", "status", apiErr.Status, "attempt", attempt+1)
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(remoteRetryDelays[attempt]):
+		}
+	}
+}
+
+func (s *Service) postOnce(ctx context.Context, ep Endpoint, path string, raw []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL(ep.BaseURL, path), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
@@ -198,9 +306,18 @@ func (s *Service) complete(ctx context.Context, ep Endpoint, p *chatPayload) (co
 		c.ToolCalls = append(c.ToolCalls, tc.toolCall())
 	}
 	if ch.FinishReason != nil {
-		c.FinishReason = *ch.FinishReason
+		c.FinishReason = toolCallsFinish(*ch.FinishReason, len(c.ToolCalls))
 	}
 	return c, nil
+}
+
+// toolCallsFinish is "tool_calls" for a reply with calls that says "stop", as Gemini's
+// OpenAI layer does.
+func toolCallsFinish(reason string, calls int) string {
+	if reason == "stop" && calls > 0 {
+		return "tool_calls"
+	}
+	return reason
 }
 
 // streamResult is what the stream parser gathered for the done frame.
@@ -300,6 +417,7 @@ func parseStream(r io.Reader, onDelta func(string) bool) (streamResult, error) {
 		}
 	}
 	res.Content = sb.String()
+	res.FinishReason = toolCallsFinish(res.FinishReason, len(res.ToolCalls))
 	return res, sc.Err()
 }
 

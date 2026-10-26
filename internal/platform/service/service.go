@@ -209,6 +209,21 @@ type probe struct {
 	winService func() bool
 }
 
+// unsafeSystemPaths are where a system unit's binary must not live: ProtectHome=yes hides
+// /home, /root and /run/user, and PrivateTmp=yes replaces /tmp and /var/tmp.
+var unsafeSystemPaths = []string{"/home/", "/root/", "/run/user/", "/tmp/", "/var/tmp/"}
+
+// Hides is the directory the system unit hides p under ("" = none): a path there that exists
+// for the user doesn't for jarvisd running as the system service.
+func Hides(p string) string {
+	for _, d := range unsafeSystemPaths {
+		if strings.HasPrefix(p, d) {
+			return strings.TrimSuffix(d, "/")
+		}
+	}
+	return ""
+}
+
 // Detect reports which service manager runs this process: a container (JARVIS_CONTAINER), the
 // jarvisd systemd unit (system or user), a launchd job, the Windows SCM, or none (a terminal, a container's init, a
 // foreign supervisor jarvisd can't count on).

@@ -508,3 +508,34 @@ func TestSealedStoreNeverWrites(t *testing.T) {
 		}
 	}
 }
+
+// directTools also carries out commands itself and answers lists (funnel stage 1).
+type directTools struct{ fakeTools }
+
+func (directTools) Direct(ctx context.Context, _ string) (map[string]any, bool) {
+	if !node.Enabled(ctx, "desktop_view") {
+		return nil, false
+	}
+	return map[string]any{"success": true, "direct": true}, true
+}
+func (directTools) AnswerChoice(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, "answered": true}, true
+}
+
+// The gate wraps the voice loop's tools: stage 1 and list answers must reach them (2026-10-25:
+// they didn't, and every "switch to X" and "the second one" went to the model).
+func TestGatePassesDirectAndChoiceAnswers(t *testing.T) {
+	st, _ := OpenStore(t.TempDir(), "n1")
+	var ts node.Toolset = Gate{Tools: directTools{fakeTools{"desktop_view", "desktop_window"}}, Store: st}
+	ctx := context.Background()
+	if out, ok := ts.(node.Director).Direct(ctx, "switch to the Claude tab"); !ok || out["direct"] != true {
+		t.Fatalf("direct = %v %v", out, ok)
+	}
+	if out, ok := ts.(node.ChoiceAnswerer).AnswerChoice(ctx, "the second one"); !ok || out["answered"] != true {
+		t.Fatalf("answer = %v %v", out, ok)
+	}
+	_ = st.SetEnabled("desktop_view", false)
+	if _, ok := ts.(node.Director).Direct(ctx, "switch to the Claude tab"); ok {
+		t.Fatal("stage 1 didn't see the command turned off")
+	}
+}

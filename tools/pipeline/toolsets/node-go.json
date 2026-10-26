@@ -1,0 +1,1427 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "act_on_items",
+   "description": "Act on items from the RECENTLY SHOWN list when the user refers back to them ('those', 'the first one'). Use only ids and actions shown there.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "description": "A verb listed as valid for those items"
+     },
+     "ref_ids": {
+      "type": "array",
+      "description": "Ids from the [id] tags; all for 'all of them'"
+     }
+    },
+    "required": [
+     "action",
+     "ref_ids"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [],
+  "examples": [
+   {
+    "voice_command": "mark those as read",
+    "expected_parameters": {
+     "action": "mark_read",
+     "ref_ids": [
+      "eml_a1b2",
+      "eml_c3d4"
+     ]
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "send me the full article for 3",
+    "expected_parameters": {
+     "action": "send_full_article",
+     "ref_ids": [
+      "art_c9"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "draft a reply to the one from ABC",
+    "expected_parameters": {
+     "action": "draft_reply",
+     "ref_ids": [
+      "eml_a1b2"
+     ]
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "answer_question",
+   "description": "Answer a general-knowledge question (facts, history, science, definitions). Not for news, scores or anything live.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  },
+  "allow_direct_answer": true,
+  "is_risky": false,
+  "keywords": [
+   "what is",
+   "what are",
+   "who is",
+   "who was",
+   "how far",
+   "how many",
+   "how much",
+   "how does",
+   "how do",
+   "how old",
+   "when was",
+   "when did",
+   "where is",
+   "where was",
+   "why is",
+   "why does",
+   "why do",
+   "define",
+   "explain",
+   "tell me about",
+   "what does",
+   "meaning of"
+  ],
+  "examples": [
+   {
+    "voice_command": "How far is California from New Jersey?",
+    "expected_parameters": {
+     "query": "How far is California from New Jersey?"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "What is the capital of France?",
+    "expected_parameters": {
+     "query": "What is the capital of France?"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Who invented the telephone?",
+    "expected_parameters": {
+     "query": "Who invented the telephone?"
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "search_web",
+    "description": "Current events, live scores, trending topics, or time-sensitive information."
+   },
+   {
+    "command_name": "get_sports",
+    "description": "Sports scores, schedules, or game results for a specific team."
+   },
+   {
+    "command_name": "get_weather",
+    "description": "Weather forecasts or current conditions."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "calculate",
+   "description": "Arithmetic on two numbers. Always use it; don't compute in your head.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "num1": {
+      "type": "number"
+     },
+     "num2": {
+      "type": "number"
+     },
+     "operation": {
+      "type": "string",
+      "enum": [
+       "add",
+       "subtract",
+       "multiply",
+       "divide"
+      ]
+     }
+    },
+    "required": [
+     "num1",
+     "num2",
+     "operation"
+    ]
+   }
+  },
+  "allow_direct_answer": true,
+  "is_risky": false,
+  "keywords": [
+   "calculate",
+   "math",
+   "add",
+   "subtract",
+   "multiply",
+   "divide",
+   "plus",
+   "minus"
+  ],
+  "examples": [
+   {
+    "voice_command": "What's 5 plus 3?",
+    "expected_parameters": {
+     "num1": 5,
+     "num2": 3,
+     "operation": "add"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Calculate 10 minus 4",
+    "expected_parameters": {
+     "num1": 10,
+     "num2": 4,
+     "operation": "subtract"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What is 6 times 7?",
+    "expected_parameters": {
+     "num1": 6,
+     "num2": 7,
+     "operation": "multiply"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Divide 20 by 5",
+    "expected_parameters": {
+     "num1": 20,
+     "num2": 5,
+     "operation": "divide"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What's 15 percent of 200?",
+    "expected_parameters": {
+     "num1": 0.15,
+     "num2": 200,
+     "operation": "multiply"
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "cancel_timer",
+   "description": "Cancel or stop a timer ('cancel the pasta timer').",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "label": {
+      "type": "string",
+      "description": "Its label, 'all', or empty for the only one"
+     }
+    },
+    "required": []
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "cancel timer",
+   "stop timer",
+   "cancel alarm",
+   "stop alarm",
+   "remove timer",
+   "delete timer"
+  ],
+  "examples": [
+   {
+    "voice_command": "Cancel the pasta timer",
+    "expected_parameters": {
+     "label": "pasta"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Cancel all timers",
+    "expected_parameters": {
+     "label": "all"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Cancel my timer",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "Stop the egg timer",
+    "expected_parameters": {
+     "label": "egg"
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "chat",
+   "description": "Chat: small talk and greetings. Put your own spoken reply in message. Facts: answer_question.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "message": {
+      "type": "string",
+      "description": "Your reply, spoken as written (not the user's words)"
+     }
+    },
+    "required": [
+     "message"
+    ]
+   }
+  },
+  "allow_direct_answer": true,
+  "is_risky": false,
+  "keywords": [
+   "chat",
+   "talk",
+   "hello",
+   "hi",
+   "hey",
+   "how are you",
+   "what's up",
+   "good morning",
+   "good evening",
+   "good night",
+   "good afternoon",
+   "how's it going",
+   "what do you think",
+   "tell me about yourself",
+   "who are you"
+  ],
+  "examples": [
+   {
+    "voice_command": "Hey Jarvis, how's it going?",
+    "expected_parameters": {
+     "message": "Hey Jarvis, how's it going?"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Good morning!",
+    "expected_parameters": {
+     "message": "Good morning!"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What do you think about space travel?",
+    "expected_parameters": {
+     "message": "What do you think about space travel?"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Tell me something interesting",
+    "expected_parameters": {
+     "message": "Tell me something interesting"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "How are you doing today?",
+    "expected_parameters": {
+     "message": "How are you doing today?"
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "answer_question",
+    "description": "Factual questions, definitions, history, science, geography, biographies"
+   },
+   {
+    "command_name": "search_web",
+    "description": "Current events, live information, news, recent data"
+   },
+   {
+    "command_name": "get_weather",
+    "description": "Weather forecasts, temperature, conditions"
+   },
+   {
+    "command_name": "calculate",
+    "description": "Math calculations, arithmetic, number crunching"
+   },
+   {
+    "command_name": "set_timer",
+    "description": "Setting timers or alarms"
+   },
+   {
+    "command_name": "control_device",
+    "description": "Smart home device control, turning on/off lights"
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_timers",
+   "description": "Check the time left on running timers.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "label": {
+      "type": "string",
+      "description": "Optional: one timer"
+     }
+    },
+    "required": []
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "check timer",
+   "timer status",
+   "how much time",
+   "time left",
+   "time remaining",
+   "what timers",
+   "how long until"
+  ],
+  "examples": [
+   {
+    "voice_command": "How much time is left?",
+    "expected_parameters": {},
+    "is_primary": true
+   },
+   {
+    "voice_command": "Check the pasta timer",
+    "expected_parameters": {
+     "label": "pasta"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What timers are running?",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "How long until the egg timer?",
+    "expected_parameters": {
+     "label": "egg"
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "control_node",
+   "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "volume_up",
+       "volume_down",
+       "set_volume",
+       "mute",
+       "unmute"
+      ]
+     },
+     "target_percent": {
+      "type": "integer",
+      "description": "For set_volume, 0-100 (a 0-10 number x10)"
+     }
+    },
+    "required": [
+     "action"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "volume",
+   "louder",
+   "quieter",
+   "softer",
+   "mute",
+   "unmute",
+   "turn up",
+   "turn down",
+   "turn it up",
+   "turn it down"
+  ],
+  "examples": [
+   {
+    "voice_command": "Turn the volume up",
+    "expected_parameters": {
+     "action": "volume_up"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Volume down",
+    "expected_parameters": {
+     "action": "volume_down"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Set the volume to 50%",
+    "expected_parameters": {
+     "action": "set_volume",
+     "target_percent": 50
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Set the volume to 5",
+    "expected_parameters": {
+     "action": "set_volume",
+     "target_percent": 50
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Mute",
+    "expected_parameters": {
+     "action": "mute"
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "export_shopping_list",
+   "description": "Send the shopping list to the store as a cart link, only when asked to send or export it.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "export",
+   "send",
+   "walmart",
+   "cart",
+   "shopping list"
+  ],
+  "examples": [
+   {
+    "voice_command": "Send my shopping list to Walmart",
+    "expected_parameters": {},
+    "is_primary": true
+   },
+   {
+    "voice_command": "Export the shopping list",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "Send the grocery list to the store",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "Send my shopping list to my notes",
+    "expected_parameters": {},
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "shopping_list",
+    "description": "Adding/reading/checking off items is the shopping_list command \u2014 this one only sends the list to the store."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "export_todo_list",
+   "description": "Send the to-do list to the user's phone, only when asked to send or export it.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "export",
+   "send",
+   "to-do list",
+   "todo list",
+   "task list",
+   "checklist",
+   "phone"
+  ],
+  "examples": [
+   {
+    "voice_command": "Send my to-do list to my phone",
+    "expected_parameters": {},
+    "is_primary": true
+   },
+   {
+    "voice_command": "Export the to-do list",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "Send me my task list",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "Show me my to-do list on my phone",
+    "expected_parameters": {},
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "todo_list",
+    "description": "Adding/reading/completing tasks is the todo_list command \u2014 this one only sends the list to your phone as a checklist."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "convert_measurement",
+   "description": "Convert units (distance, volume, weight, temperature). Always use it; don't convert in your head.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "number",
+      "description": "Default 1"
+     },
+     "from_unit": {
+      "type": "string"
+     },
+     "to_unit": {
+      "type": "string"
+     },
+     "category": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "from_unit",
+     "to_unit"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "convert",
+   "conversion",
+   "how many",
+   "in a",
+   "equals",
+   "to",
+   "miles",
+   "kilometers",
+   "gallons",
+   "liters",
+   "pounds",
+   "kilograms",
+   "celsius",
+   "fahrenheit"
+  ],
+  "examples": [
+   {
+    "voice_command": "How many inches in a mile?",
+    "expected_parameters": {
+     "value": 1,
+     "from_unit": "miles",
+     "to_unit": "inches"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Convert 5 miles to kilometers",
+    "expected_parameters": {
+     "value": 5,
+     "from_unit": "miles",
+     "to_unit": "kilometers"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "How many cups in a gallon?",
+    "expected_parameters": {
+     "value": 1,
+     "from_unit": "gallons",
+     "to_unit": "cups"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Convert 10 pounds to kilograms",
+    "expected_parameters": {
+     "value": 10,
+     "from_unit": "pounds",
+     "to_unit": "kilograms"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What's 350 Fahrenheit in Celsius?",
+    "expected_parameters": {
+     "value": 350,
+     "from_unit": "fahrenheit",
+     "to_unit": "celsius"
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "get_weather",
+    "description": "Weather queries mentioning 'metric units', 'imperial units', 'Celsius', or 'Fahrenheit' as a display preference. These are weather requests, not unit conversions."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "reminder",
+   "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list, delete or snooze them. Not for a length of time: use set_timer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "set",
+       "list",
+       "delete",
+       "snooze"
+      ]
+     },
+     "text": {
+      "type": "string",
+      "description": "What to remind about"
+     },
+     "resolved_datetimes": {
+      "type": "array",
+      "description": "Date keys, e.g. tomorrow, next_monday",
+      "items": {
+       "type": "string",
+       "format": "date-time"
+      }
+     },
+     "time": {
+      "type": "string",
+      "description": "HH:MM, 24h"
+     },
+     "relative_minutes": {
+      "type": "integer",
+      "description": "Minutes from now"
+     },
+     "recurrence": {
+      "type": "string",
+      "enum": [
+       "daily",
+       "weekdays",
+       "weekly",
+       "biweekly",
+       "monthly"
+      ]
+     },
+     "filter": {
+      "type": "string",
+      "enum": [
+       "all",
+       "today",
+       "recurring"
+      ]
+     },
+     "scope": {
+      "type": "string",
+      "enum": [
+       "one",
+       "all"
+      ]
+     },
+     "minutes": {
+      "type": "integer",
+      "description": "Snooze length"
+     }
+    },
+    "required": [
+     "action"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "remind",
+   "reminder",
+   "reminders",
+   "remind me",
+   "don't forget",
+   "remember to",
+   "snooze"
+  ],
+  "examples": [
+   {
+    "voice_command": "Remind me to call mom tomorrow at 3 PM",
+    "expected_parameters": {
+     "action": "set",
+     "text": "call mom",
+     "resolved_datetimes": [
+      "tomorrow"
+     ],
+     "time": "15:00"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Remind me to take out the trash in 30 minutes",
+    "expected_parameters": {
+     "action": "set",
+     "text": "take out the trash",
+     "relative_minutes": 30
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Remind me every day at 8 AM to take my medicine",
+    "expected_parameters": {
+     "action": "set",
+     "text": "take my medicine",
+     "time": "08:00",
+     "recurrence": "daily"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Remind me every Monday at 9 AM to submit my timesheet",
+    "expected_parameters": {
+     "action": "set",
+     "text": "submit my timesheet",
+     "resolved_datetimes": [
+      "next_monday"
+     ],
+     "time": "09:00",
+     "recurrence": "weekly"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Remind me every other Sunday at noon to call grandma",
+    "expected_parameters": {
+     "action": "set",
+     "text": "call grandma",
+     "resolved_datetimes": [
+      "next_sunday"
+     ],
+     "time": "12:00",
+     "recurrence": "biweekly"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What reminders do I have?",
+    "expected_parameters": {
+     "action": "list"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Cancel my reminder to call mom",
+    "expected_parameters": {
+     "action": "delete",
+     "text": "call mom"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Snooze for 15 minutes",
+    "expected_parameters": {
+     "action": "snooze",
+     "minutes": 15
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "set_timer",
+    "description": "Short relative-duration countdowns: 'set a timer for 5 minutes', 'timer for 30 seconds', 'countdown from 10', 'wake me up in 5 minutes'."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "shopping_list",
+   "description": "Add to, read, check off or clear the shopping list.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "add",
+       "read",
+       "check_off",
+       "remove",
+       "clear"
+      ]
+     },
+     "items": {
+      "type": "array",
+      "description": "Item names"
+     },
+     "regular": {
+      "type": "boolean",
+      "description": "Only when the user says regular or staple"
+     },
+     "scope": {
+      "type": "string",
+      "description": "For clear: trip (default) or everything",
+      "enum": [
+       "trip",
+       "everything"
+      ]
+     }
+    },
+    "required": [
+     "action"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "shopping list",
+   "grocery list",
+   "groceries",
+   "shopping",
+   "add to list",
+   "grocery",
+   "check off",
+   "need from the store"
+  ],
+  "examples": [
+   {
+    "voice_command": "Add milk and eggs to the shopping list",
+    "expected_parameters": {
+     "action": "add",
+     "items": [
+      "milk",
+      "eggs"
+     ]
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Put almond butter on the grocery list",
+    "expected_parameters": {
+     "action": "add",
+     "items": [
+      "almond butter"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What's on my shopping list?",
+    "expected_parameters": {
+     "action": "read"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Check off the milk",
+    "expected_parameters": {
+     "action": "check_off",
+     "items": [
+      "milk"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Remove eggs from the grocery list",
+    "expected_parameters": {
+     "action": "remove",
+     "items": [
+      "eggs"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Add diapers, wipes, and bananas to the list",
+    "expected_parameters": {
+     "action": "add",
+     "items": [
+      "diapers",
+      "wipes",
+      "bananas"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Add milk to the shopping list as a regular",
+    "expected_parameters": {
+     "action": "add",
+     "items": [
+      "milk"
+     ],
+     "regular": true
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Clear the shopping list",
+    "expected_parameters": {
+     "action": "clear"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Clear the shopping list including the regulars",
+    "expected_parameters": {
+     "action": "clear",
+     "scope": "everything"
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "reminder",
+    "description": "Time-based 'remind me to buy milk tomorrow' / 'remind me to pick up eggs at 5' \u2014 those are reminders, not list edits."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "tell_joke",
+   "description": "Tell a joke.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "topic": {
+      "type": "string",
+      "description": "Optional"
+     }
+    },
+    "required": []
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "joke",
+   "funny",
+   "humor",
+   "laugh",
+   "comedy",
+   "make me laugh"
+  ],
+  "examples": [
+   {
+    "voice_command": "Tell me a joke",
+    "expected_parameters": {},
+    "is_primary": true
+   },
+   {
+    "voice_command": "Tell me a joke about animals",
+    "expected_parameters": {
+     "topic": "animals"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Make me laugh with a joke about technology",
+    "expected_parameters": {
+     "topic": "technology"
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_timer",
+   "description": "Countdown timer for a length of time ('5 minutes', 'an hour'). Not for a clock time, date or alarm: use reminder.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "duration_seconds": {
+      "type": "integer",
+      "description": "Total seconds"
+     },
+     "label": {
+      "type": "string",
+      "description": "What it's for, e.g. 'pasta'"
+     }
+    },
+    "required": [
+     "duration_seconds"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "timer",
+   "set timer",
+   "alarm",
+   "countdown",
+   "wake me",
+   "notify me"
+  ],
+  "examples": [
+   {
+    "voice_command": "Set a timer for 5 minutes",
+    "expected_parameters": {
+     "duration_seconds": 300
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Timer for 30 seconds",
+    "expected_parameters": {
+     "duration_seconds": 30
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Set a 10 minute timer for pasta",
+    "expected_parameters": {
+     "duration_seconds": 600,
+     "label": "pasta"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Remind me in 1 hour",
+    "expected_parameters": {
+     "duration_seconds": 3600
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Set a timer for 1 hour and 30 minutes",
+    "expected_parameters": {
+     "duration_seconds": 5400
+    },
+    "is_primary": false
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "get_current_time",
+   "description": "Time and date somewhere else ('what time is it in Tokyo'). Local time and date are in the calendar above.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "location": {
+      "type": "string",
+      "description": "City, country or IANA time zone"
+     }
+    },
+    "required": []
+   }
+  },
+  "allow_direct_answer": true,
+  "is_risky": false,
+  "keywords": [
+   "time",
+   "current time",
+   "what time",
+   "time zone",
+   "timezone",
+   "clock",
+   "time in",
+   "what day",
+   "date",
+   "today"
+  ],
+  "examples": [
+   {
+    "voice_command": "What time is it in California?",
+    "expected_parameters": {
+     "location": "California"
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "What time is it in Tokyo?",
+    "expected_parameters": {
+     "location": "Tokyo"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Current time in London",
+    "expected_parameters": {
+     "location": "London"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What's the time in New York?",
+    "expected_parameters": {
+     "location": "New York"
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "get_weather",
+    "description": "Weather conditions, temperature, forecasts. 'What time is it' is NOT weather."
+   },
+   {
+    "command_name": "search_web",
+    "description": "General web searches, news, current events. Use get_current_time for time queries."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "todo_list",
+   "description": "Add to, read, complete or clear the to-do list. Not for timed reminders.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "add",
+       "read",
+       "complete",
+       "uncomplete",
+       "remove",
+       "clear"
+      ]
+     },
+     "tasks": {
+      "type": "array",
+      "description": "Whole tasks; don't split on 'and'"
+     },
+     "scope": {
+      "type": "string",
+      "description": "For clear: all or completed",
+      "enum": [
+       "all",
+       "completed"
+      ]
+     }
+    },
+    "required": [
+     "action"
+    ]
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "to do list",
+   "todo list",
+   "to-do list",
+   "task list",
+   "add task",
+   "mark done",
+   "check off task",
+   "to do",
+   "todo"
+  ],
+  "examples": [
+   {
+    "voice_command": "Add call the dentist to my to-do list",
+    "expected_parameters": {
+     "action": "add",
+     "tasks": [
+      "call the dentist"
+     ]
+    },
+    "is_primary": true
+   },
+   {
+    "voice_command": "Put fold the laundry on my to-do list",
+    "expected_parameters": {
+     "action": "add",
+     "tasks": [
+      "fold the laundry"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "What's on my to-do list?",
+    "expected_parameters": {
+     "action": "read"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Mark the laundry done on my to-do list",
+    "expected_parameters": {
+     "action": "complete",
+     "tasks": [
+      "the laundry"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Mark call the dentist as not done on my to-do list",
+    "expected_parameters": {
+     "action": "uncomplete",
+     "tasks": [
+      "call the dentist"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Remove fold the laundry from my to-do list",
+    "expected_parameters": {
+     "action": "remove",
+     "tasks": [
+      "fold the laundry"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Add walk the dog, buy milk, and call the bank to my to-do list",
+    "expected_parameters": {
+     "action": "add",
+     "tasks": [
+      "walk the dog",
+      "buy milk",
+      "call the bank"
+     ]
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Clear my to-do list",
+    "expected_parameters": {
+     "action": "clear"
+    },
+    "is_primary": false
+   },
+   {
+    "voice_command": "Clear the completed tasks on my to-do list",
+    "expected_parameters": {
+     "action": "clear",
+     "scope": "completed"
+    },
+    "is_primary": false
+   }
+  ],
+  "antipatterns": [
+   {
+    "command_name": "reminder",
+    "description": "Time-based 'remind me to call mom tomorrow' / 'remind me to take out the trash at 8' \u2014 those are reminders, not list edits."
+   }
+  ]
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_alerts",
+   "description": "Read out or dismiss pending alerts (news, calendar).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "alerts_json": {
+      "type": "string",
+      "description": "Set by the system, not the user"
+     },
+     "dismiss": {
+      "type": "boolean",
+      "description": "Clear them without reading"
+     }
+    },
+    "required": []
+   }
+  },
+  "allow_direct_answer": false,
+  "is_risky": false,
+  "keywords": [
+   "alerts",
+   "updates",
+   "what's up",
+   "what's new",
+   "notifications"
+  ],
+  "examples": [
+   {
+    "voice_command": "What's up?",
+    "expected_parameters": {},
+    "is_primary": true
+   },
+   {
+    "voice_command": "Any alerts?",
+    "expected_parameters": {},
+    "is_primary": false
+   },
+   {
+    "voice_command": "Clear my alerts.",
+    "expected_parameters": {
+     "dismiss": true
+    },
+    "is_primary": false
+   }
+  ]
+ }
+]

@@ -91,10 +91,6 @@ func (s *systemd) systemctl(ctx context.Context, args ...string) ([]byte, error)
 	return s.run(ctx, "systemctl", args...)
 }
 
-// unsafeSystemPaths are where a system unit's binary must not live: ProtectHome=yes hides
-// /home, /root and /run/user, and PrivateTmp=yes replaces /tmp and /var/tmp.
-var unsafeSystemPaths = []string{"/home/", "/root/", "/run/user/", "/tmp/", "/var/tmp/"}
-
 func (s *systemd) Install(ctx context.Context, o InstallOptions) error {
 	if s.user {
 		return s.installUser(ctx, o)

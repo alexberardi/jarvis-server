@@ -1,0 +1,8 @@
+{
+  "node_id": "pi-kitchen-7f3a",
+  "api_key": "test-node-key-0123456789",
+  "jarvis_config_service_url": "http://192.0.2.10:7700",
+  "room": "kitchen",
+  "mqtt_username": "pi-kitchen-7f3a",
+  "mqtt_password": "not-carried"
+}

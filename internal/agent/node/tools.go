@@ -34,6 +34,58 @@ type Toolset interface {
 // Multi chains toolsets; the first that knows a name handles it.
 type Multi []Toolset
 
+// ChoiceAnswerer is a Toolset that put a numbered list on the island (an ambiguous window name)
+// and can act on the user's answer itself: said is what was heard in the choice window; ok is
+// false when it isn't an answer to the list (then the turn goes to command-center as usual).
+type ChoiceAnswerer interface {
+	AnswerChoice(ctx context.Context, said string) (out map[string]any, ok bool)
+}
+
+// Director is a Toolset that can carry out a clear one-step command itself, with no model
+// (VOICE-FLOWS.md Q27, funnel stage 1): said is the transcript; ok is false to pass it on to
+// command-center.
+type Director interface {
+	Direct(ctx context.Context, said string) (out map[string]any, ok bool)
+}
+
+type enabledKey struct{}
+
+// WithEnabled carries which commands are on (a settings gate's) to a Director, whose own calls
+// don't pass back through the gate.
+func WithEnabled(ctx context.Context, enabled func(name string) bool) context.Context {
+	return context.WithValue(ctx, enabledKey{}, enabled)
+}
+
+// Enabled reports whether the command is on for a Director (true without a gate).
+func Enabled(ctx context.Context, name string) bool {
+	f, _ := ctx.Value(enabledKey{}).(func(string) bool)
+	return f == nil || f(name)
+}
+
+// Direct asks each Toolset that can carry out a command itself.
+func (m Multi) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	for _, t := range m {
+		if d, ok := t.(Director); ok {
+			if out, ok := d.Direct(ctx, said); ok {
+				return out, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// AnswerChoice asks each Toolset that can answer a choice.
+func (m Multi) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
+	for _, t := range m {
+		if a, ok := t.(ChoiceAnswerer); ok {
+			if out, ok := a.AnswerChoice(ctx, said); ok {
+				return out, true
+			}
+		}
+	}
+	return nil, false
+}
+
 func (m Multi) Available(ctx context.Context) []ToolDef {
 	var out []ToolDef
 	seen := map[string]bool{}
@@ -167,6 +219,18 @@ func Fail(format string, a ...any) map[string]any {
 // node itself and are never sent to command-center: every consumer of a Call output (the
 // MQTT dispatcher, the voice pipeline) takes them out with TakeSignals before posting it.
 const SignalsKey = "_jarvis_node_signals"
+
+// IslandKey and IslandOnlyKey mark a result whose outcome the node's island showed (a desktop
+// command, DESKTOP-COMMANDS.md Q9): IslandKey is the text shown, IslandOnlyKey true tells the
+// voice loop and command-center that nothing is to be spoken for it. Unlike the signals they go
+// to command-center, which ends the turn without a formatting call.
+const (
+	IslandKey     = "island"
+	IslandOnlyKey = "island_only"
+	// ChoiceKey true: the island shows a numbered list to pick from; the node listens for the
+	// answer (choice_listen_seconds) and command-center keeps the exchange open.
+	ChoiceKey = "choice"
+)
 
 // Signals are the jarvis-command-sdk CommandResponse fields only the node acts on
 // (N:utils/command_execution_service.py ToolExecutionResult). Go's built-in tools set none.

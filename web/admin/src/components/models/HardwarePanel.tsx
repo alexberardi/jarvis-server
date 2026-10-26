@@ -82,7 +82,7 @@ function EngineRow({ e }: { e: EngineInstance }) {
       {e.gave_up && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-small">
           <span className="text-text-muted">
-            Gave up after {e.retries} retries. Fix the model or its settings, then retry.
+            {e.gave_up_reason || `Gave up after ${e.retries} retries. Fix the model or its settings, then retry.`}
           </span>
           <Button
             size="sm"

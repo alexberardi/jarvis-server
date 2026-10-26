@@ -172,7 +172,7 @@
       }
     ],
     "function": {
-      "description": "List the windows open on the user's computer: id, title, app, minimized. Call it to answer what's open on screen, and before minimizing, focusing or closing a window, to get its id. Never invent ids.",
+      "description": "List the windows open on the user's computer: id, title, app, minimized, focused (newest first where known). Call it to answer what's open or what's in front.",
       "name": "desktop_list_windows",
       "parameters": {
         "properties": {},
@@ -192,56 +192,62 @@
   },
   {
     "allow_direct_answer": false,
-    "examples": [],
-    "function": {
-      "description": "Minimize one window on the user's computer.",
-      "name": "desktop_minimize_window",
-      "parameters": {
-        "properties": {
-          "window_id": {
-            "description": "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')",
-            "type": "string"
-          }
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "focus",
+          "window": "firefox"
         },
-        "required": [
-          "window_id"
-        ],
-        "type": "object"
+        "is_primary": true,
+        "voice_command": "switch to firefox"
+      },
+      {
+        "expected_parameters": {
+          "action": "minimize",
+          "window": "the terminal"
+        },
+        "is_primary": false,
+        "voice_command": "minimize the terminal"
       }
-    },
-    "is_risky": false,
-    "keywords": [
-      "minimize",
-      "hide",
-      "window"
     ],
-    "run_without_confirmation": false,
-    "type": "function"
-  },
-  {
-    "allow_direct_answer": false,
-    "examples": [],
     "function": {
-      "description": "Bring one window on the user's computer to the front.",
-      "name": "desktop_focus_window",
+      "description": "Act on one window on the user's computer. Can: switch to it, minimize. Can't: unminimize, maximize, fullscreen, restore from maximize or fullscreen, snap it left or right, move it to another monitor, move it to another workspace, keep on top: for those call with action unsupported, never a different action.",
+      "name": "desktop_window",
       "parameters": {
         "properties": {
-          "window_id": {
-            "description": "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')",
+          "action": {
+            "description": "focus = switch to; unmaximize = restore to normal size (leaves maximize or fullscreen); unsupported = anything this computer can't do",
+            "enum": [
+              "focus",
+              "minimize",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "window": {
+            "description": "The app or window as the user said it ('Firefox', 'the terminal'), 'it' (the one just acted on), 'the other one' (the one before this one, as 'switch back' means), or an id from desktop_list_windows. Leave out for the window in front",
             "type": "string"
           }
         },
         "required": [
-          "window_id"
+          "action"
         ],
         "type": "object"
       }
     },
     "is_risky": false,
     "keywords": [
-      "focus",
+      "window",
       "switch to",
-      "window"
+      "focus",
+      "minimize",
+      "maximize",
+      "fullscreen",
+      "restore",
+      "snap",
+      "move",
+      "monitor",
+      "workspace"
     ],
     "run_without_confirmation": false,
     "type": "function"
@@ -250,22 +256,24 @@
     "allow_direct_answer": false,
     "examples": [],
     "function": {
-      "description": "Ask one window on the user's computer to close, as if its close button were clicked. The app may prompt to save; it is never force-killed.",
+      "description": "Close a window on the user's computer, as its close button would (the app may ask to save; never force-killed). all_of_app closes every window of that app.",
       "name": "desktop_close_window",
       "parameters": {
         "properties": {
+          "all_of_app": {
+            "description": "Close every window of the app, not just this one",
+            "type": "boolean"
+          },
           "window_id": {
-            "description": "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')",
+            "description": "The app or window as the user said it ('TextEdit', 'the terminal', 'it'), or an id from desktop_list_windows. Leave out for the window in front",
             "type": "string"
           }
         },
-        "required": [
-          "window_id"
-        ],
+        "required": [],
         "type": "object"
       }
     },
-    "is_risky": true,
+    "is_risky": false,
     "keywords": [
       "close",
       "window"
@@ -533,7 +541,7 @@
       }
     ],
     "function": {
-      "description": "List the browser's open tabs: answers 'what's open' or 'is X open', and gives the tab_id to switch or close one.",
+      "description": "List the browser's open tabs: answers 'what's open' or 'is X open', and gives the tab_id to switch or close one. A spoken tab name may be misheard ('COD' for 'Claude'): take the tab whose title sounds like it; if none or several could be meant, read those titles back and ask which.",
       "name": "browser_list_tabs",
       "parameters": {
         "properties": {
@@ -610,7 +618,7 @@
     "allow_direct_answer": false,
     "examples": [],
     "function": {
-      "description": "Switch to a browser tab (tab_id from browser_list_tabs).",
+      "description": "Switch to a browser tab (tab_id from browser_list_tabs). To switch by the name the user said, use desktop_view when it is offered: it matches misheard names and asks when unsure.",
       "name": "browser_switch_tab",
       "parameters": {
         "properties": {

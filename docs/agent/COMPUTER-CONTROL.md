@@ -163,7 +163,9 @@ password the model can see.
    grant to ask for ([decision](../decisions/2026-10-19-desktop-recording-x11.md)).
    Desktop on Wayland, Hyprland and sway (#318): keys and buttons from evdev (the user in the
    `input` group: the setup page and `jarvis-agent permission input-monitoring` give the
-   `sudo usermod -aG input $USER` step, and a start without it refuses with it), the cursor and
+   `sudo usermod -aG input $USER && jarvis-agent restart` step, and a start without it refuses with
+   it; no logout: a `run` whose user is in the group but whose process isn't re-execs itself
+   through `newgrp input`, #571), the cursor and
    focused window from the compositor, AT-SPI's focused element per typing group (a password text
    is masked; without AT-SPI `context: none` and a warning that typed text is kept), and a
    keyframe at most every second with the click marked and a 256 px crop. GNOME and KDE refuse

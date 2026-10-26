@@ -99,12 +99,15 @@ func ParseManifest(b []byte) (*Manifest, error) {
 		if c.Type == "" || c.Name == "" {
 			return nil, fmt.Errorf("%s: a component needs a type and a name", ManifestFile)
 		}
-		if c.Type == "command" || (deviceEntry[c.Type] != "" && c.Path != "") {
-			if err := checkRelPath(c.Path); err != nil {
+		if p := c.Path; c.Type == "command" || conventional[c.Type] != "" {
+			if p == "" && c.Type != "command" {
+				p = fmt.Sprintf(conventional[c.Type], c.Name) // what Paths loads
+			}
+			if err := checkRelPath(p); err != nil {
 				return nil, fmt.Errorf("%s: component %s: %w", ManifestFile, c.Name, err)
 			}
-			if !strings.HasSuffix(c.Path, ".py") {
-				return nil, fmt.Errorf("%s: component %s: path %q is not a .py file", ManifestFile, c.Name, c.Path)
+			if !strings.HasSuffix(p, ".py") {
+				return nil, fmt.Errorf("%s: component %s: path %q is not a .py file", ManifestFile, c.Name, p)
 			}
 		}
 	}
@@ -256,8 +259,8 @@ func (m *Manifest) CheckPi(runs ...string) error {
 	return nil
 }
 
-// Commands are the components the sidecar loads. Agents, device protocols and the other Pi
-// component types don't run on a desktop yet.
+// Commands are the components every sidecar loads. Agents and device components run on a Pi
+// (PiTypes); none of the other Pi component types runs on the Go node yet.
 func (m *Manifest) Commands() []Component {
 	var out []Component
 	for _, c := range m.Components {
@@ -271,11 +274,19 @@ func (m *Manifest) Commands() []Component {
 // DeviceTypes are the device component types a Pi's sidecar loads: families and managers.
 var DeviceTypes = []string{"device_protocol", "device_manager"}
 
-// deviceEntry is where a device component declared without a path is (the Pi's convention).
-var deviceEntry = map[string]string{"device_protocol": "device_families/%s/protocol.py", "device_manager": "device_managers/%s/manager.py"}
+// Agent is the component type of a package's background agent (an IJarvisAgent: comfyui's
+// comfyui_jobs), which a Pi's sidecar loads and internal/agent/pkgagents runs on its schedule.
+const Agent = "agent"
 
-// Paths are the files of the components of type typ, a device component without a declared
-// path at its conventional place.
+// PiTypes are the component types beyond commands a Pi's sidecar loads.
+var PiTypes = append(slices.Clone(DeviceTypes), Agent)
+
+// conventional is where a device component or an agent declared without a path is (the Pi's convention).
+var conventional = map[string]string{"device_protocol": "device_families/%s/protocol.py", "device_manager": "device_managers/%s/manager.py",
+	Agent: "agents/%s/agent.py"}
+
+// Paths are the files of the components of type typ, a device component or an agent without a
+// declared path at its conventional place.
 func (m *Manifest) Paths(typ string) []string {
 	var out []string
 	for _, c := range m.Components {
@@ -283,8 +294,8 @@ func (m *Manifest) Paths(typ string) []string {
 			continue
 		}
 		p := c.Path
-		if p == "" && deviceEntry[typ] != "" {
-			p = fmt.Sprintf(deviceEntry[typ], c.Name)
+		if p == "" && conventional[typ] != "" {
+			p = fmt.Sprintf(conventional[typ], c.Name)
 		}
 		out = append(out, p)
 	}

@@ -124,11 +124,12 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	// Kept for use by hand: a desktop with the agent and the browser even when no case needed one.
 	if *keep && upErr == nil && ctx.Err() == nil {
-		kind := "wlroots"
+		kind := defaultDesktopKind()
 		if env.desk != nil {
 			kind = env.desk.kind
 		}
-		if _, err := env.Desktop(ctx, kind, true); err != nil {
+		// No browser on the Mac: the suite's Chromium with the extension is the Linux lane's.
+		if _, err := env.Desktop(ctx, kind, kind != "mac"); err != nil {
 			upErr = fmt.Errorf("--keep: %w", err)
 		}
 	}
@@ -149,6 +150,14 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
+// defaultDesktopKind is the session --keep brings up when no case needed one.
+func defaultDesktopKind() string {
+	if runtime.GOOS == "darwin" {
+		return "mac"
+	}
+	return "wlroots"
+}
+
 func runID() string {
 	b := make([]byte, 3)
 	rand.Read(b)
@@ -166,8 +175,10 @@ func skipReason(c Case, llm string, includePending bool, goos string) string {
 		return "the scripted model does no computer tasks"
 	case desk == "mac" && goos != "darwin":
 		return "macOS only: the Mac test host"
-	case desk == "mac":
-		return "macOS desktop cases are not wired yet (piece 22)"
+	case desk != "" && desk != "mac" && goos == "darwin":
+		// The Mac test host runs its own desktop cases; sway, Xvfb and the Linux Chromium
+		// the browser and teach cases need are the dev box's.
+		return "Linux only: this is the Mac test host"
 	}
 	return ""
 }
@@ -251,7 +262,7 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		}
 	}
 	if strings.HasPrefix(c.Phase, "desktop-") {
-		if err := e.StartNotes(cctx, c.Setup.NotesLayout); err != nil {
+		if err := e.StartNotes(cctx, c); err != nil {
 			return fail("notes app: " + err.Error())
 		}
 		if err := e.UserInput(cctx); err != nil {
@@ -531,8 +542,21 @@ func (e *Env) gather(ctx context.Context, cards []Card) (State, error) {
 	if st.Docs, err = readDocs(e.path("agent-home", "Documents", "Jarvis")); err != nil {
 		return st, err
 	}
-	if e.desk != nil && e.desk.notesSt != "" {
-		notes, err := notesapp.NotesState(e.desk.notesSt)
+	switch d := e.desk; {
+	case d == nil:
+	case d.kind == "mac":
+		// Only the notes that appeared while the case ran: the Mac's Notes.app is the user's,
+		// and without the snapshot the case takes at its start there is no "since" to read.
+		if d.macSeen == nil {
+			break
+		}
+		notes, err := macNotesSince(ctx, d.macSeen)
+		if err != nil {
+			return st, err
+		}
+		st.Notes = notes
+	case d.notesSt != "":
+		notes, err := notesapp.NotesState(d.notesSt)
 		if err != nil && !os.IsNotExist(err) {
 			return st, err
 		}

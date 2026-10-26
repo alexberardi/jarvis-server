@@ -108,6 +108,19 @@ func TestFollowUpGateDropsADifferentFarVoiceBeforeTheModel(t *testing.T) {
 	}
 }
 
+func TestFollowUpGateDropsABareExclamationBeforeTheModel(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	gateConv(t, ve)
+	calls := len(ve.eng.requests())
+	b := followUp(ve, "Oh my gosh", map[string]any{"level_vs_wake_db": 2.2})
+	if b["stop_reason"] != "not_for_me" || b["keep_listening"] != true {
+		t.Fatalf("body %v", b)
+	}
+	if n := len(ve.eng.requests()); n != calls {
+		t.Fatalf("the model was called %d times for an exclamation", n-calls)
+	}
+}
+
 func TestFollowUpGateHintsTheModelAndSkipsTheDoubleCheck(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -241,6 +254,10 @@ func TestFollowUpDoubleCheckIsHonestAboutTheWindow(t *testing.T) {
 	if !strings.HasPrefix(check, "[NOT_FOR_ME_DOUBLE_CHECK]") || strings.Contains(check, "wake word fired") ||
 		!strings.Contains(check, "NO wake word") {
 		t.Fatalf("follow-up double-check %q", check)
+	}
+	// The re-check thinks, but capped: llama-server enforces reasoning_budget_tokens.
+	if b, _ := reqs[1]["reasoning_budget_tokens"].(float64); b != doubleCheckThinkBudget {
+		t.Fatalf("double-check reasoning_budget_tokens %v, want %d", reqs[1]["reasoning_budget_tokens"], doubleCheckThinkBudget)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	ttsmod "github.com/alexberardi/jarvis-server/internal/modules/tts"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
+	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
 
 // The wizard's Voice step (AD3b): the active provider's voices to choose from (Kokoro's, or a
@@ -63,6 +64,29 @@ func (m *Module) voiceChoices(ctx context.Context) ttsmod.VoiceChoices {
 		Default: ttsmod.DefaultVoice, Setting: "tts/" + voiceSetting}
 }
 
+// FallbackReporter reports the tts module's remote fallback state; ok=false while Kokoro
+// speaks everything. The Speech section's TTS test reads which engine answered from it.
+type FallbackReporter interface {
+	FallbackStatus() (fallback.Status, bool)
+}
+
+// sampleEngine is which engine rendered the sample just played, for the X-Speech-Engine
+// header: local (Kokoro), remote, or local-cpu (the remote failed and the fallback answered).
+// Read from the fallback gate right after the render; the Sample call is synchronous, so the
+// gate's last served path is the sample's own (a concurrent voice turn can race it, which for
+// a test button is accepted).
+func (m *Module) sampleEngine() string {
+	if f, ok := m.TTS.(FallbackReporter); ok {
+		if st, ok := f.FallbackStatus(); ok {
+			if st.LastPath != "" {
+				return st.LastPath
+			}
+			return fallback.PathRemote
+		}
+	}
+	return "local"
+}
+
 // sampleVoice is the provider's spelling of the voice asked for; ok=false when it has no such
 // voice. Free text takes any name.
 func sampleVoice(c ttsmod.VoiceChoices, asked string) (string, bool) {
@@ -112,6 +136,7 @@ func (m *Module) handleVoiceSample(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	wav, err := m.TTS.Sample(ctx, voice, text)
 	if err == nil {
+		w.Header().Set("X-Speech-Engine", m.sampleEngine())
 		w.Header().Set("Content-Type", "audio/wav")
 		w.Header().Set("Content-Length", strconv.Itoa(len(wav)))
 		w.Header().Set("Cache-Control", "no-store")

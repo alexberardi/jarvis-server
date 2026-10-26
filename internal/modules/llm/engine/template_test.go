@@ -11,6 +11,7 @@ import (
 // Pinned chat templates (ID12): the engine is launched with the template file, ahead of the
 // operator's extra args; embeddings and whisper never get one.
 func TestEngineArgvChatTemplate(t *testing.T) {
+	pinHostRAM(t, devboxRAM)
 	c := LabelConfig{Kind: KindLlama, Model: "qwen3.5-9b", ModelPath: "/m/q.gguf", Context: 8192, Parallel: 1, GPULayers: 999,
 		ExtraArgs: "--chat-template-file /mine.jinja"}
 	k := keyFor(c, FlavourCUDA, "/e/bin")
@@ -19,7 +20,7 @@ func TestEngineArgvChatTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `-m /m/q.gguf --host 127.0.0.1 --port 9000 --alias qwen3.5-9b --no-webui -c 8192 -np 1 -ngl 999 --jinja --chat-template-file /t/abc.jinja --chat-template-file /mine.jinja`
+	want := `-m /m/q.gguf --host 127.0.0.1 --port 9000 --alias qwen3.5-9b --no-webui -c 8192 -np 1 -ngl 999 --jinja --chat-template-file /t/abc.jinja --cache-ram 2048 --chat-template-file /mine.jinja`
 	if got := strings.Join(args, " "); got != want {
 		t.Fatalf("argv\n got: %s\nwant: %s", got, want)
 	}

@@ -165,3 +165,24 @@ func TestStopWatchingShapes(t *testing.T) {
 		}
 	}
 }
+
+// #575: a reply whose last sentence promises a step it never took ended the turn.
+func TestPromisesActionShapes(t *testing.T) {
+	for _, s := range []string{"Let me open it in the browser instead…", "I'll run an errand to download your bank statement for September.",
+		"wikipedia.org isn't an app here. Let me open it in the browser instead.", "Sure! I'll go ahead and search for that.",
+		"I'm going to check the page now.", "Okay, let me try that again.", "I will look it up."} {
+		if !PromisesAction(s) {
+			t.Errorf("PromisesAction(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"Let me know if you need anything else.", "Let me know.", "Should I run an errand for that?",
+		"Let me check. It's 72 degrees and sunny.", "I'll remind you at 5.", "I opened it in the browser.",
+		"I can't open that, sorry.", "Want me to open it in the browser?", "I'll keep that in mind.", "",
+		"Your watch is set. I'll check back every hour and ping you if the price drops.", "I'll open the garage when you get home.",
+		"I'll get back to you when the research is finished.", "The errand is running. I'll read you the result when it's done.",
+		"I'll check the price tomorrow.", "I'll look again at 5 pm.", "Once it's done, I'll read you the summary."} {
+		if PromisesAction(s) {
+			t.Errorf("PromisesAction(%q) = true", s)
+		}
+	}
+}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Play } from 'lucide-react'
 import { getVoices, sampleVoice } from '@/api/tts'
-import { Alert, Button, Select } from '@/components/ui'
+import { Alert, Button, Input, Select } from '@/components/ui'
 import { groupVoices, voiceInfo } from '@/components/setup/jobs'
 import { errorMessage, errorStatus } from '@/lib/errors'
 
@@ -43,7 +43,7 @@ export default function VoicePicker({
     setError(null)
     setPlaying(true)
     try {
-      const blob = await sampleVoice(value)
+      const { blob } = await sampleVoice(value)
       if (url.current) URL.revokeObjectURL(url.current)
       url.current = URL.createObjectURL(blob)
       const audio = new Audio(url.current)
@@ -69,6 +69,16 @@ export default function VoicePicker({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-end gap-2">
+        {voices.data?.free_text ? (
+          <Input
+            id="voice-select"
+            label="Voice"
+            wrapperClassName="w-full max-w-xs"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            hint="The provider lists no voices; type the voice's name or id."
+          />
+        ) : (
         <Select
           id="voice-select"
           label="Voice"
@@ -87,6 +97,7 @@ export default function VoicePicker({
             }),
           }))}
         />
+        )}
         <Button
           onClick={play}
           disabled={!canSample || !value}

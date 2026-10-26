@@ -35,6 +35,13 @@ type session struct {
 	userID     *int64   // the last speaker STT identified
 	onComplete []func() error
 	held       *held // the computer task the wake word paused (computer.go)
+	// choice: the last round put a numbered list on the island for the user to pick from
+	// (an ambiguous window name): the next follow-up window is ChoiceListenSecs long and
+	// starts listening at once, since nothing was spoken.
+	choice bool
+	// quietTurn: the last turn spoke nothing (a desktop command the island showed): the next
+	// follow-up window listens at once, with no reply tail to drain.
+	quietTurn bool
 	// The wake's pre_wake_speech_seconds and self-playback snapshot, sent with the woken command.
 	preWakeSpeech float64
 	selfPlaying   bool
@@ -195,6 +202,23 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 		if msg == "" {
 			msg = listeningMessage
 		}
+	}
+	if last != nil && last.islandOnly {
+		// A desktop command: the island showed what happened (DESKTOP-COMMANDS.md Q9). Nothing
+		// is spoken; a failure still gets a sound, since it shouldn't depend on a glance.
+		ex.Outcome = OutcomeSilent
+		if last.choice {
+			// The island lists the candidates: listen for "the second one" (the choice window).
+			s.choice = true
+			return ""
+		}
+		if last.allFailed {
+			p.chime(ctx, errorChime)
+		}
+		// Keep listening as after any reply, so "maximize Firefox… restore it" needs one wake
+		// word (voice test, 2026-10-24).
+		s.quietTurn = true
+		return ""
 	}
 	switch {
 	case last != nil && last.allFailed && last.firstErr != "":

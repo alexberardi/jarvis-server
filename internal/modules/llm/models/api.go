@@ -61,6 +61,7 @@ func NewStack(deps module.Deps, set *settings.Service) *Stack {
 	}
 	mgr := &Manager{Store: store, Settings: set, Queue: deps.Queue, Binaries: bins, Detector: det, Labels: res,
 		HF: hf, ModelsDir: filepath.Join(deps.Config.Home, "models"), Log: log}
+	res.Fits = mgr.PlacementFit // a second engine the card can't hold isn't started (#562)
 	bins.RegisterJobs(deps.Queue, func() {
 		det.Hardware(context.Background(), true) // a new build may see more devices
 		res.Notify()

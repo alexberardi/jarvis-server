@@ -38,12 +38,13 @@ func TestShipsToSinkAndStderr(t *testing.T) {
 	log.Debug("hidden")
 	log.Info("node registered", "node_id", "n1")
 	log.WithGroup("req").Warn("slow", "ms", 900)
+	log.Warn("engine down", "cause", fmt.Errorf("exited: %w", errors.New("signal: killed")))
 	sh.Close() // flushes
 
 	if !strings.Contains(out.String(), "node registered") || strings.Contains(out.String(), "hidden") {
 		t.Fatalf("stderr: %q", out.String())
 	}
-	if len(sink.records) != 2 {
+	if len(sink.records) != 3 {
 		t.Fatalf("shipped %d records", len(sink.records))
 	}
 	r := sink.records[0]
@@ -52,6 +53,10 @@ func TestShipsToSinkAndStderr(t *testing.T) {
 	}
 	if sink.records[1].Attrs["req.ms"] != int64(900) {
 		t.Fatalf("grouped attrs %+v", sink.records[1].Attrs)
+	}
+	// An error ships as its text: encoding/json would write a wrapped one as {}.
+	if c := sink.records[2].Attrs["cause"]; c != "exited: signal: killed" {
+		t.Fatalf("error attr %#v", c)
 	}
 }
 

@@ -25,11 +25,15 @@
 #   --from-dir DIR    the same, for a directory (also JARVIS_AGENT_RELEASE_BASE)
 #   --force           reinstall the agent even when this version is installed
 #   --user NAME       the account the node runs as (default pi; it must exist)
-#   --activate        stop and disable jarvis-node, enable and start jarvis-agent. On a node
-#                     that isn't enrolled yet it refuses when this SSH session runs over wlan0:
-#                     the agent would start in setup mode, and its hotspot can drop the session
+#   --activate        stop and disable jarvis-node, enable and start jarvis-agent. A Pi whose
+#                     Python node is provisioned stays that node: the agent takes over its
+#                     identity and local state (jarvis-agent adopt-python), leaving the Python
+#                     node's files as they are. On a node that isn't enrolled yet it refuses when
+#                     this SSH session runs over wlan0: the agent would start in setup mode, and
+#                     its hotspot can drop the session
 #   --setup-mode      with --activate: activate an unenrolled node anyway (setup from the app)
-#   --deactivate      the reverse (only that: nothing is installed or removed)
+#   --deactivate      the reverse (only that: nothing is installed or removed); --keep-python
+#                     is the same: the Python node comes back as it was
 #   --root DIR        write every file under DIR and run no system command, logging each one to
 #                     DIR/install-pi-commands.log instead (tests; also JARVIS_PI_ROOT)
 set -eu
@@ -76,10 +80,10 @@ while [ $# -gt 0 ]; do
     --user=*) NODE_USER=${1#*=} ;;
     --activate) ACTION=activate ;;
     --setup-mode) SETUP_MODE=1 ;;
-    --deactivate) ACTION=deactivate ;;
+    --deactivate | --keep-python) ACTION=deactivate ;;
     --root) [ $# -ge 2 ] || die "--root needs a value"; ROOT=$2; shift ;;
     --root=*) ROOT=${1#*=} ;;
-    -h | --help) sed -n '2,34p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h | --help) sed -n '2,38p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
   shift
@@ -761,6 +765,19 @@ ssh_link() {
   # shellcheck disable=SC2086 # the client's address is its first field
   set -- $sl
   ip -o route get "$1" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1
+}
+
+# adopt_python: a Pi whose Python node is provisioned keeps that node (#586): the agent takes over
+# its node id and key, room and local state, and only reads the Python node's files, so
+# --keep-python finds it unchanged. A failed adoption refuses --activate: setup mode would
+# enroll a second node.
+adopt_python() {
+  creds=$NODE_HOME/.config/jarvis-agent/node.json
+  [ ! -f "$(P "$creds")" ] && [ -f "$(P "$NODE_HOME/.jarvis/.provisioned")" ] || return 0
+  as_node "$(P "$OPT/jarvis-agent")" adopt-python --creds "$(P "$creds")" \
+    --python-dir "$(P /opt/jarvis-node)" --secret-dir "$(P "$NODE_HOME/.jarvis")" && return 0
+  printf '%s\n' "error: not activated: jarvis-agent could not take over the Python node's identity (above); the Python node is left as it was." >&2
+  return 1
 }
 
 # may_activate: whether --activate goes on (#423). A node with no credentials starts in setup
@@ -1926,7 +1943,7 @@ write_marker
 install_unit
 if [ $ACTION != activate ]; then
   say "Installed $UNIT, disabled: --activate makes it the node that runs."
-elif may_activate; then
+elif adopt_python && may_activate; then
   activate
 else
   REFUSED=1

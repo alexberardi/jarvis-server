@@ -16,7 +16,7 @@ const (
 	Qwen3_14B   = "Qwen3_14B_Compressed"  // prod (serves the 27B)
 	Qwen3_8B    = "Qwen3_8B_Compressed"   // dev
 	Qwen3_5_9B  = "Qwen3_5_9B_Compressed" // native tools
-	ChatGPT     = "ChatGPTOpenAI"         // e2e, native tools
+	Cloud       = "Cloud"                 // remote models (any vendor), native tools
 	thinkOpen   = "<think>"
 	thinkClose  = "</think>"
 	suffixThink = "/think"

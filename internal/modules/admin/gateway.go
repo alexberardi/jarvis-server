@@ -145,6 +145,8 @@ var passRoutes = []passRoute{
 	ccUserRoute("GET /api/cc/api/v0/recordings"),
 	ccUserRoute("GET /api/cc/api/v0/recordings/{id}"),
 	ccUserRoute("DELETE /api/cc/api/v0/recordings/{id}"),
+	ccUserRoute("GET /api/cc/api/v0/recordings/{id}/keyframes/{seq}"),
+	ccUserRoute("GET /api/cc/api/v0/recordings/{id}/keyframes/{seq}/crop"),
 
 	// Inbox (webapp 01 P5): the caller's own rows. Creating and updating items is app-to-app
 	// only and not exposed.

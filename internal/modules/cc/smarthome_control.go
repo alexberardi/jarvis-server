@@ -98,6 +98,14 @@ func (m *Module) handleControlDevice(w http.ResponseWriter, r *http.Request, a p
 		detail(w, http.StatusServiceUnavailable, "MQTT not available")
 		return
 	}
+	httpx.WriteJSON(w, http.StatusOK, m.controlDeviceAction(ctx, node, d, action, data))
+}
+
+// controlDeviceAction publishes an `action` for the node's control_device command and waits
+// for its result: the shared half of the app's POST …/devices/{id}/control and the
+// control_device server tool (device_tool.go). The answer is the legacy result shape; a
+// timeout is success false with errNodeTimeout, never an error (§7.3).
+func (m *Module) controlDeviceAction(ctx context.Context, node *nodeRow, d *deviceRow, action string, data map[string]any) map[string]any {
 	actx := map[string]any{
 		"entity_id": d.entityID, "domain": d.domain, "name": d.name, "protocol": nullable(d.protocol),
 		"cloud_id": nullable(d.cloudID), "model": nullable(d.model), "local_ip": nullable(d.localIP),
@@ -119,17 +127,15 @@ func (m *Module) handleControlDevice(w http.ResponseWriter, r *http.Request, a p
 		return nil
 	})
 	if !ok {
-		// A timeout is 200 with success false, not a 5xx (§7.3).
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		return map[string]any{
 			"success": false, "entity_id": d.entityID, "action": action, "error": errNodeTimeout, "input_required": nil,
-		})
-		return
+		}
 	}
 	success, _ := laxBool(res["success"])
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"success": success, "entity_id": d.entityID, "action": action,
 		"error": strOrNil(res["error"]), "input_required": objOrNil(res["input_required"]),
-	})
+	}
 }
 
 // handleDeviceState asks the node for the device's live state (never stored).

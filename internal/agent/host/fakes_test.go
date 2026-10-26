@@ -72,6 +72,10 @@ type fakeWin32 struct {
 	volume  float32
 	windows map[uintptr]Window
 	calls   []string
+	zoomed  bool
+	iconic  bool
+	areas   []Rect // nil: two side-by-side monitors
+	rect    Rect   // the window's rect; zero: 800x600 at 100,100
 }
 
 func (f *fakeWin32) rec(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
@@ -113,6 +117,36 @@ func (f *fakeWin32) PostClose(h uintptr) error {
 	return nil
 }
 func (f *fakeWin32) ShellOpen(t string) error { f.rec("shellopen " + t); return nil }
+func (f *fakeWin32) Maximize(h uintptr) error {
+	f.rec(fmt.Sprintf("maximize %d", h))
+	f.zoomed = true
+	return nil
+}
+func (f *fakeWin32) Restore(h uintptr) error {
+	f.rec(fmt.Sprintf("restore %d", h))
+	f.zoomed, f.iconic = false, false
+	return nil
+}
+func (f *fakeWin32) IsZoomed(uintptr) bool { return f.zoomed }
+func (f *fakeWin32) IsIconic(uintptr) bool { return f.iconic }
+func (f *fakeWin32) WorkAreas() ([]Rect, error) {
+	if f.areas == nil {
+		// Two 1920x1080 monitors side by side, a 40 px taskbar on each.
+		return []Rect{{0, 0, 1920, 1040}, {1920, 0, 3840, 1040}}, nil
+	}
+	return f.areas, nil
+}
+func (f *fakeWin32) WindowRect(uintptr) (Rect, error) {
+	if f.rect == (Rect{}) {
+		return Rect{100, 100, 900, 700}, nil
+	}
+	return f.rect, nil
+}
+func (f *fakeWin32) SetRect(h uintptr, r Rect) error {
+	f.rec(fmt.Sprintf("setrect %d %d,%d %dx%d", h, r.L, r.T, r.w(), r.h()))
+	f.rect = r
+	return nil
+}
 
 func (f *fakeWin32) allCommands() string {
 	f.mu.Lock()
@@ -124,6 +158,8 @@ func (f *fakeWin32) allCommands() string {
 
 const (
 	linuxWinID = "0x03a00007"
+	hyprWinID  = "0x55aa01"
+	swayWinID  = "17"
 	macWinID   = "4242/1"
 	winWinID   = "1311"
 )
@@ -168,6 +204,9 @@ type fakeX struct {
 	why     string
 	windows []x11.Window
 	err     error
+	// features and desktops: what Features reports; nil features: everything, 4 desktops.
+	features map[string]bool
+	desktops int
 }
 
 func (f *fakeX) rec(line string) {
@@ -195,6 +234,103 @@ func (f *fakeX) op(name string, id uint32) error {
 func (f *fakeX) Activate(_ context.Context, id uint32) error    { return f.op("activate", id) }
 func (f *fakeX) CloseWindow(_ context.Context, id uint32) error { return f.op("close", id) }
 func (f *fakeX) Iconify(_ context.Context, id uint32) error     { return f.op("iconify", id) }
+
+// ewmhAll is what openbox advertises: every arranging feature, four desktops.
+var ewmhAll = map[string]bool{"_NET_WM_STATE": true, "_NET_WM_STATE_MAXIMIZED_VERT": true, "_NET_WM_STATE_MAXIMIZED_HORZ": true,
+	"_NET_WM_STATE_FULLSCREEN": true, "_NET_MOVERESIZE_WINDOW": true, "_NET_WORKAREA": true, "_NET_WM_DESKTOP": true}
+
+func (f *fakeX) Features(context.Context) (map[string]bool, int, error) {
+	if f.features == nil {
+		return ewmhAll, 4, f.err
+	}
+	return f.features, f.desktops, f.err
+}
+func (f *fakeX) SetState(_ context.Context, id uint32, add bool, states ...string) error {
+	f.rec(fmt.Sprintf("state %s add=%v %s", x11.FormatID(id), add, strings.Join(states, ",")))
+	return f.err
+}
+func (f *fakeX) MoveToDesktop(_ context.Context, id uint32, n int) error {
+	f.rec(fmt.Sprintf("desktop %s %d", x11.FormatID(id), n))
+	return f.err
+}
+func (f *fakeX) Snap(_ context.Context, id uint32, left bool) error {
+	f.rec(fmt.Sprintf("snap %s left=%v", x11.FormatID(id), left))
+	return f.err
+}
+
+// hyprClients is `hyprctl -j clients`: the focused terminal, Firefox behind it, and an unmapped
+// client that must not be listed.
+const hyprClients = `[
+ {"address":"0x55aa02","mapped":true,"class":"foot","title":"~","focusHistoryID":0,"fullscreen":0,"workspace":{"id":1,"name":"1"}},
+ {"address":"` + hyprWinID + `","mapped":true,"class":"firefox","title":"Mozilla Firefox","focusHistoryID":1,"fullscreen":1,"workspace":{"id":2,"name":"2"}},
+ {"address":"0x55aa03","mapped":false,"class":"ghost","title":"","focusHistoryID":2}]`
+
+// linuxHyprland is a Hyprland session: hyprctl answers, and every dispatch in the classic
+// form succeeds (luaOnly makes the classic form fail, as on a Lua-configured Hyprland).
+func linuxHyprland() *fakeSys { return hyprSys(false) }
+
+func hyprSys(luaOnly bool) *fakeSys {
+	s := linuxFull()
+	delete(s.bins, "wmctrl")
+	delete(s.bins, "xdotool")
+	s.bins["hyprctl"] = true
+	s.env = map[string]string{"WAYLAND_DISPLAY": "wayland-1", "HYPRLAND_INSTANCE_SIGNATURE": "sig"}
+	base := s.handler
+	s.handler = func(name string, args []string) (string, error) {
+		if name != "hyprctl" {
+			return base(name, args)
+		}
+		switch {
+		case args[0] == "-j" && args[1] == "clients":
+			return hyprClients, nil
+		case args[0] == "-j" && args[1] == "activewindow":
+			return `{"address":"0x55aa02"}`, nil
+		case args[0] == "-j" && args[1] == "monitors":
+			return `[{"name":"DP-1"},{"name":"HDMI-A-1"}]`, nil
+		case args[0] == "dispatch" && strings.HasPrefix(args[1], "hl.dsp."):
+			return "ok", nil
+		case (args[0] == "dispatch" || args[0] == "--batch") && luaOnly:
+			return "", &RunError{Name: "hyprctl", Msg: "')' expected near 'address'"}
+		case args[0] == "dispatch":
+			return "ok", nil
+		case args[0] == "--batch":
+			return "ok\n\nok", nil
+		}
+		return "", nil
+	}
+	return s
+}
+
+// swayTree is `swaymsg -t get_tree`: Firefox (focused) and a terminal on workspace 1, where the
+// terminal was focused before it.
+const swayTree = `{"id":1,"type":"root","focus":[2],"nodes":[
+ {"id":2,"type":"output","name":"DP-1","focus":[3],"nodes":[
+  {"id":3,"type":"workspace","name":"1","focus":[` + swayWinID + `,18],"nodes":[
+   {"id":18,"type":"con","name":"~","app_id":"foot","pid":10},
+   {"id":` + swayWinID + `,"type":"con","name":"Mozilla Firefox","app_id":"firefox","pid":11,"focused":true}]}]}]}`
+
+// linuxSway is a sway session.
+func linuxSway() *fakeSys {
+	s := linuxFull()
+	delete(s.bins, "wmctrl")
+	delete(s.bins, "xdotool")
+	s.bins["swaymsg"] = true
+	s.env = map[string]string{"WAYLAND_DISPLAY": "wayland-1", "SWAYSOCK": "/run/sway.sock"}
+	base := s.handler
+	s.handler = func(name string, args []string) (string, error) {
+		if name != "swaymsg" {
+			return base(name, args)
+		}
+		if args[0] == "-t" && args[1] == "get_tree" {
+			return swayTree, nil
+		}
+		if args[0] == "-t" && args[1] == "get_outputs" {
+			return `[{"name":"DP-1","active":true},{"name":"HDMI-A-1","active":true},{"name":"eDP-1","active":false}]`, nil
+		}
+		return `[{"success":true}]`, nil
+	}
+	return s
+}
 
 func linuxEmpty() *fakeSys { return &fakeSys{bins: map[string]bool{}, env: map[string]string{}} }
 

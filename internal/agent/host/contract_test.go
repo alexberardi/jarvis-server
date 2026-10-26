@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -20,21 +21,59 @@ type subject struct {
 	winID    string
 	full     func() (Backend, recorder)
 	empty    func() (Backend, recorder)
+	// lacks: capabilities this platform has no native version of, so even a full host must not
+	// advertise them (Hyprland and sway have no minimise).
+	lacks []string
+}
+
+// arranging is the arranging capabilities, which the X11, macOS and Windows backends don't have
+// yet.
+var arranging = []string{CapWindowsUnminimize, CapWindowsMaximize, CapWindowsUnmaximize,
+	CapWindowsFullscreen, CapWindowsSnap, CapWindowsMonitor, CapWindowsWorkspace}
+
+// do runs any window action, with a target for the moves.
+func do(h *Host, a WindowAction, id string) error {
+	switch a {
+	case ActionMoveToWorkspace:
+		return h.WindowMove(ctx, a, id, "2")
+	case ActionMoveToMonitor:
+		return h.WindowMove(ctx, a, id, "next")
+	}
+	return h.WindowDo(ctx, a, id)
+}
+
+func (s subject) wantCaps() []string {
+	var want []string
+	for c := range KnownCapabilities {
+		if !slices.Contains(s.lacks, c) {
+			want = append(want, c)
+		}
+	}
+	sort.Strings(want)
+	return want
 }
 
 var subjects = []subject{
 	{"linux", "linux", linuxWinID,
 		func() (Backend, recorder) { s := linuxFull(); return NewLinux(s), s },
-		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s }},
+		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s }, arranging},
 	{"linux-ewmh", "linux", linuxWinID,
 		func() (Backend, recorder) { s, x := linuxEWMH(); return &Linux{Sys: s, X: x}, s },
-		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }},
+		func() (Backend, recorder) { s := linuxEmpty(); return &Linux{Sys: s, X: &fakeX{sys: s, wm: true}}, s }, []string{CapWindowsMonitor}},
+	{"linux-hyprland", "linux", hyprWinID,
+		func() (Backend, recorder) { s := linuxHyprland(); return NewLinux(s), s },
+		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s },
+		[]string{CapWindowsMinimize, CapWindowsUnminimize}},
+	{"linux-sway", "linux", swayWinID,
+		func() (Backend, recorder) { s := linuxSway(); return NewLinux(s), s },
+		func() (Backend, recorder) { s := linuxEmpty(); return NewLinux(s), s },
+		[]string{CapWindowsMinimize, CapWindowsUnminimize, CapWindowsMaximize}},
 	{"darwin", "darwin", macWinID,
 		func() (Backend, recorder) { d, s, _ := macDesktop(); return d, s },
-		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }},
+		func() (Backend, recorder) { s := macEmpty(); return NewDarwin(s), s }, arranging},
 	{"windows", "windows", winWinID,
 		func() (Backend, recorder) { w := winFull(); return NewWindows(w), w },
-		func() (Backend, recorder) { w := winEmpty(); return NewWindows(w), w }},
+		func() (Backend, recorder) { w := winEmpty(); return NewWindows(w), w }, []string{CapWindowsFullscreen, CapWindowsWorkspace}},
 }
 
 func forEach(t *testing.T, f func(t *testing.T, s subject)) {
@@ -86,12 +125,7 @@ func TestFullHostHasEveryCapability(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var want []string
-		for c := range KnownCapabilities {
-			want = append(want, c)
-		}
-		sort.Strings(want)
-		if !reflect.DeepEqual(got, want) {
+		if want := s.wantCaps(); !reflect.DeepEqual(got, want) {
 			t.Fatalf("capabilities = %v, want %v", got, want)
 		}
 	})
@@ -164,11 +198,20 @@ func TestListWindowsReturnsOpaqueIDs(t *testing.T) {
 	})
 }
 
+// A backend that lists an action does it; one that doesn't answers ErrNotSupported (native
+// actions only: no stand-ins).
 func TestWindowActionsSucceedOnALiveWindow(t *testing.T) {
 	forEach(t, func(t *testing.T, s subject) {
-		for _, a := range []WindowAction{ActionMinimize, ActionFocus, ActionClose} {
+		for _, a := range WindowActions {
 			b, _ := s.full()
-			if err := New(b).WindowDo(ctx, a, s.winID); err != nil {
+			err := do(New(b), a, s.winID)
+			if slices.Contains(s.lacks, ActionCapability[a]) {
+				if !errors.Is(err, ErrNotSupported) {
+					t.Fatalf("%s: err = %v, want ErrNotSupported", a, err)
+				}
+				continue
+			}
+			if err != nil {
 				t.Fatalf("%s: %v", a, err)
 			}
 		}
@@ -207,14 +250,17 @@ func TestCloseIsGraceful(t *testing.T) {
 		if err := New(b).WindowDo(ctx, ActionClose, s.winID); err != nil {
 			t.Fatal(err)
 		}
-		cmds := strings.ToLower(rec.allCommands())
+		graceful := map[string]string{"linux": "wmctrl -i -c " + s.winID, "linux-ewmh": "x11 close 0x03a00007",
+			"linux-hyprland": "hyprctl dispatch closewindow address:" + s.winID,
+			// sway's kill is its close command: it sends the app its close event, never a signal.
+			"linux-sway": "swaymsg [con_id=" + s.winID + "] kill",
+			"darwin":     "ax close 4242/1", "windows": "postclose 1311"}[s.name]
+		cmds := strings.ToLower(strings.ReplaceAll(rec.allCommands(), graceful, ""))
 		for _, banned := range []string{"kill", "quit", "terminate", "-9", "xdotool windowclose"} {
 			if strings.Contains(cmds, banned) {
 				t.Fatalf("close used %q:\n%s", banned, cmds)
 			}
 		}
-		graceful := map[string]string{"linux": "wmctrl -i -c " + s.winID, "linux-ewmh": "x11 close 0x03a00007",
-			"darwin": "ax close 4242/1", "windows": "postclose 1311"}[s.name]
 		if !strings.Contains(rec.allCommands(), graceful) {
 			t.Fatalf("close did not issue %q:\n%s", graceful, rec.allCommands())
 		}

@@ -52,9 +52,11 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
+	"github.com/alexberardi/jarvis-server/internal/agent/pkgagents"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
 )
@@ -198,6 +200,8 @@ func main() {
 		err = hatCmd(ctx, os.Args[2:])
 	case "provision":
 		err = provisionCmd(ctx, os.Args[2:])
+	case "adopt-python":
+		err = adoptPythonCmd(ctx, os.Args[2:])
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
 	case "computer":
@@ -242,7 +246,7 @@ func usage(w io.Writer) {
            (settings come from the config file, see config below; flags given here win)
            [--creds PATH] [--config PATH] [--allow-open-any] [--no-browser]
            [--confirm-dictation off|submit|all]   ask before typing/clicking sends anything
-           (default: submit)
+           risky: pays, sends, deletes, shares, changes the account (default: submit)
            [--sidecar-python PY --sidecar-commands DIR]
            [--no-overlay] [--no-tray]   no on-screen island / no status icon
            [--voice-input DEV] [--voice-output DEV] [--wake-threshold 0.4] [--wake-models DIR]
@@ -255,6 +259,10 @@ func usage(w io.Writer) {
            setup hotspot is up), until the node is provisioned
            --wifi simulated (the NetworkManager backend is still to come) [--listen :8080]
            [--captive-listen :80] [--ap-ssid SSID] [--creds PATH]
+  adopt-python  a Pi with no node.json takes over its provisioned Python node's identity (node id
+           and key, room) and local state (command secrets, reminders, timers, K2), leaving the
+           Python node's files as they are; nothing when there is none
+           [--creds PATH] [--python-dir /opt/jarvis-node] [--secret-dir ~/.jarvis]
   listen   the voice pipeline alone (no MQTT), same voice and tool flags
            [--once] [--timeout DUR] [--no-tools]   e.g. --voice-input wav:hey_jarvis.wav --once
   wake-compare  record Pulse sources side by side and score each for "hey Jarvis" (debug; on a
@@ -614,9 +622,23 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if p.desktop {
+		regroupInput(log)
+	}
 	if !p.desktop {
 		// A Pi is headless: no status icon, no island, nothing that opens a browser.
 		*f.noTray, *f.noOverlay = true, true
+	}
+	var adoptLogin bool
+	if p.desktop && runtime.GOOS == "darwin" {
+		// A stale copy steps aside for the one installed in /Applications (#483); the
+		// installed copy re-points the login item at itself further down, once it holds the
+		// control socket.
+		done, adopt := runHandover(log)
+		if done {
+			return nil
+		}
+		adoptLogin = adopt
 	}
 	cp, tf, voiceOn, noOverlay, vf, hf := f.cp, f.tf, f.voiceOn, f.noOverlay, f.vf, f.hf
 	vf.clampFollowUp(log)
@@ -636,6 +658,13 @@ func runAgent(ctx context.Context, args []string) error {
 		return err
 	}
 	c, err := node.LoadCreds(path)
+	if errors.Is(err, node.ErrNotEnrolled) && !p.desktop {
+		// A Pi the Python node ran on: the same node, not a new one (install-pi.sh --activate
+		// adopts it first; this is for a unit started without it).
+		if py, perr := pinode.DefaultPythonNode(); perr == nil {
+			c, err = loadOrAdopt(ctx, log, path, py)
+		}
+	}
 	if err != nil {
 		if errors.Is(err, node.ErrNotEnrolled) && !interactive() && p.desktop {
 			// A login item on a computer that isn't set up: the status icon's "Set up", then
@@ -662,6 +691,9 @@ func runAgent(ctx context.Context, args []string) error {
 		return notSetUp(err)
 	}
 	migrateLegacyID(log)
+	if adoptLogin {
+		adoptIfInstalled(ctx, log)
+	}
 	ctx, quit := context.WithCancel(ctx)
 	defer quit()
 	pill := &runningPill{}
@@ -708,12 +740,16 @@ func runAgent(ctx context.Context, args []string) error {
 	if p.desktop {
 		// Computer tasks in the browser and on the desktop (plan P3 pieces 8 and 22): build
 		// adds the executor's tools after the browser's.
-		tf.computer = func(bt *browser.Tools, apps computer.Apps) node.Toolset {
+		tf.computer = func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset {
 			var b computer.Browser
 			if bt != nil {
 				b = computer.BrowserOf(bt)
 			}
-			return &computer.Tools{Browser: b, Desktop: computer.NativeDesktop(apps), Switch: computerSw, Activity: activity,
+			d := computer.NativeDesktop(apps)
+			if d != nil {
+				d.Focus = func(ctx context.Context, id string) error { return h.WindowDo(ctx, host.ActionFocus, id) }
+			}
+			return &computer.Tools{Browser: b, Desktop: d, Switch: computerSw, Activity: activity,
 				CC: func() computer.Approver {
 					if cc := liveCC.Load(); cc != nil {
 						return cc
@@ -878,8 +914,23 @@ func runAgent(ctx context.Context, args []string) error {
 	end := nodeEnd{credsFile: path, nodeID: c.NodeID, desktop: p.desktop, noTray: *f.noTray, stop: quit, openSetup: setup, log: log}
 	runNode := func(ctx context.Context) error { return end.of(r.Run(ctx)) }
 	ic := &trayIcon{off: *f.noTray, log: log, sw: sw, h: h, configURL: c.ConfigURL, quit: quit, setup: setup, signOut: r.SignOut,
-		activity: activity, computer: computerSw, recorder: recorder}
+		activity: activity, computer: computerSw, recorder: recorder, reached: r.Reached, retryNow: r.RetryNow,
+		webUI: make(chan struct{}, 1)}
 	sw.changed = ic.voiceChanged
+	// The agent may be started before its server: while the server doesn't answer, the menu
+	// says what it is waiting for (and offers "Retry now") and the island says it in a line,
+	// instead of a menu that claims it runs and a microphone that never opens (#585).
+	wait := &serverWait{refresh: ic.refresh, log: log, note: func(text string) {
+		if n := note.Load(); n != nil {
+			(*n)(text)
+		}
+	}}
+	r.OnWaiting = wait.waiting
+	r.OnReached = func(url string) {
+		wait.reached(url)
+		ic.lookForWebUI() // "Open Jarvis Automation" too, without waiting out its own backoff
+	}
+	sw.waiting = wait.voiceWaiting
 	if computerSw != nil {
 		computerSw.Watch(func(bool) { ic.refresh() })
 	}
@@ -937,7 +988,7 @@ func hideFromScreenshots(tools node.Multi, i *island.Island) {
 }
 
 // attachIsland keeps the island out of desktop_read_screen's pictures and shows on it what
-// dictation types, fills, clicks or asks, while listening is on.
+// dictation types, fills, clicks or asks, and what window commands did, while listening is on.
 func attachIsland(tools node.Multi, i *island.Island, listening func() bool) {
 	note := func(text string, d time.Duration) {
 		if listening() {
@@ -954,6 +1005,8 @@ func attachIsland(tools node.Multi, i *island.Island, listening func() bool) {
 				x.Confirm.Show = note
 			}
 		case *browser.Tools:
+			x.Show = note
+		case *desktop.Tools:
 			x.Show = note
 		}
 	}
@@ -980,8 +1033,8 @@ type toolFlags struct {
 	live *sidecar.Live
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
-	// desktop_open's catalogue: build adds them after the browser tools.
-	computer func(bt *browser.Tools, apps computer.Apps) node.Toolset
+	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
+	computer func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -989,7 +1042,7 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 		anyOpen:   fs.Bool("allow-open-any", false, "let desktop_open open any path, app or URI scheme (default: http, https, mailto)"),
 		noBrowser: fs.Bool("no-browser", false, "don't serve the browser extension (no browser_* tools)"),
 		confirm: fs.String("confirm-dictation", dictate.ConfirmSubmit,
-			"ask the user before dictation acts: off, submit (before Enter, a click, a submitting fill; the default) or all"),
+			"ask the user before dictation acts: off, submit (before Enter, and a browser click or submit that pays, sends, deletes, shares or changes the account; the default) or all"),
 		py:     fs.String("sidecar-python", "", "python interpreter for the package sidecar (spike)"),
 		cmdDir: fs.String("sidecar-commands", "", "directory of IJarvisCommand modules for the sidecar (spike)"),
 	}
@@ -1030,6 +1083,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	guard := &jarvispage.Guard{Origins: f.origins}
 	dt.JarvisPage = guard.InFront
 	opener := openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt)
+	// Tabs and sheets by name (VOICE-FLOWS.md Q26), and their names for speech-to-text.
+	opener.Views = views.Native(h)
+	dt.HearFirst = opener.ViewVocabulary
 	tools := node.Multi{opener, &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	var bt *browser.Tools
@@ -1050,7 +1106,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	if f.computer != nil {
 		// A desktop task's app that isn't running opens from desktop_open's catalogue, by name
 		// only: never a link or a path, whatever --allow-open-any says.
-		tools = append(tools, f.computer(bt, opener))
+		tools = append(tools, f.computer(bt, opener, h))
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
 	return h, tools, closeAll, err
@@ -1088,6 +1144,11 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 			f.pkgs.Builtins = packages.PiBuiltins(os.Getenv("JARVIS_AGENT_NODE_COMMANDS"))
 			// apt packages and post_install ops through install-pi.sh's root wrappers.
 			f.pkgs.System = packages.NewSystem(log)
+			// The packages' background agents (comfyui_jobs) on their schedules, their alerts
+			// in the Pi's queue; one that keeps failing marks its package failed in the app.
+			agents := &pkgagents.Scheduler{Sidecar: live, Alerts: f.host.Alerts, Log: log}
+			f.pkgs.AgentHealth = agents.Failing
+			go agents.Run(ctx)
 			go boot()
 		} else {
 			boot()
@@ -1116,6 +1177,7 @@ func dictationTools(h *host.Host, mode string, log *slog.Logger) (*dictate.Tools
 func openThenType(d *desktop.Tools, dt *dictate.Tools) *desktop.Tools {
 	tr := &launches.Tracker{Log: dt.Log}
 	d.Log = dt.Log
+	d.Confirm = dt.Confirm // closing every window of an app asks first (DESKTOP-COMMANDS.md Q8)
 	if dt.Win != nil && runtime.GOOS == "darwin" {
 		// The window list is AppleScript there, seconds on a busy Mac and behind the Automation
 		// grant; the window server answers in milliseconds with no grant.
@@ -1303,7 +1365,9 @@ func try(ctx context.Context, args []string) error {
 	origins := tryOrigins(ctx, *server)
 	guard := &jarvispage.Guard{Origins: origins}
 	dt.JarvisPage = guard.InFront
-	ts := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
+	opener := openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt)
+	opener.Views = views.Native(h)
+	ts := node.Multi{opener, &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).

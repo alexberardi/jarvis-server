@@ -33,7 +33,7 @@ required case passed, 1 when one failed, 2 when the run could not bring its worl
 | `blocked_site` | browser | a site the household blocked (`setup.block`) is refused | piece 14 |
 | `notes_wlroots` | desktop-wlroots | a note in the fixture notes app under headless sway (Xwayland) | piece 35 |
 | `notes_x11` | desktop-x11 | the same under Xvfb | piece 35 |
-| `notes_macos` | desktop-mac | Notes.app on the Mac test host; skipped elsewhere, not wired yet | piece 22 |
+| `notes_macos` | desktop-mac | a note in Apple's Notes.app on the Mac test host, attended; skipped elsewhere | piece 22 |
 | `replay_changed_param` | teach | the bank download, demonstrated for 2026-09 (`setup.demonstrate`), replayed for August | piece 32 |
 | `replay_moved_button` | teach | the same replayed after the site moved its buttons (every page the moved variant) | piece 32 |
 
@@ -89,7 +89,7 @@ A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
 | `download` | `site` (bank, card), `month`? (YYYY-MM) | that statement was downloaded |
 | `spreadsheet_has` | `contains` (strings), `file`? (glob) | one file in the agent's `~/Documents/Jarvis` has them all (case-insensitive; `.xlsx` by its cells, other files as text) |
 | `form_submitted` | `fields` | a form was sent with those values (case-insensitive) |
-| `note_exists` | `title`, `body`? | the notes app saved that note (`notes.py --state`) |
+| `note_exists` | `title`, `body`? | that note was saved (the notes app's `notes.py --state`; on the Mac, a note Notes.app did not have before the case) |
 | `reply_matches` | `pattern` | something Jarvis said (chat answers, card titles and bodies) matches |
 | `asked` | `pattern`? | a card with buttons was posted (matching, over its title and body) |
 | `refused` | `pattern`? | something Jarvis said is a refusal (default: can't, not allowed, blocked, …) |
@@ -105,14 +105,16 @@ rewrites it).
    127.0.0.1:0`. Only when a case needs them (so a run of pending cases needs neither sway nor
    Xvfb): a desktop session, headless sway (`WLR_BACKENDS=headless`, Xwayland on) or `Xvfb :N`,
    each under its own `dbus-run-session` with its own `XDG_RUNTIME_DIR` and HOME and nothing of the
-   user's environment (as `scripts/desktop-shot`); the real `jarvis-agent run --profile desktop
+   user's environment (as `scripts/desktop-shot`); on the Mac test host no session is started and
+   the host's own logged-in one is used instead (below); the real `jarvis-agent run --profile desktop
    --voice=false --computer-control`, enrolled to the sandbox with the seeded login, with its own control and browser
    sockets and computer control turned on by that `--computer-control` flag; for browser and teach cases Playwright's Chromium with a throwaway `--user-data-dir`,
    `--load-extension` of `jarvis-agent browser pack --target chromium`, the native-messaging
    manifest in the profile's `NativeMessagingHosts/`, and a DevTools pipe the suite sets the
    session cookies through. The run waits until the extension is connected to the agent.
 2. **Each case**: reset the fixtures (`ccsites /control/reset`, the fake relay's pushes, the
-   agent's `~/Documents/Jarvis` and `~/Downloads`; desktop cases restart the notes app with an empty state file),
+   agent's `~/Documents/Jarvis` and `~/Downloads`; desktop cases restart the notes app with an
+   empty state file, or on the Mac delete the case's own notes from Notes.app),
    log in to `setup.login`, then send `say` as the seeded user's chat message to the agent node
    (`POST /api/v0/mobile/chat`, the app's chat). New inbox cards are answered as `answers` say.
    The errand is over at its completion card (category `errand`, not its progress card), or once the chat has answered
@@ -124,10 +126,11 @@ rewrites it).
 3. **Score**: gather the state (`ccsites /control/state`, `~/Documents/Jarvis`, the notes state
    file, the fake relay's pushes, the cards, the replies) into `cases/<case>/run-N/state.json`
    and evaluate the checks; a failed run gets a screenshot of the session (`failure.png`: grim,
-   or ImageMagick's `import` on X11). A case passes when at least two thirds of its runs pass
+   ImageMagick's `import` on X11, `screencapture -x` on the Mac). A case passes when at least two thirds of its runs pass
    (1 of 1, 2 of 3).
 4. **Tear-down**, also on Ctrl-C: browser, agent, notes app and session (each its own process
-   group), the sites, `scripts/sandbox down --purge`. With `--keep`, nothing is stopped instead:
+   group; the Mac's own session is left alone), the sites, `scripts/sandbox down --purge`. With
+   `--keep`, nothing is stopped instead:
 
 ## Keeping the world up (`--keep`)
 
@@ -160,9 +163,47 @@ Needs: sway (`scripts/desktop-shot deps` builds one into `~/.cache`, with Xwayla
 rebuilt), `Xvfb` for X11 cases (`sudo pacman -S xorg-server-xvfb`), `grim`, `dbus-run-session`,
 Python 3 with Tk for the notes app (`sudo pacman -S tk`; the bring-up says so in one line when it
 is missing), and Playwright's Chromium (`cd e2e/web && npx playwright install chromium`, or
-`--chromium`). Each is checked only when a case needs it. Before a desktop case the session's user
-presses Shift (through the agent's own input backend): desktop tasks run only while someone used
-the computer in the last few minutes.
+`--chromium`). Each is checked only when a case needs it, and none of them on the
+Mac test host (below). Before a desktop case the session's user presses Shift (through the agent's own input backend): desktop tasks run only while someone
+used the computer in the last few minutes.
+
+## On the Mac test host
+
+macOS has one window server per login session and no headless one, so a `desktop-mac` case runs
+in the Mac's **own logged-in session, attended** (COMPUTER-CONTROL.md C9: a desktop task runs
+only while someone used the computer in the last few minutes). The suite starts no session of
+its own there: it runs the agent in the one that is already up, and the case drives the real
+Notes.app on the screen in front of you. So run it by hand, at the Mac, and leave it alone until
+it is over:
+
+```sh
+go run ./tools/ccsuite run --filter notes_macos --llm shared --label background --repeat 3
+```
+
+What differs from a Linux run:
+
+- **Which cases run.** On macOS only `desktop-mac` (and `tests`) cases run; the browser, teach,
+  wlroots and x11 cases are skipped as "Linux only: this is the Mac test host", because sway,
+  Xvfb and the Linux Chromium they need are the dev box's. On Linux a `desktop-mac` case is
+  skipped as "macOS only: the Mac test host".
+- **Privacy grants.** The agent, `osascript` and `screencapture` all run as children of the
+  terminal you start ccsuite in, and macOS gives a child the terminal's grants, so the run dir's
+  freshly built `jarvis-agent` needs no grant of its own. That terminal (Terminal, iTerm, …)
+  needs, in System Settings > Privacy & Security: **Accessibility** (the agent's clicks and
+  keys), **Screen Recording** (its screen reads, and failure screenshots) and **Automation** for
+  Notes (the suite resets and reads Notes.app; macOS asks once, the first time). Bring-up checks
+  the first two and a refused Automation and says in one line what to turn on, instead of
+  failing later as a vague case failure.
+- **The notes fixture is the real Notes.app**, not `tools/ccsites/notesapp` (which the wlroots
+  and x11 cases use), so `setup.notes_layout` does not apply. Because those are your own notes,
+  the suite touches as little of them as it can: before a case it deletes notes whose name is
+  one the case's `note_exists` checks ask for (`Groceries`) and writes down the id of every note
+  there is; afterwards it reads back only the notes that were not there before, so no other
+  note's text reaches the suite or `state.json`. It goes through AppleScript
+  (`tools/ccsuite/macnotes.go`).
+- **Screenshots** of a failure come from `screencapture -x`, so they show the whole Mac screen.
+- A second `jarvis-agent` runs beside the one you may have installed: it is enrolled to the run's
+  sandbox, uses its own HOME under the run dir and its own sockets, and runs `--voice=false`.
 
 ## Results on the house model
 
@@ -204,6 +245,13 @@ own downloads. Its one failure in the run before (2/3) was a replan whose JSON l
 
 `store_order_cancel` and `injection_stops` take the longest because they end on `--settle` (a
 cancelled confirmation, an unanswered question), not on a completion card.
+
+`notes_macos` was wired and flipped to `required` by piece 22 (2026-10-24), which gave the suite
+its `desktop-mac` session, its Notes.app fixture and its grant checks. **It has no results table
+yet:** the piece was built where no attended Mac session was available, so the first run of it is
+the piece's QA check on the Mac test host (`--filter notes_macos --llm shared --label background
+--repeat 3`); a failure there reopens the piece. Flipping it changes nothing off macOS, where the
+case is skipped.
 
 The teach cases were flipped to `required` by piece 32 (2026-10-20): `--llm shared --label
 background --filter replay_ --repeat 3`, as `required`, fresh, one run (5.4 minutes), not picked

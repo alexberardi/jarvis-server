@@ -423,12 +423,20 @@ const voiceHH = "hh-voice"
 // template with the thinking switch, the 8B/14B a local text one with it.
 func providerTraits(provider string) llm.ModelTraits {
 	switch provider {
-	case prompts.ChatGPT:
+	case prompts.Cloud, "ChatGPTOpenAI": // the goldens' legacy name
 		return llm.ModelTraits{ToolCalling: string(prompts.ToolsNative), ToolCallingFrom: ModeSourceRemote}
 	case prompts.Qwen3_5_9B:
 		return llm.ModelTraits{ToolCalling: string(prompts.ToolsNative), ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true}
 	}
 	return llm.ModelTraits{ToolCalling: string(prompts.ToolsText), ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true}
+}
+
+// localTraits is provider's traits served by a local engine: for tests that read the prompt
+// off the warmup, which a remote live skips.
+func localTraits(provider string) llm.ModelTraits {
+	tr := providerTraits(provider)
+	tr.Local = true
+	return tr
 }
 
 // withTraits makes tr the live model's traits (the LLM mode's input).

@@ -182,6 +182,10 @@ func TestLearnFromDesktopRecording(t *testing.T) {
 			`1. click AXButton "New Note" in com.apple.Notes at (310,62)`,
 		}},
 		{"desktop_wayland_trace.json", waylandModel, "Add to the shopping list", []WStep{
+			// Each event of a step is a step (#581): the click into the editor, then the typing.
+			{Intent: "Write the item in notes.txt", Target: "desktop", App: "org.gnome.TextEditor",
+				Window: &StepWindow{Class: "org.gnome.TextEditor", Title: "notes.txt", Point: &WindowPoint{X: 200, Y: 340, W: 800, H: 600}},
+				Action: computeruse.Action{Kind: "click", Intent: "Write the item in notes.txt", X: ptr(1200), Y: ptr(340)}},
 			{Intent: "Write the item in notes.txt", Target: "desktop", App: "org.gnome.TextEditor", Window: notes, Risk: computeruse.CatSensitiveInput,
 				Action: computeruse.Action{Kind: "type", Intent: "Write the item in notes.txt", Text: maskedValue}},
 			{Intent: "Save it", Target: "desktop", App: "org.gnome.TextEditor", Window: notes,
@@ -287,5 +291,58 @@ func TestLearnFromBadDesktopRecording(t *testing.T) {
 	le.model.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("%d model calls for bad desktop recordings", calls)
+	}
+}
+
+// #581: a step the model groups as "type the text, then Enter" replays both, in order.
+func TestDesktopStepKeepsEveryEvent(t *testing.T) {
+	evs := []desktopEvent{
+		{Kind: "input", App: "omawrite", Value: "test test test"},
+		{Kind: "key", App: "omawrite", Key: "Enter"},
+	}
+	out, err := parseLearnOutput(`{"name": "test omacalc", "steps": [{"intent": "type test message", "event_seqs": [1, 2]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := buildDesktopWorkflow(Recording{ID: "r", HouseholdID: cbHH, OwnerID: 5}, evs, nil, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []WStep{
+		{Intent: "type test message", Target: "desktop", App: "omawrite",
+			Action: computeruse.Action{Kind: "type", Intent: "type test message", Text: "test test test"}},
+		{Intent: "type test message", Target: "desktop", App: "omawrite",
+			Action: computeruse.Action{Kind: "keypress", Intent: "type test message", Keys: []string{"enter"}}},
+	}
+	if g, w := mustJSON(t, w.Steps), mustJSON(t, want); g != w {
+		t.Fatalf("steps\n got %s\nwant %s", g, w)
+	}
+}
+
+// #581: the user's stop at the end of a trace (the status icon on the bar, then its menu) is
+// not a step; a click in the window, or typing after a click on the bar, stays.
+func TestDesktopTraceTrimsStopClicks(t *testing.T) {
+	win := `"window":{"class":"org.gnome.Nautilus","title":"Home","x":0,"y":40,"w":1600,"h":1000}`
+	ev := func(kind string, x, y int) string {
+		return fmt.Sprintf(`{"kind":%q,"app":"org.gnome.Nautilus","x":%d,"y":%d,"key":"a",%s}`, kind, x, y, win)
+	}
+	for _, tc := range []struct {
+		name  string
+		trace []string
+		want  int
+	}{
+		{"icon then menu", []string{ev("click", 100, 100), ev("click", 1500, 10), ev("click", 1450, 80)}, 1},
+		{"icon alone", []string{ev("click", 100, 100), ev("click", 1500, 10)}, 1},
+		{"last click in the window", []string{ev("click", 100, 100), ev("click", 200, 200)}, 2},
+		{"typing after the bar", []string{ev("click", 1500, 10), ev("key", 0, 0)}, 2},
+		{"no point (sway)", []string{ev("click", 100, 100), ev("click", 0, 0)}, 2},
+	} {
+		evs, err := parseDesktopTrace([]byte("[" + strings.Join(tc.trace, ",") + "]"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(evs) != tc.want {
+			t.Errorf("%s: %d events, want %d", tc.name, len(evs), tc.want)
+		}
 	}
 }

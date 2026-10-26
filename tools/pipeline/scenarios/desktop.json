@@ -98,7 +98,7 @@
      }
     ]
    },
-   "desktop_focus_window": {
+   "desktop_window": {
     "success": true,
     "window_id": "643/1",
     "action": "focus",
@@ -109,9 +109,10 @@
    {
     "say": "focus the TextEdit window",
     "expect": {
-     "tool": "desktop_focus_window",
+     "tool": "desktop_window",
      "args_match": {
-      "window_id": "(?i)^(643/1|.*text ?-?edit.*)$"
+      "window": "(?i)^(643/1|.*text ?-?edit.*)$",
+      "action": "^focus$"
      },
      "not_reply": "(?i)didn't work|not found|which window"
     }

@@ -180,6 +180,15 @@ func errorLine(k Kind) *regexp.Regexp {
 	return nil
 }
 
+// outputTail is the engines.Spec OutputTail of a kind: a Python traceback (vLLM's EngineCore
+// one runs past 100 lines) needs more than llama-server's last lines (0 = the default).
+func outputTail(k Kind) int {
+	if _, ok := k.Python(); ok {
+		return 200
+	}
+	return 0
+}
+
 // Python returns a kind's Python engine, if it is one.
 func (k Kind) Python() (PyEngine, bool) {
 	e, ok := PyEngines[k]

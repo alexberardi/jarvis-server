@@ -97,7 +97,10 @@ Omarchy does not ship:
 - **Status icon:** it registers and shows in the tray on both bar colours. The menu reads
   "Jarvis Automation Agent — Running", then the "Listen for "Hey Jarvis"" checkbox, the
   "Computer control" checkbox (unchecked: off by default), then "Open Jarvis Automation" (once jarvisd's discovery answers; this item is missing with
-  `--offline`), then Quit.
+  `--offline`), then Quit. With `--offline` the header says "Waiting for the Jarvis server at
+  http://127.0.0.1:9" instead of "Running" and the menu offers "Retry now", with a line under
+  the voice checkbox when listening is on (agent/DESIGN.md §15, #585); the island says the same
+  in a pill once, which the run waits out before it takes its baseline.
   **Finding:** at tray size (about 20 px on a 26 px bar), the shield is a plain downscale
   of the 64 px art (`tray.Color`, CatmullRom). It loses its white outline and pointed bottom,
   and reads as a purple rectangle with a white blob. On the dark bar the purple is also

@@ -681,3 +681,33 @@ func TestWindowByTitle(t *testing.T) {
 		t.Errorf("a terminal titled Notes = %v, want denied", out)
 	}
 }
+
+// #581: observing an app gives its window the focus (a replay's next step is in it), unless
+// it has it; a failed batch says why at the top too, for the tool-call trace.
+func TestObserveFocusesTheApp(t *testing.T) {
+	f := newDesktop(t)
+	finder := dFinder
+	finder.Focused = true
+	f.wins.ws = []DesktopWindow{dNotes, finder}
+	var focused []string
+	f.tl.Desktop.Focus = func(_ context.Context, id string) error {
+		focused = append(focused, id)
+		for i := range f.wins.ws {
+			f.wins.ws[i].Focused = f.wins.ws[i].ID == id
+		}
+		return nil
+	}
+	if out, _ := f.observe(t, "Notes"); out["success"] != true || out["focus_error"] != nil {
+		t.Fatalf("observe = %v", out)
+	}
+	if out, _ := f.observe(t, "Notes"); out["success"] != true {
+		t.Fatalf("observe again = %v", out)
+	}
+	if strings.Join(focused, ",") != dNotes.ID {
+		t.Errorf("focused %v, want Notes' window once", focused)
+	}
+	res := f.act(t, "Notes", click("cap_nope", 1, 1))
+	if res["success"] != false || res["error_code"] != "invalid_action" || res["error"] == "" {
+		t.Errorf("failed act = %v, want its error at the top", res)
+	}
+}

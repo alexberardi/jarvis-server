@@ -49,6 +49,12 @@ func (m *Module) pendingConfirmHint(conv *conversation) string {
 	if p == nil || !conv.hasTool(dictate.ToolConfirm) || m.now().After(p.deadline) {
 		return ""
 	}
+	if g := conv.confirmGate; g == nil || g.id != p.id || !g.asked {
+		// Asked in plain text: desktop_confirm needs an answer to request_validation (confirm_gate.go).
+		return fmt.Sprintf("[waiting for the user's answer: %q (confirmation_id %s). Nothing has been done yet. Ask "+
+			"exactly that with request_validation (options [\"Yes\", \"Cancel\"]); %s works only with their reply to it.]",
+			p.question, p.id, dictate.ToolConfirm)
+	}
 	return fmt.Sprintf("[waiting for the user's answer: %q (confirmation_id %s). Nothing has been done yet. If this "+
 		"answers it, call %s with that confirmation_id and the user's words; never say it was done unless that "+
 		"call's result shows it.]", p.question, p.id, dictate.ToolConfirm)

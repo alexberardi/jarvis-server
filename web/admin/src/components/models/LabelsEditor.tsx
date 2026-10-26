@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from 'react'
-import { AlertTriangle, Globe, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, Globe, Mic, SlidersHorizontal } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { engineText, latencyText, testSTT, type STTTestResult } from '@/api/speech'
+import SpeechPresetPicker from './SpeechPresetPicker'
 import {
   LABEL_KIND,
   LABEL_TITLE,
@@ -43,6 +46,7 @@ const STATE_TEXT: Record<string, string> = {
   fetching_engine: 'fetching engine',
   no_engine_build: 'no engine build',
   gpu_unavailable: 'GPU unavailable',
+  does_not_fit: "doesn't fit",
 }
 
 const BUILD_KIND: Record<EngineLabel, string> = {
@@ -271,6 +275,7 @@ function EngineLabelCard({
         <p className="text-small text-warning">{cfg.problem || status.reason}</p>
       )}
       {cfg.note && <p className="text-small text-text-muted">{cfg.note}</p>}
+      {status.note && <p className="text-small text-text-muted">{status.note}</p>}
       {label === 'cloud' && (
         <p className="text-small text-text-muted">
           A provider's model, next to the ones on this machine. Nothing uses it until you pick it for a feature under
@@ -306,6 +311,30 @@ function EngineLabelCard({
                 : `Requests for this label leave this machine: prompts, conversation text${isLLM ? ' and any images' : ''} go to the endpoint below. Use it only with a provider you trust.`}
           </Banner>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {isSTT && (
+              <SpeechPresetPicker
+                id={id('preset')}
+                kind="stt"
+                onPick={(p) => set({ remote_url: p.url, remote_api: p.api, remote_model: p.stt_model ?? '' })}
+              />
+            )}
+            {isSTT && (
+              <Field
+                label="API"
+                htmlFor={id('remote_api')}
+                hint={cfg.remote_api_effective === 'elevenlabs' ? 'ElevenLabs API now' : 'OpenAI-compatible now'}
+              >
+                <select
+                  id={id('remote_api')}
+                  value={v('remote_api') === 'elevenlabs' ? 'elevenlabs' : 'openai'}
+                  onChange={(e) => set({ remote_api: e.target.value })}
+                  className={selectClass}
+                >
+                  <option value="openai">OpenAI-compatible (/audio/transcriptions)</option>
+                  <option value="elevenlabs">ElevenLabs (/v1/speech-to-text)</option>
+                </select>
+              </Field>
+            )}
             <Field label="Base URL" htmlFor={id('remote_url')}>
               <input
                 id={id('remote_url')}
@@ -374,6 +403,23 @@ function EngineLabelCard({
                 />
               </Field>
             )}
+            {isSTT && (
+              <Field
+                label="If the provider fails"
+                htmlFor={id('fallback')}
+                hint="The fallback runs a whisper model from the Models page on this machine's CPU."
+              >
+                <select
+                  id={id('fallback')}
+                  value={v('fallback') || 'off'}
+                  onChange={(e) => set({ fallback: e.target.value })}
+                  className={selectClass}
+                >
+                  <option value="off">The voice turn fails</option>
+                  <option value="cpu">Fall back to CPU whisper on this machine</option>
+                </select>
+              </Field>
+            )}
             {isLLM && foldField()}
             {isLLM && (
               <Field label="Context window" htmlFor={id('remote_context')} hint="Tokens; 0 = unknown (conversation compaction stays off)">
@@ -389,6 +435,21 @@ function EngineLabelCard({
               </Field>
             )}
           </div>
+          {isSTT && status.fallback?.warning && (
+            <Banner tone="warning" icon={<AlertTriangle size={16} />}>
+              {status.fallback.warning}.{' '}
+              <Link to="/admin/models?job=stt&tab=catalog" className="font-medium underline underline-offset-2">
+                Install one from the catalog
+              </Link>
+            </Banner>
+          )}
+          {isSTT && status.fallback && (status.fallback.fallbacks > 0 || status.fallback.last_remote_error) && (
+            <p className="text-small text-text-muted">
+              {status.fallback.fallbacks > 0 &&
+                `The CPU fallback answered ${status.fallback.fallbacks} request${status.fallback.fallbacks === 1 ? '' : 's'} since the last restart. `}
+              {status.fallback.last_remote_error && `Last remote error: ${status.fallback.last_remote_error}`}
+            </p>
+          )}
         </div>
       )}
 
@@ -565,6 +626,8 @@ function EngineLabelCard({
         </>
       )}
 
+      {isSTT && mode !== 'off' && <STTTest dirty={dirty} />}
+
       {dirty && (
         <div className="flex justify-end gap-2">
           <Button onClick={() => setDraft({})} disabled={put.isPending}>
@@ -574,6 +637,52 @@ function EngineLabelCard({
             Save
           </Button>
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * STTTest transcribes a short clip bundled in jarvisd ("tell me a joke") through the saved stt
+ * settings (docs/llm/07-remote-speech.md §4) and shows what was heard, the round trip and
+ * which engine answered. Disabled while the form is dirty: the test runs what is saved.
+ */
+function STTTest({ dirty }: { dirty: boolean }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<STTTestResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    setResult(null)
+    try {
+      setResult(await testSTT())
+    } catch (err) {
+      setError(errorMessage(err, 'The test failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2" data-testid="stt-test">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={run} loading={busy} disabled={dirty} icon={<Mic size={14} aria-hidden />}>
+          Test transcription
+        </Button>
+        {dirty && <span className="text-small text-text-muted">Save first: the test uses the saved settings.</span>}
+      </div>
+      {result && (
+        <p role="status" className="text-small text-text">
+          Heard “{result.text.trim()}” in {latencyText(result.latency_ms)}, {engineText(result.engine)}. The clip says
+          “{result.clip_says}”.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="text-small text-danger">
+          {error}
+        </p>
       )}
     </div>
   )

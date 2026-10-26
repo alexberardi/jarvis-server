@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# The Windows 11 test VM for the desktop agent's live checks (docs/agent/DESKTOP-COMMANDS.md,
+# "Prerequisites"): QEMU/KVM as the user's own session (no libvirt, no group change), OVMF with
+# Secure Boot and a software TPM (swtpm), PipeWire audio for the mic and speakers, two virtual
+# monitors so move-to-monitor gets tested. Dev box only; never touches the host's network setup.
+#
+#   scripts/win11-vm install [--dry-run]
+#       first boot from the Windows 11 ISO (+ the virtio-win driver ISO): creates the disk, the
+#       firmware variables and the TPM state, then opens the VM's window. Click through Windows
+#       Setup (runbook: docs/agent/win11-vm.md).
+#   scripts/win11-vm start [--headless] [--dry-run]
+#       boot the disk as it is (--headless: no window, for a quick check that it boots)
+#   scripts/win11-vm stop
+#       ask Windows to shut down (ACPI power button), then wait for QEMU to exit
+#   scripts/win11-vm snapshot NAME | revert NAME | snapshots
+#       with the VM off: save or restore the disk (qcow2 internal snapshot), the firmware
+#       variables and the TPM state together as NAME ("clean" is the one the runbook makes: Windows
+#       set up, the agent installed); list them
+#   scripts/win11-vm status
+#
+# Everything lives in $JARVIS_WIN11_DIR (default ~/.cache/jarvis-harness/win11). The ISOs come
+# from WIN11_ISO (default: the newest ~/Downloads/Win*11*.iso) and VIRTIO_ISO (default:
+# ~/vms/win11/virtio-win.iso, from fedorapeople.org's stable-virtio). WIN11_CPUS (8), WIN11_MEM
+# (8192, MiB), WIN11_DISK_SIZE (80G).
+#
+# Networking is QEMU's user mode: the guest reaches this box's loopback as 10.0.2.2, so its
+# jarvis-agent uses http://10.0.2.2:7700 (mDNS doesn't cross the NAT). Nothing listens on the LAN.
+set -euo pipefail
+
+DIR=${JARVIS_WIN11_DIR:-$HOME/.cache/jarvis-harness/win11}
+CPUS=${WIN11_CPUS:-8}
+MEM=${WIN11_MEM:-8192}
+DISK_SIZE=${WIN11_DISK_SIZE:-80G}
+OVMF_CODE=${WIN11_OVMF_CODE:-/usr/share/edk2/x64/OVMF_CODE.secboot.4m.fd}
+OVMF_VARS=${WIN11_OVMF_VARS:-/usr/share/edk2/x64/OVMF_VARS.4m.fd}
+VIRTIO_ISO=${VIRTIO_ISO:-$HOME/vms/win11/virtio-win.iso}
+DISK=$DIR/disk.qcow2
+VARS=$DIR/ovmf-vars.fd
+TPM=$DIR/tpm
+QMP=$DIR/qmp.sock
+PIDFILE=$DIR/qemu.pid
+
+say() { echo "win11-vm: $*" >&2; }
+die() { say "$*"; exit 1; }
+usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
+
+CMD=${1:-}
+[ -n "$CMD" ] || { usage; exit 2; }
+shift
+DRY=0 HEADLESS=0 NAME=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    --dry-run) DRY=1; shift ;;
+    --headless) HEADLESS=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) die "unknown argument $1" ;;
+    *) NAME=$1; shift ;;
+  esac
+done
+
+x() { if [ "$DRY" = 1 ]; then echo "+ $*"; else "$@"; fi; }
+
+# Unix sockets (QMP, swtpm) live in DIR; their path must fit sun_path.
+[ ${#DIR} -le 80 ] || die "JARVIS_WIN11_DIR is too long for a socket path (${#DIR} > 80 characters): pick a shorter one"
+
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+need() {
+  [ "$DRY" = 1 ] && return 0
+  [ -r /dev/kvm ] && [ -w /dev/kvm ] || die "/dev/kvm is not read-write for $(id -un)"
+  local t
+  for t in qemu-system-x86_64 qemu-img swtpm; do
+    command -v "$t" >/dev/null || die "$t not on PATH (sudo pacman -S --needed qemu-base swtpm)"
+  done
+  [ -r "$OVMF_CODE" ] && [ -r "$OVMF_VARS" ] || die "no OVMF firmware at $OVMF_CODE (sudo pacman -S --needed edk2-ovmf)"
+}
+
+# display picks the virtual screens: two outputs on virtio-vga, or one standard VGA screen when
+# the virtio-vga module isn't installed.
+display() {
+  if qemu-system-x86_64 -device help 2>/dev/null | grep -q '"virtio-vga"'; then
+    echo "-device virtio-vga,max_outputs=2"
+  else
+    say "virtio-vga isn't installed (sudo pacman -S --needed qemu-hw-display-virtio-vga): one standard VGA screen, no second monitor"
+    echo "-vga std"
+  fi
+}
+
+start_tpm() {
+  x mkdir -p "$TPM"
+  x swtpm socket --tpm2 --tpmstate "dir=$TPM" --ctrl "type=unixio,path=$DIR/swtpm.sock" \
+    --log "file=$DIR/swtpm.log" --terminate --daemon
+  if [ "$DRY" = 0 ]; then
+    for _ in $(seq 1 50); do [ -S "$DIR/swtpm.sock" ] && return 0; sleep 0.1; done
+    die "swtpm didn't start (see $DIR/swtpm.log)"
+  fi
+}
+
+# boot runs QEMU; extra arguments (the install ISOs) are added at the end.
+boot() {
+  running && die "the VM is already running (scripts/win11-vm stop)"
+  start_tpm
+  local ui=(-display gtk,zoom-to-fit=on)
+  [ "$HEADLESS" = 1 ] && ui=(-display none)
+  # shellcheck disable=SC2046 # display's words are separate arguments on purpose
+  x qemu-system-x86_64 -name jarvis-win11 -enable-kvm -machine q35,smm=on -cpu host \
+    -smp "$CPUS" -m "$MEM" \
+    -global driver=cfi.pflash01,property=secure,value=on \
+    -drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE" \
+    -drive "if=pflash,format=raw,unit=1,file=$VARS" \
+    -chardev "socket,id=chrtpm,path=$DIR/swtpm.sock" -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-crb,tpmdev=tpm0 \
+    -drive "file=$DISK,if=none,id=disk0,format=qcow2" -device nvme,drive=disk0,serial=jarvis0 \
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -audiodev pipewire,id=snd0 -device ich9-intel-hda -device hda-duplex,audiodev=snd0 \
+    -device qemu-xhci -device usb-tablet \
+    $(display) "${ui[@]}" \
+    -qmp "unix:$QMP,server,nowait" -pidfile "$PIDFILE" -daemonize "$@"
+}
+
+case $CMD in
+  install)
+    need
+    iso=${WIN11_ISO:-$(ls -t "$HOME"/Downloads/Win*11*.iso 2>/dev/null | head -1 || true)}
+    [ -n "$iso" ] && { [ "$DRY" = 1 ] || [ -r "$iso" ]; } || die "no Windows 11 ISO (set WIN11_ISO)"
+    { [ "$DRY" = 1 ] || [ -r "$VIRTIO_ISO" ]; } || die "no virtio-win ISO at $VIRTIO_ISO (set VIRTIO_ISO)"
+    [ -e "$DISK" ] && die "$DISK exists: this VM is installed (start it, or delete $DIR to start over)"
+    x mkdir -p "$DIR"
+    x qemu-img create -q -f qcow2 "$DISK" "$DISK_SIZE"
+    x cp "$OVMF_VARS" "$VARS"
+    # The NVMe disk needs no driver during Setup (Windows has one); the virtio-win ISO is for the
+    # network and display drivers afterwards (its guest-tools installer).
+    boot -drive "file=$iso,media=cdrom,readonly=on" -drive "file=$VIRTIO_ISO,media=cdrom,readonly=on" -boot order=d,menu=on
+    say "Windows Setup is up: press a key at 'Press any key to boot from CD', then follow docs/agent/win11-vm.md"
+    ;;
+  start)
+    need
+    [ "$DRY" = 1 ] || [ -e "$DISK" ] || die "no VM yet: scripts/win11-vm install"
+    boot
+    ;;
+  stop)
+    running || { say "not running"; exit 0; }
+    command -v socat >/dev/null || die "stop needs socat (or shut Windows down from inside)"
+    printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"system_powerdown"}' | socat - "unix-connect:$QMP" >/dev/null
+    for _ in $(seq 1 120); do running || { say "stopped"; exit 0; }; sleep 1; done
+    die "Windows didn't shut down within 2 minutes (it may be updating); scripts/win11-vm stop again, or close the window"
+    ;;
+  snapshot|revert)
+    [[ "$NAME" =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "usage: scripts/win11-vm $CMD NAME (letters, digits, - and _)"
+    running && die "stop the VM first (snapshots are taken and restored with it off)"
+    [ "$DRY" = 1 ] || [ -e "$DISK" ] || die "no VM yet"
+    if [ "$CMD" = snapshot ]; then
+      x qemu-img snapshot -c "$NAME" "$DISK"
+      x mkdir -p "$DIR/snap/$NAME"
+      x cp "$VARS" "$DIR/snap/$NAME/ovmf-vars.fd"
+      x rm -rf "$DIR/snap/$NAME/tpm"
+      x cp -a "$TPM" "$DIR/snap/$NAME/tpm"
+      say "saved $NAME"
+    else
+      [ "$DRY" = 1 ] || [ -d "$DIR/snap/$NAME" ] || die "no snapshot $NAME (scripts/win11-vm snapshots)"
+      x qemu-img snapshot -a "$NAME" "$DISK"
+      x cp "$DIR/snap/$NAME/ovmf-vars.fd" "$VARS"
+      x rm -rf "$TPM"
+      x cp -a "$DIR/snap/$NAME/tpm" "$TPM"
+      say "reverted to $NAME"
+    fi
+    ;;
+  snapshots)
+    [ -e "$DISK" ] || die "no VM yet"
+    qemu-img snapshot -l "$DISK"
+    ;;
+  status)
+    if running; then say "running (pid $(cat "$PIDFILE"))"; else say "stopped"; fi
+    [ -e "$DISK" ] && qemu-img info "$DISK" | grep -E '^(virtual|disk) size' || say "no disk yet"
+    ;;
+  *) usage; exit 2 ;;
+esac

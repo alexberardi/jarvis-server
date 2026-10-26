@@ -100,8 +100,14 @@ func (c *conversation) noteUsage(u llm.Usage) {
 }
 
 // afterTurn runs when a turn has finished (not while client tool calls are outstanding): at
-// the threshold it queues a compaction. Callers hold conv.mu.
+// the threshold it queues a compaction, and it queues the description of tool-result images.
+// Callers hold conv.mu.
 func (m *Module) afterTurn(ctx context.Context, conv *conversation) {
+	for _, mm := range conv.messages {
+		if mm.fromTool && len(mm.images) > 0 {
+			m.scheduleDescribe(conv.id, mm.id) // a follow-up keeps what the screenshot showed (#576)
+		}
+	}
 	if conv.promptTokens <= 0 {
 		return
 	}

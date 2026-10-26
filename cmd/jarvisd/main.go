@@ -232,6 +232,7 @@ func modules(env config.Env) []module.Module {
 	admin.Accounts, admin.Households = auth, auth
 	admin.Models = llm
 	admin.TTS = ttsm // the wizard's voice sample (AD3b)
+	admin.STT = sttm // the Speech section's STT test
 	admin.Exposure = exposure(served, env)
 	// A4: logs (AD9), connections (AD7: registry + app clients).
 	admin.Logs, admin.Registry, admin.Apps = logs, cfgm, auth

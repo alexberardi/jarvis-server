@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -473,8 +474,9 @@ func TestWaylandWithoutATSPI(t *testing.T) {
 	}
 }
 
-// Keyframes: at most one a second; a click that ends typing takes the keyframe (the typing's
-// would be the same moment); without a cursor position (sway) there is no point and no crop.
+// Keyframes: at most one a second, but every click gets one (#581: quick clicks are each a
+// step to name by sight); a click that ends typing takes the keyframe (the typing's would be
+// the same moment); without a cursor position (sway) there is no point and no crop.
 func TestWaylandKeyframes(t *testing.T) {
 	e := newWLEnv(t)
 	tr, evs := e.record(t, func() {
@@ -483,7 +485,7 @@ func TestWaylandKeyframes(t *testing.T) {
 		s.tap(evdev.BtnLeft) // flushes "h": one keyframe, the click's
 		e.feed(s)
 		s = &evStream{at: s.at}
-		s.tap(evdev.BtnLeft) // 100 ms later: none
+		s.tap(evdev.BtnLeft) // 100 ms later: a click still gets one
 		e.feed(s)
 		s = &evStream{at: s.at.Add(time.Second)}
 		s.tap(evdev.BtnLeft) // over a second later: one
@@ -496,10 +498,10 @@ func TestWaylandKeyframes(t *testing.T) {
 	for _, k := range tr.Keyframes {
 		seqs = append(seqs, k.Seq)
 	}
-	if len(seqs) != 2 || seqs[0] != 2 || seqs[1] != 4 {
-		t.Fatalf("keyframes at %v, want [2 4]", seqs)
+	if !slices.Equal(seqs, []int{2, 3, 4}) {
+		t.Fatalf("keyframes at %v, want [2 3 4]", seqs)
 	}
-	if evs[0].KeyframePoint != nil || evs[2].KeyframePoint != nil || evs[1].KeyframePoint == nil {
+	if evs[0].KeyframePoint != nil || evs[1].KeyframePoint == nil || evs[2].KeyframePoint == nil {
 		t.Fatalf("keyframe points: %+v", evs)
 	}
 }
@@ -558,7 +560,7 @@ func TestWaylandRefusals(t *testing.T) {
 	out, _ = tools.Call(context.Background(), "computer_record_start", map[string]any{"mode": "desktop"}, node.Request{})
 	msg, _ := out["error"].(string)
 	if out["success"] != false || !strings.Contains(msg, "sudo usermod -aG input $USER") ||
-		!strings.Contains(msg, "log out") {
+		!strings.Contains(msg, "jarvis-agent restart") || strings.Contains(msg, "log out") {
 		t.Fatalf("no input group: %v", out)
 	}
 	if noGroup.r.Current() != "" {

@@ -104,7 +104,14 @@ cmd/jarvis-agentw/    Windows launcher (GUI subsystem, -H=windowsgui): starts ja
 internal/agent/
   host/               Backend interface + Host (gate, clamp, validate) + linux/darwin/windows backends
                       -- read host.go first
-  desktop/            the 8 client tools over Host, and the open policy
+  desktop/            the client tools over Host (desktop_window: one tool for the window verbs,
+                      its actions computed per call; window.go), the open policy, and
+                      desktop_views/desktop_view: tabs and sheets by spoken name, matched by
+                      sound, a choice when unsure (views.go; VOICE-FLOWS.md Q26); Direct
+                      (direct.go) is funnel stage 1 (Q27): "switch to X" done on the node with
+                      no model, before command-center (voice: Pipeline.direct)
+  views/              desktop's view source on Linux: the front window's page tabs from AT-SPI
+                      (atspi.Tabs/SelectTab) by the window's pid; macOS/Windows not yet
   apps/               installed-app catalogue (per-OS scanners), name resolution, apps.json
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
@@ -113,6 +120,8 @@ internal/agent/
   packages/           Pantry package install/update/revert/uninstall from the app (DESIGN.md §6):
                       the MQTT requests (requests.go), download (archive.go), manifest checks,
                       uv + venv (python.go), pkgs/ and the sidecar swap (manager.go)
+  pkgagents/          a Pi's package agents (a manifest's agents: comfyui_jobs) on their schedules, run in
+                      the sidecar (agent_run); their alerts in the Pi's queue, Failing for the app
   browser/            browser control: native-messaging host relay (nativehost.go), the agent's
                       socket + peer check (ipc.go), Hub of connected browsers (hub.go), the 9
                       browser_* tools (tools.go), host-manifest registration per OS/browser
@@ -238,7 +247,8 @@ the agent (+~4.5 MB), the price of one verification path.
 5. **Capability names are a closed set** (`KnownCapabilities`); `Host` rejects others.
 6. **`open` is fire-and-forget.** No launch confirmation; it is unreliable everywhere. Linux
    refuses without a graphical session (xdg-open on a headless box exits 0 having done nothing).
-7. **Close is graceful, never a kill:** `WM_CLOSE`, `wmctrl -c`, the window's AXCloseButton.
+7. **Close is graceful, never a kill:** `WM_CLOSE`, `wmctrl -c`, the window's AXCloseButton,
+   Hyprland's `closewindow`, sway's `kill` (its close command: the app gets its close event, no signal).
 8. **Window ids are opaque** (decimal HWND, X11 `0x…`, macOS `pid/index`), but each backend
    validates its own format before an id reaches a subprocess or AppleScript. The Python
    macOS provider spliced ids into AppleScript unvalidated; don't regress that.
@@ -257,8 +267,15 @@ the agent (+~4.5 MB), the price of one verification path.
 12. **Every `tool_call` is verified** with `POST /commands/{rid}/verify` before running
     (single use). Broker ACLs already confine publishers; this is defence in depth for a node
     that can open things.
-13. **Wayland has no window control** (no cross-client API). XWayland's `DISPLAY` does not
-    count. Per-compositor backends are an open question.
+13. **Wayland has no cross-client window API**, so `host` drives windows only where a
+    compositor exposes its own IPC: Hyprland (`hyprctl`, classic dispatch then the Lua form) and
+    sway (`swaymsg`), in `host/wlcomp.go`: list (with `focused`), focus, close. Neither offers
+    minimise: there's no real one, and a stand-in is never offered (DESKTOP-COMMANDS.md Q4).
+    GNOME/KDE Wayland still have no window control. XWayland's `DISPLAY` does not count.
+    On X11 the EWMH window manager's own requests arrange windows (`_NET_WM_STATE`
+    maximise/fullscreen, `_NET_MOVERESIZE_WINDOW` into half the `_NET_WORKAREA` for snap,
+    `_NET_WM_DESKTOP`), each offered only when the WM advertises it. Live check on a throwaway
+    Xvfb + openbox: `TestX11ArrangingLive` (`JARVIS_X11_ARRANGE=1`, under `env -i`).
 14. **macOS window control needs Accessibility for "Jarvis Automation Agent.app"** (`net.jarvisautomation.agent`, `internal/agent/appid`; was `io.jarvis.agent`) plus
     an Automation grant for System Events. A bare binary added with "+" never shows in the list
     on macOS 26, so the agent ships as a bundle and calls `AXIsProcessTrustedWithOptions`
@@ -294,7 +311,7 @@ the agent (+~4.5 MB), the price of one verification path.
     response. Each call is bounded by `Config.ToolTimeout` and a panic is a failure result.
 21. **Follow-up is the Python node's, widened by command-center's gate** (go-pi-node.md §3.9,
     §3.10): a window after every reply not marked `end_of_exchange` / `not_for_me`, 8 s then 6,
-    then 5 (Python: 4 then 3), ≤ 5, answers end after 1.2 s of silence (Python 0.5) and may run
+    then 5 (Python: 4 then 3), ≤ 5 (silent desktop steps don't count and get an 8 s window, so a process can be said step by step; ≤ 30 turns in all), answers end after 1.2 s of silence (Python 0.5) and may run
     10 s; sent as blocking `/voice/command` follow_up turns of the same conversation with
     `level_vs_wake_db`. A `not_for_me` with `keep_listening` is ignored silently and the window
     listens again (same iteration, no flush: nothing was said), at most `MaxIgnored`, for only

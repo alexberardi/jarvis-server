@@ -127,10 +127,19 @@ type Spec struct {
 	// PIDDir, if set, holds a pid file for the running engine so Sweep can kill it after
 	// jarvisd dies without stopping it (macOS has no Pdeathsig). Names must be unique in it.
 	PIDDir string
-	// ErrorLine, if set, finds the engine's own reason for exiting in its output: the first
-	// line since the start that matches (its first group, if it has one) is added to the
-	// exit's error, e.g. the root cause of a Python traceback the last lines no longer show.
+	// ErrorLine, if set, finds the engine's own reason for going down in its output: the first
+	// line that matches (its last group, if it has one) since the start, or since it first
+	// passed its health check once it has, is added to the exit's or the health failure's
+	// error, e.g. the root cause of a Python traceback the last lines no longer show.
 	ErrorLine *regexp.Regexp
+	// OutputTail is how many output lines Status keeps (0 = 20). A Python traceback needs more.
+	OutputTail int
+	// Fatal, if set, matches an output line that means restarting can't help (the GPU is out
+	// of memory at load): once the process exits after printing one at load, before the engine
+	// first passes its health check, it fails at once, with the line in LastError and
+	// Status.Fatal, instead of restarting. A line after that (one big request) does not count:
+	// the crash frees the card, so a restart can help.
+	Fatal *regexp.Regexp
 	// OnHealthy, if set, runs (in its own goroutine) each time a start first passes its health
 	// check: after the first start and after every restart. The llm layer warms the engine
 	// there (decision 2026-10-20-prompt-diet).
@@ -248,6 +257,7 @@ type Status struct {
 	Started   time.Time // when the running process was launched; zero when none
 	LastError string    // why it last went down or unhealthy
 	Output    []string  // last lines of stdout and stderr
+	Fatal     string    // the Spec.Fatal line the last run printed at load, "" for none
 }
 
 const outputTail = 20
@@ -268,7 +278,9 @@ type Supervisor struct {
 	restarts int
 	lastErr  string
 	tail     []string
-	reason   string // ErrorLine's match since the start
+	reason   string // ErrorLine's match since the start, or since it served
+	fatal    string // Fatal's first matching line since the start, before it first served
+	served   bool   // the current process has passed its health check
 
 	cur *run // nil when the loop is not running
 }
@@ -318,7 +330,7 @@ func (s *Supervisor) Status() Status {
 	defer s.mu.Unlock()
 	st := Status{
 		Name: s.spec.Name, State: s.state, PID: s.pid, Restarts: s.restarts,
-		Since: s.since, LastError: s.lastErr, Output: slices.Clone(s.tail),
+		Since: s.since, LastError: s.lastErr, Output: slices.Clone(s.tail), Fatal: s.fatal,
 	}
 	if s.pid != 0 {
 		st.Started = s.started
@@ -454,6 +466,11 @@ func (s *Supervisor) loop(r *run, p *proc) {
 			cause = c
 		}
 		s.log.Warn("engine down", "cause", cause)
+		if f := s.fatalLine(); f != "" {
+			s.log.Error("engine failed: restarting can't help", "line", f, "cause", cause)
+			finish(Failed, fmt.Sprintf("%v: %s", cause, f))
+			return
+		}
 
 		now := time.Now()
 		recent = slices.DeleteFunc(recent, func(t time.Time) bool { return now.Sub(t) > pol.Window })
@@ -539,6 +556,10 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 			if !healthy {
 				healthy = true
 				startup.Stop()
+				s.mu.Lock()
+				// A warning's exception at load says nothing about a later death mid-request.
+				s.served, s.fatal, s.reason = true, "", ""
+				s.mu.Unlock()
 				s.log.Info("engine healthy", "pid", p.cmd.Process.Pid)
 				if s.spec.OnHealthy != nil {
 					go s.spec.OnHealthy()
@@ -551,7 +572,7 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 			fails++
 			s.log.Warn("engine health check failed", "err", err, "consecutive", fails)
 			if fails >= hc.FailureThreshold {
-				cause := fmt.Errorf("%d consecutive failed health checks: %w", fails, err)
+				cause := s.explain(fmt.Errorf("%d consecutive failed health checks: %w", fails, err))
 				if hc.DrainGrace <= 0 {
 					return false, cause
 				}
@@ -616,6 +637,13 @@ type proc struct {
 	err    error
 }
 
+// fatalLine is Fatal's match since the start, "" for none.
+func (s *Supervisor) fatalLine() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fatal
+}
+
 // explain adds ErrorLine's match to an exit's error.
 func (s *Supervisor) explain(err error) error {
 	s.mu.Lock()
@@ -635,7 +663,7 @@ func (p *proc) exitErr() error {
 
 // spawn launches the engine. Callers hold s.mu; the output goroutines take it per line.
 func (s *Supervisor) spawn() (*proc, error) {
-	s.reason = ""
+	s.reason, s.fatal, s.served = "", "", false
 	cmd := exec.Command(s.spec.Path, s.spec.Args...)
 	cmd.Dir = s.spec.Dir
 	cmd.Env = s.spec.environ(os.Environ())
@@ -710,9 +738,16 @@ func (w *lineWriter) emit(line []byte) {
 			w.s.reason = m[len(m)-1]
 		}
 	}
+	if re := w.s.spec.Fatal; re != nil && !w.s.served && w.s.fatal == "" && re.MatchString(l) {
+		w.s.fatal = l
+	}
 	w.s.tail = append(w.s.tail, l)
-	if len(w.s.tail) > outputTail {
-		w.s.tail = slices.Delete(w.s.tail, 0, len(w.s.tail)-outputTail)
+	n := w.s.spec.OutputTail
+	if n <= 0 {
+		n = outputTail
+	}
+	if len(w.s.tail) > n {
+		w.s.tail = slices.Delete(w.s.tail, 0, len(w.s.tail)-n)
 	}
 	w.s.mu.Unlock()
 }

@@ -14,9 +14,18 @@ with jarvis-node-mobile, which browses for it:
 - **Instance name** the node id the API's `/api/v1/info` reports (`jarvis-<last 8 hex of the MAC>`
   on a reset node).
 - **Port** the API's listener (8080), on the host's LAN addresses (`mdns.Advertise`'s interface
-  pick, as jarvisd's `_jarvis-config._tcp`).
+  pick, as jarvisd's `_jarvis-config._tcp`). The SRV target is `<hostname>-jarvis.local.`, not
+  the host's own name (#567): the Go responder's unique A/AAAA records for `<hostname>.local`
+  made avahi see a conflict and rename the Pi to `<hostname>-2.local`. Clients use the
+  addresses the resolve returns, not the target name.
 - **TXT** `node_id` and `hardware` (same values as `/api/v1/info`). Clients should still call
   `/api/v1/info` at the resolved address before provisioning.
+- **`/api/v1/info` `setup_mode`** (#565) says which setup the agent chose: `"lan"` (no hotspot;
+  the node is on the user's network and found over this advertisement) or `"hotspot"` (the app
+  joins the node's SSID; the API is at 192.168.4.1). `state` stays `AP_MODE` in both while the
+  node waits for the app, so clients that only know `AP_MODE` keep working; clients that need to
+  tell the two apart read `setup_mode`. A node without the field (the Python node, older agents)
+  is in hotspot mode.
 
 It is withdrawn as soon as the node is provisioned (the provisioning server's `OnProvisioned`
 ends setup mode) or setup mode stops; a failed attempt leaves it up, as the API is. An

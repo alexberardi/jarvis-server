@@ -212,14 +212,27 @@ func TestLinuxInputPermission(t *testing.T) {
 	}
 	var access error = evdev.ErrNoAccess
 	p := linuxPermissions("linux", "hyprland", func() error { return access })
-	if len(p) != 1 || p[0].ID != "input-monitoring" || p[0].How != inputGroupCmd || p[0].Status() != firstrun.NotAsked {
+	if len(p) != 1 || p[0].ID != "input-monitoring" || p[0].How != inputGroupHow || p[0].Status() != firstrun.NotAsked {
 		t.Fatalf("%+v", p)
 	}
 	access = nil
 	if p[0].Status() != firstrun.Granted {
 		t.Fatal("not granted once the keyboard opens")
 	}
-	if !strings.Contains(computer.ErrInputGroup.Error(), inputGroupCmd) {
-		t.Fatalf("the refusal says %q", computer.ErrInputGroup)
+	// #571: a logout loses the user's work, and doesn't even restart the systemd user manager.
+	for _, text := range []string{computer.ErrInputGroup.Error(), p[0].Why, p[0].How, inputGroupHint(false), inputGroupHint(true)} {
+		low := strings.ToLower(text)
+		if strings.Contains(low, "log out") || strings.Contains(low, "reboot") ||
+			(text != p[0].Why && !strings.Contains(text, "jarvis-agent restart")) {
+			t.Errorf("advice %q", text)
+		}
+	}
+	for _, text := range []string{computer.ErrInputGroup.Error(), p[0].How, inputGroupHint(false)} {
+		if !strings.Contains(text, inputGroupCmd) {
+			t.Errorf("%q lacks %q", text, inputGroupCmd)
+		}
+	}
+	if strings.Contains(inputGroupHint(true), "usermod") {
+		t.Error("a member is told to add the group again")
 	}
 }

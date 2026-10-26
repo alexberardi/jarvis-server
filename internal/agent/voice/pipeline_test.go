@@ -170,6 +170,7 @@ type fakeServer struct {
 	commands    []StreamRequest // every /voice/command body, in order
 	said        []string        // every Speak text, in order
 	transcribed int
+	hint        string // the last Transcribe's WithTranscribeHint
 
 	nodeCtx  map[string]any
 	tools    ToolSchemas
@@ -201,10 +202,11 @@ func (s *fakeServer) EndConversation(_ context.Context, id string) error {
 	s.ended <- id
 	return nil
 }
-func (s *fakeServer) Transcribe(_ context.Context, cmd, spk []byte, id string) (Transcript, error) {
+func (s *fakeServer) Transcribe(ctx context.Context, cmd, spk []byte, id string) (Transcript, error) {
 	s.log("transcribe")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.hint, _ = ctx.Value(hintKey{}).(string)
 	s.transcribed++
 	if s.transcribed == 1 {
 		s.cmdWAV, s.spkWAV = cmd, spk
