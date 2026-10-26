@@ -114,7 +114,7 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "open youtube in my browser", Params: map[string]any{"url": "https://www.youtube.com"}, Primary: true},
 				{VoiceCommand: "search youtube for lofi music", Params: map[string]any{"url": "https://www.youtube.com/results?search_query=lofi+music"}},
 			}}, 0, t.open, false},
-		{node.Spec{Name: ToolSwitchTab, Description: "Switch to a browser tab (tab_id from browser_list_tabs).",
+		{node.Spec{Name: ToolSwitchTab, Description: "Switch to a browser tab (tab_id from browser_list_tabs). To switch by the name the user said, use desktop_view when it is offered: it matches misheard names and asks when unsure.",
 			Params:   []node.Param{required},
 			Keywords: []string{"browser", "switch", "tab", "go to", "show"}}, 0, t.simple("switch_tab"), false},
 		{node.Spec{Name: ToolCloseTab, Description: "Close a browser tab (tab_id from browser_list_tabs).",

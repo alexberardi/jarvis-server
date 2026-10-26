@@ -89,3 +89,20 @@ func clip(s string) string {
 // Available reports whether the accessibility bus can be reached (nil) or why not: without it a
 // desktop recording has no element context and masks nothing.
 func Available(ctx context.Context) error { return available(ctx) }
+
+// Tab is a page tab in an app's active window: a browser tab, a spreadsheet's sheet, an
+// editor's or terminal's tab. Index is its place in the window's tabs, in tree order.
+type Tab struct {
+	Index    int
+	Name     string
+	Selected bool
+}
+
+// Tabs lists the page tabs of the active window of the app with this pid.
+func Tabs(ctx context.Context, pid int) ([]Tab, error) { return tabs(ctx, pid) }
+
+// SelectTab switches to the tab Tabs reported at index with this name (stale_ref when the tabs
+// changed since).
+func SelectTab(ctx context.Context, pid, index int, name string) error {
+	return selectTab(ctx, pid, index, name)
+}

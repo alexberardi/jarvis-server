@@ -13,10 +13,14 @@ import (
 const MaxVocabulary = 400
 
 // Vocabulary is this computer's app names for speech-to-text (DESIGN.md §14 "Biasing
-// speech-to-text"): the open windows' apps, most recently focused first, the app launched
+// speech-to-text"): the front window's tabs and sheets (HearFirst), the open windows' apps,
+// most recently focused first, the app launched
 // last, then the catalogue (apps.Vocabulary). Never sent to the LLM.
 func (t *Tools) Vocabulary(ctx context.Context) string {
 	var first []string
+	if t.HearFirst != nil {
+		first = t.HearFirst(ctx)
+	}
 	if t.Win != nil {
 		if ok, _ := t.Win.Available(ctx); ok {
 			if ws, err := t.Win.List(ctx); err == nil {
