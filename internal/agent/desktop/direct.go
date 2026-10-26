@@ -69,6 +69,8 @@ func (t *Tools) Direct(ctx context.Context, said string) (map[string]any, bool) 
 	var view *View
 	var viewCands []View
 	var appName string
+	r.views = r.views && node.Enabled(ctx, ToolView)
+	r.windows = r.windows && node.Enabled(ctx, ToolWindow)
 	if r.views && t.Views != nil {
 		var views []View
 		var err error

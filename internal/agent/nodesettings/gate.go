@@ -31,14 +31,14 @@ func (g Gate) Call(ctx context.Context, name string, args map[string]any, req no
 	return g.Tools.Call(ctx, name, args, req)
 }
 
-// Direct passes funnel stage 1 through (node.Director): "switch to X" may focus a window or
-// switch a tab, so it runs while either command is on.
+// Direct passes funnel stage 1 through (node.Director), telling it which commands are on: its
+// own calls don't come back through the gate.
 func (g Gate) Direct(ctx context.Context, said string) (map[string]any, bool) {
 	d, ok := g.Tools.(node.Director)
-	if !ok || (!g.Store.Enabled("desktop_view") && !g.Store.Enabled("desktop_window")) {
+	if !ok {
 		return nil, false
 	}
-	return d.Direct(ctx, said)
+	return d.Direct(node.WithEnabled(ctx, g.Store.Enabled), said)
 }
 
 // AnswerChoice passes an answer to the island's list through (node.ChoiceAnswerer): it runs a

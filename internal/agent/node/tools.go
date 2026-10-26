@@ -48,6 +48,20 @@ type Director interface {
 	Direct(ctx context.Context, said string) (out map[string]any, ok bool)
 }
 
+type enabledKey struct{}
+
+// WithEnabled carries which commands are on (a settings gate's) to a Director, whose own calls
+// don't pass back through the gate.
+func WithEnabled(ctx context.Context, enabled func(name string) bool) context.Context {
+	return context.WithValue(ctx, enabledKey{}, enabled)
+}
+
+// Enabled reports whether the command is on for a Director (true without a gate).
+func Enabled(ctx context.Context, name string) bool {
+	f, _ := ctx.Value(enabledKey{}).(func(string) bool)
+	return f == nil || f(name)
+}
+
 // Direct asks each Toolset that can carry out a command itself.
 func (m Multi) Direct(ctx context.Context, said string) (map[string]any, bool) {
 	for _, t := range m {
