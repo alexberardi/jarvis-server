@@ -269,6 +269,8 @@ func (m *Module) registerRecordings(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+v0+"/recordings", m.user(m.handleListRecordings))
 	mux.HandleFunc("GET "+v0+"/recordings/{id}", m.user(m.handleGetRecording))
 	mux.HandleFunc("DELETE "+v0+"/recordings/{id}", m.user(m.handleDeleteRecording))
+	mux.HandleFunc("GET "+v0+"/recordings/{id}/keyframes/{seq}", m.user(m.handleGetKeyframe(false)))
+	mux.HandleFunc("GET "+v0+"/recordings/{id}/keyframes/{seq}/crop", m.user(m.handleGetKeyframe(true)))
 }
 
 // startRecordings schedules the daily retention sweep (D27: a trigger, not a loop).
