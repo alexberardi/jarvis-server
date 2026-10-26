@@ -621,6 +621,9 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if p.desktop {
+		regroupInput(log)
+	}
 	if !p.desktop {
 		// A Pi is headless: no status icon, no island, nothing that opens a browser.
 		*f.noTray, *f.noOverlay = true, true

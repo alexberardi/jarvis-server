@@ -558,7 +558,7 @@ func TestWaylandRefusals(t *testing.T) {
 	out, _ = tools.Call(context.Background(), "computer_record_start", map[string]any{"mode": "desktop"}, node.Request{})
 	msg, _ := out["error"].(string)
 	if out["success"] != false || !strings.Contains(msg, "sudo usermod -aG input $USER") ||
-		!strings.Contains(msg, "log out") {
+		!strings.Contains(msg, "jarvis-agent restart") || strings.Contains(msg, "log out") {
 		t.Fatalf("no input group: %v", out)
 	}
 	if noGroup.r.Current() != "" {
