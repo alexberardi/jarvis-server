@@ -139,7 +139,10 @@ owner=$(docker exec "$NAME" stat -c %u /data/jarvis.db) || fail "no /data/jarvis
 [ "$owner" = 99 ] || fail "/data/jarvis.db belongs to uid $owner, want 99"
 ok "jarvisd runs as uid 99; /data/jarvis.db is uid 99"
 
-docker logs "$NAME" 2>&1 | grep -q "Setup token:" || fail "docker logs has no 'Setup token:'"
+# Not `docker logs | grep -q`: grep -q exits at the match, docker logs can die of SIGPIPE, and
+# pipefail then fails the check with the token right there in the log.
+logs=$(docker logs "$NAME" 2>&1)
+grep -q "Setup token:" <<<"$logs" || fail "docker logs has no 'Setup token:'"
 ok "docker logs shows the setup token"
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:37710/) || fail "GET :37710/"
