@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -21,21 +22,26 @@ import (
 
 // chatPayload is the upstream request body.
 type chatPayload struct {
-	Model              string          `json:"model"`
-	Messages           []Message       `json:"messages"`
-	Temperature        float64         `json:"temperature"`
-	Stream             bool            `json:"stream"`
-	StreamOptions      *streamOptions  `json:"stream_options,omitempty"`
-	MaxTokens          *int            `json:"max_tokens,omitempty"`
-	TopP               *float64        `json:"top_p,omitempty"`
-	Seed               *int64          `json:"seed,omitempty"`
-	Tools              []Tool          `json:"tools,omitempty"`
-	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
-	ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs,omitempty"`
-	ReasoningBudget    *int            `json:"reasoning_budget,omitempty"`
+	Model         string         `json:"model"`
+	Messages      []Message      `json:"messages"`
+	Temperature   *float64       `json:"temperature,omitempty"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	MaxTokens     *int           `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens replaces max_tokens for a remote: OpenAI's newer models refuse
+	// max_tokens.
+	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
+	TopP                *float64        `json:"top_p,omitempty"`
+	Seed                *int64          `json:"seed,omitempty"`
+	Tools               []Tool          `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
+	ChatTemplateKwargs  map[string]bool `json:"chat_template_kwargs,omitempty"`
+	ReasoningBudget     *int            `json:"reasoning_budget,omitempty"`
 	// ReasoningBudgetTokens is llama-server's own name for a capped budget (N>0); it ignores
 	// reasoning_budget.
 	ReasoningBudgetTokens *int `json:"reasoning_budget_tokens,omitempty"`
+	// ReasoningEffort is OpenAI's thinking control for its reasoning models (fixedSampling).
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -49,7 +55,21 @@ type streamOptions struct {
 // enforces by closing the thinking block after N tokens. A remote gets none of these: they are
 // llama-server's, and OpenAI answers 400 to an unknown parameter.
 func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
-	if budget == nil || ep.Remote {
+	if ep.Remote {
+		if ep.API != APIAnthropic { // anthropicBody reads MaxTokens
+			p.MaxCompletionTokens, p.MaxTokens = p.MaxTokens, nil
+		}
+		if fixedSampling(p.Model) {
+			// The cap counts hidden reasoning too: a chat turn's 256 went on thinking and the
+			// answer came back empty.
+			p.Temperature, p.TopP, p.MaxCompletionTokens = nil, nil, nil
+			if budget != nil && *budget == 0 {
+				p.ReasoningEffort = "low" // the lowest every family (o-series, gpt-5.x) accepts
+			}
+		}
+		return
+	}
+	if budget == nil {
 		return
 	}
 	p.ChatTemplateKwargs = map[string]bool{"enable_thinking": *budget != 0}
@@ -61,6 +81,14 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 	if b > 0 {
 		p.ReasoningBudgetTokens = &b
 	}
+}
+
+// fixedSampling: OpenAI's reasoning models answer 400 to any temperature or top_p but the
+// default. shortcut: matched by name (also behind a router's "openai/" prefix); add new families here.
+func fixedSampling(model string) bool {
+	m := strings.ToLower(model)
+	m = m[strings.LastIndex(m, "/")+1:]
+	return slices.ContainsFunc([]string{"gpt-5", "o1", "o3", "o4"}, func(p string) bool { return strings.HasPrefix(m, p) })
 }
 
 func endpointURL(base, path string) string {

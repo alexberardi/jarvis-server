@@ -505,8 +505,8 @@ func TestOpenAIPathUnchanged(t *testing.T) {
 	}
 	path, h, body := rec.last()
 	want := `{"model":"gpt-test","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}],` +
-		`"temperature":0.2,"stream":false,"max_tokens":50,"tools":[{"type":"function","function":{"name":"now"}}],` +
-		`"tool_choice":"auto"}` // no llama-server thinking fields: OpenAI refuses them
+		`"temperature":0.2,"stream":false,"max_completion_tokens":50,"tools":[{"type":"function","function":{"name":"now"}}],` +
+		`"tool_choice":"auto"}` // no max_tokens or llama-server thinking fields: OpenAI refuses them
 	if path != "/v1/chat/completions" || body != want {
 		t.Fatalf("%s\n got %s\nwant %s", path, body, want)
 	}

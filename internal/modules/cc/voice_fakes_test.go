@@ -431,6 +431,14 @@ func providerTraits(provider string) llm.ModelTraits {
 	return llm.ModelTraits{ToolCalling: string(prompts.ToolsText), ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true}
 }
 
+// localTraits is provider's traits served by a local engine: for tests that read the prompt
+// off the warmup, which a remote live skips.
+func localTraits(provider string) llm.ModelTraits {
+	tr := providerTraits(provider)
+	tr.Local = true
+	return tr
+}
+
 // withTraits makes tr the live model's traits (the LLM mode's input).
 func withTraits(m *Module, tr llm.ModelTraits) {
 	m.LiveModelTraits = func(context.Context) llm.ModelTraits { return tr }

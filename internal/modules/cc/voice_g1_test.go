@@ -102,6 +102,7 @@ func TestG1ThroughWarmup(t *testing.T) {
 					m.tools.Register(stubTool{toolName(d.(*pyjson.Object))})
 				}
 				m.dateKeys = keys
+				withTraits(m, localTraits(provider)) // the tools payload is read off the warmup
 			})
 			ve.stt.recognition = true
 			ve.set(settingWebSearch, true, settings.Scope{HouseholdID: voiceHH})
@@ -138,7 +139,13 @@ func assertWarmPrompt(t *testing.T, ve *voiceEnv, cid, want string) {
 	if got != want {
 		t.Fatalf("messages[0] differs from the G1 fixture %s", firstDiffStr(got, want))
 	}
-	// The warmup inference carried the same bytes.
+	// The warmup inference carried the same bytes; a remote live (ChatGPT's traits) gets none.
+	if !ve.m.LiveModelTraits(context.Background()).Local {
+		if n := len(ve.eng.requests()); n != 0 {
+			t.Fatalf("remote live: %d warmup requests, want none", n)
+		}
+		return
+	}
 	warm := ve.eng.requests()[0]
 	if s := messagesOf(warm)[0]["content"]; s != want {
 		t.Fatal("warmup request system prompt differs")
