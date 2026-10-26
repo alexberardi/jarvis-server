@@ -105,7 +105,11 @@ internal/agent/
   host/               Backend interface + Host (gate, clamp, validate) + linux/darwin/windows backends
                       -- read host.go first
   desktop/            the client tools over Host (desktop_window: one tool for the window verbs,
-                      its actions computed per call; window.go), and the open policy
+                      its actions computed per call; window.go), the open policy, and
+                      desktop_views/desktop_view: tabs and sheets by spoken name, matched by
+                      sound, a choice when unsure (views.go; VOICE-FLOWS.md Q26)
+  views/              desktop's view source on Linux: the front window's page tabs from AT-SPI
+                      (atspi.Tabs/SelectTab) by the window's pid; macOS/Windows not yet
   apps/               installed-app catalogue (per-OS scanners), name resolution, apps.json
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch

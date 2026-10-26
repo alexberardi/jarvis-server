@@ -37,9 +37,12 @@ const (
 // and desktop_confirm (offered while confirmation is on; the browser's fill and click use the
 // same Confirmer).
 type Tools struct {
-	KB      Keyboard
-	Win     Windows    // nil: named apps are unavailable
-	Confirm *Confirmer // nil or mode off: nothing is asked first
+	// HearFirst, when set, is names speech-to-text should expect before any app's: the front
+	// window's tabs and sheets (desktop.Tools.ViewVocabulary).
+	HearFirst func(ctx context.Context) []string
+	KB        Keyboard
+	Win       Windows    // nil: named apps are unavailable
+	Confirm   *Confirmer // nil or mode off: nothing is asked first
 	// Show, when set, shows text on the island for d ("" clears it).
 	Show func(text string, d time.Duration)
 	Log  *slog.Logger
