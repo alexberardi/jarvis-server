@@ -53,16 +53,21 @@ func freePort(t *testing.T, host string) int {
 	return c.LocalAddr().(*net.UDPAddr).Port
 }
 
+// testLog is the UA's log in t: go test prints it only for a failing test, so a CI flake
+// says what the UA did (why a call ended) without -v. Debug with -v.
 func testLog(t *testing.T) *slog.Logger {
+	level := slog.LevelInfo
 	if testing.Verbose() {
-		return slog.New(slog.NewTextHandler(&testWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		level = slog.LevelDebug
 	}
-	return slog.New(slog.DiscardHandler)
+	return slog.New(slog.NewTextHandler(&testWriter{t}, &slog.HandlerOptions{Level: level}))
 }
 
 type testWriter struct{ t *testing.T }
 
 func (w *testWriter) Write(b []byte) (int, error) {
+	// A UA goroutine can log after its test has completed, and t.Log panics then.
+	defer func() { _ = recover() }()
 	w.t.Log(strings.TrimSpace(string(b)))
 	return len(b), nil
 }

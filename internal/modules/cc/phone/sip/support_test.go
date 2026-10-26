@@ -116,7 +116,8 @@ func TestStatusCountsActiveCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := u.Status().ActiveCalls; n != 1 {
-		t.Fatalf("ActiveCalls %d while ringing", n)
+		e, d := c.End()
+		t.Fatalf("ActiveCalls %d while ringing (end %q %q)", n, e, d)
 	}
 	c.Hangup(context.Background())
 	<-c.Done()
