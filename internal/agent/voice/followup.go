@@ -261,6 +261,14 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if tr.Speaker != nil && tr.Speaker.UserID != nil {
 			s.userID = tr.Speaker.UserID
 		}
+		if p.direct(ctx, s, &ex, text) { // funnel stage 1: done here, no command-center turn
+			t.FollowUps = append(t.FollowUps, ex)
+			ignored, used = 0, 0
+			if !s.quietTurn {
+				it++
+			}
+			continue
+		}
 
 		// A follow_up turn of the same conversation, on the blocking route as the Python node
 		// sends it (continue_conversation → POST /voice/command).
