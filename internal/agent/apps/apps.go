@@ -37,6 +37,9 @@ type App struct {
 	Path string `json:"path"` // what gets launched; comes from the scan, never from the model
 	Kind Kind   `json:"-"`
 	ID   string `json:"-"` // desktop-file id (e.g. "steam"), else ""
+	// Also is what the app is called besides its name: a desktop file's GenericName and
+	// Keywords ("Calculator", "calc" for Omacalc). Matched only when no name matches.
+	Also []string `json:"-"`
 }
 
 // Source is one glob of app paths. "**" matches any number of directories (including none),
@@ -217,13 +220,14 @@ func entry(src Source, p string) (App, bool) {
 		if name == "" {
 			name = id
 		}
-		return App{Name: name, Path: p, Kind: DesktopFile, ID: id}, true
+		return App{Name: name, Path: p, Kind: DesktopFile, ID: id, Also: de.also}, true
 	}
 	return App{}, false
 }
 
 type desktopEntry struct {
 	name, typ, exec   string
+	also              []string // GenericName, then Keywords
 	noDisplay, hidden bool
 }
 
@@ -231,8 +235,8 @@ func (d desktopEntry) launchable() bool {
 	return (d.typ == "" || d.typ == "Application") && d.exec != "" && !d.noDisplay && !d.hidden
 }
 
-// parseDesktop reads the [Desktop Entry] group: the unlocalised Name, Type, Exec, NoDisplay
-// and Hidden. Localised keys (Name[de]) are ignored.
+// parseDesktop reads the [Desktop Entry] group: the unlocalised Name, GenericName, Keywords,
+// Type, Exec, NoDisplay and Hidden. Localised keys (Name[de]) are ignored.
 func parseDesktop(p string) (desktopEntry, error) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -259,6 +263,14 @@ func parseDesktop(p string) (desktopEntry, error) {
 		switch k {
 		case "Name":
 			d.name = v
+		case "GenericName":
+			d.also = append([]string{v}, d.also...)
+		case "Keywords":
+			for _, w := range strings.Split(v, ";") {
+				if w = strings.TrimSpace(w); w != "" {
+					d.also = append(d.also, w)
+				}
+			}
 		case "Type":
 			d.typ = v
 		case "Exec":
