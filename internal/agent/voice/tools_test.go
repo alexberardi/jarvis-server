@@ -433,7 +433,7 @@ func TestClampChoiceListen(t *testing.T) {
 }
 
 // Voice test, 2026-10-24: "maximize Firefox… restore it" needs one wake word. A silent desktop
-// command keeps listening like a spoken reply, starting at once.
+// command keeps listening, starting at once, for 8 s: time to say the next step (2026-10-25).
 func TestIslandOnlySuccessKeepsListening(t *testing.T) {
 	os := &fakeOS{}
 	srv := newServer()
@@ -450,8 +450,8 @@ func TestIslandOnlySuccessKeepsListening(t *testing.T) {
 	if tr.Outcome != OutcomeSilent || tr.FollowUpEnd != EndTimeout {
 		t.Fatalf("turn %+v", tr)
 	}
-	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{3 * time.Second}) {
-		t.Fatalf("windows %v, want one 3 s follow-up", got)
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want one 8 s window for the next step", got)
 	}
 }
 
