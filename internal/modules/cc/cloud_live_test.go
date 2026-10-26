@@ -37,53 +37,56 @@ func TestCloudLive(t *testing.T) {
 
 	for _, p := range ps {
 		t.Run(p.Name, func(t *testing.T) {
+			busy := &livetest.Busy{}
 			res := liveResolver{llm.Endpoint{BaseURL: p.BaseURL, APIKey: p.Key, Model: p.Model, Remote: true, API: p.API}}
 			ve := newVoiceEnv(t, prompts.Cloud, func(m *Module) {
-				m.LLM, m.Endpoints = llm.NewService(llm.ServiceConfig{Resolver: res}), res.Resolve
+				m.LLM, m.Endpoints = llm.NewService(llm.ServiceConfig{Resolver: res, HTTPClient: busy.Client()}), res.Resolve
 			})
 			ve.start("live", clientTools)
 
 			// Blocking: a client tool call, then the formatting call after its result.
 			b := ve.turn("/api/v0/voice/command", "live", "add milk to my todo list", nil).want(200).json()
-			call := liveToolCall(t, b, "todo_list")
+			call := liveToolCall(t, busy, b, "todo_list")
 			b = ve.do("POST", "/api/v0/voice/command/continue", map[string]any{"conversation_id": "live",
 				"tool_results": []any{map[string]any{"tool_call_id": call["id"], "output": map[string]any{"success": true, "items": []string{"milk"}}}}},
 				ve.node.h()).want(200).json()
 			if msg, _ := b["assistant_message"].(string); msg == "" {
-				t.Fatalf("no answer after the todo result: %v", b)
+				busy.Fatalf(t, "no answer after the todo result: %v", b)
 			}
 			t.Logf("todo: %v", b["assistant_message"])
 
-			// Streaming, with the todo round in the history.
+			// Streaming, with the todo round in the history. Any tool will do: a model may look the
+			// weather up with quick_search instead (gpt-5-nano does); the call must be well formed.
 			s := ve.turn("/api/v0/voice/command/stream", "live", "what's the weather in Paris today?", nil).want(202).json()
-			call = liveToolCall(t, s, "get_weather")
+			call = liveToolCall(t, busy, s, "")
 			a := ve.do("POST", "/api/v0/voice/command/continue/stream", map[string]any{"conversation_id": "live",
 				"tool_results": []any{map[string]any{"tool_call_id": call["id"], "output": map[string]any{"conditions": "sunny", "temp_c": 21}}}},
 				ve.node.h()).want(200)
 			if len(a.body) == 0 {
-				t.Fatal("the streamed answer after the weather result was empty")
+				busy.Fatalf(t, "the streamed answer after the weather result was empty")
 			}
 			t.Logf("weather: %s", a.body)
 		})
 	}
 }
 
-// liveToolCall is the response's call to name, with JSON-object arguments, or a fatal error.
-func liveToolCall(t *testing.T, r map[string]any, name string) map[string]any {
+// liveToolCall is the response's call to name (any call for ""), with JSON-object arguments,
+// or a fatal error.
+func liveToolCall(t *testing.T, busy *livetest.Busy, r map[string]any, name string) map[string]any {
 	t.Helper()
 	calls, _ := r["tool_calls"].([]any)
 	for _, c := range calls {
 		call, _ := c.(map[string]any)
 		fn, _ := call["function"].(map[string]any)
-		if fn["name"] != name {
+		if name != "" && fn["name"] != name {
 			continue
 		}
 		var args map[string]any
 		if id, _ := call["id"].(string); id == "" || json.Unmarshal([]byte(fn["arguments"].(string)), &args) != nil {
-			t.Fatalf("malformed %s call: %v", name, call)
+			busy.Fatalf(t, "malformed %s call: %v", fn["name"], call)
 		}
 		return call
 	}
-	t.Fatalf("no %s call (stop %v): %v", name, r["stop_reason"], r)
+	busy.Fatalf(t, "no %s call (stop %v): %v", name, r["stop_reason"], r)
 	return nil
 }

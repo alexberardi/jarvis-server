@@ -6,7 +6,10 @@
 package livetest
 
 import (
+	"net/http"
 	"os"
+	"sync/atomic"
+	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
 )
@@ -43,3 +46,32 @@ func Providers() []Provider {
 	}
 	return out
 }
+
+// Busy remembers the provider's last HTTP status, so a check that fails while the provider
+// is still refusing after jarvisd's retries (429, 5xx: Google's "experiencing high demand")
+// skips instead: that is the provider's capacity, not a request it rejected.
+type Busy struct{ last atomic.Int32 }
+
+// Client is the HTTP client for the llm.Service under test.
+func (b *Busy) Client() *http.Client {
+	return &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		resp, err := http.DefaultTransport.RoundTrip(r)
+		if err == nil {
+			b.last.Store(int32(resp.StatusCode))
+		}
+		return resp, err
+	})}
+}
+
+// Fatalf fails the test, or skips it when the provider's last answer was 429 or 5xx.
+func (b *Busy) Fatalf(t testing.TB, format string, args ...any) {
+	t.Helper()
+	if s := b.last.Load(); s == http.StatusTooManyRequests || s >= 500 {
+		t.Skipf("provider overloaded (HTTP %d after retries), skipped: "+format, append([]any{s}, args...)...)
+	}
+	t.Fatalf(format, args...)
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

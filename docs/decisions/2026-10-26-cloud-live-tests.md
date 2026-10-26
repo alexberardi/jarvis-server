@@ -14,3 +14,14 @@ It now also runs on pull requests from this repository that touch `internal/modu
 after (the old check ran on main only). Fork PRs get no secrets and are skipped. The models are
 the providers' smallest, so a run costs cents. Supersedes the "never on pull requests" note of
 the 2026-10-12 Anthropic live check.
+
+A check that fails while the provider is still answering 429 or 5xx after jarvisd's retries
+skips instead (`livetest.Busy`): the first CI run hit Google's "experiencing high demand"
+503s, which are the provider's capacity, not a request it refused. A 400 or a malformed tool
+call still fails. The streamed voice turn accepts any well-formed tool call, since a model may
+answer the weather with `quick_search` (gpt-5-nano did); which tool a model picks is a prompt
+question, not a format one.
+
+The first runs found two bugs: voice turns on an Anthropic remote sent Claude no tools (cc's
+raw-only tools were dropped by `anthropicTools`), and Gemini ends a tool-call reply with
+`finish_reason: "stop"` (now reported as `tool_calls`).

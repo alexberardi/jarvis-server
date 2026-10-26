@@ -20,13 +20,14 @@ func TestRemoteLive(t *testing.T) {
 	}
 	for _, p := range ps {
 		t.Run(p.Name, func(t *testing.T) {
-			remoteLiveChecks(t, Endpoint{BaseURL: p.BaseURL, APIKey: p.Key, Model: p.Model, Remote: true, API: p.API})
+			remoteLiveChecks(t, &livetest.Busy{}, Endpoint{BaseURL: p.BaseURL, APIKey: p.Key, Model: p.Model, Remote: true, API: p.API})
 		})
 	}
 }
 
-func remoteLiveChecks(t *testing.T, ep Endpoint) {
-	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}}, Log: quietLog()})
+func remoteLiveChecks(t *testing.T, busy *livetest.Busy, ep Endpoint) {
+	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}},
+		HTTPClient: busy.Client(), Log: quietLog()})
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "get_weather", Description: "Current weather for a city",
@@ -38,13 +39,13 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 	wantToolCall := func(t *testing.T, calls []ToolCall) {
 		t.Helper()
 		if len(calls) == 0 || calls[0].ID == "" || calls[0].Function.Name != "get_weather" {
-			t.Fatalf("no get_weather call: %+v", calls)
+			busy.Fatalf(t, "no get_weather call: %+v", calls)
 		}
 		var args struct {
 			City string `json:"city"`
 		}
 		if err := json.Unmarshal([]byte(calls[0].Function.Arguments), &args); err != nil || args.City == "" {
-			t.Fatalf("arguments %q: %v", calls[0].Function.Arguments, err)
+			busy.Fatalf(t, "arguments %q: %v", calls[0].Function.Arguments, err)
 		}
 	}
 
@@ -52,10 +53,10 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 		r, err := s.Chat(ctx, ChatRequest{Messages: []Message{msg("system", "Answer in one word."), msg("user", "What colour is the sky on a clear day?")},
 			MaxTokens: ptr(32)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		if r.Content == "" || r.FinishReason != "stop" || r.Usage.PromptTokens == 0 || r.Usage.CompletionTokens == 0 {
-			t.Fatalf("%+v", r)
+			busy.Fatalf(t, "%+v", r)
 		}
 		t.Logf("chat: %q %+v", r.Content, r.Usage)
 	})
@@ -64,20 +65,20 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 	t.Run("thinking off", func(t *testing.T) {
 		r, err := s.Chat(ctx, ChatRequest{Messages: []Message{msg("user", "Say hello.")}, MaxTokens: ptr(64), ReasoningBudget: ptr(0), Temperature: ptr(0.4)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		if r.Content == "" {
-			t.Fatalf("empty answer: %+v", r)
+			busy.Fatalf(t, "empty answer: %+v", r)
 		}
 	})
 
 	t.Run("tool round trip", func(t *testing.T) {
 		first, err := s.Chat(ctx, ChatRequest{Messages: weatherQ, Tools: tools, MaxTokens: ptr(256)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		if first.FinishReason != "tool_calls" {
-			t.Fatalf("finish %q: %+v", first.FinishReason, first)
+			busy.Fatalf(t, "finish %q: %+v", first.FinishReason, first)
 		}
 		wantToolCall(t, first.ToolCalls)
 		msgs := append(append([]Message{}, weatherQ...), Message{Role: "assistant", Content: TextContent(first.Content), ToolCalls: first.ToolCalls})
@@ -86,10 +87,10 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 		}
 		final, err := s.Chat(ctx, ChatRequest{Messages: msgs, Tools: tools, MaxTokens: ptr(256)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		if final.FinishReason != "stop" || len(final.ToolCalls) != 0 || final.Content == "" {
-			t.Fatalf("final %+v", final)
+			busy.Fatalf(t, "final %+v", final)
 		}
 		t.Logf("round trip: %q", final.Content)
 	})
@@ -105,7 +106,7 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 			msg("user", "And in Rome?"))
 		r, err := s.Chat(ctx, ChatRequest{Messages: msgs, Tools: tools, MaxTokens: ptr(256)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		wantToolCall(t, r.ToolCalls)
 	})
@@ -113,18 +114,18 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 	t.Run("stream tool call", func(t *testing.T) {
 		ch, err := s.Stream(ctx, ChatRequest{Messages: weatherQ, Tools: tools, MaxTokens: ptr(256)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		var last Frame
 		for f := range ch {
 			last = f
 		}
 		if !last.Done || last.Err != "" || last.FinishReason != "tool_calls" || len(last.ToolCalls) == 0 {
-			t.Fatalf("final frame %+v", last)
+			busy.Fatalf(t, "final frame %+v", last)
 		}
 		tc := last.ToolCalls[0]
 		if tc.ID == nil || *tc.ID == "" || tc.Name == nil || *tc.Name != "get_weather" || !json.Valid([]byte(tc.Arguments)) {
-			t.Fatalf("tool call %+v", tc)
+			busy.Fatalf(t, "tool call %+v", tc)
 		}
 		t.Logf("streamed tool call: %s %s", *tc.Name, tc.Arguments)
 	})
@@ -132,7 +133,7 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 	t.Run("stream text", func(t *testing.T) {
 		ch, err := s.Stream(ctx, ChatRequest{Messages: []Message{msg("user", "Count from one to five in words.")}, MaxTokens: ptr(128)})
 		if err != nil {
-			t.Fatal(err)
+			busy.Fatalf(t, "%v", err)
 		}
 		text := ""
 		var last Frame
@@ -141,7 +142,7 @@ func remoteLiveChecks(t *testing.T, ep Endpoint) {
 			last = f
 		}
 		if !last.Done || last.Err != "" || text == "" {
-			t.Fatalf("streamed %q, final frame %+v", text, last)
+			busy.Fatalf(t, "streamed %q, final frame %+v", text, last)
 		}
 	})
 }
