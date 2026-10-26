@@ -240,6 +240,16 @@ func TestAnthropicToolAlreadyAnthropicShaped(t *testing.T) {
 	}
 }
 
+// cc builds its tools as raw OpenAI JSON with Function unset (warmup.go); they were all
+// dropped, so Claude saw no tools and wrote its calls out as text.
+func TestAnthropicToolFromRawOnly(t *testing.T) {
+	tools := []Tool{{Raw: json.RawMessage(`{"type":"function","function":{"name":"todo_list","description":"d","parameters":{"type":"object"}}}`), Type: "function"}}
+	got, _ := json.Marshal(anthropicTools(tools))
+	if want := `[{"name":"todo_list","description":"d","input_schema":{"type":"object"}}]`; string(got) != want {
+		t.Fatalf("got %s", got)
+	}
+}
+
 func TestAnthropicToolMessageNeedsID(t *testing.T) {
 	rec := newRecorder(t)
 	s := anthropicService(rec, "", "claude-sonnet-test")
