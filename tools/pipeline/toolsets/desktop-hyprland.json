@@ -643,7 +643,7 @@
     "allow_direct_answer": false,
     "examples": [],
     "function": {
-      "description": "Switch to a browser tab (tab_id from browser_list_tabs).",
+      "description": "Switch to a browser tab (tab_id from browser_list_tabs). To switch by the name the user said, use desktop_view when it is offered: it matches misheard names and asks when unsure.",
       "name": "browser_switch_tab",
       "parameters": {
         "properties": {

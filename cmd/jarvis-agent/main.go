@@ -56,6 +56,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
 )
@@ -1074,6 +1075,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	guard := &jarvispage.Guard{Origins: f.origins}
 	dt.JarvisPage = guard.InFront
 	opener := openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt)
+	// Tabs and sheets by name (VOICE-FLOWS.md Q26), and their names for speech-to-text.
+	opener.Views = views.Native(h)
+	dt.HearFirst = opener.ViewVocabulary
 	tools := node.Multi{opener, &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	var bt *browser.Tools
@@ -1353,7 +1357,9 @@ func try(ctx context.Context, args []string) error {
 	origins := tryOrigins(ctx, *server)
 	guard := &jarvispage.Guard{Origins: origins}
 	dt.JarvisPage = guard.InFront
-	ts := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
+	opener := openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt)
+	opener.Views = views.Native(h)
+	ts := node.Multi{opener, &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).

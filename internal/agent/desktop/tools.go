@@ -107,7 +107,10 @@ type Tools struct {
 	// question.
 	Confirm *dictate.Confirmer
 	// Now is the clock for "it" (the last window acted on, for a minute); nil: time.Now.
-	Now   func() time.Time
+	Now func() time.Time
+	// Views lists and switches the tabs and sheets inside app windows (views.go); nil: the
+	// view tools aren't offered.
+	Views ViewSource
 	tools []tool
 
 	mu        sync.Mutex
@@ -125,6 +128,10 @@ type Tools struct {
 	// closes of the same app in that turn get the same question instead of closing.
 	closing     string
 	closingWait map[string]any
+	// viewChoices is the numbered list of views the island last showed (one list at a time:
+	// a window list clears it and the other way round), for the app as said.
+	viewChoices   []View
+	viewChoiceApp string
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).
@@ -168,6 +175,12 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 			Params:   []node.Param{winID, {Name: "all_of_app", Type: "bool", Description: "Close every window of the app, not just this one"}},
 			Keywords: []string{"close", "window"}},
 			host.CapWindowsClose, t.close, nil},
+	}
+	vs := viewsSpecs()
+	for i, call := range []func(context.Context, map[string]any) (map[string]any, error){t.listViews, t.switchView} {
+		spec := vs[i]
+		t.tools = append(t.tools, tool{spec: spec, call: call,
+			render: func(map[string]bool) (node.Spec, bool) { return spec, t.Views != nil }})
 	}
 	return t
 }
