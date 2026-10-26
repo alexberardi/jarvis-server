@@ -222,6 +222,8 @@ execute(conversation_id, messages, tools, max_iterations=10, user_utterance, age
                within voice.tool_dedupe_window_seconds (120) and not already nudged this turn → pop,
                append system "[TOOL_DEDUPE] The results of X with those arguments are already in this
                conversation above — answer from them concisely; …", continue. Fail-open everywhere.
+               Go: read tools (browser_read_page, desktop_read_screen) are exempt; they return the
+               current state, so a follow-up re-reads it.
              - Param validation (types + enums from available_commands); invalid and retries <
                JARVIS_INVALID_PARAM_RETRY_MAX (default 1 if model.small_model_mode else 2) → append
                "[INVALID_PARAM_RETRY n/max] … Invalid: a.b expected datetime, …"; continue
