@@ -154,12 +154,8 @@ Models page ("Runs: Remote endpoint", "API") or `PUT /v1/models/labels`:
 - Errors: Anthropic's error JSON surfaces as `"<type>: <message>"` with the upstream status.
 - Embeddings: the Messages API has none; an embeddings label resolving to `anthropic` is
   `misconfigured` with that reason.
-- **Limitations:** verified only against canned responses (`anthropic_test.go`);
-  `TestAnthropicLive` (a plain chat, a tool round trip, a streamed tool call) runs against the
-  real API when `JARVIS_TEST_ANTHROPIC_KEY` is set (model `JARVIS_TEST_ANTHROPIC_MODEL`,
-  default `claude-haiku-4-5-20251001`). CI runs it in `.github/workflows/anthropic-live.yml` on
-  push to main, weekly and on demand, from the repository secret `ANTHROPIC_API_KEY` (never on
-  pull requests; without the secret it warns and passes). Fable/Mythos tool round trips are not supported: they
+- **Limitations:** canned responses in `anthropic_test.go`; live checks in "Live cloud
+  checks" below. Fable/Mythos tool round trips are not supported: they
   need thinking blocks replayed verbatim, which the OpenAI-shaped history can't carry. No prompt
   caching (`cache_control`) is requested.
 
@@ -176,8 +172,31 @@ API key; `remote_api` stays `auto` (= `openai`).
   `reasoning_effort: "low"`. 2.5 Pro and 3.x can't turn thinking off, and `minimal`
   is a 400 on some models ("Thinking level MINIMAL is not supported"), so `low` (accepted by
   every family) is as low as it goes. Temperature and top_p are sent as usual.
-- **Limitations:** verified against canned requests only (`thinking_test.go`, `spec_test.go`);
-  there is no live Gemini check in CI.
+- A transient refusal from any remote (429, 500, 502, 503, 504: Gemini's "This model is
+  currently experiencing high demand") is retried twice, after 1 s and 3 s (`remoteRetryDelays`).
+- Thought signatures Gemini returns on tool calls (`extra_content`) are kept on non-streamed
+  replies and sent back as is; a history call without one (cc's history, another model's turn,
+  a streamed reply) gets Google's stand-in `skip_thought_signature_validator`.
+
+**Live cloud checks** (`.github/workflows/cloud-live.yml`). Every provider whose key is set runs,
+with the model from `JARVIS_TEST_<NAME>_MODEL` or the default (`internal/modules/llm/livetest`):
+
+| provider | secret → env | default model |
+| --- | --- | --- |
+| Anthropic | `ANTHROPIC_API_KEY` → `JARVIS_TEST_ANTHROPIC_KEY` | `claude-haiku-4-5-20251001` |
+| OpenAI | `OPENAI_API_KEY` → `JARVIS_TEST_OPENAI_KEY` | `gpt-5-nano` |
+| Gemini | `GEMINI_API_KEY` → `JARVIS_TEST_GEMINI_KEY` | `gemini-3.1-flash-lite` |
+
+- `TestRemoteLive` (llm): chat, thinking off, a tool round trip, a tool call in the history from
+  another model, streamed text and a streamed tool call; tool calls must come back with an id,
+  the right name and JSON-object arguments.
+- `TestCloudLive` (cc): voice turns through the `Cloud` prompt with the dev node's whole tool set
+  (`fixtures/golden/prompts/_inputs.json`) plus the server tools: a `todo_list` round trip on
+  the blocking routes, then a `get_weather` round trip on the streaming routes with the first in
+  the history.
+- Runs on same-repo pull requests touching `internal/modules/llm`, `internal/modules/cc` or the
+  prompt goldens, on push to main, weekly and on demand; never on fork PRs. Without any key it
+  warns and passes. `JARVIS_TEST_<NAME>_URL` points a provider at a gateway instead.
 
 Global:
 
