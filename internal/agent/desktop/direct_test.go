@@ -22,7 +22,7 @@ func TestParseSwitch(t *testing.T) {
 			t.Errorf("%q: %+v %v, want %+v", said, got, ok, want)
 		}
 	}
-	for _, said := range []string{"switch to the Claude tab and type hello", "what's the weather",
+	for _, said := range []string{"switch to the Claude tab and type hello", "what's the weather", "go to the top", "go to the bottom of the page",
 		"switch to it", "go to the other one", "switch the lights off", "open Discord"} {
 		if r, ok := parseSwitch(said); ok {
 			t.Errorf("%q parsed as %+v: the model's", said, r)

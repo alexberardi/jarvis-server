@@ -176,6 +176,18 @@ func TestOpenLaunchesInstalledAppsByName(t *testing.T) {
 	}
 }
 
+func TestOpenBareDomainOpensTheSite(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	out := call(t, ts, ToolOpen, map[string]any{"target": "google.com"})
+	if out["success"] != true || strings.Join(b.opened, ";") != "https://google.com" || len(b.launched) != 0 {
+		t.Fatalf("out %v opened %v launched %v", out, b.opened, b.launched)
+	}
+	if out := call(t, ts, ToolOpen, map[string]any{"target": "Photoshop"}); out["error_code"] != "app_not_found" {
+		t.Fatalf("an app name stays an app: %v", out)
+	}
+}
+
 func TestListApps(t *testing.T) {
 	ts := New(host.New(&fakeBackend{caps: all}), OpenPolicy{}, catalogue)
 	out := call(t, ts, ToolListApps, map[string]any{"query": "MICRO"})

@@ -21,6 +21,9 @@ import (
 var reSwitch = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+|can you\s+|could you\s+)?` +
 	`(?:switch|go|jump|flip|change|move)(?:\s+(?:over|back))?\s+to\s+(?:the\s+|my\s+)?(.+?)[\s.!?]*$`)
 
+// pageEdges are where "go to the …" scrolls the page, not a window or tab.
+var pageEdges = []string{"top", "bottom", "top of the page", "bottom of the page"}
+
 var (
 	reInApp    = regexp.MustCompile(`(?i)^(.+?)\s+(?:in|on)\s+(?:the\s+|my\s+)?(.+)$`)
 	reViewWord = regexp.MustCompile(`(?i)\s+(?:tab|sheet|worksheet)$`)
@@ -55,6 +58,9 @@ func parseSwitch(said string) (switchRequest, bool) {
 	ref := strings.TrimSuffix(strings.ToLower(r.target), " one")
 	if r.target == "" || slices.Contains(itWords, ref) || slices.Contains(otherWords, ref) {
 		return switchRequest{}, false // "switch to it", "the other one": the model has the context
+	}
+	if slices.Contains(pageEdges, ref) {
+		return switchRequest{}, false // "go to the top": the page's, browser.Tools.Direct scrolls
 	}
 	return r, true
 }
