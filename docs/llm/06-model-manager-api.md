@@ -122,7 +122,7 @@ and background only):
 | `<p>.extra_args` | `""` | shell-quoted extra flags (after jarvisd's own, so a `--chat-template-file` here overrides the pinned one) |
 | `<p>.fold_system_messages` (llm) | `auto` | ID12: `auto` = the model's catalog flag (never for remote), `on`, `off`. When on, requests are folded for a strict chat template (04 §3.7) |
 | `<p>.remote_url`, `remote_model`, `remote_api_key` (secret), `remote_vision` (llm) | | LD2 remote endpoint |
-| `<p>.remote_api` (llm, embeddings) | `auto` | The remote's dialect: `openai` (`/chat/completions`, `/embeddings`), `anthropic` (the Messages API, chat only) or `auto` = `anthropic` when `remote_url`'s host is `api.anthropic.com`, else `openai`. See "Anthropic remote" below |
+| `<p>.remote_api` (llm, embeddings) | `auto` | The remote's dialect: `openai` (`/chat/completions`, `/embeddings`), `anthropic` (the Messages API, chat only) or `auto` = `anthropic` when `remote_url`'s host is `api.anthropic.com`, else `openai`. See "Anthropic remote" and "Gemini remote" below |
 
 **Anthropic remote** (`remote_api` = `anthropic`, `internal/modules/llm/anthropic.go`; the
 translation rules come from jarvis-llm-proxy-api#75 by @davidalee). Set it through the admin
@@ -162,6 +162,21 @@ Models page ("Runs: Remote endpoint", "API") or `PUT /v1/models/labels`:
   pull requests; without the secret it warns and passes). Fable/Mythos tool round trips are not supported: they
   need thinking blocks replayed verbatim, which the OpenAI-shaped history can't carry. No prompt
   caching (`cache_control`) is requested.
+
+**Gemini remote** (Google; the OpenAI dialect through Google's OpenAI-compatible layer, so no
+translator). Set `remote_url` to `https://generativelanguage.googleapis.com`, `remote_model` to a
+Gemini model id (`gemini-2.5-flash`; a `models/` prefix is fine) and `remote_api_key` to a Gemini
+API key; `remote_api` stays `auto` (= `openai`).
+
+- A bare host, `/v1beta` or any path not already ending in `/openai` becomes
+  `…/v1beta/openai`; requests go to `…/v1beta/openai/chat/completions` (and `/embeddings`, e.g.
+  `gemini-embedding-001`) with a bearer key.
+- For a model whose name starts `gemini`: no token cap is sent (Gemini counts thinking against
+  it, and a short cap returns an empty answer), and thinking off (budget 0) sends
+  `reasoning_effort: "minimal"`. 2.5 Pro and 3.x can't turn thinking off, so `minimal` (the
+  lowest every family accepts) is as low as it goes. Temperature and top_p are sent as usual.
+- **Limitations:** verified against canned requests only (`thinking_test.go`, `spec_test.go`);
+  there is no live Gemini check in CI.
 
 Global:
 
