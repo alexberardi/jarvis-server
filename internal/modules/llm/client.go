@@ -7,12 +7,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 )
 
 // The OpenAI-compatible engine client: llama-server and remote endpoints speak
@@ -163,6 +165,7 @@ type wireToolCall struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	} `json:"function"`
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 type wireUsage struct {
@@ -199,7 +202,17 @@ func (c *wireToolCall) toolCall() ToolCall {
 	if id == "" {
 		id = "call_" + newHex(12)
 	}
-	return ToolCall{ID: id, Type: "function", Function: FunctionCall{Name: c.Function.Name, Arguments: argumentsString(c.Function.Arguments)}}
+	return ToolCall{ID: id, Type: "function", Function: FunctionCall{Name: c.Function.Name, Arguments: argumentsString(c.Function.Arguments)},
+		ExtraContent: c.ExtraContent}
+}
+
+// remoteRetryDelays are the waits before retrying a remote's transient refusal (429, or a 5xx
+// such as Gemini's 503 "This model is currently experiencing high demand"). A var for tests.
+var remoteRetryDelays = []time.Duration{time.Second, 3 * time.Second}
+
+func retryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests || code == http.StatusInternalServerError || code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
 }
 
 func (s *Service) post(ctx context.Context, ep Endpoint, path string, body any) (*http.Response, error) {
@@ -207,6 +220,22 @@ func (s *Service) post(ctx context.Context, ep Endpoint, path string, body any) 
 	if err != nil {
 		return nil, err
 	}
+	for attempt := 0; ; attempt++ {
+		resp, err := s.postOnce(ctx, ep, path, raw)
+		var apiErr *APIError
+		if !ep.Remote || attempt >= len(remoteRetryDelays) || !errors.As(err, &apiErr) || !retryableStatus(apiErr.Status) {
+			return resp, err
+		}
+		s.log.Info("llm: remote refused, retrying", "status", apiErr.Status, "attempt", attempt+1)
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(remoteRetryDelays[attempt]):
+		}
+	}
+}
+
+func (s *Service) postOnce(ctx context.Context, ep Endpoint, path string, raw []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL(ep.BaseURL, path), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
