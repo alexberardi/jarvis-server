@@ -97,10 +97,10 @@ func TestPayloadRemoteReasoningModelSendsNoSampling(t *testing.T) {
 }
 
 // Gemini counts thinking against the cap and 2.5 Pro / 3.x can't turn thinking off, so a
-// remote Gemini gets no cap and "minimal" effort for thinking off; sampling is kept.
+// remote Gemini gets no cap and "low" effort for thinking off; sampling is kept.
 func TestPayloadRemoteGemini(t *testing.T) {
 	s := NewService(ServiceConfig{Log: quietLog()})
-	for budget, effort := range map[int]string{0: `"reasoning_effort":"minimal"`, -1: ""} {
+	for budget, effort := range map[int]string{0: `"reasoning_effort":"low"`, -1: ""} {
 		req := &ChatRequest{Messages: []Message{msg("user", "hi")}, Temperature: ptr(0.4), MaxTokens: ptr(256), ReasoningBudget: ptr(budget)}
 		b, err := json.Marshal(s.payload(context.Background(), Endpoint{Model: "models/gemini-2.5-flash", Remote: true}, LabelLive, req, req.Messages, false))
 		if err != nil {

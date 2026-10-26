@@ -71,7 +71,7 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 			// Gemini's cap counts thinking too, and 2.5 Pro and 3.x can't turn thinking off.
 			p.MaxCompletionTokens = nil
 			if budget != nil && *budget == 0 {
-				p.ReasoningEffort = "minimal" // the lowest every family (2.5, 3.x) accepts
+				p.ReasoningEffort = "low" // minimal is a 400 on some (3 Pro); low works on every family
 			}
 		}
 		return

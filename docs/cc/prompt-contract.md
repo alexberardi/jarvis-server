@@ -251,6 +251,6 @@ Four prompts are embedded in the server as `builtin/*.txt`. They keep the provid
 | `Qwen3_14B_Compressed` | the prod text prompt | `qwen3-14b`, `qwen3.8-27b` (the prod 27B) |
 | `Qwen3_8B_Compressed` | the dev text prompt | `qwen3-4b`, `qwen3-8b` |
 | `Qwen3_5_9B_Compressed` | the native-tools prompt | `qwen3.5-9b` |
-| `ChatGPTOpenAI` | the e2e prompt (remote OpenAI) | none (set by hand for a remote model) |
+| `Cloud` (was `ChatGPTOpenAI`, still accepted) | the e2e prompt (remote OpenAI); vendor-neutral | every remote live model (OpenAI, Anthropic, Gemini, OpenRouter…): `LiveModelTraits` derives it |
 
 Native or text tool calling is not a different built-in: it is `llm.tool_calling` (§5). A built-in written for text tool calling uses `{{tools}}` or `{{tools_compact}}`, which render empty when the model is native, so the same text serves both. The catalog's pinned templates (`qwen3.jinja`, `qwen3.5.jinja`, `qwen3.8.jinja`) all reference `tools` and have `enable_thinking`, so with `auto` and a built-in every catalog model, the prod 27B included, goes native with the suffix. The catalog's `prompt_provider` defaults are unchanged by this contract.

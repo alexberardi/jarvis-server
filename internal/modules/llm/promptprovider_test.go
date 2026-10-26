@@ -102,7 +102,7 @@ func TestLivePromptProvider(t *testing.T) {
 	if st := m.LabelStates(ctx)["live"]; st != "remote" {
 		t.Fatalf("live label state %q, want remote", st)
 	}
-	want = ModelTraits{ToolCalling: "native", ToolCallingFrom: "remote"}
+	want = ModelTraits{PromptProvider: "Cloud", ToolCalling: "native", ToolCallingFrom: "remote"}
 	if tr := m.LiveModelTraits(ctx); tr != want {
 		t.Fatalf("remote traits: %+v want %+v", tr, want)
 	}

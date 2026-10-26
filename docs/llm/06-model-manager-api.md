@@ -173,8 +173,9 @@ API key; `remote_api` stays `auto` (= `openai`).
   `gemini-embedding-001`) with a bearer key.
 - For a model whose name starts `gemini`: no token cap is sent (Gemini counts thinking against
   it, and a short cap returns an empty answer), and thinking off (budget 0) sends
-  `reasoning_effort: "minimal"`. 2.5 Pro and 3.x can't turn thinking off, so `minimal` (the
-  lowest every family accepts) is as low as it goes. Temperature and top_p are sent as usual.
+  `reasoning_effort: "low"`. 2.5 Pro and 3.x can't turn thinking off, and `minimal`
+  is a 400 on some models ("Thinking level MINIMAL is not supported"), so `low` (accepted by
+  every family) is as low as it goes. Temperature and top_p are sent as usual.
 - **Limitations:** verified against canned requests only (`thinking_test.go`, `spec_test.go`);
   there is no live Gemini check in CI.
 
