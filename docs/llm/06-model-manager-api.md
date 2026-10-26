@@ -192,11 +192,13 @@ with the model from `JARVIS_TEST_<NAME>_MODEL` or the default (`internal/modules
   the right name and JSON-object arguments.
 - `TestCloudLive` (cc): voice turns through the `Cloud` prompt with the dev node's whole tool set
   (`fixtures/golden/prompts/_inputs.json`) plus the server tools: a `todo_list` round trip on
-  the blocking routes, then a `get_weather` round trip on the streaming routes with the first in
+  the blocking routes, then a tool round trip (any tool) on the streaming routes with the first in
   the history.
 - Runs on same-repo pull requests touching `internal/modules/llm`, `internal/modules/cc` or the
   prompt goldens, on push to main, weekly and on demand; never on fork PRs. Without any key it
-  warns and passes. `JARVIS_TEST_<NAME>_URL` points a provider at a gateway instead.
+  warns and passes. A check that fails while the provider still answers 429/5xx after the
+  retries skips ("provider overloaded"). `JARVIS_TEST_<NAME>_URL` points a provider at a gateway
+  instead.
 
 Global:
 

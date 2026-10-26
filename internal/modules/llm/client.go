@@ -306,9 +306,18 @@ func (s *Service) complete(ctx context.Context, ep Endpoint, p *chatPayload) (co
 		c.ToolCalls = append(c.ToolCalls, tc.toolCall())
 	}
 	if ch.FinishReason != nil {
-		c.FinishReason = *ch.FinishReason
+		c.FinishReason = toolCallsFinish(*ch.FinishReason, len(c.ToolCalls))
 	}
 	return c, nil
+}
+
+// toolCallsFinish is "tool_calls" for a reply with calls that says "stop", as Gemini's
+// OpenAI layer does.
+func toolCallsFinish(reason string, calls int) string {
+	if reason == "stop" && calls > 0 {
+		return "tool_calls"
+	}
+	return reason
 }
 
 // streamResult is what the stream parser gathered for the done frame.
@@ -408,6 +417,7 @@ func parseStream(r io.Reader, onDelta func(string) bool) (streamResult, error) {
 		}
 	}
 	res.Content = sb.String()
+	res.FinishReason = toolCallsFinish(res.FinishReason, len(res.ToolCalls))
 	return res, sc.Err()
 }
 

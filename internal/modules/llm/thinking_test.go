@@ -190,3 +190,21 @@ func TestToolCallKeepsExtraContent(t *testing.T) {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
+
+// Gemini's OpenAI layer ends a tool-call reply with finish_reason "stop"; callers read
+// "tool_calls", as OpenAI sends.
+func TestToolCallsFinishReason(t *testing.T) {
+	sse := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	res, err := parseStream(strings.NewReader(sse), func(string) bool { return true })
+	if err != nil || res.FinishReason != "tool_calls" {
+		t.Fatalf("stream: %+v %v", res, err)
+	}
+	rec := newRecorder(t, canned{body: `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":"stop"}]}`})
+	ep := Endpoint{BaseURL: rec.srv.URL, Model: "gemini-3.1-flash-lite", Remote: true}
+	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}}, Log: quietLog()})
+	r, err := s.Chat(context.Background(), ChatRequest{Messages: []Message{msg("user", "weather?")}})
+	if err != nil || r.FinishReason != "tool_calls" {
+		t.Fatalf("chat: %+v %v", r, err)
+	}
+}
