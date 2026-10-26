@@ -21,11 +21,13 @@ const (
 	ToolView  = "desktop_view"
 )
 
-// View is one named view in an app's front window, in the order the app shows them.
+// View is one named view in an app's windows (the front one's first), in the order the app
+// shows them.
 type View struct {
 	Index    int
 	Name     string
 	Selected bool
+	Window   string // the title of the window it is in, when the app has several
 }
 
 // ViewSource lists and switches the views of an app's front window. app is the app as said
