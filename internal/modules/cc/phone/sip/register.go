@@ -98,11 +98,19 @@ func (u *UA) supervise(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
+		case <-u.after(backoff):
 		case <-u.refresh: // Check: try now
 		}
 		backoff = min(backoff*2, u.cfg.BackoffMax)
 	}
+}
+
+// after is the backoff's wait (Config.After, else time.After).
+func (u *UA) after(d time.Duration) <-chan time.Time {
+	if u.cfg.After != nil {
+		return u.cfg.After(d)
+	}
+	return time.After(d)
 }
 
 // hintFor is a plain-words reading of a failed attempt.

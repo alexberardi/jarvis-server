@@ -31,13 +31,22 @@ type NotFoundError struct {
 }
 
 func (e *NotFoundError) Error() string {
+	// Said aloud when every tool failed ("Sorry, that didn't work: …"), so it reads as a sentence.
 	if len(e.Suggestions) == 0 {
-		return fmt.Sprintf("%v %q", ErrNotFound, e.Query)
+		return fmt.Sprintf("there's no app called %q on this computer", e.Query)
 	}
-	return fmt.Sprintf("%v %q (closest: %s)", ErrNotFound, e.Query, strings.Join(e.Suggestions, ", "))
+	return fmt.Sprintf("there's no app called %q on this computer; did you mean %s?", e.Query, orList(e.Suggestions))
 }
 
 func (e *NotFoundError) Unwrap() error { return ErrNotFound }
+
+// orList is "A", "A or B", "A, B or C".
+func orList(s []string) string {
+	if len(s) < 2 {
+		return strings.Join(s, "")
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " or " + s[len(s)-1]
+}
 
 // norm lowercases and keeps letters and digits only: "Visual Studio Code" -> "visualstudiocode".
 func norm(s string) string {
@@ -107,7 +116,8 @@ func Resolve(list []App, query string) (App, error) {
 
 // Find picks exactly one app for a spoken name, in tiers, stopping at the first tier with
 // any match: exact (name or desktop id, ignoring case and punctuation), then the name starts
-// with the query, then every query word appears in the name, then a small edit distance (typos,
+// with the query, then every query word appears in the name, then the app's GenericName or a
+// Keyword (desktop files), then a small edit distance (typos,
 // mishearings), then the same sound (winmatch.SoundsLike: "oh my right" for Omawrite). A tier
 // with several matches is ambiguous rather than a guess. Names that only sound close
 // (winmatch.SoundsNear: "the oven" for Neovim) are never picked; they come back as suggestions.
@@ -143,6 +153,23 @@ func Find(list []App, query string) (Pick, error) {
 		if len(hits) > 1 {
 			return Pick{}, &AmbiguousError{Query: query, Candidates: names(hits, 8)}
 		}
+	}
+	// What the app is (GenericName, Keywords): "calculator" for Omacalc. Before any fuzzy
+	// tier: an exact word the app describes itself with beats a near spelling of another name.
+	var also []App
+	for _, a := range list {
+		for _, w := range a.Also {
+			if norm(w) == nq {
+				also = append(also, a)
+				break
+			}
+		}
+	}
+	if len(also) == 1 {
+		return Pick{App: also[0]}, nil
+	}
+	if len(also) > 1 {
+		return Pick{}, &AmbiguousError{Query: query, Candidates: names(also, 8)}
 	}
 	fuzzy := func(a App) Pick { return Pick{App: a, Fuzzy: true, HeardAs: strings.TrimSpace(query)} }
 	// Spelling: allow 1 edit for short names, 2 for longer; the best distance must be unique.
@@ -238,5 +265,6 @@ func suggest(list []App, q string, n int) []string {
 	return out
 }
 
-// suggestScore: only names that are actually close are suggested.
-const suggestScore = 0.6
+// suggestScore: only names that are actually close are suggested ("calculator" is 0.63 from
+// "Google Photos" by sound).
+const suggestScore = 0.65

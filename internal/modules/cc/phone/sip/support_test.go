@@ -104,13 +104,20 @@ func TestStatusCountsActiveCalls(t *testing.T) {
 	p := newPBX(t, "secret")
 	u := startUA(t, p.config(t, "secret"))
 	waitState(t, u, StateRegistered, 3*time.Second)
-	p.setInvite(func(d *diago.DialogServerSession) { d.Ringing() })
+	// The far end has to keep ringing while the count is read: diago hangs a dialog up as soon
+	// as its INVITE handler returns, so a handler that only rings and returns ends the call —
+	// and drops it from the count — on a machine slow enough to get there first.
+	p.setInvite(func(d *diago.DialogServerSession) {
+		d.Ringing()
+		<-d.Context().Done()
+	})
 	c, err := u.Dial(context.Background(), "2125550100")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n := u.Status().ActiveCalls; n != 1 {
-		t.Fatalf("ActiveCalls %d while ringing", n)
+		e, d := c.End()
+		t.Fatalf("ActiveCalls %d while ringing (end %q %q)", n, e, d)
 	}
 	c.Hangup(context.Background())
 	<-c.Done()

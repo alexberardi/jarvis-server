@@ -28,6 +28,10 @@ import (
 //
 //	HELPER_STARTS           append one line per start, once the knobs below are set up
 //	HELPER_CRASH_AFTER      exit 3 after this duration
+//	HELPER_ERROR_LINE       print this line (as a traceback's root cause)
+//	HELPER_ERROR_AFTER      wait this long before printing HELPER_ERROR_LINE
+//	HELPER_EARLY_LINE       print this line at once (an exception vLLM only warns about at load)
+//	HELPER_ERROR_ON         wait for this file to exist before printing HELPER_ERROR_LINE
 //	HELPER_ENV_FILE         write the environment here
 //	HELPER_CHILD_PID_FILE   spawn a sleeping grandchild and write its pid here
 //	HELPER_IGNORE_TERM      ignore SIGTERM
@@ -70,7 +74,22 @@ func runHelper() {
 	}
 	fmt.Println("hello stdout")
 	fmt.Fprintln(os.Stderr, "hello stderr")
+	if v := os.Getenv("HELPER_EARLY_LINE"); v != "" {
+		fmt.Fprintln(os.Stderr, v)
+	}
 	if v := os.Getenv("HELPER_ERROR_LINE"); v != "" {
+		if d := os.Getenv("HELPER_ERROR_AFTER"); d != "" {
+			wait, err := time.ParseDuration(d)
+			if err != nil {
+				panic(err)
+			}
+			time.Sleep(wait)
+		}
+		if f := os.Getenv("HELPER_ERROR_ON"); f != "" {
+			for _, err := os.Stat(f); err != nil; _, err = os.Stat(f) {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
 		// A Python traceback: the root cause, then lines that push it out of the tail.
 		fmt.Fprintln(os.Stderr, "(EngineCore pid=123) ERROR 10-20 04:40:09 [core.py:1510] "+v)
 		for i := 0; i < 40; i++ {
@@ -293,6 +312,93 @@ func TestErrorLineExplainsExit(t *testing.T) {
 	})
 	if out := s.Status().Output; slices.ContainsFunc(out, func(l string) bool { return strings.HasPrefix(l, "ValueError") }) {
 		t.Fatal("the test's root cause is still in the tail: it proves nothing")
+	}
+}
+
+// An engine that served, then lost its EngineCore mid-request (#582): health fails, and the
+// cause names the child's exception printed since it served, not a warning from its load. A
+// longer OutputTail keeps the traceback.
+func TestErrorLineExplainsDeathAfterServing(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false)
+	request := filepath.Join(f.dir, "request")
+	spec := f.spec(map[string]string{"HELPER_EARLY_LINE": "ModuleNotFoundError: No module named 'flashinfer_cubin'",
+		"HELPER_ERROR_ON": request, "HELPER_ERROR_LINE": "RuntimeError: Could not find nvcc"})
+	spec.Restart.MaxRestarts = 1
+	spec.OutputTail = 100
+	spec.ErrorLine = regexp.MustCompile(`(?:^|\] )((?:\w+\.)*\w*(?:Error|Exception): .*)`)
+	s := start(t, spec)
+	eventually(t, "the load warning", func() bool {
+		return slices.ContainsFunc(s.Status().Output, func(l string) bool { return strings.HasPrefix(l, "ModuleNotFoundError") })
+	})
+	f.health.set(true)
+	waitHealthy(t, s)
+	if err := os.WriteFile(request, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the traceback", func() bool {
+		return slices.Contains(s.Status().Output, "RuntimeError: Engine core initialization failed. See root cause above.")
+	})
+	if out := s.Status().Output; !slices.ContainsFunc(out, func(l string) bool { return strings.HasSuffix(l, "Could not find nvcc") }) {
+		t.Fatalf("the tail lost the root cause: %q", out)
+	}
+	f.health.set(false)
+	eventually(t, "the health failure explained", func() bool {
+		e := s.Status().LastError
+		return strings.Contains(e, "consecutive failed health checks") && strings.HasSuffix(e, ": RuntimeError: Could not find nvcc")
+	})
+}
+
+// A Fatal line (the GPU is out of memory) means restarting can't help: the engine fails at
+// once, with the line, and is not restarted (#562).
+func TestFatalLineFailsWithoutRestart(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false)
+	spec := f.spec(map[string]string{"HELPER_CRASH_AFTER": "0s",
+		"HELPER_ERROR_LINE": "ggml_backend_cuda_buffer_type_alloc_buffer: allocating 5120.00 MiB on device 0: cudaMalloc failed: out of memory"})
+	spec.Restart.MaxRestarts = 5
+	spec.Fatal = regexp.MustCompile(`cudaMalloc failed: out of memory`)
+	s := start(t, spec)
+	ctx, cancel := context.WithTimeout(context.Background(), hangGuard)
+	defer cancel()
+	if err := s.WaitHealthy(ctx); !errors.Is(err, ErrFailed) {
+		t.Fatalf("WaitHealthy = %v, want ErrFailed", err)
+	}
+	st := s.Status()
+	if st.State != Failed || st.Restarts != 0 || !strings.Contains(st.Fatal, "cudaMalloc failed: out of memory") ||
+		!strings.Contains(st.LastError, "cudaMalloc failed") {
+		t.Fatalf("status = %+v", st)
+	}
+	if n := f.startCount(); n != 1 {
+		t.Fatalf("starts = %d, want 1", n)
+	}
+	// Started again (Retry after freeing the card): the old line no longer counts.
+	f.health.set(true)
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Fatal != "" {
+		t.Fatalf("fatal kept across a start: %+v", st)
+	}
+}
+
+// A Fatal line only counts at load: an engine that served, then printed one on a big request
+// and crashed, is restarted (the crash freed the card), as any other crash is.
+func TestFatalLineAfterHealthyRestarts(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	spec := f.spec(map[string]string{"HELPER_ERROR_AFTER": "300ms", "HELPER_CRASH_AFTER": "300ms",
+		"HELPER_ERROR_LINE": "ggml_gallocr_reserve_n: failed to allocate CUDA0 buffer of size 2147483648"})
+	spec.Restart.MaxRestarts = 5
+	spec.Fatal = regexp.MustCompile(`failed to allocate \S+ buffer`)
+	s := start(t, spec)
+	waitHealthy(t, s)
+	eventually(t, "a restart or a failure", func() bool { return f.startCount() >= 2 || s.State() == Failed })
+	st := s.Status()
+	if n := f.startCount(); n < 2 || st.Fatal != "" || st.Restarts < 1 {
+		t.Fatalf("starts = %d, status = %+v; want restarted, no fatal line", n, st)
 	}
 }
 

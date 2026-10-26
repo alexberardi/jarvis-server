@@ -65,6 +65,10 @@ type Config struct {
 	NoRTPTimeout    time.Duration // a call with no RTP this long is over (30 s)
 	TransferWait    time.Duration // a transfer's wait for the PBX's final NOTIFY (30 s)
 	MaxAuthFailures int           // authentication failures before registration stops (3)
+
+	// After is the backoff's timer (nil: time.After). Tests inject one that records the waits
+	// asked for and fires at once, so the schedule is checked exactly, not by timing packets.
+	After func(time.Duration) <-chan time.Time
 }
 
 // Defaults.

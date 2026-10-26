@@ -304,3 +304,26 @@ func TestDefang(t *testing.T) {
 		t.Fatalf("Defang left markers: %q", got)
 	}
 }
+
+// A misheard name matches no title: every tab comes back, the closest sounding first.
+func TestListTabsMisheardQueryReturnsAllClosestFirst(t *testing.T) {
+	h, path := startHub(t)
+	all := []any{
+		map[string]any{"tab_id": 1.0, "title": "Web Analytics"},
+		map[string]any{"tab_id": 2.0, "title": "Claude"},
+		map[string]any{"tab_id": 3.0, "title": "YouTube"},
+	}
+	connectExt(t, h, path, "Firefox", false, func(m Message) Message {
+		if q, _ := m.Args["query"].(string); q != "" {
+			return ok(map[string]any{"count": 0.0, "tabs": []any{}})
+		}
+		return ok(map[string]any{"count": 3.0, "tabs": all})
+	})
+	for _, q := range []string{"Claude pad", "Cloud Fair"} {
+		out, _ := NewTools(h).Call(context.Background(), ToolListTabs, map[string]any{"query": q}, node.Request{})
+		tabs, _ := out["tabs"].([]any)
+		if len(tabs) != 3 || tabs[0].(map[string]any)["title"] != "Claude" || out["no_match"] == nil {
+			t.Fatalf("%q: %v", q, out)
+		}
+	}
+}

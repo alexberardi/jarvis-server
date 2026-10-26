@@ -74,7 +74,7 @@ func realNodeRequest(t *testing.T, fx *pyjson.Object, clientTools []any) string 
 func TestG1ThroughWarmup(t *testing.T) {
 	inputs := goldenPrompts(t, "_inputs.json")
 	nodeDev := og2(og2(inputs, "tool_sets").(*pyjson.Object), "node_dev").([]any)
-	for _, provider := range []string{prompts.Qwen3_14B, prompts.Qwen3_8B, prompts.Qwen3_5_9B, prompts.ChatGPT} {
+	for _, provider := range []string{prompts.Qwen3_14B, prompts.Qwen3_8B, prompts.Qwen3_5_9B, "ChatGPTOpenAI"} { // the goldens keep the legacy name (Cloud's alias)
 		fx := goldenPrompts(t, provider+"__real_node.json")
 		var keys []string
 		for _, k := range og2(og2(og2(fx, "inputs").(*pyjson.Object), "node_context").(*pyjson.Object), "date_keys").([]any) {
@@ -102,6 +102,7 @@ func TestG1ThroughWarmup(t *testing.T) {
 					m.tools.Register(stubTool{toolName(d.(*pyjson.Object))})
 				}
 				m.dateKeys = keys
+				withTraits(m, localTraits(provider)) // the tools payload is read off the warmup
 			})
 			ve.stt.recognition = true
 			ve.set(settingWebSearch, true, settings.Scope{HouseholdID: voiceHH})
@@ -138,7 +139,13 @@ func assertWarmPrompt(t *testing.T, ve *voiceEnv, cid, want string) {
 	if got != want {
 		t.Fatalf("messages[0] differs from the G1 fixture %s", firstDiffStr(got, want))
 	}
-	// The warmup inference carried the same bytes.
+	// The warmup inference carried the same bytes; a remote live (ChatGPT's traits) gets none.
+	if !ve.m.LiveModelTraits(context.Background()).Local {
+		if n := len(ve.eng.requests()); n != 0 {
+			t.Fatalf("remote live: %d warmup requests, want none", n)
+		}
+		return
+	}
 	warm := ve.eng.requests()[0]
 	if s := messagesOf(warm)[0]["content"]; s != want {
 		t.Fatal("warmup request system prompt differs")

@@ -11,7 +11,7 @@ import (
 
 // TestVisionLabel: background vision goes to the background slot, else to live, else nowhere.
 func TestVisionLabel(t *testing.T) {
-	ce := newChatEnv(t, prompts.ChatGPT)
+	ce := newChatEnv(t, prompts.Cloud)
 	ctx := context.Background()
 	if l, ok := ce.m.visionLabel(ctx); ok || l != "" {
 		t.Fatalf("no vision = %q %v", l, ok)

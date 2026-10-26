@@ -1,0 +1,368 @@
+[
+ {
+  "name": "desktop windows (Hyprland): maximize a named window",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "maximize firefox",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^maximize$",
+      "window": "(?i)firefox"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): maximize the focused window",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "maximize this window",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^maximize$"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): switch to an app",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "switch to the terminal",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$",
+      "window": "(?i)terminal"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): fullscreen",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "make firefox full screen",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^fullscreen$",
+      "window": "(?i)firefox"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): leave maximize",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "unmaximize this",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^unmaximize$"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): restore a maximized window",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "restore firefox to its normal size",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^unmaximize$",
+      "window": "(?i)firefox"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): snap left",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "snap slack to the left",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^snap_left$",
+      "window": "(?i)slack"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): snap right",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "put the terminal on the right side",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^snap_right$",
+      "window": "(?i)terminal"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): move to a workspace",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "move firefox to workspace 3",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^move_to_workspace$",
+      "window": "(?i)firefox"
+     },
+     "args": {
+      "workspace": 3
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): minimize is not here",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "minimize slack",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^(unsupported|minimize|move_to_monitor|pin|(keep|always)[ _]?on[ _]?top)$"
+     }
+    }
+   }
+  ],
+  "comment": "Any action not offered here gets the same answer as unsupported (desktop/window.go): the fixed not-supported message."
+ },
+ {
+  "name": "desktop windows (Hyprland): keep on top is not here",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "keep the terminal on top of everything",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^(unsupported|minimize|move_to_monitor|pin|(keep|always)[ _]?on[ _]?top)$"
+     }
+    }
+   }
+  ],
+  "comment": "Any action not offered here gets the same answer as unsupported (desktop/window.go): the fixed not-supported message."
+ },
+ {
+  "name": "desktop windows (Hyprland): one monitor: no move to monitor",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "move this window to my other monitor",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^(unsupported|minimize|move_to_monitor|pin|(keep|always)[ _]?on[ _]?top)$"
+     }
+    }
+   }
+  ],
+  "comment": "Any action not offered here gets the same answer as unsupported (desktop/window.go): the fixed not-supported message."
+ },
+ {
+  "name": "desktop windows (Hyprland): near miss: what is open",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "what windows are open on my computer",
+    "expect": {
+     "tool": "desktop_list_windows"
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): near miss: close",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "close the terminal window",
+    "expect": {
+     "tool": "desktop_close_window"
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): close every window of an app",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "close all my terminal windows",
+    "expect": {
+     "tool": "desktop_close_window",
+     "args_match": {
+      "window_id": "(?i)terminal"
+     },
+     "args": {
+      "all_of_app": true
+     }
+    }
+   }
+  ],
+  "results": {
+   "desktop_list_windows": {
+    "success": true,
+    "windows": [
+     {
+      "id": "0xa",
+      "title": "build",
+      "app": "foot",
+      "minimized": false,
+      "focused": true
+     },
+     {
+      "id": "0xb",
+      "title": "Mozilla Firefox",
+      "app": "firefox",
+      "minimized": false,
+      "focused": false
+     },
+     {
+      "id": "0xc",
+      "title": "logs",
+      "app": "foot",
+      "minimized": false,
+      "focused": false
+     }
+    ]
+   }
+  },
+  "comment": "Listing the windows first is a fine start of the chain; with results, toolbench skips it and the pipeline run checks the close."
+ },
+ {
+  "name": "desktop windows (Hyprland): the other one",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "switch to the other window",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$"
+     }
+    }
+   }
+  ],
+  "comment": "Models often leave the window out here; the node then resolves 'the other window' from what was said (desktop/window.go saidReference)."
+ },
+ {
+  "name": "desktop windows (Hyprland): it, with nothing acted on yet (the focused window)",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "maximize it",
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^maximize$"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "desktop windows (Hyprland): the island's choice list, then 'the second one'",
+  "tools": "../toolsets/desktop-hyprland.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "switch to the terminal",
+    "results": {
+     "desktop_window": {
+      "success": false,
+      "error_code": "ambiguous_window",
+      "error": "2 windows match \"the terminal\"; ask the user which one they mean (use words from its title)",
+      "candidates": [
+       "foot — build",
+       "foot — logs"
+      ],
+      "numbered": [
+       "foot — build",
+       "foot — logs"
+      ],
+      "island": "Which one?  1. foot — build  2. foot — logs",
+      "island_only": true,
+      "choice": true
+     }
+    },
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$"
+     }
+    }
+   },
+   {
+    "say": "the second one",
+    "results": {
+     "desktop_window": {
+      "success": true,
+      "action": "focus",
+      "window_id": "0xb",
+      "matched_window": "foot — logs",
+      "island": "Switched to foot",
+      "island_only": true
+     }
+    },
+    "expect": {
+     "tool": "desktop_window",
+     "args_match": {
+      "action": "^focus$",
+      "window": "(?i)logs|^2$|second"
+     }
+    }
+   }
+  ]
+ }
+]

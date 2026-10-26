@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -20,14 +21,18 @@ import (
 //   - "Open Omerite and type hello there." opened the app, then told the user to type "hello
 //     there" themselves (nagUnfinished);
 //   - "Stop watching the example.com one" got "I've stopped watching it" with no cancel_watch
-//     call, and the watch stayed on (#221, nagNotCancelled).
+//     call, and the watch stayed on (#221, nagNotCancelled);
+//   - a reply ending "Let me open it in the browser instead…" or "I'll run an errand to …"
+//     ended the turn with nothing done (#575, nagPromised).
 
 const (
-	nagRecallFirst  = "[RECALL_FIRST]"
-	nagUnfinished   = "[UNFINISHED_REQUEST]"
-	nagNoMemoryTool = "[NO_MEMORY_TOOL]"
-	nagUnsaved      = "[NOT_SAVED]"
-	nagNotCancelled = "[NOT_CANCELLED]"
+	nagRecallFirst   = "[RECALL_FIRST]"
+	nagUnfinished    = "[UNFINISHED_REQUEST]"
+	nagNoMemoryTool  = "[NO_MEMORY_TOOL]"
+	nagUnsaved       = "[NOT_SAVED]"
+	nagNotCancelled  = "[NOT_CANCELLED]"
+	nagDeviceNotDone = "[DEVICE_NOT_DONE]"
+	nagPromised      = "[PROMISED_NOT_DONE]"
 )
 
 const (
@@ -45,20 +50,28 @@ const (
 	noMemoryToolRetry = nagNoMemoryTool + " None of your tools can save that, so nothing was saved. Answer " +
 		"again: tell the user plainly, in one short sentence, that you can't remember it for them here. Do not " +
 		"say it was noted or saved."
+	deviceNotDoneRetry = nagDeviceNotDone + " No successful control_device call ran this turn, so no device was " +
+		"changed and your reply is not true yet. control_device is the tool for smart-home devices (control_node " +
+		"is only this speaker's own volume). Call control_device now with the device the user means (copy its " +
+		"entity_id from the device list), or if its result above failed, tell the user plainly it didn't work."
+	promisedRetry = nagPromised + " Your reply says you will do something, but it ends your turn: nothing will do it. " +
+		"Call the tool for it now (run_errand for a task on the computer or the web that takes several steps), or " +
+		"tell the user plainly, in one short sentence, that you can't."
 )
 
 // serverToolKeywords are the force guard's keywords for offered server tools, whose definitions
 // carry none (a node's own tools carry theirs). Without them the guard's keyword half only knew
 // the node's words: a Pi's happened to cover "remember", a desktop agent's didn't.
 var serverToolKeywords = map[string][]string{
-	"remember": {"remember", "note", "don't forget", "keep in mind"},
-	"forget":   {"forget"},
+	"remember":       {"remember", "note", "don't forget", "keep in mind"},
+	"forget":         {"forget"},
+	"control_device": {"turn on", "turn off", "switch on", "switch off", "light", "lights", "lock", "unlock", "thermostat", "dim", "brighten"},
 }
 
 // offeredServerKeywords are serverToolKeywords for the server tools this conversation offers.
 func offeredServerKeywords(conv *conversation) []string {
 	var out []string
-	for _, n := range []string{"remember", "forget"} {
+	for _, n := range []string{"remember", "forget", "control_device"} {
 		if conv.serverNames[n] {
 			out = append(out, serverToolKeywords[n]...)
 		}
@@ -92,12 +105,59 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 		return recordingNotRunNag(conv, utterance, msgs)
 	case switchNotRunNag(conv, utterance, msgs) != "":
 		return switchNotRunRetry
-	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool):
-		if words := tf.TypeAfterOpenWords(utterance); words != "" {
-			return fmt.Sprintf(unfinishedTypeFormat, words)
-		}
+	// After the guards that own a target of their own (recordings, computer control), so they
+	// win on a phrasing the device filter doesn't exclude (review of #512).
+	case conv.hasTool("control_device") && countNags(msgs, nagDeviceNotDone) < 1 &&
+		tf.IsDeviceChangeRequest(utterance) && tf.ClaimsDeviceChanged(reply) && !deviceDoneThisTurn(msgs):
+		return deviceNotDoneRetry
+	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool) &&
+		tf.TypeAfterOpenWords(utterance) != "":
+		return fmt.Sprintf(unfinishedTypeFormat, tf.TypeAfterOpenWords(utterance))
+	// Last: "Let me open it in the browser instead…" or "I'll run an errand…" ended the turn (#575).
+	case countNags(msgs, nagPromised) < 1 && tf.PromisesAction(reply):
+		return promisedRetry
 	}
 	return ""
+}
+
+// deviceDoneThisTurn reports a successful control_device result since the turn's user message
+// (#512: a reply may only say a device changed when its tool call confirmed it). A node's
+// result message carries no Name, so results are matched to calls by id.
+func deviceDoneThisTurn(msgs []chatMsg) bool {
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck) {
+			start = i
+			break
+		}
+	}
+	names := map[string]string{}
+	for _, m := range msgs[start:] {
+		for _, c := range m.ToolCalls {
+			names[c.ID] = c.Function.Name
+		}
+		if m.Role != "tool" {
+			continue
+		}
+		name := m.Name
+		if name == "" {
+			name = names[m.ToolCallID]
+		}
+		if name != "control_device" {
+			continue
+		}
+		var o map[string]any
+		// A node's own control_device answers with whatever its client wrote, so success is
+		// read leniently ("true", 1) as the rest of the module reads node results.
+		dec := json.NewDecoder(strings.NewReader(m.Content))
+		dec.UseNumber()
+		if dec.Decode(&o) == nil {
+			if s, ok := laxBool(o["success"]); ok && s {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // calledThisTurn reports whether an assistant message since the turn's user message called
@@ -120,6 +180,7 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 // isFollowThroughNag reports one of this file's nudges (scrubbed like the other nags).
 func isFollowThroughNag(m chatMsg) bool {
 	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
-		isNag(m, nagNotCancelled) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) || isNag(m, nagRecordingNotRun) ||
-		isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool)
+		isNag(m, nagNotCancelled) || isNag(m, nagDeviceNotDone) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) ||
+		isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool) ||
+		isNag(m, nagPromised)
 }

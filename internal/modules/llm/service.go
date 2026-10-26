@@ -539,7 +539,7 @@ func (s *Service) payload(ctx context.Context, ep Endpoint, label string, req *C
 	if req.Temperature != nil {
 		t = *req.Temperature // D8: an explicit 0 is honoured (legacy `or 0.7` made it 0.7)
 	}
-	p := &chatPayload{Model: ep.Model, Messages: msgs, Temperature: t, Stream: stream,
+	p := &chatPayload{Model: ep.Model, Messages: msgs, Temperature: &t, Stream: stream,
 		MaxTokens: req.MaxTokens, TopP: req.TopP, Seed: req.Seed}
 	if stream {
 		p.StreamOptions = &streamOptions{IncludeUsage: true}
@@ -724,7 +724,8 @@ func (s *Service) retryJSON(ctx context.Context, ep Endpoint, label string, req 
 	if c := s.backgroundCap(ctx); background(label, req.Priority) && c > 0 && mt > c {
 		mt = c
 	}
-	p := &chatPayload{Model: ep.Model, Messages: retry, Temperature: jsonmode.RetryTemperature(t),
+	rt := jsonmode.RetryTemperature(t)
+	p := &chatPayload{Model: ep.Model, Messages: retry, Temperature: &rt,
 		MaxTokens: &mt, TopP: req.TopP, Seed: req.Seed}
 	p.applyThinking(s.budget(ctx, label, req), ep)
 	s.log.Warn("llm: JSON invalid, retrying once", "label", label)

@@ -422,3 +422,29 @@ func TestPurgeUser(t *testing.T) {
 		t.Fatalf("%d traces", n)
 	}
 }
+
+// The Go node adopts a Pi's Python node (#586, decisions/2026-10-23-pi-node-adopts-python-identity.md):
+// the same node id and key heartbeat with runtime "go" from now on. That is the same node, with
+// its room and settings, and nothing mints a second one.
+func TestPythonNodeAdoptedByTheGoRuntime(t *testing.T) {
+	e := newEnv(t)
+	owner := e.auth.addUser(1, "hh1", authn.RoleAdmin)
+	n := e.createNode("pi-kitchen", "hh1")
+	e.do("PATCH", "/api/v0/admin/nodes/pi-kitchen", map[string]any{"room": "kitchen", "voice_mode": "full"}, adminH()).want(200)
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"version_info": map[string]any{"version": "0.3.4", "install_mode": "git"}}, n.h()).want(200)
+
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"version_info": map[string]any{"version": "v0.2.0", "install_mode": "tarball", "runtime": "go"}, "needs_k2": false}, n.h()).want(200)
+	got := e.do("GET", "/api/v0/admin/nodes/pi-kitchen", nil, bearer(owner)).want(200).json()
+	if got["runtime"] != "go" || got["install_mode"] != "tarball" || got["room"] != "kitchen" || got["voice_mode"] != "full" || got["household_id"] != "hh1" {
+		t.Fatalf("after the Go runtime's heartbeat: %v", got)
+	}
+	var rows int
+	if err := e.d.Read.QueryRow(`SELECT COUNT(*) FROM cc_nodes`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("cc_nodes rows: %d %v", rows, err)
+	}
+	if len(e.auth.nodes) != 1 || !e.auth.active("pi-kitchen") {
+		t.Fatalf("auth nodes: %v", e.auth.nodes)
+	}
+}

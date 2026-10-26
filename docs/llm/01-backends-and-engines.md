@@ -196,6 +196,14 @@ failed ──retry_failed_loads (cooldown 60s·2^(n-1) ≤ 600s; or force) ─�
   - Multiple devices add `--split-mode layer|row` and `--tensor-split a,b`.
   - `gpu_layers` → `-ngl`.
   - CPU → `-ngl 0` (or a CPU build).
+  - **The host prompt cache** → `--cache-ram <MiB>`, always passed: llama-server's own default is
+    8192 MiB of host RAM (§6), which every install would pay on top of the model's VRAM. A chat
+    label gets `min(2048, RAM/10)` MiB, at least 256; an `--embedding` engine gets `--cache-ram 0`
+    (it never reuses a prompt). 256 MiB also stands in when the OS won't say how much RAM there is
+    (`sysinfo.TotalMemory() == 0`), since a tenth of nothing would switch the cache off. The value
+    is read from the host, not from the label, so it never splits one model into two engines (LD1).
+    `extra_args` wins: an operator's own `--cache-ram`/`-cram` token means ours is left out
+    altogether, so `ps` and admin's argv say what the engine really runs.
 - **Reporting.** `jarvisd doctor` and admin show detection, proposal and effective assignment.
 
 ### 3.5 Metal (macOS)
@@ -367,7 +375,7 @@ The decision: [2026-10-19-vllm-engine](../decisions/2026-10-19-vllm-engine.md). 
 
 **Engine kind of a label.** On linux/amd64 a directory model (`DirEngine`) runs on vLLM, on darwin/arm64 on MLX. Until the model manager installs repo directories (#299 part 2), `llm.<label>.model` names one by absolute path; the labels API (`PUT /v1/models/labels`) now accepts a directory for an LLM label when it has a `config.json`, and refuses others.
 
-**Supervision.** `python -I -m vllm.entrypoints.openai.api_server --model DIR --host 127.0.0.1 --port N --served-model-name default_model --max-model-len <context> --gpu-memory-utilization <share> [--tensor-parallel-size <cards>] [--enable-auto-tool-choice --tool-call-parser <p>] [--reasoning-parser <p>]`, then `extra_args` (e.g. `--enforce-eager`). Unlike mlx_lm.server it takes an API key, so each instance gets a random one in `VLLM_API_KEY` (not on argv), as llama-server does; `/health` is outside vLLM's key check. `gpu_devices` becomes `CUDA_VISIBLE_DEVICES`, and more than one card is tensor parallel. Its environment adds `HF_HUB_OFFLINE=1` (requests name `default_model`; no Hub downloads), `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1`, and points vLLM's, triton's, torch inductor's and flashinfer's run-time caches under `<install>/cache/`. The instance key is §3.11's plus the devices, the share and the parsers. Health and restart are llama-server's. When a Python engine exits, the first exception line of its output since that start (`engines.Spec.ErrorLine`) is added to the error, since a Python traceback ends with a generic `RuntimeError: Engine core initialization failed. See root cause above.` and the kept tail is 20 lines: the label then says e.g. *"exited: exit status 1: ValueError: Free memory on device cuda:0 (0.95/11.61 GiB) on startup is less than desired GPU memory utilization (0.28, 3.25 GiB). …"*.
+**Supervision.** `python -I -m vllm.entrypoints.openai.api_server --model DIR --host 127.0.0.1 --port N --served-model-name default_model --max-model-len <context> --gpu-memory-utilization <share> [--tensor-parallel-size <cards>] [--enable-auto-tool-choice --tool-call-parser <p>] [--reasoning-parser <p>]`, then `extra_args` (e.g. `--enforce-eager`). Unlike mlx_lm.server it takes an API key, so each instance gets a random one in `VLLM_API_KEY` (not on argv), as llama-server does; `/health` is outside vLLM's key check. `gpu_devices` becomes `CUDA_VISIBLE_DEVICES`, and more than one card is tensor parallel. Its environment adds `HF_HUB_OFFLINE=1` (requests name `default_model`; no Hub downloads), `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1`, `VLLM_USE_FLASHINFER_SAMPLER=0` (FlashInfer's top-k/top-p sampler is compiled on first use, with nvcc, ninja, a host compiler and CUDA headers matching nvcc; without a CUDA toolkit its warmup killed the default start and, under `--enforce-eager`, its first sampled request killed the EngineCore, #582; PyTorch's sampler needs none of that), and points vLLM's, triton's, torch inductor's and flashinfer's run-time caches under `<install>/cache/`. The instance key is §3.11's plus the devices, the share and the parsers. Health and restart are llama-server's. When a Python engine exits or fails its health checks, the first exception line of its output (`engines.Spec.ErrorLine`) since that start, or since it first passed its health check once it has (so an EngineCore that dies mid-request names its own exception, not a warning from the load), is added to the error, since a Python traceback ends with a generic `RuntimeError: Engine core initialization failed. See root cause above.` or `EngineDeadError: … See stack trace (above)`; Python engines also keep a 200-line tail (`Spec.OutputTail`; llama-server 20): the label then says e.g. *"exited: exit status 1: ValueError: Free memory on device cuda:0 (0.95/11.61 GiB) on startup is less than desired GPU memory utilization (0.28, 3.25 GiB). …"*.
 
 **GPU share and coexistence with llama-server.** vLLM preallocates `--gpu-memory-utilization` × the card for weights, activations, CUDA graphs and as much KV cache as fits, and refuses to start when less than that is free. Its upstream default, 0.9, would leave a llama-server label on the same card nothing, so jarvisd always passes the share (`VLLMGPUMemory`): `llm.<label>.gpu_memory_utilization` (0.05–0.95; the Labels editor's "GPU memory share" under Advanced, for vLLM labels), or, when it is 0 (the default), weights (the directory's safetensors) + KV cache at the label's context (from `config.json`: layers × KV heads × head dim × 2 × 2 bytes per token) + 1.5 GiB, split over the label's cards, rounded up to the next hundredth and kept within 0.1–0.9. Qwen3-0.6B at 4096 tokens gets 0.28 of a 12 GB card, at 8192 tokens 0.32. The share, the parsers and the vision flag are worked out once per model, context, devices and setting for the life of the process, so a later detection that reads the card a little differently doesn't restart a running engine. The fit check counts a vLLM engine as that share of its cards (`Manager.Residents`), whatever its model weighs, next to llama-server's weights + KV estimates and "other programs", so the overcommit warning names both when they don't fit together (e.g. a 0.9 share next to a 4 GB GGUF on a 12 GB card).
 
@@ -436,7 +444,7 @@ See 05 §5 for the full disposition. The engine-shaping keys are:
 | `gpu_layers` | |
 | `kv_cache_type` | |
 | `flash_attn` | |
-| `extra_args` | |
+| `extra_args` | A `--cache-ram` or `-cram` token here replaces jarvisd's own (§3.4). |
 | `gpu_memory_utilization` | vLLM (§3.12) |
 | `dir_engine`, `dtype`, `quantization` | Transformers (§3.13) |
 | `remote_*` | |
@@ -466,6 +474,13 @@ The live slot's thinking flags become redundant once jarvisd sends the kwarg per
   - `--chat-template-file` (the catalog's pinned template, ID12; last one wins, so `extra_args` can override)
   - `--mmproj`
   - `--embedding`
+  - `--cache-ram` / `-cram` (b11457): the server prompt cache's size in MiB. Upstream defaults to
+    8192, so an unset flag costs up to 8 GiB of host RAM per engine — on the devbox the 9B held
+    8.5 GiB of anonymous RAM for it with every layer on the GPU. jarvisd always sets it (§3.4) and
+    keeps the cache **on** for chat labels: it saves re-processing the system prompt when live,
+    background and computer turns alternate on one slot. `--cache-idle-slots` (on by default)
+    requires it, so `--cache-ram 0` turns prompt caching off for that engine. llama-server
+    rejects the `--cache-ram=N` form and takes the flag twice (last wins).
   - `--list-devices`
   - `/health`, `/v1/chat/completions` (stream + `stream_options.include_usage`), `/v1/embeddings`, `/props`
 
@@ -532,7 +547,7 @@ internal/modules/llm/
 **Local slot spec.**
 
 ```go
-engines.Spec{Name: "llm-live", Path: <llama-server>, Args: ["-m", model, "--jinja", "-c", ctx, "-np", par, "-ngl", layers, "--host", "127.0.0.1", "--port", port, ...mmproj, ...split, ...extra], GPU: {Backend, VisibleDevices}, Health: &HealthCheck{URL: "http://127.0.0.1:<port>/health", DrainGrace: 30s}, StartTimeout: 10m}
+engines.Spec{Name: "llm-live", Path: <llama-server>, Args: ["-m", model, "--jinja", "-c", ctx, "-np", par, "-ngl", layers, "--host", "127.0.0.1", "--port", port, ...mmproj, "--cache-ram", cacheMiB, ...split, ...extra], GPU: {Backend, VisibleDevices}, Health: &HealthCheck{URL: "http://127.0.0.1:<port>/health", DrainGrace: 30s}, StartTimeout: 10m}
 ```
 
 - The port comes from `engines.FreePort()`. The engine binds **127.0.0.1 only**: jarvisd is the only client.

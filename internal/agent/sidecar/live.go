@@ -124,6 +124,22 @@ func (l *Live) RemindersDue(ctx context.Context) ([]DueReminder, int, error) {
 	return nil, 0, ErrNoPackages
 }
 
+// Agents are the background agents of the sidecar in service; none without one.
+func (l *Live) Agents() []AgentDef {
+	if sc := l.Current(); sc != nil {
+		return sc.Agents()
+	}
+	return nil
+}
+
+// RunAgent is Sidecar.RunAgent on the sidecar in service.
+func (l *Live) RunAgent(ctx context.Context, name string) ([]json.RawMessage, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.RunAgent(ctx, name)
+	}
+	return nil, ErrNoPackages
+}
+
 // Failed are the installed packages whose commands didn't load.
 func (l *Live) Failed() map[string]string {
 	if sc := l.Current(); sc != nil {

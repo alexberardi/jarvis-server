@@ -20,8 +20,10 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
+	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/engines"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
+	"github.com/alexberardi/jarvis-server/internal/platform/service"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 	"github.com/alexberardi/jarvis-server/internal/voice/fallback"
 )
@@ -992,7 +994,7 @@ func (m *Manager) Register(ctx context.Context, req RegisterRequest) (Model, err
 		return m.registerDir(ctx, req)
 	}
 	if err != nil {
-		return Model{}, badRequest("no file at %s", req.Path)
+		return Model{}, badRequest("%s", noFile(req.Path))
 	}
 	var entry Entry
 	if req.CatalogID != "" {
@@ -1271,7 +1273,7 @@ func (m *Manager) validateField(ctx context.Context, d labelRef, f string, def s
 				}
 			}
 			if !fileExists(s) {
-				return badRequest("%s.%s: no file at %s", d.Name, f, s)
+				return badRequest("%s.%s: %s", d.Name, f, noFile(s))
 			}
 			return nil
 		}
@@ -1456,7 +1458,8 @@ func deviceList(s string) []int {
 }
 
 // Residents lists the GPU memory assigned local engines need, from the current label
-// settings. Labels sharing one engine (same model, context and devices, LD1) count once.
+// settings. Labels sharing one engine count once: by the engine a running label is on, else by
+// engine.EngineIdentity (LD1; #562: two labels on one model that differ in slots are two engines).
 // Labels on the CPU (gpu_layers 0 or gpu_backend cpu), remote, shared or off need none.
 func (m *Manager) Residents(ctx context.Context) []Resident {
 	if m.Labels == nil {
@@ -1469,11 +1472,14 @@ func (m *Manager) Residents(ctx context.Context) []Resident {
 		if c.Engine != engine.ModeLocal || c.Model == "" || c.GPULayers == 0 || c.GPUBackend == string(engine.FlavourCPU) {
 			continue
 		}
-		need, ok := m.residentNeed(ctx, c)
+		need, ok := m.residentNeed(ctx, c, false)
 		if !ok {
 			continue
 		}
-		key := fmt.Sprintf("%s|%s|%d|%s", c.Kind, c.Model, c.Context, c.GPUDevices)
+		key := "id:" + engine.EngineIdentity(c)
+		if ls.Endpoint != nil && ls.Endpoint.Engine != "" {
+			key = "engine:" + ls.Endpoint.Engine
+		}
 		if i, ok := idx[key]; ok {
 			out[i].Labels = append(out[i].Labels, c.Label)
 			continue
@@ -1541,8 +1547,8 @@ func (m *Manager) otherPrograms(ctx context.Context, residents []Resident) []Res
 
 // residentNeed estimates a label's engine in MB: its installed model (plus projector) at the
 // label's context, or an external file by its size. A vLLM engine needs the share of its
-// cards it preallocates, whatever the model weighs.
-func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64, bool) {
+// cards it preallocates, whatever the model weighs. floor: count a guessed KV as nothing (placement).
+func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig, floor bool) (int64, bool) {
 	if c.Kind == engine.KindVLLM {
 		frac, dev, err := engine.VLLMGPUMemory(c, m.hardware(ctx))
 		if err != nil {
@@ -1578,9 +1584,15 @@ func (m *Manager) residentNeed(ctx context.Context, c engine.LabelConfig) (int64
 	} else {
 		return 0, false
 	}
-	need, _ := gpuNeed(c.ModelKind, weights, host, kv, max(n, 0))
 	if n <= 0 && c.ModelKind == engine.ModelLLM {
-		need, _ = gpuNeed(c.ModelKind, weights, host, kv, 8192)
+		n = 8192
+	}
+	need, guessed := gpuNeed(c.ModelKind, weights, host, kv, max(n, 0))
+	if guessed && floor {
+		// The KV guess assumes dense attention; a sliding-window model (Gemma 4: 18.9 GB measured,
+		// 32.6 GB guessed) needs far less. floor (placement) counts the weights alone then, a
+		// lower bound: only what certainly can't fit is refused, and a load-time OOM handles the rest.
+		need, _ = gpuNeed(c.ModelKind, weights, host, kv, 0)
 	}
 	return need / mb, true
 }
@@ -1667,4 +1679,17 @@ func (m *Manager) FitWarning(ctx context.Context, modelID string, assign []strin
 	return fmt.Sprintf("%s needs about %d MB but %s has only %d MB left next to %s; it may fail to start. "+
 		"Move a label to another card, lower a context, or pick a smaller model.",
 		mod.ID, f.NeededMB, f.Device, f.DeviceMB*95/100-f.CommittedMB, strings.Join(f.Alongside, ", "))
+}
+
+// systemUnit reports whether jarvisd runs as the system service (a var for tests).
+var systemUnit = func() bool { return service.Detect() == service.Systemd && !service.UserUnit() }
+
+// noFile says a model path isn't there, or, under the system unit, that jarvisd can't see it
+// (ProtectHome, PrivateTmp), which a user who sees the file wouldn't guess (#582).
+func noFile(path string) string {
+	if d := service.Hides(path); d != "" && systemUnit() {
+		return fmt.Sprintf("jarvisd runs as a system service and can't see %s (the service hides %s); put the model under %s",
+			path, d, config.SystemHome)
+	}
+	return "no file at " + path
 }

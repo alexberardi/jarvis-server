@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -194,7 +195,15 @@ func setupDeps(log *slog.Logger, o setupOptions) firstrun.Deps {
 	if runtime.GOOS == "darwin" && macax.Supported() {
 		d.Permissions = macPermissions(freshStatus, func() map[string]string { return agentPermissions(controlDial) })
 	} else {
-		d.Permissions = linuxPermissions(runtime.GOOS, (&dictate.LinuxWindows{X: dictate.OSExec{}}).Compositor(), inputAccess)
+		// The agent records, so its answer counts: after usermod and `jarvis-agent restart` it
+		// has the group, and this page (started before) doesn't.
+		access := func() error {
+			if agentPermissions(controlDial)["input-monitoring"] == firstrun.Granted {
+				return nil
+			}
+			return inputAccess()
+		}
+		d.Permissions = linuxPermissions(runtime.GOOS, (&dictate.LinuxWindows{X: dictate.OSExec{}}).Compositor(), access)
 	}
 	if p := typingPortal(); p != nil {
 		d.Portal = p
@@ -354,8 +363,13 @@ func macPermissions(fresh func(name string) string, agent func() map[string]stri
 }
 
 // inputGroupCmd adds the user to the input group: they run it themselves (the agent never
-// asks for sudo), then log out and back in. computer.ErrInputGroup says the same.
+// asks for sudo), then restart only the agent, which joins the group through newgrp
+// (regroupInput). computer.ErrInputGroup says the same.
 const inputGroupCmd = "sudo usermod -aG input $USER"
+
+// inputGroupHow is the whole step: no logout, which wouldn't even restart the systemd user
+// manager the agent runs under.
+const inputGroupHow = inputGroupCmd + " && jarvis-agent restart"
 
 // linuxPermissions is the Linux step, on Hyprland and sway (where the desktop can be recorded):
 // the input group, Linux's Input Monitoring, granted once access says the keyboard opens.
@@ -365,8 +379,8 @@ func linuxPermissions(goos, compositor string, access func() error) []firstrun.P
 	}
 	return []firstrun.Permission{{ID: "input-monitoring", Label: "Keyboard and mouse (the input group)",
 		Why: "So Jarvis can watch what you do on the desktop when you ask it to learn a task (never what you type " +
-			"into a password field it can see). Run the command in a terminal, then log out and back in.",
-		How: inputGroupCmd,
+			"into a password field it can see). Run the command in a terminal: it restarts only Jarvis, nothing else closes.",
+		How: inputGroupHow,
 		Status: func() string {
 			if access() == nil {
 				return firstrun.Granted
@@ -405,7 +419,7 @@ func boolStatus(check func() bool) func() string {
 
 // freshChecks are the grants macOS shows a process as they were at its start, which
 // `jarvis-agent permission <name>` checks in a fresh one (on Linux input-monitoring is the
-// input group, which a login applies). The running agent answers the same checks for itself
+// input group, which the agent joins when it starts). The running agent answers the same checks for itself
 // (control.Permissions).
 var freshChecks = map[string]func() string{
 	"accessibility":    boolStatus(macax.Trusted),
@@ -486,9 +500,32 @@ func permissionCmd(args []string, w io.Writer) error {
 	st := check()
 	fmt.Fprintln(w, st)
 	if st != firstrun.Granted && runtime.GOOS == "linux" && args[0] == "input-monitoring" {
-		fmt.Fprintf(w, "Recording the desktop needs to read the keyboard and mouse: run `%s`, then log out and back in.\n", inputGroupCmd)
+		fmt.Fprintln(w, inputGroupHint(inputGroupMember()))
 	}
 	return nil
+}
+
+// inputGroupHint is permission's advice when the keyboard doesn't open. A member already ran
+// usermod; this terminal (and an agent started before it) just doesn't have the group yet.
+func inputGroupHint(member bool) string {
+	if member {
+		return "You're in the input group; run `jarvis-agent restart` so Jarvis picks it up (it restarts only Jarvis; nothing else closes)."
+	}
+	return "Recording the desktop needs to read the keyboard and mouse: run `" + inputGroupHow + "` (it restarts only Jarvis; nothing else closes)."
+}
+
+// inputGroupMember: the group database lists this user in the input group.
+func inputGroupMember() bool {
+	g, err := user.LookupGroup("input")
+	if err != nil {
+		return false
+	}
+	u, err := user.Current()
+	if err != nil {
+		return false
+	}
+	ids, _ := u.GroupIds()
+	return slices.Contains(ids, g.Gid)
 }
 
 // --- GNOME/KDE typing ---

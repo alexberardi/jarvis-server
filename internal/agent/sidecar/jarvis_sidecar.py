@@ -19,7 +19,14 @@ JSON-lines requests on stdin:
     <- {"id": 5, "result": {"key", "record"} | {"rejected": "..."} | {"failed": "..."}}
     -> {"id": 6, "method": "reminders_due"}
     <- {"id": 6, "result": {"due": [{"id", "text", "user_id"}, ...], "pending": N}}
+    -> {"id": 7, "method": "agent_run", "params": {"name": "comfyui_jobs"}}
+    <- {"id": 7, "result": {"alerts": [{Alert.to_dict()}, ...]} | {"error": "..."}}
     <- {"id": N, "error": "..."}            on a protocol-level failure
+
+A Pi's packages may also have background agents (the listing's "agents": IJarvisAgent
+modules; describe adds them as "agents": [{"name", "package", "interval_seconds",
+"run_on_startup"}]). The Go agent owns their schedule (internal/agent/pkgagents) and runs each
+with agent_run; what they post (inbox items, pushes) goes through the backends below.
 
 A Pi's packages may also have device families and managers (the listing's "families" and
 "managers"; describe adds them as "families"/"managers"). Their methods return the body the
@@ -254,17 +261,40 @@ def register_backends() -> None:
             return int(_ask("alerts.count", {}) or 0)
 
     class AgentInbox(InboxBackend):
-        # No attachments parameter: a post with attachments gets "attachments_unsupported".
+        # Attachments (already validated by JarvisInbox.post) go to the agent as files, which it
+        # uploads (N:services/inbox_backend.py): a path as it is, data through a temp file
+        # removed once the post returns, so a 25 MB video never crosses the pipe.
         def post_inbox_item(self, command_name, *, title, summary="", body="", category="general", metadata=None,
-                            user_id=None, create_push_notification=False, target_type="household"):
+                            user_id=None, create_push_notification=False, target_type="household", attachments=None):
+            import os
+            import tempfile
+
+            temps = []
             try:
-                return _ask("inbox.post", {"command_name": command_name, "title": title, "summary": summary,
-                                           "body": body, "category": category, "metadata": metadata,
-                                           "user_id": user_id, "create_push_notification": create_push_notification,
-                                           "target_type": target_type})
+                files = []
+                for att in attachments or []:
+                    path = att.path
+                    if path is None:
+                        fd, path = tempfile.mkstemp(prefix="jarvis-inbox-")
+                        temps.append(path)
+                        with os.fdopen(fd, "wb") as f:
+                            f.write(att.data)
+                    files.append({"path": os.path.abspath(os.fspath(path)), "mime": att.mime, "filename": att.filename})
+                params = {"command_name": command_name, "title": title, "summary": summary, "body": body,
+                          "category": category, "metadata": metadata, "user_id": user_id,
+                          "create_push_notification": create_push_notification, "target_type": target_type}
+                if files:
+                    params["attachments"] = files
+                return _ask("inbox.post", params)
             except Exception as exc:  # a tag, never an exception, into a command
                 print(f"sidecar: inbox post failed: {exc}", file=sys.stderr)
                 return "http_error"
+            finally:
+                for path in temps:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
 
     class AgentSignals(SignalsBackend):
         def emit_signal(self, payload):
@@ -323,6 +353,9 @@ PACKAGE_OF: dict = {}
 # The installed packages' device families by protocol_name, and device managers by name.
 FAMILIES: dict = {}
 MANAGERS: dict = {}
+# The installed packages' background agents by name, and the package each came from.
+AGENTS: dict = {}
+AGENT_PACKAGE: dict = {}
 
 
 def load_packages(listing: str) -> dict:
@@ -376,7 +409,68 @@ def load_packages(listing: str) -> dict:
             _load_device_component(name, top, rel, "protocol_name", FAMILIES)
         for rel in pkg.get("managers") or []:
             _load_device_component(name, top, rel, "name", MANAGERS)
+        for rel in pkg.get("agents") or []:
+            _load_agent(name, top, rel)
     return found
+
+
+def _load_agent(package: str, top: str, rel: str) -> None:
+    """A Pantry background agent (agents/<name>/agent.py: an IJarvisAgent, as
+    N:utils/agent_discovery_service finds it). One that doesn't load fails its package."""
+    from jarvis_command_sdk import IJarvisAgent
+
+    try:
+        module = importlib.import_module(top + "." + rel[: -len(".py")].replace("/", "."))
+        found = [cls() for _, cls in inspect.getmembers(module, inspect.isclass)
+                 if issubclass(cls, IJarvisAgent) and cls.__module__ == module.__name__ and not inspect.isabstract(cls)]
+        if not found:
+            FAILED[package] = f"{rel}: no IJarvisAgent in it"
+        for agent in found:
+            name = agent.name
+            if name in AGENTS and AGENT_PACKAGE.get(name) != package:
+                FAILED[package] = f"{rel}: agent {name} is already provided by {AGENT_PACKAGE[name]}"
+                continue
+            AGENTS[name] = agent
+            AGENT_PACKAGE[name] = package
+    except BaseException as exc:
+        print(f"sidecar: {package}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
+        FAILED[package] = f"{rel}: {type(exc).__name__}: {exc}"
+
+
+def describe_agents() -> list:
+    """The loaded agents and their schedules; one whose schedule can't be read fails its package."""
+    out = []
+    for name in sorted(AGENTS):
+        try:
+            sched = AGENTS[name].schedule
+            out.append({"name": name, "package": AGENT_PACKAGE[name], "interval_seconds": int(sched.interval_seconds),
+                        "run_on_startup": bool(sched.run_on_startup)})
+        except Exception as exc:
+            print(f"sidecar: skipping agent {name}: {exc}", file=sys.stderr)
+            FAILED[AGENT_PACKAGE[name]] = f"agent {name}: schedule: {type(exc).__name__}: {exc}"
+    return out
+
+
+def agent_run(params: dict) -> dict:
+    """One run of an agent (N:services/agent_scheduler_service._run_agent_safe; the Go agent
+    owns the schedule and the alert queue): await run(), then its alerts. A run that raises is
+    {"error"}; alerts that can't be read are none."""
+    name = params.get("name")
+    agent = AGENTS.get(name)
+    if agent is None:
+        raise RuntimeError(f"no agent {name!r} in this sidecar")
+    set_current_user_id(None)
+    try:
+        _run(agent.run())
+    except BaseException as exc:  # a SystemExit in run() must not end the sidecar
+        print(f"sidecar: agent {name} failed:\n{traceback.format_exc()}", file=sys.stderr)
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    alerts = []
+    try:
+        alerts = [a.to_dict() for a in agent.get_alerts() or []]
+    except Exception as exc:
+        print(f"sidecar: agent {name}: alerts not read: {exc}", file=sys.stderr)
+    return {"alerts": alerts}
 
 
 def _load_device_component(package: str, top: str, rel: str, key: str, into: dict) -> None:
@@ -530,7 +624,8 @@ def describe(commands: dict) -> dict:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:
                 FAILED[PACKAGE_OF[name]] = f"{name}: {type(exc).__name__}: {exc}"
-    return {"tools": tools, "failed": FAILED, **device_families()}
+    agents = describe_agents()
+    return {"tools": tools, "failed": FAILED, "agents": agents, **device_families()}
 
 
 def data_summaries(commands: dict, params: dict) -> dict:
@@ -1220,6 +1315,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": store_auth(commands, msg.get("params") or {})}
             elif method == "context_query":
                 reply = {"id": msg_id, "result": context_query(commands, msg.get("params") or {})}
+            elif method == "agent_run":
+                reply = {"id": msg_id, "result": agent_run(msg.get("params") or {})}
             elif method == "reminders_due":
                 if "reminder" not in commands:
                     raise RuntimeError("no built-in reminder command in this sidecar")

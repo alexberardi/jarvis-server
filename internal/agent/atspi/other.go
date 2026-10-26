@@ -20,3 +20,6 @@ func elementAt(int, int, int) (*computeruse.Element, error) { return nil, ErrUns
 func focused(int) (*computeruse.Element, error)             { return nil, ErrUnsupported }
 
 func available(context.Context) error { return ErrUnsupported }
+
+func tabs(context.Context, int) ([]Tab, error)          { return nil, ErrUnsupported }
+func selectTab(context.Context, int, int, string) error { return ErrUnsupported }

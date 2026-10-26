@@ -128,6 +128,11 @@ export interface TraceEvent {
   key?: string
   filename?: string
   element?: { role?: string; name?: string; tag?: string; type?: string }
+  /** its place in the trace (a desktop click's keyframe is stored by it) */
+  seq?: number
+  /** desktop: the app and the focused window it happened in */
+  app?: string
+  window?: { class?: string; title?: string }
   [field: string]: unknown
 }
 
@@ -140,8 +145,10 @@ export interface Recording {
   /** Only on a single recording (the list leaves it out). */
   trace?: unknown
   narration: string
-  /** How many keyframes the computer that recorded it keeps (they never leave it). */
+  /** How many keyframes the computer that recorded it took. */
   keyframes: number
+  /** Only on a single recording: the click keyframes the server keeps, by the event's seq (crop: its crop too). */
+  keyframe_images?: { seq: number; crop: boolean }[]
   /** The trace's events. */
   steps: number
   created_at: string
@@ -157,6 +164,18 @@ export async function listRecordings(householdId: string): Promise<Recording[]> 
 
 export async function getRecording(id: string): Promise<Recording> {
   const { data } = await apiClient.get<Recording>(`${V0}/recordings/${encodeURIComponent(id)}`)
+  return data
+}
+
+/**
+ * getRecordingKeyframe downloads one click's keyframe (the screen, the click marked) or its crop.
+ * The gateway wants the bearer header, which an <img> src can't send, so it comes as a Blob.
+ */
+export async function getRecordingKeyframe(id: string, seq: number, crop: boolean): Promise<Blob> {
+  const { data } = await apiClient.get<Blob>(
+    `${V0}/recordings/${encodeURIComponent(id)}/keyframes/${seq}${crop ? '/crop' : ''}`,
+    { responseType: 'blob' },
+  )
   return data
 }
 

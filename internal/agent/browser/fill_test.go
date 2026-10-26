@@ -65,17 +65,27 @@ func TestFillAndClick(t *testing.T) {
 		t.Errorf("empty click: %v", out)
 	}
 
-	// With confirmation on, a click and a submitting fill wait for the user's yes; a plain fill doesn't.
+	// With confirmation on, a risky click and a risky submitting fill wait for the user's yes; a
+	// plain fill doesn't (risk_test.go has what is risky).
 	conf := &dictate.Confirmer{Mode: dictate.ConfirmSubmit}
 	ts.Confirm = conf
 	desk := &dictate.Tools{Confirm: conf}
-	n := len(f.received())
-	out = call(ToolClick, map[string]any{"text": "OK"})
-	if out["status"] != "awaiting_confirmation" || out["success"] != false || len(f.received()) != n {
+	acts := func() int { // fills and clicks sent (the gate may also list the tabs)
+		k := 0
+		for _, m := range f.received() {
+			if m.Cmd == "fill" || m.Cmd == "click" {
+				k++
+			}
+		}
+		return k
+	}
+	n := acts()
+	out = call(ToolClick, map[string]any{"text": "Place order"})
+	if out["status"] != "awaiting_confirmation" || out["success"] != false || acts() != n {
 		t.Fatalf("click not gated: %v", out)
 	}
 	res, _ := desk.Call(ctx, dictate.ToolConfirm, map[string]any{"confirmation_id": out["confirmation_id"], "answer": "yes"}, node.Request{})
-	if res["clicked"] != "ok" || len(f.received()) != n+1 {
+	if res["clicked"] != "ok" || acts() != n+1 {
 		t.Errorf("confirmed click: %v", res)
 	}
 	out = call(ToolFill, map[string]any{"field": "password", "text": "hunter2", "submit": true})
@@ -83,7 +93,7 @@ func TestFillAndClick(t *testing.T) {
 		t.Errorf("submitting fill: %v", out)
 	}
 	res, _ = desk.Call(ctx, dictate.ToolConfirm, map[string]any{"confirmation_id": out["confirmation_id"], "answer": "cancel"}, node.Request{})
-	if res["cancelled"] != true || len(f.received()) != n+1 {
+	if res["cancelled"] != true || acts() != n+1 {
 		t.Errorf("cancelled fill ran: %v", res)
 	}
 	if out := call(ToolFill, map[string]any{"field": "search", "text": "pizza"}); out["status"] == "awaiting_confirmation" {

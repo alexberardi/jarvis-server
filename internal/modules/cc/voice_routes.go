@@ -324,8 +324,14 @@ func (m *Module) handleContinue(w http.ResponseWriter, r *http.Request, n *nodeC
 			info, nil, nil, nil, nil, nil, nil))
 		return
 	}
+	msg, end := resultMessage(res), res.EndOfExchange
+	if res.IslandOnly {
+		// The node's island showed it: nothing to speak. The exchange stays open: the node
+		// keeps listening as after any reply ("…restore it"), longer for a list to pick from.
+		msg, end = "", false
+	}
 	httpx.WriteJSON(w, http.StatusOK, voiceResponse(nil, info, wireStop(res.Stop), toolCallsList(res.ToolCalls),
-		validationObject(res.Validation), resultMessage(res), nil, res.EndOfExchange))
+		validationObject(res.Validation), msg, nil, end))
 }
 
 // resultMessage is result.get("assistant_message"): the string as is, null where the legacy

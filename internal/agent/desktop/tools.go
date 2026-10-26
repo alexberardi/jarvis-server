@@ -1,6 +1,7 @@
-// Package desktop turns host capabilities into node client tools: one tool per capability,
-// offered only while the capability is available, with the open policy applied here (host owns
-// mechanism, this package owns what the LLM may ask for).
+// Package desktop turns host capabilities into node client tools, offered only while their
+// capability is available, with the open policy applied here (host owns mechanism, this package
+// owns what the LLM may ask for). Window verbs are one tool, desktop_window, whose action list is
+// computed per call from the capabilities (docs/agent/DESKTOP-COMMANDS.md Q3).
 package desktop
 
 import (
@@ -8,14 +9,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/launches"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -29,8 +34,7 @@ const (
 	ToolGetVolume = "desktop_get_volume"
 	ToolSetVolume = "desktop_set_volume"
 	ToolList      = "desktop_list_windows"
-	ToolMinimize  = "desktop_minimize_window"
-	ToolFocus     = "desktop_focus_window"
+	ToolWindow    = "desktop_window"
 	ToolClose     = "desktop_close_window"
 	ToolListApps  = "desktop_list_apps"
 )
@@ -43,6 +47,9 @@ type OpenPolicy struct {
 }
 
 var openSchemes = map[string]bool{"http": true, "https": true, "mailto": true}
+
+// reDomain is a bare site name, "google.com" or "news.ycombinator.com".
+var reDomain = regexp.MustCompile(`(?i)^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$`)
 
 // targetKind classifies a desktop_open target.
 type targetKind int
@@ -81,6 +88,9 @@ type tool struct {
 	spec       node.Spec
 	capability string
 	call       func(ctx context.Context, args map[string]any) (map[string]any, error)
+	// render, when set, builds the spec from the capabilities present now (false: not offered),
+	// in place of spec + capability.
+	render func(have map[string]bool) (node.Spec, bool)
 }
 
 // Lister returns the installed-app catalogue, computed now.
@@ -95,14 +105,46 @@ type Tools struct {
 	// recorded).
 	Launched *launches.Tracker
 	Log      *slog.Logger // nil: no logs
-	tools    []tool
+	// Show puts a window command's outcome on the island ("Maximized Firefox"); nil: not shown.
+	Show func(text string, d time.Duration)
+	// Confirm holds closing every window of an app for the user's yes (Q8); nil or off: no
+	// question.
+	Confirm *dictate.Confirmer
+	// Now is the clock for "it" (the last window acted on, for a minute); nil: time.Now.
+	Now func() time.Time
+	// Views lists and switches the tabs and sheets inside app windows (views.go); nil: the
+	// view tools aren't offered.
+	Views ViewSource
+	tools []tool
+
+	mu        sync.Mutex
+	lastActed host.Window
+	actedAt   time.Time
+	// choices is the numbered list the island last showed (an ambiguous name), so "the second
+	// one" picks a window by its place even when titles repeat; choicesAt dates it.
+	choices   []host.Window
+	choicesAt time.Time
+	// choiceCall is the call that ended in the list (tool and arguments), re-run on the chosen
+	// window when the answer comes in the choice window (AnswerChoice).
+	choiceTool string
+	choiceArgs map[string]any
+	// closing is a close-all of this app waiting for the user's yes, and its question: further
+	// closes of the same app in that turn get the same question instead of closing.
+	closing     string
+	closingWait map[string]any
+	// viewChoices is the numbered list of views the island last showed (one list at a time:
+	// a window list clears it and the other way round), for the app as said.
+	viewChoices   []View
+	viewChoiceApp string
+	// mixedChoices: a funnel-stage-1 list of different kinds (a window or a tab), each a call.
+	mixedChoices []func(context.Context) (map[string]any, error)
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).
 func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	t := &Tools{Host: h, Policy: policy, Apps: list}
-	winID := node.Param{Name: "window_id", Type: "string", Required: true,
-		Description: "The id from desktop_list_windows, or the app or window name as the user said it ('TextEdit', 'the terminal')"}
+	winID := node.Param{Name: "window_id", Type: "string",
+		Description: "The app or window as the user said it ('TextEdit', 'the terminal', 'it'), or an id from desktop_list_windows. Leave out for the window in front"}
 	t.tools = []tool{
 		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text. A job inside an app ('in X, make a note and save it') is an errand: run_errand.",
 			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "The app's name as said, or a URL"}},
@@ -111,7 +153,7 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 				{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true},
 				{VoiceCommand: "launch steam on my computer", Params: map[string]any{"target": "Steam"}},
 			}},
-			host.CapOpen, t.open},
+			host.CapOpen, t.open, nil},
 		{node.Spec{Name: ToolListApps, Description: "The apps installed on the computer. Use for 'what apps can you open' or 'do I have X', not to open one.",
 			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional name to look up"}},
 			Keywords: []string{"apps", "applications", "programs", "games", "installed", "available", "open", "computer", "desktop"},
@@ -120,29 +162,31 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 				{VoiceCommand: "what apps are on my computer", Params: map[string]any{}},
 				{VoiceCommand: "do I have steam installed", Params: map[string]any{"query": "steam"}},
 			}},
-			host.CapOpen, t.listApps},
+			host.CapOpen, t.listApps, nil},
 		{node.Spec{Name: ToolGetVolume, Description: "The computer's volume.",
 			Keywords: []string{"volume", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what's the volume on my computer", Params: map[string]any{}, Primary: true}}},
-			host.CapVolumeGet, t.getVolume},
+			host.CapVolumeGet, t.getVolume, nil},
 		{node.Spec{Name: ToolSetVolume, Description: "Set the computer's volume.",
 			Params:   []node.Param{{Name: "volume", Type: "int", Required: true, Description: "0-100"}},
 			Keywords: []string{"volume", "louder", "quieter", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "set my computer volume to 30", Params: map[string]any{"volume": 30}, Primary: true}}},
-			host.CapVolumeSet, t.setVolume},
-		{node.Spec{Name: ToolList, Description: "List the windows open on the user's computer: id, title, app, minimized. Call it to answer what's open on screen, and before minimizing, focusing or closing a window, to get its id. Never invent ids.",
+			host.CapVolumeSet, t.setVolume, nil},
+		{node.Spec{Name: ToolList, Description: "List the windows open on the user's computer: id, title, app, minimized, focused (newest first where known). Call it to answer what's open or what's in front.",
 			Keywords: []string{"windows", "apps", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what windows are open on my computer", Params: map[string]any{}, Primary: true}}},
-			host.CapWindowsList, t.list},
-		{node.Spec{Name: ToolMinimize, Description: "Minimize one window on the user's computer.", Params: []node.Param{winID},
-			Keywords: []string{"minimize", "hide", "window"}},
-			host.CapWindowsMinimize, t.windowAction(host.ActionMinimize)},
-		{node.Spec{Name: ToolFocus, Description: "Bring one window on the user's computer to the front.", Params: []node.Param{winID},
-			Keywords: []string{"focus", "switch to", "window"}},
-			host.CapWindowsFocus, t.windowAction(host.ActionFocus)},
-		{node.Spec{Name: ToolClose, Description: "Ask one window on the user's computer to close, as if its close button were clicked. The app may prompt to save; it is never force-killed.", Params: []node.Param{winID},
-			Keywords: []string{"close", "window"}, Risky: true},
-			host.CapWindowsClose, t.windowAction(host.ActionClose)},
+			host.CapWindowsList, t.list, nil},
+		{spec: node.Spec{Name: ToolWindow}, render: windowSpec, call: t.window},
+		{node.Spec{Name: ToolClose, Description: "Close a window on the user's computer, as its close button would (the app may ask to save; never force-killed). all_of_app closes every window of that app.",
+			Params:   []node.Param{winID, {Name: "all_of_app", Type: "bool", Description: "Close every window of the app, not just this one"}},
+			Keywords: []string{"close", "window"}},
+			host.CapWindowsClose, t.close, nil},
+	}
+	vs := viewsSpecs()
+	for i, call := range []func(context.Context, map[string]any) (map[string]any, error){t.listViews, t.switchView} {
+		spec := vs[i]
+		t.tools = append(t.tools, tool{spec: spec, call: call,
+			render: func(map[string]bool) (node.Spec, bool) { return spec, t.Views != nil }})
 	}
 	return t
 }
@@ -159,7 +203,11 @@ func (t *Tools) Available(ctx context.Context) []node.ToolDef {
 	}
 	var out []node.ToolDef
 	for _, tl := range t.tools {
-		if have[tl.capability] {
+		if tl.render != nil {
+			if spec, ok := tl.render(have); ok {
+				out = append(out, spec.Render())
+			}
+		} else if have[tl.capability] {
 			out = append(out, tl.spec.Render())
 		}
 	}
@@ -168,7 +216,8 @@ func (t *Tools) Available(ctx context.Context) []node.ToolDef {
 
 // Call runs a tool. Failures are outputs ({"success": false, "error", "error_code"}), so the
 // LLM can tell the user what happened.
-func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ node.Request) (map[string]any, bool) {
+func (t *Tools) Call(ctx context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
+	ctx = context.WithValue(ctx, saidKey{}, req.VoiceCommand)
 	for _, tl := range t.tools {
 		if tl.spec.Name != name {
 			continue
@@ -177,12 +226,24 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		if err != nil {
 			o := node.Fail("%v", err)
 			o["error_code"] = code(err)
+			if (name == ToolWindow || name == ToolClose) && o["error_code"] == "not_supported" {
+				// Q9: the island says it, with the error chime; nothing is spoken.
+				t.island(o, UnsupportedMessage, true)
+			}
 			var amb *apps.AmbiguousError
 			var nf *apps.NotFoundError
 			var we *windowError
 			if errors.As(err, &we) {
 				if len(we.match.Candidates) > 0 {
 					o["candidates"] = we.match.Candidates // ask the user which one
+				}
+				if (name == ToolWindow || name == ToolClose) && len(we.match.Candidates) > 1 {
+					// Q9: an ambiguous name lists the candidates on the island, numbered; the
+					// user answers "the second one" in the choice window.
+					t.choice(o, we.match.Candidates, we.windows)
+					t.mu.Lock()
+					t.choiceTool, t.choiceArgs = name, maps.Clone(args)
+					t.mu.Unlock()
 				}
 				if we.windows != nil {
 					o["windows"] = we.windows // retry with an id from these, in the same turn
@@ -194,7 +255,9 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 			}
 			return o, true
 		}
-		out["success"] = true
+		if _, set := out["success"]; !set { // a parked confirmation says success: false itself
+			out["success"] = true
+		}
 		return out, true
 	}
 	return nil, false
@@ -250,6 +313,14 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		return nil, err
 	}
 	p, err := apps.Find(list, target)
+	if errors.Is(err, apps.ErrNotFound) && reDomain.MatchString(strings.TrimSpace(target)) {
+		// "open google.com": no app has that name, so it's the site.
+		link := "https://" + strings.TrimSpace(target)
+		if err := t.Host.Open(ctx, link); err != nil {
+			return nil, err
+		}
+		return map[string]any{"opened": link, "note": "requested; launch is not confirmed"}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -387,26 +458,6 @@ func (t *Tools) list(ctx context.Context, _ map[string]any) (map[string]any, err
 		return nil, err
 	}
 	return map[string]any{"windows": ws}, nil
-}
-
-func (t *Tools) windowAction(a host.WindowAction) func(context.Context, map[string]any) (map[string]any, error) {
-	return func(ctx context.Context, args map[string]any) (map[string]any, error) {
-		id, _ := args["window_id"].(string)
-		if id == "" {
-			return nil, fmt.Errorf("%w: window_id is required", errBadArgs)
-		}
-		out := map[string]any{}
-		if w, ok, err := t.resolveWindow(ctx, id); err != nil {
-			return nil, err
-		} else if ok && w.ID != id {
-			id, out["matched_window"] = w.ID, windowName(w)
-		}
-		if err := t.Host.WindowDo(ctx, a, id); err != nil {
-			return nil, err
-		}
-		out["window_id"], out["action"] = id, string(a)
-		return out, nil
-	}
 }
 
 // windowError is a window_id that names no single window, with the open windows so the model

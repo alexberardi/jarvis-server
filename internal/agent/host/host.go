@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -34,17 +35,29 @@ const (
 	CapWindowsFocus    = "windows.focus"
 	CapWindowsClose    = "windows.close"
 	CapOpen            = "open"
+
+	// The arranging verbs (DESKTOP-COMMANDS.md L1). Each is offered only where the platform has
+	// a native version (Q4): no stand-ins.
+	CapWindowsUnminimize = "windows.unminimize"
+	CapWindowsMaximize   = "windows.maximize"
+	CapWindowsUnmaximize = "windows.unmaximize" // leave maximize or fullscreen
+	CapWindowsFullscreen = "windows.fullscreen"
+	CapWindowsSnap       = "windows.snap"
+	CapWindowsMonitor    = "windows.monitor"   // only while there is a second monitor
+	CapWindowsWorkspace  = "windows.workspace" // a numbered workspace
 )
 
 // KnownCapabilities is the closed set.
 var KnownCapabilities = map[string]bool{
 	CapVolumeGet: true, CapVolumeSet: true,
 	CapWindowsList: true, CapWindowsMinimize: true, CapWindowsFocus: true, CapWindowsClose: true,
-	CapOpen: true,
+	CapOpen:              true,
+	CapWindowsUnminimize: true, CapWindowsMaximize: true, CapWindowsUnmaximize: true,
+	CapWindowsFullscreen: true, CapWindowsSnap: true, CapWindowsMonitor: true, CapWindowsWorkspace: true,
 }
 
-// AllWindowCaps is every window capability, for backends that gain or lose window control as a
-// unit (X11 present, Accessibility granted).
+// AllWindowCaps is the basic window capabilities, for backends that gain or lose them as a unit
+// (X11 present, Accessibility granted). The arranging ones are added per platform.
 var AllWindowCaps = []string{CapWindowsList, CapWindowsMinimize, CapWindowsFocus, CapWindowsClose}
 
 const (
@@ -60,6 +73,12 @@ type Window struct {
 	Title     string `json:"title"`
 	App       string `json:"app"`
 	Minimized bool   `json:"minimized"`
+	// Focused: the window with keyboard focus, where the backend can tell (Hyprland, sway);
+	// false everywhere else for now.
+	Focused bool `json:"focused"`
+	// Workspace names the window's workspace where the backend knows it (Hyprland, sway), so
+	// two windows with the same title can be told apart; "" elsewhere.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // Errors. Every deliberate failure is one of these, so callers map conditions identically
@@ -105,6 +124,11 @@ type Backend interface {
 	// .desktop file or a .lnk shortcut). Fire-and-forget, like Open. The path always comes
 	// from the app catalogue, never from the model.
 	LaunchApp(ctx context.Context, path string) error
+	// ArrangeWindow runs the actions past minimise, focus and close (unminimize, maximize,
+	// unmaximize, fullscreen, snap, move to a monitor or workspace). target is the monitor or
+	// workspace of a move, already validated by Host; "" otherwise. Setting a state the window
+	// is already in is not an error.
+	ArrangeWindow(ctx context.Context, id string, a WindowAction, target string) error
 }
 
 // Host gates, clamps and validates in front of exactly one Backend. It is the only thing that
@@ -200,24 +224,79 @@ func (h *Host) ListWindows(ctx context.Context) ([]Window, error) {
 	return ws, err
 }
 
-// WindowAction is one of the three window verbs.
+// WindowAction is a window verb.
 type WindowAction string
 
 const (
-	ActionMinimize WindowAction = "minimize"
-	ActionFocus    WindowAction = "focus"
-	ActionClose    WindowAction = "close"
+	ActionMinimize        WindowAction = "minimize"
+	ActionFocus           WindowAction = "focus"
+	ActionClose           WindowAction = "close"
+	ActionUnminimize      WindowAction = "unminimize"
+	ActionMaximize        WindowAction = "maximize"
+	ActionUnmaximize      WindowAction = "unmaximize"
+	ActionFullscreen      WindowAction = "fullscreen"
+	ActionSnapLeft        WindowAction = "snap_left"
+	ActionSnapRight       WindowAction = "snap_right"
+	ActionMoveToMonitor   WindowAction = "move_to_monitor"
+	ActionMoveToWorkspace WindowAction = "move_to_workspace"
 )
 
 // ActionCapability maps a window action to the capability it needs.
 var ActionCapability = map[WindowAction]string{
-	ActionMinimize: CapWindowsMinimize,
-	ActionFocus:    CapWindowsFocus,
-	ActionClose:    CapWindowsClose,
+	ActionMinimize:        CapWindowsMinimize,
+	ActionFocus:           CapWindowsFocus,
+	ActionClose:           CapWindowsClose,
+	ActionUnminimize:      CapWindowsUnminimize,
+	ActionMaximize:        CapWindowsMaximize,
+	ActionUnmaximize:      CapWindowsUnmaximize,
+	ActionFullscreen:      CapWindowsFullscreen,
+	ActionSnapLeft:        CapWindowsSnap,
+	ActionSnapRight:       CapWindowsSnap,
+	ActionMoveToMonitor:   CapWindowsMonitor,
+	ActionMoveToWorkspace: CapWindowsWorkspace,
 }
 
-// WindowDo runs a window action. Close is always a graceful request.
+// WindowActions is every action, in the order a tool lists them.
+var WindowActions = []WindowAction{ActionFocus, ActionMinimize, ActionUnminimize, ActionMaximize,
+	ActionUnmaximize, ActionFullscreen, ActionSnapLeft, ActionSnapRight, ActionMoveToMonitor,
+	ActionMoveToWorkspace, ActionClose}
+
+// NeedsTarget: the move actions take a monitor or workspace (WindowMove).
+func NeedsTarget(a WindowAction) bool { return a == ActionMoveToMonitor || a == ActionMoveToWorkspace }
+
+// WindowDo runs a window action that takes no target. Close is always a graceful request.
 func (h *Host) WindowDo(ctx context.Context, action WindowAction, id string) error {
+	if NeedsTarget(action) {
+		return fmt.Errorf("host: %s needs a target (WindowMove)", action)
+	}
+	return h.windowDo(ctx, action, id, "")
+}
+
+var (
+	reWorkspace = regexp.MustCompile(`^[1-9][0-9]{0,2}$`)
+	// A monitor is next, previous, its position (1-9) or its connector name ("DP-1").
+	reMonitor = regexp.MustCompile(`^(next|previous|[1-9]|[A-Za-z][A-Za-z0-9_.-]{0,31})$`)
+)
+
+// WindowMove moves a window to a monitor (next, previous, 1-9 or a name) or a numbered
+// workspace. The target is validated here, once, before any backend sees it.
+func (h *Host) WindowMove(ctx context.Context, action WindowAction, id, target string) error {
+	switch action {
+	case ActionMoveToWorkspace:
+		if !reWorkspace.MatchString(target) {
+			return Errorf(ErrInvalidTarget, "workspace must be a number from 1 to 999 (got %q)", target)
+		}
+	case ActionMoveToMonitor:
+		if !reMonitor.MatchString(target) {
+			return Errorf(ErrInvalidTarget, "monitor must be next, previous, a number or a name like DP-1 (got %q)", target)
+		}
+	default:
+		return fmt.Errorf("host: %s takes no target (WindowDo)", action)
+	}
+	return h.windowDo(ctx, action, id, target)
+}
+
+func (h *Host) windowDo(ctx context.Context, action WindowAction, id, target string) error {
 	capability, ok := ActionCapability[action]
 	if !ok {
 		return fmt.Errorf("host: unknown window action %q", action)
@@ -233,8 +312,10 @@ func (h *Host) WindowDo(ctx context.Context, action WindowAction, id string) err
 		return h.b.MinimizeWindow(ctx, id)
 	case ActionFocus:
 		return h.b.FocusWindow(ctx, id)
-	default:
+	case ActionClose:
 		return h.b.CloseWindow(ctx, id)
+	default:
+		return h.b.ArrangeWindow(ctx, id, action, target)
 	}
 }
 

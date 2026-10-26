@@ -74,6 +74,9 @@ const (
 	// StateGPUUnavailable: the label must run on a GPU that isn't usable (a driver update
 	// waiting for a reboot, …); Reason is a sentence for the user. It fails at once.
 	StateGPUUnavailable = "gpu_unavailable"
+	// StateDoesNotFit is a label state only (requests see StateFailed): the GPU can't hold the
+	// label's engine next to the others on it, so none was started (engine.StateDoesNotFit).
+	StateDoesNotFit = "does_not_fit"
 )
 
 // NotReadyError says a label's engine can't serve yet.
@@ -161,6 +164,9 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent is a vendor's opaque per-call data, sent back as is: Gemini 3's
+	// {"google":{"thought_signature":…}}, which it requires on tool calls in the history.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 // Message is a chat message. Tool history (ToolCalls on assistant turns, ToolCallID on tool

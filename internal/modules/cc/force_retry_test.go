@@ -184,3 +184,29 @@ func TestForceRetryNotAfterDedupeNudge(t *testing.T) {
 		t.Fatalf("done %v", f)
 	}
 }
+
+// A read tool returns the current state, so a follow-up ("what about now") re-reads it: the
+// identical second-turn call reaches the node instead of being turned back by [TOOL_DEDUPE].
+func TestDedupeLetsReadToolsRerun(t *testing.T) {
+	ce, cid := forceEnv(t)
+	readCall := func(id string) engineReply {
+		return engineReply{toolCalls: []map[string]any{{"id": id, "type": "function",
+			"function": map[string]any{"name": "browser_read_page", "arguments": `{}`}}}}
+	}
+	ce.eng.push(readCall("call_r1"))
+	ce.eng.say("The page says hello.")
+	ce.chat("tok-7", map[string]any{"message": "read the page", "conversation_id": cid})
+	clearScript(ce)
+	before := len(ce.eng.requests())
+	ce.eng.push(readCall("call_r2"))
+	ce.eng.say("Now it says goodbye.")
+	ce.chat("tok-7", map[string]any{"message": "what about now", "conversation_id": cid})
+	for _, r := range ce.eng.requests()[before:] {
+		if strings.Contains(fmtMessages(r), nagDedupe) {
+			t.Fatal("the second-turn read was turned back by the dedupe nudge")
+		}
+	}
+	if n := len(ce.pub.commands("tool_call")); n != 2 {
+		t.Fatalf("%d tool_call commands reached the node, want 2", n)
+	}
+}

@@ -1,6 +1,7 @@
 package computer
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -44,7 +45,10 @@ type Desktop struct {
 	// Apps finds and opens installed apps through desktop_open's catalogue (nil: an app that
 	// isn't running can't be used).
 	Apps Apps
-	Now  func() time.Time // nil: time.Now
+	// Focus gives window id (DesktopWindow.ID) the keyboard focus (nil: observe can't, and
+	// keys go wherever the focus is).
+	Focus func(ctx context.Context, id string) error
+	Now   func() time.Time // nil: time.Now
 	// Sleep pauses a batch between a click and the keys that follow it (nil: time.Sleep, bounded
 	// by the context).
 	Sleep func(ctx context.Context, d time.Duration)
@@ -389,6 +393,21 @@ func (t *Tools) window(ctx context.Context, app string) (DesktopWindow, string, 
 	}
 }
 
+// focus gives w the keyboard focus unless it has it.
+func (t *Tools) focus(ctx context.Context, w DesktopWindow) error {
+	ws, err := t.Desktop.Windows.List(ctx)
+	if err != nil {
+		return err
+	}
+	if f, ok := findWindow(ws, ""); ok && f.ID == w.ID {
+		return nil
+	}
+	if err := t.Desktop.Focus(ctx, w.ID); err != nil {
+		return fmt.Errorf("couldn't bring %s to the front: %w", w.App, err)
+	}
+	return nil
+}
+
 func firstNonEmpty(ss ...string) string {
 	for _, s := range ss {
 		if s != "" {
@@ -423,6 +442,14 @@ func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]an
 	if code, err := appCheck([]string{w.App}, nil, nil); err != nil {
 		return failCode(code, "%v", err)
 	}
+	out := map[string]any{"success": true, "target": TargetDesktop, "app": w.App, "window_id": w.ID}
+	// The app looked at is the one acted in next: its window takes the focus, so keys and
+	// typing go to it (a replay's step in another app, #581).
+	if app != "" && t.Desktop.Focus != nil {
+		if err := t.focus(ctx, w); err != nil {
+			out["focus_error"] = err.Error()
+		}
+	}
 	t.runs().With(a.RunID, func(r *Run) {
 		if r.App == "" {
 			r.App = w.App
@@ -434,7 +461,6 @@ func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]an
 	if !a.Snapshot && !a.Screenshot {
 		a.Snapshot = true
 	}
-	out := map[string]any{"success": true, "target": TargetDesktop, "app": w.App, "window_id": w.ID}
 	if w.Title != "" {
 		out["title"] = w.Title
 	}
@@ -503,7 +529,9 @@ func (t *Tools) actDesktop(ctx context.Context, a actArgs) map[string]any {
 			newApps = append(newApps, r.NewApp)
 		}
 		if !r.OK {
-			out["success"] = false
+			// The batch's failure is the action's: callers that read only the top (the
+			// tool-call trace) see why too (#581).
+			out["success"], out["error_code"], out["error"] = false, cmp.Or(r.Code, "failed"), r.Error
 			out["stopped_at"] = i
 			if r.Code == "paused" {
 				out["paused"] = true

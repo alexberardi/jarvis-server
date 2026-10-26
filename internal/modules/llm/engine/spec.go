@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/alexberardi/jarvis-server/internal/platform/sysinfo"
 )
 
 // Placement-and-load identity of an engine instance (LD1): two labels whose configs produce
@@ -76,6 +79,17 @@ func keyFor(c LabelConfig, f Flavour, binary string) instanceKey {
 	return k
 }
 
+// EngineIdentity is what decides, from settings alone, whether two labels' local configs run
+// one engine (LD1): equal identities share one. The resolver's instance key adds the build. A
+// label the GPU can't hold a second copy for may run on another's engine anyway (Resolver.Fits);
+// a running label's Endpoint.Engine is then the truth.
+func EngineIdentity(c LabelConfig) string {
+	if c.ModelPath == "" {
+		c.ModelPath = c.Model
+	}
+	return keyFor(c, Flavour(c.GPUBackend), "").hash()
+}
+
 func normList(s string) string {
 	var parts []string
 	for _, p := range strings.Split(s, ",") {
@@ -84,6 +98,27 @@ func normList(s string) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+// How much host RAM llama-server's server prompt cache may hold, in MiB. Upstream's own
+// default is 8192 (`-cram`, ggml-org/llama.cpp#16391), which every install pays on top of the
+// model's VRAM: on the devbox the 9B held 8.5 GiB of anonymous RAM for it, and a 16 GiB box
+// swaps. We keep the cache — it saves re-processing the system prompt when live, background
+// and computer turns alternate on one slot — but size it from the host: a tenth of RAM, at
+// most cacheRAMCapMiB and at least cacheRAMFloorMiB. The floor also stands in for a host whose
+// RAM the OS won't say (sysinfo returns 0): a tenth of nothing would disable the cache.
+const (
+	cacheRAMCapMiB   = 2048
+	cacheRAMFloorMiB = 256
+)
+
+// hostMemory is the host's physical RAM in bytes, 0 when unknown (tests replace it).
+var hostMemory = sysinfo.TotalMemory
+
+// cacheRAMMiB is the --cache-ram value for a chat engine on this host.
+func cacheRAMMiB() int {
+	mib := int(hostMemory() / (1 << 20) / 10)
+	return min(max(mib, cacheRAMFloorMiB), cacheRAMCapMiB)
 }
 
 // args builds the engine command line for an instance key (01 §11 "Local slot spec").
@@ -137,6 +172,17 @@ func (k instanceKey) args(port int, alias string) ([]string, error) {
 		}
 		if k.MMProj != "" {
 			a = append(a, "--mmproj", k.MMProj)
+		}
+		if !slices.Contains(extra, "--cache-ram") && !slices.Contains(extra, "-cram") {
+			// Sized from the host rather than left at upstream's 8 GiB; off for embeddings,
+			// which never reuse a prompt. An operator's own value in extra_args wins, and
+			// ours is left out entirely so `ps` and admin's argv say what the engine runs.
+			// llama-server rejects the `--cache-ram=N` form, so the exact token is enough.
+			if k.Embedding {
+				a = append(a, "--cache-ram", "0")
+			} else {
+				a = append(a, "--cache-ram", strconv.Itoa(cacheRAMMiB()))
+			}
 		}
 		if k.KVCacheType != "" && k.KVCacheType != "f16" {
 			a = append(a, "-ctk", k.KVCacheType, "-ctv", k.KVCacheType)

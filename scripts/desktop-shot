@@ -12,7 +12,8 @@
 #                   run; its credentials live in .sandbox/NAME/desktop/agent-home/, never in
 #                   ~/.config.
 #   --offline       no server: the agent runs with placeholder credentials (it keeps retrying
-#                   jarvisd; the icon and island still show, the menu lacks "Open Jarvis …")
+#                   jarvisd; the icon and island still show, the menu says "Waiting for the
+#                   Jarvis server at …" with "Retry now" and lacks "Open Jarvis …")
 #   --states LIST   island states to capture, comma-separated (default: all of them):
 #                   running (the "Jarvis is running" pill), listening, thinking, speaking,
 #                   follow_up, error, and the computer-task indicators controlling, paused,
@@ -239,6 +240,9 @@ PY
       log "control socket: computer-on failed"
     fi
   fi
+  # With no server the agent says on the island, once, that it is waiting for one (#585): an
+  # 8 s pill. Let it go before the baseline, or every island capture would diff against it.
+  [ "${DS_OFFLINE:-0}" = 1 ] && sleep 9
   shot "$base" # the new baseline: the bar with its icon, no island
 
   last=${DS_STATES##*,}
@@ -357,7 +361,7 @@ for theme in ${THEMES//,/ }; do
   # setsid: the session and everything in it is one process group, killed as one on exit.
   setsid "${agent_env[@]}" "XDG_RUNTIME_DIR=$RT" XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland \
     "DS_OUT=$OUT" "DS_SIZE=$SIZE" "DS_SWAY=$SWAY" "DS_AGENT=$BIN/jarvis-agent" "DS_HELPER=$BIN/desktopshot" \
-    "DS_CREDS=$CREDS" "DS_STATES=$STATES" "DS_FIRST_THEME=$first" \
+    "DS_CREDS=$CREDS" "DS_STATES=$STATES" "DS_FIRST_THEME=$first" "DS_OFFLINE=$OFFLINE" \
     dbus-run-session -- bash "$0" __session "$theme" &
   SESSIONS+=($!)
   wait $! || rc=1

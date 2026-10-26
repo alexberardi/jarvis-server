@@ -28,7 +28,7 @@ import (
 //
 // Knobs: FAKE_ENGINE_LOG (directory: each start writes <pid>.json with argv and env),
 // FAKE_ENGINE_LOADING (duration /health answers 503 first), FAKE_ENGINE_LIST_DEVICES (printed
-// for --list-devices).
+// for --list-devices), FAKE_ENGINE_OOM=1 (exits 1 after a CUDA out-of-memory line).
 func TestMain(m *testing.M) {
 	if os.Getenv("FAKE_UV") == "1" {
 		os.Exit(runFakeUV(os.Args[1:]))
@@ -83,7 +83,7 @@ func runFakeEngine(args []string) {
 	if dir := os.Getenv("FAKE_ENGINE_LOG"); dir != "" {
 		env := map[string]string{}
 		for _, k := range []string{"LLAMA_API_KEY", "CUDA_VISIBLE_DEVICES", "GGML_VK_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "HF_HUB_OFFLINE",
-			"VLLM_API_KEY", "VLLM_CACHE_ROOT"} {
+			"VLLM_API_KEY", "VLLM_CACHE_ROOT", "VLLM_USE_FLASHINFER_SAMPLER"} {
 			if v, ok := os.LookupEnv(k); ok {
 				env[k] = v
 			}
@@ -101,6 +101,12 @@ func runFakeEngine(args []string) {
 	}
 	if _, err := os.Stat(model); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load model:", err)
+		os.Exit(1)
+	}
+	if os.Getenv("FAKE_ENGINE_OOM") == "1" {
+		// llama.cpp on a CUDA card another engine already fills.
+		fmt.Fprintln(os.Stderr, "ggml_backend_cuda_buffer_type_alloc_buffer: allocating 5120.00 MiB on device 0: cudaMalloc failed: out of memory")
+		fmt.Fprintln(os.Stderr, "llama_model_load: error loading model: unable to allocate CUDA0 buffer")
 		os.Exit(1)
 	}
 	if os.Getenv("FAKE_ENGINE_IGNORE_TERM") == "1" {

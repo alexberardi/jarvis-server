@@ -75,7 +75,7 @@ so read them before you run them. The install scripts check the archive they dow
 
 While only pre-releases exist, use the release's own URL. GitHub's `releases/latest` skips
 pre-releases, so `releases/latest/download/...` links give a 404. The commands below use
-`v0.1.0-rc18` as the example tag: replace it with the newest tag. Each install script installs
+`v0.1.0-rc18.7` as the example tag: replace it with the newest tag. Each install script installs
 the release it came from.
 
 ### The server
@@ -107,7 +107,7 @@ Removing the package stops the service and keeps the data in `/var/lib/jarvisd`;
 **From a terminal, Linux and macOS:**
 
 ```sh
-curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install.sh
+curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.7/install.sh
 less install.sh          # read it first
 sh install.sh            # asks for sudo
 ```
@@ -124,7 +124,7 @@ Options (`sh install.sh --help`):
 **From a terminal, Windows** (PowerShell, as Administrator or it asks for elevation):
 
 ```powershell
-irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install.ps1 | iex
+irm https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.7/install.ps1 | iex
 ```
 
 Options (`-StopLegacy`, `-Yes`, `-Uninstall`, `-Purge`, `-Version`) need the downloaded file:
@@ -187,7 +187,7 @@ permissions it needs).
 - **Any other Linux** (Fedora, Bazzite, Arch, …), as yourself, not with sudo:
 
   ```sh
-  curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install-agent.sh
+  curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.7/install-agent.sh
   sh install-agent.sh      # --no-start, --version <tag>, --uninstall [--purge]
   ```
 
@@ -201,7 +201,7 @@ Python node's installer does (HAT overlay, ALSA, PulseAudio, networking) and ins
 `jarvis-agent.service`, **disabled**: only one node may own the HAT.
 
 ```sh
-curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18/install-pi.sh
+curl -fsSLO https://github.com/alexberardi/jarvis-server/releases/download/v0.1.0-rc18.7/install-pi.sh
 sudo sh install-pi.sh                 # --user NAME (default pi), --version <tag>
 /opt/jarvis-agent/jarvis-agent enroll --server <server> --room kitchen   # as the node's user; approve the code in the app or admin
 sudo sh install-pi.sh --activate      # make the Go node the one that runs (--deactivate goes back)
@@ -227,7 +227,7 @@ advertises itself over mDNS (`_jarvis-config._tcp`).
 ```sh
 jarvisd service status            # also: sudo jarvisd service start|stop|restart
 jarvisd doctor                    # can nodes and phones reach it? (sudo jarvisd doctor --fix)
-sudo jarvisd upgrade --version v0.1.0-rc18   # signed upgrade with a DB snapshot and rollback
+sudo jarvisd upgrade --version v0.1.0-rc18.7   # signed upgrade with a DB snapshot and rollback
 jarvisd --help
 ```
 
@@ -294,7 +294,8 @@ control needs no `wmctrl`/`xdotool` either). On GNOME and KDE (Wayland) it types
 desktop portal once you allow it: run `jarvis-agent dictation allow` and accept the dialog (asked
 once). macOS needs the Accessibility grant. Typing into a *named* app works on Hyprland, sway, X11,
 macOS and Windows (on GNOME/KDE, click into the app first). `jarvis-agent status` says what works. By default Jarvis asks
-"Send … to Claude?" before anything is sent (Enter, a click, a submitting fill); `run --confirm-dictation off`
+"Send … to Claude?" before anything is sent (Enter, or a browser click or submit that pays, sends, deletes,
+shares or changes your account; a search just runs); `run --confirm-dictation off`
 turns that off, `all` asks before every keystroke too. Typing presses keys, as you would: in a terminal app
 with key bindings (Neovim/Vim in normal mode, `less`, `htop`) they run as commands, so switch it to
 insert mode first (DESIGN §14, "Safety summary").

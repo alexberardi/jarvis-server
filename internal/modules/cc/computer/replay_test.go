@@ -477,3 +477,48 @@ func TestReplayOpensWindowAtFirstStep(t *testing.T) {
 		t.Fatalf("first observe %+v", o)
 	}
 }
+
+// #581: a desktop replay opens (and focuses) each step's app before its first step there, as
+// the recording's launcher did; a step that fails says which step and why.
+func TestReplayDesktopOpensEachApp(t *testing.T) {
+	ptr := func(i int) *int { return &i }
+	wf := &Workflow{ID: "tw_1", Version: 1, Name: "test omacalc", Steps: []WorkflowStep{
+		{Intent: "type test message", Target: "desktop", App: "omawrite",
+			Action: computeruse.Action{Kind: "type", Intent: "type test message", Text: "test test test"}},
+		{Intent: "type test message", Target: "desktop", App: "omawrite",
+			Action: computeruse.Action{Kind: "keypress", Intent: "type test message", Keys: []string{"enter"}}},
+		{Intent: "press 7", Target: "desktop", App: "omacalc",
+			Window: &StepWindow{Class: "omacalc", Point: &WindowPoint{X: 40, Y: 300, W: 400, H: 600}},
+			Action: computeruse.Action{Kind: "click", Intent: "press 7", X: ptr(2236), Y: ptr(679)}},
+	}, Success: SuccessCheck{TextPresent: []string{"77"}}}
+	e := newEnv(t, Observation{App: "omacalc", Title: "Omacalc", Text: "77", Gen: 1})
+	var at []string // the app each act ran with, after the observes before it
+	e.exec.onAct = func() {
+		var apps []string
+		for _, o := range e.exec.observes {
+			apps = append(apps, o.Target.App)
+		}
+		at = append(at, strings.Join(apps, ","))
+	}
+	e.script(`{"actions": [{"kind": "click", "x": 40, "y": 300, "intent": "press 7"}]}`)
+	if out := e.replay(wf, nil); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(at) < 3 || at[0] != "omawrite" || at[1] != "omawrite" || !strings.HasPrefix(at[2], "omawrite,omacalc") {
+		t.Fatalf("observes before each act: %q, want omawrite opened first, then omacalc", at)
+	}
+	if req := e.llm.reqs[0]; !strings.Contains(userText(req), "click 40,300 from the top-left of the window") {
+		t.Fatalf("the model round has no window point hint")
+	}
+
+	// The typing fails on the computer, and so does the model's round: the summary names the step.
+	e = newEnv(t, Observation{App: "omawrite", Gen: 1})
+	e.exec.results = func(b Batch) ActResult {
+		return ActResult{Results: []StepResult{{I: 0, Code: "not_found", Error: "omawrite has no window open"}}}
+	}
+	e.script(`not json`, `not json`, `not json`)
+	out := e.replay(wf, nil)
+	if out.State != StateFailed || !strings.HasPrefix(out.Summary, "Step 1 (type test message) failed: ") {
+		t.Fatalf("outcome %+v", out)
+	}
+}

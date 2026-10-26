@@ -36,8 +36,8 @@ var (
 	ErrWaylandRecording = errors.New("On Wayland I can record the desktop on Hyprland and sway; on GNOME and KDE I can only record the browser for now")
 	// ErrInputGroup: the keyboard and mouse devices can't be read (macOS's ErrInputMonitoring).
 	ErrInputGroup = errors.New("to record the desktop, Jarvis needs to read the keyboard and mouse: run " +
-		"`sudo usermod -aG input $USER` in a terminal, then log out and back in " +
-		"(`jarvis-agent permission input-monitoring` says when it's done)")
+		"`sudo usermod -aG input $USER` in a terminal, then `jarvis-agent restart` " +
+		"(it restarts only Jarvis; nothing else closes)")
 )
 
 // wlSystem is what a Wayland recording asks the system.

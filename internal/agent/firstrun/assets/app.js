@@ -144,7 +144,7 @@ function renderPermissions(perms, os) {
   const mac = os === "darwin";
   $("perm-title").textContent = mac ? "Let Jarvis Automation Agent work on this Mac" : "Let Jarvis Automation Agent watch the keyboard and mouse";
   $("perm-intro").textContent = mac ? "macOS asks you to allow each of these once. The ticks turn green as you do."
-    : "Only for recording what you do on the desktop. Run the command once in a terminal, then log out and back in.";
+    : "Only for recording what you do on the desktop. Run the command once in a terminal: it restarts only Jarvis, nothing else closes.";
   const list = $("perm-list");
   list.replaceChildren();
   let all = true;

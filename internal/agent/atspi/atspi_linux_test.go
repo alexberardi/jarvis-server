@@ -28,6 +28,8 @@ type fakeNode struct {
 	box    [4]int32
 	text   string
 	kids   []*fakeNode
+	// actions are GetActions' names; none: a single unnamed action (DoAction 0 still works).
+	actions []string
 
 	app  *fakeApp
 	path dbus.ObjectPath
@@ -96,6 +98,16 @@ func (n *fakeNode) GetAccessibleAtPoint(x, y int32, coord uint32) (objRef, *dbus
 }
 
 func (n *fakeNode) GrabFocus() (bool, *dbus.Error) { n.log("GrabFocus"); return true, nil }
+
+type action struct{ Name, Desc, Key string }
+
+func (n *fakeNode) GetActions() ([]action, *dbus.Error) {
+	out := make([]action, len(n.actions))
+	for i, a := range n.actions {
+		out[i] = action{Name: a}
+	}
+	return out, nil
+}
 
 func (n *fakeNode) DoAction(i int32) (bool, *dbus.Error) {
 	n.log("DoAction " + strconv.Itoa(int(i)))
@@ -205,7 +217,6 @@ const (
 	roleApplication = 75
 	roleLabel       = 29
 	rolePanel       = 39
-	rolePageTabList = 38
 )
 
 var usable = []int{stateEnabled, stateSensitive}

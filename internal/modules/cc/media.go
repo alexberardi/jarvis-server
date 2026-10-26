@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/audio"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
@@ -227,7 +228,16 @@ func (m *Module) handleTranscribe(w http.ResponseWriter, r *http.Request, n *nod
 	if convID != "" && m.followUpGateOn(ctx, n.HouseholdID, n.ID) {
 		voiceDone = m.voiceCheck(context.WithoutCancel(ctx), convID, file, speakerAudio)
 	}
-	res, err := m.STT.Transcribe(ctx, file, m.commandSTTOptions(ctx, n.HouseholdID, n.ID, speakerAudio, scope))
+	opts := m.commandSTTOptions(ctx, n.HouseholdID, n.ID, speakerAudio, scope)
+	if hint := sttHint(r.FormValue("prompt_hint")); hint != "" {
+		// The node expects a particular kind of answer (a place in the island's list): last,
+		// where whisper weighs the prompt most.
+		opts.Prompt = strings.TrimSpace(opts.Prompt + " " + hint)
+		if len(opts.Prompt) > maxSTTPrompt {
+			opts.Prompt = strings.ToValidUTF8(opts.Prompt[len(opts.Prompt)-maxSTTPrompt:], "")
+		}
+	}
+	res, err := m.STT.Transcribe(ctx, file, opts)
 	if voiceDone != nil {
 		<-voiceDone
 	}
@@ -592,6 +602,24 @@ func (m *Module) handlePollVoiceProfileResult(w http.ResponseWriter, r *http.Req
 
 // maxSTTPrompt bounds voice.stt_prompt; whisper only keeps the last ~224 tokens of it anyway.
 const maxSTTPrompt = 1000
+
+// maxSTTHint bounds a node's prompt_hint.
+const maxSTTHint = 200
+
+// sttHint is a node's prompt_hint, kept to letters, digits, spaces and sentence punctuation:
+// it goes into whisper's prompt, never into the LLM's.
+func sttHint(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(" .,'?!-", r) {
+			b.WriteRune(r)
+		}
+		if b.Len() >= maxSTTHint {
+			break
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
 
 // commandSTTOptions are the transcription options of a node voice command: the household /
 // node's voice.stt_prompt (after a desktop node's app names) and voice.stt_preprocess. The wake-clip pass doesn't use them, so

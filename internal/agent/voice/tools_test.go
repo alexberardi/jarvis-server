@@ -25,6 +25,7 @@ type fakeOS struct {
 	mu      sync.Mutex
 	volume  int
 	actions []string
+	windows []host.Window // nil: Firefox and a terminal
 }
 
 func (f *fakeOS) Platform() string { return "linux" }
@@ -40,13 +41,19 @@ func (f *fakeOS) ApplyVolume(_ context.Context, l int) error {
 	return f.act(fmt.Sprintf("volume %d", l))
 }
 func (f *fakeOS) ListWindows(context.Context) ([]host.Window, error) {
+	if f.windows != nil {
+		return f.windows, nil
+	}
 	return []host.Window{{ID: "0x1", Title: "Inbox", App: "firefox"}, {ID: "0x2", Title: "notes", App: "kitty"}}, nil
 }
 func (f *fakeOS) MinimizeWindow(_ context.Context, id string) error { return f.act("minimize " + id) }
 func (f *fakeOS) FocusWindow(_ context.Context, id string) error    { return f.act("focus " + id) }
 func (f *fakeOS) CloseWindow(_ context.Context, id string) error    { return f.act("close " + id) }
-func (f *fakeOS) LaunchApp(_ context.Context, p string) error       { return f.act("launch " + p) }
-func (f *fakeOS) Open(_ context.Context, t string) error            { return f.act("open " + t) }
+func (f *fakeOS) ArrangeWindow(_ context.Context, id string, a host.WindowAction, _ string) error {
+	return f.act(string(a) + " " + id)
+}
+func (f *fakeOS) LaunchApp(_ context.Context, p string) error { return f.act("launch " + p) }
+func (f *fakeOS) Open(_ context.Context, t string) error      { return f.act("open " + t) }
 func (f *fakeOS) act(s string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -175,12 +182,14 @@ func TestChainedToolCalls(t *testing.T) {
 	cont := func(rs []ToolResult) (*Control, error) {
 		seen = append(seen, rs)
 		if len(seen) == 1 {
-			return &Control{StopReason: "tool_calls", ToolCalls: []ToolCall{call("c2", desktop.ToolMinimize, `{"window_id":"0x1"}`)}}, nil
+			return &Control{StopReason: "tool_calls", ToolCalls: []ToolCall{call("c2", desktop.ToolWindow, `{"window":"0x1","action":"minimize"}`)}}, nil
 		}
 		return complete("Minimised Firefox."), nil
 	}
 	r, tr := toolRig(t, desktopTools(os), toolCalls(call("c1", desktop.ToolList, `{}`)), cont)
-	if tr.Outcome != OutcomeSpoken || tr.Message != "Minimised Firefox." {
+	// The minimise is a desktop command: the island showed it, so nothing is spoken (Q9), even
+	// though this fake command-center still replied.
+	if tr.Outcome != OutcomeSilent || tr.Message != "" {
 		t.Fatalf("turn %+v", tr)
 	}
 	if got := os.did(); !slices.Equal(got, []string{"minimize 0x1"}) {
@@ -363,5 +372,142 @@ func TestContinueEndingNotForMeOrSilentSaysNothing(t *testing.T) {
 		if slices.Contains(r.srv.callList(), "speak") || len(r.spk.all()) != 1 {
 			t.Fatalf("%s: something was played", stop)
 		}
+	}
+}
+
+// A desktop command the computer can't do is a failure the island shows: the error chime, no
+// "Sorry, that didn't work" spoken over it.
+func TestIslandOnlyFailureChimesInsteadOfSpeaking(t *testing.T) {
+	os := &fakeOS{}
+	r, tr := toolRig(t, desktopTools(os), toolCalls(call("c1", desktop.ToolWindow, `{"action":"unsupported"}`)),
+		steps(t, complete("")))
+	if tr.Outcome != OutcomeSilent || tr.Message != "" {
+		t.Fatalf("turn %+v", tr)
+	}
+	outs := r.spk.all()
+	if len(outs) != 2 { // the wake chime, then the error chime: no speech
+		t.Fatalf("%d playbacks", len(outs))
+	}
+	if got := os.did(); len(got) != 0 {
+		t.Fatalf("OS did %v", got)
+	}
+}
+
+// An ambiguous window name puts a numbered list on the island (Q9): nothing is spoken, and the
+// next window is the choice window, 8 s and listening at once, even with follow-ups off.
+func TestIslandChoiceOpensTheChoiceWindow(t *testing.T) {
+	os := &fakeOS{windows: []host.Window{{ID: "0x1", Title: "build", App: "Terminal"}, {ID: "0x2", Title: "logs", App: "Terminal"}}}
+	srv := newServer()
+	srv.reply, srv.speakPCM = toolCalls(call("c1", desktop.ToolWindow, `{"action":"focus","window":"terminal"}`)), pcmOf(300)
+	var posted []ToolResult
+	srv.cont = func(rs []ToolResult) (*Control, error) { posted = rs; return complete(""), nil }
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	r.p.Cfg.FollowUp.ListenSecs = 0 // follow-ups off: the choice window still opens
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || tr.Message != "" || tr.FollowUpEnd != EndTimeout {
+		t.Fatalf("turn %+v", tr)
+	}
+	if len(posted) != 1 || posted[0].Output["choice"] != true || posted[0].Output["island_only"] != true {
+		t.Fatalf("posted %s", outputs(posted))
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want the 8 s choice window", got)
+	}
+	if outs := r.spk.all(); len(outs) != 1 { // the wake chime only: no error chime, no speech
+		t.Fatalf("%d playbacks", len(outs))
+	}
+}
+
+func TestClampChoiceListen(t *testing.T) {
+	for _, c := range []struct{ in, want float64 }{{60, 30}, {30, 30}, {8, 8}} {
+		if got := ClampChoiceListen(c.in); got != c.want {
+			t.Errorf("ClampChoiceListen(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// Voice test, 2026-10-24: "maximize Firefox… restore it" needs one wake word. A silent desktop
+// command keeps listening, starting at once, for 8 s: time to say the next step (2026-10-25).
+func TestIslandOnlySuccessKeepsListening(t *testing.T) {
+	os := &fakeOS{}
+	srv := newServer()
+	srv.reply, srv.speakPCM = toolCalls(call("c1", desktop.ToolWindow, `{"action":"minimize","window":"firefox"}`)), pcmOf(300)
+	srv.cont = func([]ToolResult) (*Control, error) { return complete(""), nil }
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || tr.FollowUpEnd != EndTimeout {
+		t.Fatalf("turn %+v", tr)
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want one 8 s window for the next step", got)
+	}
+}
+
+// "The second one" in the choice window switches windows on the node: no follow-up turn goes to
+// command-center for it, and whisper got the list's hint.
+func TestChoiceAnswerIsActedOnByTheNode(t *testing.T) {
+	os := &fakeOS{windows: []host.Window{{ID: "0x1", Title: "build", App: "Terminal"}, {ID: "0x2", Title: "logs", App: "Terminal"}}}
+	srv := newServer()
+	srv.reply, srv.speakPCM = toolCalls(call("c1", desktop.ToolWindow, `{"action":"focus","window":"terminal"}`)), pcmOf(300)
+	srv.cont = func([]ToolResult) (*Control, error) { return complete(""), nil }
+	srv.texts = []string{"The second one."}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if got := os.did(); !slices.Equal(got, []string{"focus 0x2"}) {
+		t.Fatalf("OS did %v (turn %+v)", got, tr)
+	}
+	if len(tr.FollowUps) == 0 || tr.FollowUps[0].Outcome != OutcomeSilent {
+		t.Fatalf("follow-ups %+v", tr.FollowUps)
+	}
+	srv.mu.Lock()
+	n, hint := len(srv.commands), srv.hint
+	srv.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d follow-up turns went to command-center", n)
+	}
+	if !strings.Contains(hint, "The second one") {
+		t.Fatalf("transcribe hint %q", hint)
+	}
+}
+
+// Funnel stage 1 (VOICE-FLOWS.md Q27): "switch to the terminal" is done on the node, with no
+// command-center turn, and the next window waits 8 s for the next step.
+func TestDirectCommandSkipsCommandCenter(t *testing.T) {
+	os := &fakeOS{}
+	srv := newServer()
+	srv.text = "Switch to the terminal."
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || !slices.Contains(os.did(), "focus 0x2") {
+		t.Fatalf("turn %+v, did %v", tr, os.did())
+	}
+	if slices.Contains(srv.callList(), "stream") || slices.Contains(srv.callList(), "command") {
+		t.Fatalf("command-center was asked: %v", srv.callList())
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want the 8 s next-step window", got)
 	}
 }

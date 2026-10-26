@@ -1,7 +1,10 @@
 package models
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
@@ -208,24 +211,97 @@ func Overcommitted(hw engine.Hardware, residents []Resident) []string {
 	}
 	out := []string{}
 	for _, d := range devs {
-		var need int64
-		var labels []string
-		for _, r := range residents {
-			on := r.Devices
-			if len(on) == 0 {
-				on = []int{devs[0].Index}
-			}
-			for _, i := range on {
-				if i == d.Index {
-					need += r.NeededMB / int64(len(on))
-					labels = append(labels, r.Labels...)
-				}
-			}
-		}
+		need, labels, _ := cardLoad(devs, d, residents, "")
 		if usable := d.TotalMB * 95 / 100; need > usable {
 			out = append(out, fmt.Sprintf("%s (%s, %d MB): %s need about %d MB together; move one to another card, "+
 				"lower its context, or pick a smaller model", d.ID, d.Name, d.TotalMB, strings.Join(labels, ", "), need))
 		}
 	}
 	return out
+}
+
+// fullOffload says whether a label puts every layer on the GPU (gpu_layers 999, the default, or
+// negative): only then is its need estimate the card's.
+func fullOffload(c engine.LabelConfig) bool {
+	return c.GPULayers < 0 || c.GPULayers >= 999
+}
+
+// PlacementFit is the resolver's Fits (#562): a new GPU engine for c doesn't fit when the card
+// it goes on can't hold it next to the engines alongside, though it would fit there alone. A
+// model too big for the card on its own is left to llama.cpp to offload as it can, and an
+// engine with only some layers on the GPU isn't judged (its need is unknown).
+func (m *Manager) PlacementFit(ctx context.Context, c engine.LabelConfig, f engine.Flavour, alongside []engine.LabelConfig) string {
+	if len(alongside) == 0 || !fullOffload(c) || f == engine.FlavourCPU {
+		return ""
+	}
+	hw := OnFlavour(m.hardware(ctx), f)
+	devs := hw.Discrete(hw.Flavour)
+	if len(devs) == 0 {
+		return ""
+	}
+	need, ok := m.residentNeed(ctx, c, true)
+	if !ok {
+		return ""
+	}
+	var residents []Resident
+	for _, a := range alongside {
+		if !fullOffload(a) {
+			continue
+		}
+		if n, ok := m.residentNeed(ctx, a, true); ok {
+			residents = append(residents, Resident{Labels: []string{a.Label}, Model: modelFile(a), NeededMB: n, Devices: deviceList(a.GPUDevices)})
+		}
+	}
+	on := deviceList(c.GPUDevices)
+	if len(on) == 0 {
+		on = []int{devs[0].Index}
+	}
+	for _, d := range devs {
+		if !slices.Contains(on, d.Index) {
+			continue
+		}
+		mine := need / int64(len(on))
+		committed, labels, same := cardLoad(devs, d, residents, modelFile(c))
+		usable := d.TotalMB * 95 / 100
+		if mine > usable || mine+committed <= usable {
+			continue
+		}
+		why := fmt.Sprintf("%s (%d MB) can't hold %s (about %d MB) next to %s (about %d MB)",
+			d.Name, d.TotalMB, c.Label, mine, strings.Join(labels, ", "), committed)
+		hint := "pick a smaller model or lower its context"
+		if same {
+			why += fmt.Sprintf(": that would be two copies of %s", filepath.Base(modelFile(c)))
+			hint = "give it the same GPU layers, devices, projector and extra args so they share one engine"
+		}
+		if c.Label == engine.LabelBackground {
+			hint = "set it to engine=shared, " + hint
+		}
+		return why + "; " + hint + ", or move it to another card or the CPU (gpu_layers 0)"
+	}
+	return ""
+}
+
+// modelFile is a label's model file (an installed id resolved), or its model setting.
+func modelFile(c engine.LabelConfig) string {
+	if c.ModelPath != "" {
+		return c.ModelPath
+	}
+	return c.Model
+}
+
+// cardLoad is what the residents placed on card d need, their labels, and whether one of them
+// runs model.
+func cardLoad(devs []engine.Device, d engine.Device, residents []Resident, model string) (need int64, labels []string, same bool) {
+	for _, r := range residents {
+		on := r.Devices
+		if len(on) == 0 {
+			on = []int{devs[0].Index}
+		}
+		if slices.Contains(on, d.Index) {
+			need += r.NeededMB / int64(len(on))
+			labels = append(labels, r.Labels...)
+			same = same || r.Model == model
+		}
+	}
+	return need, labels, same
 }

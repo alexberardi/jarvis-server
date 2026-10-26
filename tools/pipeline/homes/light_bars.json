@@ -1,0 +1,10 @@
+{
+  "device_agent": {
+    "device_controls": {
+      "light": [
+        {"entity_id": "rgbic_tv_light_bars", "name": "Office Light Bars", "state": "unknown", "area": "Office"},
+        {"entity_id": "rgbic_kitchen_strip", "name": "Kitchen Light Strip", "state": "unknown", "area": "Kitchen"}
+      ]
+    }
+  }
+}

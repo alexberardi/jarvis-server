@@ -309,7 +309,7 @@ func TestLoadToolSet(t *testing.T) {
 // Regenerate with: go run ./tools/pipeline toolset desktop > tools/pipeline/toolsets/desktop.json
 // (and desktop-windows the same way).
 func TestDesktopToolsetIsCurrent(t *testing.T) {
-	for name, render := range map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset} {
+	for name, render := range map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset, "desktop-hyprland": RenderDesktopHyprlandToolset} {
 		want, err := render()
 		if err != nil {
 			t.Fatal(err)

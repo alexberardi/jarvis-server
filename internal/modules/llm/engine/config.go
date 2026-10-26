@@ -128,7 +128,7 @@ var fields = []field{
 		desc: "Fold later system messages into the user turn, for chat templates that reject them (Qwen 3.5, 3.8): auto = as the model's catalog entry says (never for remote), on or off",
 		opts: []any{FoldAuto, FoldOn, FoldOff}, only: []string{ModelLLM}, remote: true},
 	{name: "extra_args", typ: settings.String, def: "", desc: "Extra engine flags (shell-quoted); a --chat-template-file here overrides the model's pinned template"},
-	{name: "remote_url", typ: settings.String, def: "", desc: "Remote base URL, e.g. https://api.openai.com/v1 (OpenAI-compatible) or https://api.anthropic.com",
+	{name: "remote_url", typ: settings.String, def: "", desc: "Remote base URL, e.g. https://api.openai.com/v1 (OpenAI-compatible), https://api.anthropic.com or https://generativelanguage.googleapis.com (Gemini)",
 		only: []string{ModelLLM, ModelEmbedding, ModelSTT}, remote: true},
 	{name: "remote_api", typ: settings.String, def: APIAuto,
 		desc: "API the remote endpoint speaks: auto (anthropic for api.anthropic.com, else openai), openai (/chat/completions) or anthropic (the Messages API; chat only, no embeddings)",
@@ -202,6 +202,13 @@ const (
 
 // anthropicHost is the Anthropic API's host; remote_api=auto picks the Messages API for it.
 const anthropicHost = "api.anthropic.com"
+
+// googleHost is the Gemini API's host. It is spoken to through its OpenAI-compatible
+// layer at googleOpenAIPath, which NormalizeBaseURL fills in for a bare host.
+const (
+	googleHost       = "generativelanguage.googleapis.com"
+	googleOpenAIPath = "/v1beta/openai"
+)
 
 // RemoteAPI resolves a remote_api setting against the remote URL: auto (or anything
 // unrecognised) is anthropic when the URL's host is api.anthropic.com, otherwise openai.

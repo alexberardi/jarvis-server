@@ -109,6 +109,8 @@ export interface EngineInstance {
   retries: number
   /** Retries ran out: the engine stays failed until Retry or a settings change. */
   gave_up: boolean
+  /** Why it gave up at once, when retrying can't help (out of GPU memory). */
+  gave_up_reason?: string
   output: string[] | null
   kind: string
   flavour: string
@@ -118,12 +120,33 @@ export interface EngineInstance {
   args: string[] | null
 }
 
+/**
+ * A remote speech label's fallback (the stt label, or the tts voice when tts.provider=remote):
+ * the setting, what served lately and why the fallback can't work when it can't.
+ */
+export interface SpeechFallback {
+  /** The setting: off or cpu. */
+  mode: string
+  /** Requests the local CPU engine served since jarvisd started. */
+  fallbacks: number
+  /** What served the latest request: remote or local-cpu ("" before any). */
+  last_path?: string
+  last_remote_error?: string
+  last_remote_error_at?: string
+  /** Until then requests skip the remote. */
+  backoff_until?: string
+  /** Why the fallback can't work as set (fallback=cpu with no local model installed). */
+  warning?: string
+}
+
 export interface VoiceModel {
   label: string
   id: string
   kind: string
   path: string
   problem?: string
+  /** A remote tts voice's fallback to local Kokoro; absent while Kokoro speaks everything. */
+  fallback?: SpeechFallback
 }
 
 export interface HardwareResponse {
@@ -449,6 +472,8 @@ export interface LabelConfig {
   remote_api_effective?: string
   /** stt only: how long one remote transcription may take, in milliseconds. */
   remote_timeout_ms?: number
+  /** stt only: what a remote label does when the provider fails (off, or cpu). */
+  fallback?: string
   problem?: string
   /** Something to know that isn't a problem (a Python engine runs the model text-only). */
   note?: string
@@ -477,6 +502,10 @@ export interface LabelStatus {
   state: string
   reason?: string
   endpoint?: Endpoint
+  /** Why a ready label runs on an engine started for other settings (the GPU can't hold a second copy). */
+  note?: string
+  /** A remote stt label's fallback state; absent for every other label. */
+  fallback?: SpeechFallback
 }
 
 export interface LabelsResponse {
@@ -521,6 +550,7 @@ export type LabelUpdate = Partial<{
   remote_vision: boolean
   remote_api: string
   remote_timeout_ms: number
+  fallback: string
 }>
 
 /** putLabels validates the whole body before writing anything (422 otherwise; I4). */

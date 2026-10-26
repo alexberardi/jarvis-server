@@ -12,7 +12,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/platform/authn"
+	"github.com/alexberardi/jarvis-server/internal/platform/blob"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
@@ -114,6 +117,41 @@ func (m *Module) handlePutKeyframe(crop bool) nodeHandler {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "stored", "id": id, "seq": seq, "crop": crop})
+	}
+}
+
+// handleGetKeyframe: GET /api/v0/recordings/{id}/keyframes/{seq}[/crop], the owner's (the
+// Recordings page shows them), the JPEG as stored.
+func (m *Module) handleGetKeyframe(crop bool) userHandler {
+	return func(w http.ResponseWriter, r *http.Request, u authn.User) {
+		seq, err := strconv.Atoi(r.PathValue("seq"))
+		if err != nil || seq < 1 {
+			validationError(w, "path -> seq: Input should be a positive integer")
+			return
+		}
+		rec, err := m.ownRecording(r.Context(), u, r.PathValue("id"))
+		if err != nil {
+			m.writeErr(w, err)
+			return
+		}
+		if m.deps.Blobs == nil {
+			detail(w, http.StatusNotFound, "Keyframe not found")
+			return
+		}
+		rs, _, err := blob.OpenSeeker(r.Context(), m.deps.Blobs, keyframeKey(rec.ID, seq, crop))
+		if errors.Is(err, blob.ErrNotFound) {
+			detail(w, http.StatusNotFound, "Keyframe not found")
+			return
+		} else if err != nil {
+			m.internalError(w, err)
+			return
+		}
+		defer rs.Close()
+		h := w.Header()
+		h.Set("Content-Type", "image/jpeg")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Cache-Control", "private, max-age=86400")
+		http.ServeContent(w, r, "", time.Time{}, rs)
 	}
 }
 

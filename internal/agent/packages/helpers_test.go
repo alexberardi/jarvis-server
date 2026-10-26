@@ -171,6 +171,7 @@ type listEntry struct {
 	Commands []string `json:"commands"`
 	Families []string `json:"families"`
 	Managers []string `json:"managers"`
+	Agents   []string `json:"agents"`
 }
 
 func readList(file string) ([]listEntry, error) {

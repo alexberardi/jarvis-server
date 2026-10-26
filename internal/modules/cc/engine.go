@@ -41,7 +41,10 @@ const (
 const (
 	iterMaxTokens        = 256
 	doubleCheckMaxTokens = 1536
-	loopTemperature      = 0.4
+	// doubleCheckThinkBudget caps the re-check's thinking: uncapped, Gemma 4 thought for up
+	// to 16 s (1536 tokens, no answer) where Qwen 3.5 used ~200 tokens.
+	doubleCheckThinkBudget = 256
+	loopTemperature        = 0.4
 )
 
 // validationRequest is request_validation's payload.
@@ -59,6 +62,13 @@ type engineResult struct {
 	Validation    *validationRequest
 	ServerResults []chatMsg
 	EndOfExchange bool
+	// IslandOnly: every client result of the round said the node's island covered it
+	// (island_only, a desktop command): no LLM call; a voice node gets no reply to speak, other
+	// callers (mobile chat) get the island text as Message (DESKTOP-COMMANDS.md Q9).
+	IslandOnly bool
+	// IslandChoice: one of those results is a numbered list on the island for the user to pick
+	// from: the exchange stays open for the answer (no end_of_exchange).
+	IslandChoice bool
 	// KeepListening: a follow-up the gate rejected; the node keeps its window open
 	// (followup_gate.go). Sent as keep_listening only when true.
 	KeepListening bool
@@ -186,7 +196,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		req := llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(msgs), MaxTokens: &maxTok, Temperature: &temp,
 			ReasoningBudget: budget}
 		if doubleChecked && maxTok == doubleCheckMaxTokens {
-			b := -1 // the double-check pass ends in /think: let it reason
+			b := doubleCheckThinkBudget // the double-check pass ends in /think: let it reason, briefly
 			req.ReasoningBudget = &b
 		}
 		if native {
@@ -379,6 +389,20 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 					m.deps.Log.Info("cc: typed_app_filled", "conversation_id", conv.id)
 				}
 			}
+			// 2c. desktop_confirm carries the user's answer, never the model's; without one it
+			// doesn't reach the node (confirm_gate.go).
+			confirmRefused := map[int]*pyjson.Object{}
+			for i := range calls {
+				if !isConfirmCall(conv, calls[i].Function.Name) {
+					continue
+				}
+				if out, refusal := conv.gateConfirm(calls[i].ID, calls[i].Function.Arguments); refusal != nil {
+					confirmRefused[i] = refusal
+					m.deps.Log.Warn("cc: confirm_refused", "conversation_id", conv.id, "reason", "no_user_answer")
+				} else {
+					calls[i].Function.Arguments = out
+				}
+			}
 			// The history keeps the calls as executed.
 			msgs[len(msgs)-1].ToolCalls = append([]parse.ToolCall(nil), calls...)
 
@@ -393,9 +417,14 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				names[i] = c.Function.Name
 			}
 			endExec := tr.measure("tool_exec_iter_"+strconv.Itoa(iter+1), "cc", map[string]any{"tools": names})
-			for _, c := range calls {
+			for i, c := range calls {
 				if c.Function.Name == "request_validation" {
 					validation = true
+				}
+				if refusal := confirmRefused[i]; refusal != nil {
+					serverResults = append(serverResults, chatMsg{Role: "tool", ToolCallID: c.ID, Name: c.Function.Name,
+						Content: pyjson.Dumps(refusal, true)})
+					continue
 				}
 				if !conv.serverNames[c.Function.Name] {
 					if params := conv.imageParams[c.Function.Name]; len(params) > 0 {
@@ -447,6 +476,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				}
 				qs, _ := q.(string)
 				ps, _ := pn.(string)
+				conv.confirmGate.shown()
 				return withReasoning(engineResult{Stop: stopValidation,
 					Validation: &validationRequest{Question: qs, ParameterName: ps, Options: ol}}), msgs
 			}
@@ -745,9 +775,13 @@ func toolFailedThisTurn(msgs []chatMsg) bool {
 	return false
 }
 
+// readTools return the current state (a page, the screen), so a repeat re-reads it rather than
+// being answered from the earlier result: findDuplicate never holds them back.
+var readTools = map[string]bool{"browser_read_page": true, "desktop_read_screen": true}
+
 // findDuplicate is _find_duplicate_issued_call: the first client call identical (name +
 // canonical args) to one issued in this conversation within voice.tool_dedupe_window_seconds
-// and not already nudged this turn. Every failure passes the call through.
+// and not already nudged this turn; read tools are exempt. Every failure passes the call through.
 func (m *Module) findDuplicate(ctx context.Context, conv *conversation, calls []parse.ToolCall, nudged map[[2]string]bool) (string, string, time.Duration, bool) {
 	window := m.settings.Float(ctx, settingDedupeWindow, settings.Scope{})
 	if window <= 0 || len(conv.issued) == 0 {
@@ -755,6 +789,9 @@ func (m *Module) findDuplicate(ctx context.Context, conv *conversation, calls []
 	}
 	now := m.now()
 	for _, c := range calls {
+		if readTools[c.Function.Name] {
+			continue
+		}
 		key, ok := canonicalArgsKey(c.Function.Arguments)
 		if !ok || nudged[[2]string{c.Function.Name, key}] {
 			continue

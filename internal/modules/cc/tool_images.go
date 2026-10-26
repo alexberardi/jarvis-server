@@ -16,9 +16,10 @@ import (
 // carry "image_attachments": [{"mime", "data" (base64), "label"}] (the desktop agent's
 // desktop_read_screen does). They are lifted out of the output where results arrive, before
 // anything records or forwards it, and shown to the live model as image parts of that tool
-// message. The image is for the turn that asked for it only: conversation.commit drops it, so
-// history keeps the label alone. Never stored: not in history, traces, transcripts, job
-// payloads or logs. A live model without vision gets OCR text instead.
+// message. After the turn the chat-image describe job replaces it with a short description
+// (afterTurn, chat_images.go), so a follow-up ("what colours was it?") has the gist. The bytes
+// live in memory only until then: never in traces, transcripts, job payloads or logs. A live
+// model without vision gets OCR text instead, which history keeps.
 
 const (
 	toolImagesKey = "image_attachments"
@@ -26,7 +27,7 @@ const (
 	// toolResultBodyMax is the continue / result-sink body cap: the usual body plus the images.
 	toolResultBodyMax = chatBodyMax
 	// toolImageNote follows each label in the tool output the model reads.
-	toolImageNote = " (shown to you with this result; not kept after this turn)"
+	toolImageNote = " (shown to you with this result; later turns keep a short description)"
 )
 
 // ImageOCR reads text from images (the ocr module's in-process API): the fallback when the
@@ -146,7 +147,7 @@ func decodeToolImage(v any) (string, []byte, string) {
 
 // toolMsg is a client tool result as a history message, with its images.
 func toolMsg(tr toolResult) chatMsg {
-	return chatMsg{Role: "tool", ToolCallID: tr.ToolCallID, Content: outputString(tr.Output), images: tr.images}
+	return chatMsg{Role: "tool", ToolCallID: tr.ToolCallID, Content: outputString(tr.Output), images: tr.images, fromTool: true}
 }
 
 // prepareToolImages decides how the live model gets the results' images: as images when it
@@ -213,16 +214,6 @@ func (m *Module) ocrText(ctx context.Context, imgs []chatImage) (string, string)
 		}
 	}
 	return "", noVision + " and OCR found no text in it."
-}
-
-// dropToolImages removes images from tool messages (they are for the turn that asked for
-// them only); the label in the content stays.
-func dropToolImages(msgs []chatMsg) {
-	for i := range msgs {
-		if msgs[i].Role == "tool" && len(msgs[i].images) > 0 {
-			msgs[i].images = nil
-		}
-	}
 }
 
 func copyObject(o *pyjson.Object) *pyjson.Object {
