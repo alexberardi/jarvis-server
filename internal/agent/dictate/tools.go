@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
@@ -60,6 +61,11 @@ type Tools struct {
 	// shows the Jarvis web page of this agent's server. Typing with no app named then goes to
 	// the window used before it, never into the chat (jarvispage.go). Nil: no guard.
 	JarvisPage func(ctx context.Context, front *Window) bool
+
+	mu sync.Mutex
+	// directConfirm is the confirmation stage 1 put on the island (direct.go), answered by
+	// voice in the choice window.
+	directConfirm string
 }
 
 // Open, then type (DESIGN.md §14): a launch is fire-and-forget, so typing into an app launched

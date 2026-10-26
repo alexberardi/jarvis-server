@@ -512,7 +512,10 @@ func TestSealedStoreNeverWrites(t *testing.T) {
 // directTools also carries out commands itself and answers lists (funnel stage 1).
 type directTools struct{ fakeTools }
 
-func (directTools) Direct(context.Context, string) (map[string]any, bool) {
+func (directTools) Direct(ctx context.Context, _ string) (map[string]any, bool) {
+	if !node.Enabled(ctx, "desktop_view") {
+		return nil, false
+	}
 	return map[string]any{"success": true, "direct": true}, true
 }
 func (directTools) AnswerChoice(context.Context, string) (map[string]any, bool) {
@@ -532,8 +535,7 @@ func TestGatePassesDirectAndChoiceAnswers(t *testing.T) {
 		t.Fatalf("answer = %v %v", out, ok)
 	}
 	_ = st.SetEnabled("desktop_view", false)
-	_ = st.SetEnabled("desktop_window", false)
 	if _, ok := ts.(node.Director).Direct(ctx, "switch to the Claude tab"); ok {
-		t.Fatal("stage 1 ran with both commands turned off")
+		t.Fatal("stage 1 didn't see the command turned off")
 	}
 }
