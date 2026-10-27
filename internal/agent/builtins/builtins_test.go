@@ -15,6 +15,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 )
 
@@ -448,5 +449,21 @@ func TestSpokenNumbersDropTrailingZeros(t *testing.T) {
 	out, _ = (&Calculate{}).Call(context.Background(), "calculate", map[string]any{"num1": 5.0, "num2": 2.0, "operation": "divide"}, node.Request{})
 	if out["message"] != "5 divided by 2 equals 2.5." {
 		t.Errorf("divide = %q", out["message"])
+	}
+}
+
+// A volume change ends the exchange; a failed one doesn't.
+func TestControlNodeEndsTheExchange(t *testing.T) {
+	a := &sdkhost.Audio{Path: filepath.Join(t.TempDir(), "v.json"), Run: func(context.Context, string, ...string) (string, error) {
+		return "Volume: front-left: 1 / 50% / 0 dB", nil
+	}}
+	c := &ControlNode{Audio: a}
+	out, _ := c.Call(context.Background(), "control_node", map[string]any{"action": "volume_up"}, node.Request{})
+	if !node.TakeSignals(out).ClearHistory || out["message"] != "Volume 60 percent." {
+		t.Fatalf("volume_up = %v", out)
+	}
+	out, _ = c.Call(context.Background(), "control_node", map[string]any{"action": "explode"}, node.Request{})
+	if node.TakeSignals(out).ClearHistory {
+		t.Fatalf("a failure ended the exchange: %v", out)
 	}
 }

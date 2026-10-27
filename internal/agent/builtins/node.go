@@ -31,6 +31,20 @@ func (c *ControlNode) Call(ctx context.Context, name string, args map[string]any
 	if name != controlNodeName {
 		return nil, false
 	}
+	out, ok := c.call(ctx, args)
+	if ok, _ := out["success"].(bool); ok {
+		// The exchange ends: a follow-up window would hear the reply's own "Volume 30 percent"
+		// as a new volume command (the lab Pi, which has no voiceprints for jarvisd's gate,
+		// stepped its volume down that way). Unlike N:.
+		sig := node.TakeSignals(out)
+		sig.ClearHistory = true
+		out[node.SignalsKey] = sig
+	}
+	return out, ok
+}
+
+func (c *ControlNode) call(ctx context.Context, args map[string]any) (map[string]any, bool) {
+	name := controlNodeName
 	if out := validated(def(name), args); out != nil {
 		return out, true
 	}

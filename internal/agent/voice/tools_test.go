@@ -606,3 +606,33 @@ func TestShortcutsSkipFollowUpsLikeOurReply(t *testing.T) {
 		}
 	}
 }
+
+// endingDirector's spoken result ends the exchange (control_node's ClearHistory).
+type endingDirector struct{ volumeDirector }
+
+func (d *endingDirector) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	out, ok := d.volumeDirector.Direct(ctx, said)
+	if ok {
+		out[node.SignalsKey] = node.Signals{Speak: true, ClearHistory: true}
+	}
+	return out, ok
+}
+
+// A volume change says its level and ends the exchange: no follow-up window to hear the reply
+// as the next volume command.
+func TestSpokenShortcutCanEndTheExchange(t *testing.T) {
+	srv := newServer()
+	srv.text, srv.speakPCM = "Volume up.", pcmOf(300)
+	srv.texts = []string{"Volume 1."}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	d := &endingDirector{}
+	r.p.Tools = d
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.FollowUpEnd != EndClearHistory || len(tr.FollowUps) != 0 || tr.Message != "Volume 70 percent." {
+		t.Fatalf("turn %+v", tr)
+	}
+}
