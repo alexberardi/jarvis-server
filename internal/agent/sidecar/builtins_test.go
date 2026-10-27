@@ -95,14 +95,14 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	for _, tl := range sc.Available(ctx) {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"calculate", "check_alerts", "shopping_list",
-		"todo_list", "control_node", "tell_joke", "answer_question", "convert_measurement", "reminder"} {
+	for _, want := range []string{"check_alerts", "shopping_list", "todo_list", "control_node", "reminder"} {
 		if !names[want] {
 			t.Errorf("no %s among %v", want, names)
 		}
 	}
 	// The Go agent serves these itself (packages.PortedToGo); a Python copy would shadow it.
-	for _, skipped := range []string{"control_device", "routine", "send_link", "set_timer", "check_timers", "cancel_timer", "get_current_time"} {
+	for _, skipped := range []string{"control_device", "routine", "send_link", "set_timer", "check_timers", "cancel_timer",
+		"get_current_time", "calculate", "convert_measurement", "tell_joke", "answer_question", "chat"} {
 		if names[skipped] {
 			t.Errorf("%s is offered by the sidecar; the Go agent serves it", skipped)
 		}
@@ -118,10 +118,6 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 		}
 		t.Logf("%s %s -> %s", name, asJSON(args), asJSON(out))
 		return out
-	}
-
-	if out := call("calculate", map[string]any{"num1": 6, "num2": 7, "operation": "multiply"}); out["success"] != true || out["result"] != 42.0 {
-		t.Errorf("calculate = %v", out)
 	}
 
 	// The timer commands are Go now (TestTimersMatchPython runs the Python ones against them).
@@ -154,9 +150,6 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	}
 	if out := call("shopping_list", map[string]any{"action": "read"}); !strings.Contains(asJSON(out), "milk") {
 		t.Errorf("shopping read = %v", out)
-	}
-	if out := call("tell_joke", nil); out["success"] != true {
-		t.Errorf("tell_joke = %v", out)
 	}
 
 	// Reminders: set by the command into the agent's store, nothing due yet.
