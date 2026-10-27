@@ -832,13 +832,13 @@ func runAgent(ctx context.Context, args []string) error {
 			r.Capabilities = func() map[string]any { return map[string]any{"led_mode": state().LEDMode()} }
 		}
 	}
-	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
-	// and are in its settings snapshot; a computer has none.
+	// The device families (Pantry packages in the sidecar) answer the app's device requests and
+	// are in the settings snapshot, on a Pi and a computer alike.
 	// A secrets push can configure a family (an API key): it joins the heartbeat's protocols.
 	var devs func(context.Context) nodesettings.Devices
 	var secrets func()
 	sc := liveSidecar(tools)
-	if !p.desktop && sc != nil {
+	if sc != nil {
 		devs = sc.Devices
 		secrets = func() {
 			if err := sc.RefreshDevices(); err != nil {
@@ -852,11 +852,11 @@ func runAgent(ctx context.Context, args []string) error {
 	// action, callback and toggle_command: the app's device control, a command's buttons and
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
 	wireActions(r, sc, st, sayNow(mic), log)
+	if sc != nil {
+		wireDevices(r, sc, log)
+	}
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
-		if sc != nil {
-			wireDevices(r, sc, log)
-		}
 		wirePiTasks(r, st, filepath.Dir(path), tools, tf.pkgs, tf.host.Timers, quit, log)
 	}
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's

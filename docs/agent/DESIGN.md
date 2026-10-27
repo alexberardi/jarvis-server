@@ -269,8 +269,11 @@ Install, Update, Revert and Uninstall work on a computer as on a Pi:
 - **Manifest.** `jarvis_package.yaml` or `jarvis_command.yaml`. Undeclared components are found
   by the Pi's conventions (`command.py`, `commands/*/command.py`, `agents/*/agent.py`, ...).
   Refused: another OS in `platforms`, `targets` without `desktop`, any `apt_packages`,
-  `apt_sources` or `post_install`, no command, or a pip requirement that isn't a plain name and
-  version specifier. Non-command components are skipped and reported in `skipped_components`.
+  `apt_sources` or `post_install`, neither a command nor a device family/manager, or a pip
+  requirement that isn't a plain name and version specifier. Device families and managers load
+  in the sidecar and answer the app's device requests as on a Pi
+  ([decision](../decisions/2026-10-26-devices-on-desktop-agents.md)); the other non-command
+  components (agents) are skipped and reported in `skipped_components`.
 - **Python.** `uv` 0.12.24, downloaded on first install and checked against pinned SHA-256s
   (`JARVIS_AGENT_UV` names another), makes `venv/` on uv's own CPython 3.12 (`python/`), and
   `uv pip install`s the pinned jarvis-command-sdk commit plus the manifest's `packages`

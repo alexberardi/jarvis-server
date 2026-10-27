@@ -1,6 +1,6 @@
-// Package devices is the Go Pi node's side of the household's smart-home devices: the app's
-// device scan, list and state requests, the device-cache verbs, OAuth's auth-ready, and the
-// registry of direct devices. The device families themselves are Python (Pantry packages,
+// Package devices is the Go node's side, on a Pi or a computer, of the household's smart-home
+// devices: the app's device scan, list and state requests, the device-cache verbs, OAuth's
+// auth-ready, and the registry of direct devices. The device families themselves are Python (Pantry packages,
 // jarvis_command_sdk.IJarvisDeviceProtocol) and run in the package sidecar; this package owns
 // MQTT and the uploads, as the Python node's mqtt_tts_listener and device_*_handler do
 // (docs/agent/go-pi-node.md §3.17).

@@ -259,8 +259,9 @@ func (m *Manifest) CheckPi(runs ...string) error {
 	return nil
 }
 
-// Commands are the components every sidecar loads. Agents and device components run on a Pi
-// (PiTypes); none of the other Pi component types runs on the Go node yet.
+// Commands are the components every sidecar loads. Device components run on every node
+// (DeviceTypes), agents on a Pi (PiTypes); none of the other Pi component types runs on the Go
+// node yet.
 func (m *Manifest) Commands() []Component {
 	var out []Component
 	for _, c := range m.Components {
@@ -271,7 +272,7 @@ func (m *Manifest) Commands() []Component {
 	return out
 }
 
-// DeviceTypes are the device component types a Pi's sidecar loads: families and managers.
+// DeviceTypes are the device component types every node's sidecar loads: families and managers.
 var DeviceTypes = []string{"device_protocol", "device_manager"}
 
 // Agent is the component type of a package's background agent (an IJarvisAgent: comfyui's
