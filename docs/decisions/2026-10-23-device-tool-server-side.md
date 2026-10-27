@@ -87,3 +87,5 @@ seeding the scenario's own device into the registry (the device-import POST of
 item did not make. Were that done, scenario 1's `not_reply` would be flipped to assert the
 success (reply says the lights are off, args carry `entity_id rgbic_tv_light_bars`); the
 scenario file is otherwise correct as written.
+
+**Narrowed 2026-10-27** by [2026-10-27-go-builtins](2026-10-27-go-builtins.md): a node with the device's family offers its own `control_device` and the server tool steps aside for it.

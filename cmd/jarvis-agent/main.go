@@ -36,10 +36,12 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
+	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
@@ -758,6 +760,7 @@ func runAgent(ctx context.Context, args []string) error {
 				}}
 		}
 	}
+	tf.cc = liveCC.Load
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -783,6 +786,7 @@ func runAgent(ctx context.Context, args []string) error {
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
 	served := nodesettings.Gate{Tools: tools, Store: st}
+	tf.routine.Tools = served // a step the household turned off doesn't run
 	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: p.installMode, NodeKind: p.nodeKind, DeviceID: deviceid.Get(), Log: log}
 	runner.Store(r)
 	if p.desktop {
@@ -853,7 +857,8 @@ func runAgent(ctx context.Context, args []string) error {
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
 	wireActions(r, sc, st, sayNow(mic), log)
 	if sc != nil {
-		wireDevices(r, sc, log)
+		wireDevices(r, sc, tf.registry, log)
+		wireRoutineVerb(r, served, log)
 	}
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
@@ -893,8 +898,6 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	if onConnected := r.OnConnected; p.desktop {
 		r.OnConnected = func(ctx context.Context, cc *node.CC) {
-			liveCC.Store(cc)
-			defer liveCC.CompareAndSwap(cc, nil)
 			go uploads.serve(ctx, cc) // the recordings not sent yet
 			if onConnected != nil {
 				onConnected(ctx, cc)
@@ -903,6 +906,7 @@ func runAgent(ctx context.Context, args []string) error {
 			}
 		}
 	}
+	connectCC(r, &liveCC)
 	connectHost(r, tf.host)
 	var setup func()
 	if p.desktop {
@@ -1031,6 +1035,12 @@ type toolFlags struct {
 	host *sdkhost.Host
 	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
 	live *sidecar.Live
+	// cc, when the caller sets it, is jarvisd's client while connected, for the Go built-ins;
+	// registry is the household's direct devices, which build makes (wireDevices keeps it fresh)
+	// and routine the routine built-in, whose steps run on the served toolset.
+	cc       func() *node.CC
+	registry *devices.Registry
+	routine  *builtins.Routine
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
@@ -1054,7 +1064,7 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 // long-running `run` does; `listen`, a test command often started over SSH, doesn't).
 //
 // st, when set, is the node's settings store: the sidecar's packages read their secrets and
-// keep their data there (DESIGN §16). The Pi profile (f.pi) has only the sidecar and the clock.
+// keep their data there (DESIGN §16). The Pi profile (f.pi) has only the sidecar and the Go built-ins.
 func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, st *nodesettings.Store) (*host.Host, node.Multi, func(), error) {
 	h, err := nativeHost()
 	if err != nil {
@@ -1157,8 +1167,16 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 	stopBrowser := closeAll
 	closeAll = func() { _ = live.Close(); stopBrowser() }
 	tools = append(tools, live)
-	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
-	tools = append(tools, &clock.Tool{})
+	// After the sidecar, so a package's command of the same name (Python's get_current_time with
+	// its city table, Home Assistant's control_device) wins when present.
+	cc := f.cc
+	if cc == nil {
+		cc = func() *node.CC { return nil }
+	}
+	f.registry = &devices.Registry{}
+	f.routine = &builtins.Routine{Store: st, CC: cc, Log: log}
+	tools = append(tools, &builtins.ControlDevice{Devices: f.registry, Families: live, CC: cc},
+		&builtins.SendLink{CC: cc}, f.routine, &clock.Tool{})
 	return tools, closeAll, nil
 }
 

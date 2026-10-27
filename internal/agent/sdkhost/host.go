@@ -244,13 +244,7 @@ func (h *Host) commandCenter(ctx context.Context, method string, p params) (any,
 		if cc == nil {
 			return nil, errNoCC
 		}
-		// The node client's 15 s limit is short for a model's reply.
-		slow := *cc
-		if cc.HTTP != nil {
-			hc := *cc.HTTP
-			hc.Timeout = llmTimeout
-			slow.HTTP = &hc
-		}
+		slow := cc.WithTimeout(llmTimeout) // the node client's 15 s limit is short for a model's reply
 		// As N:JarvisCommandCenterClient.chat_text: the prompt as one system message.
 		var resp struct {
 			Content *string `json:"content"`

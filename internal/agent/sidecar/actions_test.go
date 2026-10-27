@@ -27,6 +27,17 @@ func TestSidecarControlsADeviceThroughItsFamily(t *testing.T) {
 		t.Fatalf("control saw %v", rec)
 	}
 
+	// A spoken colour also reaches the family as rgb (LIFX and Kasa take only rgb).
+	ctx["color"] = "green"
+	if res, err = sc.Action(map[string]any{"command_name": "control_device", "action_name": "set_color", "context": ctx}); err != nil || res["success"] != true {
+		t.Fatalf("set_color = %v, %v", res, err)
+	}
+	rec, _ = st.Data("fakelight", "controlled", time.Now())
+	if rgb, _ := rec.Value("rgb").([]any); len(rgb) != 3 {
+		t.Fatalf("set_color: family saw rgb %v", rec.Value("rgb"))
+	}
+	delete(ctx, "color")
+
 	// A family whose control raises is a failed result, not a crashed sidecar.
 	res, err = sc.Action(map[string]any{"command_name": "control_device", "action_name": "explode", "context": ctx})
 	if err != nil || res["success"] != false || res["error"] != "the bulb popped" {

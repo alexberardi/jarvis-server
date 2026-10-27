@@ -1350,7 +1350,7 @@ checked on the lab Pi 4 since it was built.
 | 4.2 self-update on the Pi | built | partly: `systemd-run --user` reaches pi's manager; **open (e)**: the rollback repro after rerunning `install-pi.sh` (#220) |
 | 4.3 `install-pi.sh` (3a, 3b), the release | built | no; no published release yet |
 | 4.4 provisioning API, NetworkManager backend, recovery, setup mode at boot | built | no; setup mode at boot (#292) unit-tested, pending the lab Pi |
-| 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; **open (b)**: `control_device`, `routine`, `send_link` are skipped (`internal/agent/packages/python.go:58`) |
+| 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; (b) built, not yet on a Pi: `control_device`, `routine` (and the `routine` verb), `send_link` are Go built-ins (`internal/agent/builtins`, decision 2026-10-27-go-builtins) |
 | 5.1 follow-up | built (heard on the desktop) | no |
 | 5.2 barge-in | built (rig tests) | no |
 | 5.3 client tools / continue | built | no |
