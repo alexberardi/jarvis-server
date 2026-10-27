@@ -1,0 +1,305 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "reminder",
+        "description": "Time-based 'remind me to call mom tomorrow' / 'remind me to take out the trash at 8' — those are reminders, not list edits."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "add",
+          "tasks": [
+            "call the dentist"
+          ]
+        },
+        "is_primary": true,
+        "voice_command": "Add call the dentist to my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "tasks": [
+            "fold the laundry"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Put fold the laundry on my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "read"
+        },
+        "is_primary": false,
+        "voice_command": "What's on my to-do list?"
+      },
+      {
+        "expected_parameters": {
+          "action": "complete",
+          "tasks": [
+            "the laundry"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Mark the laundry done on my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "uncomplete",
+          "tasks": [
+            "call the dentist"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Mark call the dentist as not done on my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "remove",
+          "tasks": [
+            "fold the laundry"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Remove fold the laundry from my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "tasks": [
+            "walk the dog",
+            "buy milk",
+            "call the bank"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Add walk the dog, buy milk, and call the bank to my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear"
+        },
+        "is_primary": false,
+        "voice_command": "Clear my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear",
+          "scope": "completed"
+        },
+        "is_primary": false,
+        "voice_command": "Clear the completed tasks on my to-do list"
+      }
+    ],
+    "function": {
+      "description": "Add to, read, complete or clear the to-do list. Not for timed reminders.",
+      "name": "todo_list",
+      "parameters": {
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "read",
+              "complete",
+              "uncomplete",
+              "remove",
+              "clear"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "description": "For clear: all or completed",
+            "enum": [
+              "all",
+              "completed"
+            ],
+            "type": "string"
+          },
+          "tasks": {
+            "description": "Whole tasks; don't split on 'and'",
+            "type": "array"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "to do list",
+      "todo list",
+      "to-do list",
+      "task list",
+      "add task",
+      "mark done",
+      "check off task",
+      "to do",
+      "todo"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "reminder",
+        "description": "Time-based 'remind me to call mom tomorrow' / 'remind me to take out the trash at 8' — those are reminders, not list edits."
+      }
+    ],
+    "command_name": "todo_list",
+    "critical_rules": [
+      "tasks is required for add, complete, uncomplete, and remove — if unclear, ask which task",
+      "This manages a to-do list, NOT time-based reminders — 'remind me to call mom at 5' belongs to the reminder command"
+    ],
+    "description": "Add to, read, complete or clear the to-do list. Not for timed reminders.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "add",
+          "tasks": [
+            "call the dentist"
+          ]
+        },
+        "is_primary": true,
+        "voice_command": "Add call the dentist to my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "tasks": [
+            "fold the laundry"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Put fold the laundry on my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "read"
+        },
+        "is_primary": false,
+        "voice_command": "What's on my to-do list?"
+      },
+      {
+        "expected_parameters": {
+          "action": "complete",
+          "tasks": [
+            "the laundry"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Mark the laundry done on my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "uncomplete",
+          "tasks": [
+            "call the dentist"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Mark call the dentist as not done on my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "remove",
+          "tasks": [
+            "fold the laundry"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Remove fold the laundry from my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "tasks": [
+            "walk the dog",
+            "buy milk",
+            "call the bank"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Add walk the dog, buy milk, and call the bank to my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear"
+        },
+        "is_primary": false,
+        "voice_command": "Clear my to-do list"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear",
+          "scope": "completed"
+        },
+        "is_primary": false,
+        "voice_command": "Clear the completed tasks on my to-do list"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "to do list",
+      "todo list",
+      "to-do list",
+      "task list",
+      "add task",
+      "mark done",
+      "check off task",
+      "to do",
+      "todo"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "add",
+          "read",
+          "complete",
+          "uncomplete",
+          "remove",
+          "clear"
+        ],
+        "name": "action",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Whole tasks; don't split on 'and'",
+        "enum_values": null,
+        "name": "tasks",
+        "options_source": null,
+        "required": false,
+        "type": "array\u003cstring\u003e"
+      },
+      {
+        "default_value": null,
+        "description": "For clear: all or completed",
+        "enum_values": [
+          "all",
+          "completed"
+        ],
+        "name": "scope",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "rules": [
+      "tasks is ALWAYS an array of strings, even for a single task",
+      "Each task is a whole phrase — do NOT split a single task on 'and' ('call mom and dad' is one task)",
+      "Only split into multiple tasks when the user clearly enumerates several ('add walk the dog, buy milk, and call the bank' -\u003e three tasks)",
+      "Default action is 'add' when a task is mentioned, 'read' when just asking about the list",
+      "'mark X done/complete/finished' -\u003e complete; 'mark X not done/incomplete/undone' -\u003e uncomplete",
+      "'clear my to-do list' -\u003e clear with scope 'all'; 'clear completed/finished tasks' -\u003e scope 'completed'"
+    ]
+  }
+}

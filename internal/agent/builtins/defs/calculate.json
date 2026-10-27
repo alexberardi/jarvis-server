@@ -1,0 +1,193 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "examples": [
+      {
+        "expected_parameters": {
+          "num1": 5,
+          "num2": 3,
+          "operation": "add"
+        },
+        "is_primary": true,
+        "voice_command": "What's 5 plus 3?"
+      },
+      {
+        "expected_parameters": {
+          "num1": 10,
+          "num2": 4,
+          "operation": "subtract"
+        },
+        "is_primary": false,
+        "voice_command": "Calculate 10 minus 4"
+      },
+      {
+        "expected_parameters": {
+          "num1": 6,
+          "num2": 7,
+          "operation": "multiply"
+        },
+        "is_primary": false,
+        "voice_command": "What is 6 times 7?"
+      },
+      {
+        "expected_parameters": {
+          "num1": 20,
+          "num2": 5,
+          "operation": "divide"
+        },
+        "is_primary": false,
+        "voice_command": "Divide 20 by 5"
+      },
+      {
+        "expected_parameters": {
+          "num1": 0.15,
+          "num2": 200,
+          "operation": "multiply"
+        },
+        "is_primary": false,
+        "voice_command": "What's 15 percent of 200?"
+      }
+    ],
+    "function": {
+      "description": "Arithmetic on two numbers. Always use it; don't compute in your head.",
+      "name": "calculate",
+      "parameters": {
+        "properties": {
+          "num1": {
+            "type": "number"
+          },
+          "num2": {
+            "type": "number"
+          },
+          "operation": {
+            "enum": [
+              "add",
+              "subtract",
+              "multiply",
+              "divide"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "num1",
+          "num2",
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "calculate",
+      "math",
+      "add",
+      "subtract",
+      "multiply",
+      "divide",
+      "plus",
+      "minus"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "command_name": "calculate",
+    "critical_rules": [
+      "Map terms: plus/sum→'add', minus→'subtract', times→'multiply', divided by→'divide'."
+    ],
+    "description": "Arithmetic on two numbers. Always use it; don't compute in your head.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "num1": 5,
+          "num2": 3,
+          "operation": "add"
+        },
+        "is_primary": true,
+        "voice_command": "What's 5 plus 3?"
+      },
+      {
+        "expected_parameters": {
+          "num1": 10,
+          "num2": 4,
+          "operation": "subtract"
+        },
+        "is_primary": false,
+        "voice_command": "Calculate 10 minus 4"
+      },
+      {
+        "expected_parameters": {
+          "num1": 6,
+          "num2": 7,
+          "operation": "multiply"
+        },
+        "is_primary": false,
+        "voice_command": "What is 6 times 7?"
+      },
+      {
+        "expected_parameters": {
+          "num1": 20,
+          "num2": 5,
+          "operation": "divide"
+        },
+        "is_primary": false,
+        "voice_command": "Divide 20 by 5"
+      },
+      {
+        "expected_parameters": {
+          "num1": 0.15,
+          "num2": 200,
+          "operation": "multiply"
+        },
+        "is_primary": false,
+        "voice_command": "What's 15 percent of 200?"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "calculate",
+      "math",
+      "add",
+      "subtract",
+      "multiply",
+      "divide",
+      "plus",
+      "minus"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": null,
+        "name": "num1",
+        "options_source": null,
+        "required": true,
+        "type": "float"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": null,
+        "name": "num2",
+        "options_source": null,
+        "required": true,
+        "type": "float"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "add",
+          "subtract",
+          "multiply",
+          "divide"
+        ],
+        "name": "operation",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      }
+    ]
+  }
+}

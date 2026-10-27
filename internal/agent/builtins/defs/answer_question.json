@@ -1,0 +1,161 @@
+{
+  "client_tool": {
+    "allow_direct_answer": true,
+    "antipatterns": [
+      {
+        "command_name": "search_web",
+        "description": "Current events, live scores, trending topics, or time-sensitive information."
+      },
+      {
+        "command_name": "get_sports",
+        "description": "Sports scores, schedules, or game results for a specific team."
+      },
+      {
+        "command_name": "get_weather",
+        "description": "Weather forecasts or current conditions."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "query": "How far is California from New Jersey?"
+        },
+        "is_primary": true,
+        "voice_command": "How far is California from New Jersey?"
+      },
+      {
+        "expected_parameters": {
+          "query": "What is the capital of France?"
+        },
+        "is_primary": false,
+        "voice_command": "What is the capital of France?"
+      },
+      {
+        "expected_parameters": {
+          "query": "Who invented the telephone?"
+        },
+        "is_primary": false,
+        "voice_command": "Who invented the telephone?"
+      }
+    ],
+    "function": {
+      "description": "Answer a general-knowledge question (facts, history, science, definitions). Not for news, scores or anything live.",
+      "name": "answer_question",
+      "parameters": {
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "what is",
+      "what are",
+      "who is",
+      "who was",
+      "how far",
+      "how many",
+      "how much",
+      "how does",
+      "how do",
+      "how old",
+      "when was",
+      "when did",
+      "where is",
+      "where was",
+      "why is",
+      "why does",
+      "why do",
+      "define",
+      "explain",
+      "tell me about",
+      "what does",
+      "meaning of"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": true,
+    "antipatterns": [
+      {
+        "command_name": "search_web",
+        "description": "Current events, live scores, trending topics, or time-sensitive information."
+      },
+      {
+        "command_name": "get_sports",
+        "description": "Sports scores, schedules, or game results for a specific team."
+      },
+      {
+        "command_name": "get_weather",
+        "description": "Weather forecasts or current conditions."
+      }
+    ],
+    "command_name": "answer_question",
+    "description": "Answer a general-knowledge question (facts, history, science, definitions). Not for news, scores or anything live.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "query": "How far is California from New Jersey?"
+        },
+        "is_primary": true,
+        "voice_command": "How far is California from New Jersey?"
+      },
+      {
+        "expected_parameters": {
+          "query": "What is the capital of France?"
+        },
+        "is_primary": false,
+        "voice_command": "What is the capital of France?"
+      },
+      {
+        "expected_parameters": {
+          "query": "Who invented the telephone?"
+        },
+        "is_primary": false,
+        "voice_command": "Who invented the telephone?"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "what is",
+      "what are",
+      "who is",
+      "who was",
+      "how far",
+      "how many",
+      "how much",
+      "how does",
+      "how do",
+      "how old",
+      "when was",
+      "when did",
+      "where is",
+      "where was",
+      "why is",
+      "why does",
+      "why do",
+      "define",
+      "explain",
+      "tell me about",
+      "what does",
+      "meaning of"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": null,
+        "name": "query",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      }
+    ]
+  }
+}
