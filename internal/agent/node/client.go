@@ -154,6 +154,19 @@ func (c *CC) do(ctx context.Context, method, path string, body, out any) error {
 	return doJSON(ctx, c.HTTP, method, joinURL(c.BaseURL, path), map[string]string{"X-API-Key": c.Creds.APIKey()}, body, out)
 }
 
+// WithTimeout is a copy of c whose calls may take up to d (a model's reply outlasts the
+// client's 15 s).
+func (c *CC) WithTimeout(d time.Duration) *CC {
+	slow := *c
+	hc := http.Client{}
+	if c.HTTP != nil {
+		hc = *c.HTTP
+	}
+	hc.Timeout = d
+	slow.HTTP = &hc
+	return &slow
+}
+
 // Do is one node-authenticated call to command-center: body (nil for none) as JSON, the JSON
 // answer into out (nil to discard), a non-2xx as *HTTPError.
 func (c *CC) Do(ctx context.Context, method, path string, body, out any) error {

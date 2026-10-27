@@ -1,0 +1,212 @@
+package builtins
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"log/slog"
+	"maps"
+	"net/http"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+)
+
+var routineSpec = node.Spec{
+	Name:        "routine",
+	Description: "Execute a multi-step voice routine (e.g. good morning, good night). Runs sub-commands and composes a natural spoken response.",
+	Params: []node.Param{{Name: "routine_name", Type: "string", Required: true,
+		Description: "Name of the routine to execute (e.g. good_morning, good_night)."}},
+	Keywords: []string{"routine", "good morning", "good night", "bedtime", "start my day", "morning routine", "briefing",
+		"daily briefing", "morning briefing", "nightly briefing", "evening briefing", "nightly update", "catch me up", "daily update"},
+	Examples: []node.Example{
+		{VoiceCommand: "Good morning", Params: map[string]any{"routine_name": "good_morning"}, Primary: true},
+		{VoiceCommand: "Good night", Params: map[string]any{"routine_name": "good_night"}},
+		{VoiceCommand: "Give me my morning briefing", Params: map[string]any{"routine_name": "morning_briefing"}},
+		{VoiceCommand: "Give me my nightly briefing", Params: map[string]any{"routine_name": "nightly_briefing"}},
+	},
+}
+
+// RoutineTimeout bounds a whole routine: jarvisd waits about a minute for a run's result.
+const RoutineTimeout = 55 * time.Second
+
+// composeTimeout bounds the model's composition of the reply.
+const composeTimeout = 30 * time.Second
+
+var lengthInstructions = map[string]string{
+	"short":  "Respond in 2-4 spoken sentences, conversational tone.",
+	"medium": "Respond in 6-10 spoken sentences, flowing narrative tone. Cover each topic with a sentence or two.",
+	"long":   "Respond in a detailed paragraph style, about 60 seconds of speech. Cover each topic thoroughly.",
+}
+
+var typeLengths = map[string]string{"routine": "short", "briefing": "medium"}
+
+var relativeDays = map[string]int{"today": 0, "tomorrow": 1, "yesterday": -1, "day_after_tomorrow": 2}
+
+var thinkRe = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
+
+// Routine is the routine command (commands/routine_command.py): each step a call to the node's
+// own toolset, then one spoken reply composed by the live model from the steps' results. A
+// definition comes with jarvisd's run (D24), else from the routines pulled into Store, else
+// from the built-in defaults.
+type Routine struct {
+	Store *nodesettings.Store // nil: the defaults only
+	// Tools runs the steps: the node's whole toolset, set once it is built.
+	Tools node.Toolset
+	CC    CC
+	Now   func() time.Time
+	Log   *slog.Logger
+}
+
+func (t *Routine) Available(context.Context) []node.ToolDef {
+	return []node.ToolDef{routineSpec.Render()}
+}
+
+// definition is the named routine: the store's copy, then the default.
+func (t *Routine) definition(slug string) map[string]any {
+	if t.Store != nil {
+		if o, ok := t.Store.Data(nodesettings.RoutineCommand, slug, t.now()); ok {
+			var d map[string]any
+			if b, err := json.Marshal(o); err == nil && json.Unmarshal(b, &d) == nil {
+				return d
+			}
+		}
+	}
+	return DefaultRoutines()[slug]
+}
+
+func (t *Routine) now() time.Time {
+	if t.Now != nil {
+		return t.Now()
+	}
+	return time.Now()
+}
+
+func (t *Routine) Call(ctx context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
+	if name != routineSpec.Name {
+		return nil, false
+	}
+	slug, _ := args["routine_name"].(string)
+	def, _ := args["routine_definition"].(map[string]any) // the verb's; never the model's
+	if steps, _ := def["steps"].([]any); len(steps) == 0 {
+		def = t.definition(slug)
+	}
+	if def == nil {
+		return node.Fail("Unknown routine: %s", slug), true
+	}
+	steps, _ := def["steps"].([]any)
+	if len(steps) == 0 {
+		return node.Fail("Routine '%s' has no steps configured.", slug), true
+	}
+	results, errs := map[string]any{}, map[string]string{}
+	for _, raw := range steps {
+		step, _ := raw.(map[string]any)
+		cmd, _ := step["command"].(string)
+		label, _ := step["label"].(string)
+		if label == "" {
+			label = cmd
+		}
+		stepArgs, _ := step["args"].(map[string]any)
+		stepArgs = maps.Clone(stepArgs) // the definition stays as it was
+		if stepArgs == nil {
+			stepArgs = map[string]any{}
+		}
+		if dates, ok := stepArgs["resolved_datetimes"].([]any); ok {
+			stepArgs["resolved_datetimes"] = t.resolveDates(dates)
+		}
+		if cmd == routineSpec.Name {
+			errs[label] = "A routine can't run a routine"
+			continue
+		}
+		out, handled := t.Tools.Call(ctx, cmd, stepArgs, req)
+		if !handled {
+			t.log().Warn("routine: step skipped, command not found", "command", cmd, "routine", slug)
+			errs[label] = "Command '" + cmd + "' not available"
+			continue
+		}
+		node.TakeSignals(out)
+		if ok, _ := out["success"].(bool); !ok {
+			msg, _ := out["error"].(string)
+			errs[label] = cmp.Or(msg, "Unknown error")
+			t.log().Warn("routine: step failed", "label", label, "error", msg)
+			continue
+		}
+		data := maps.Clone(out)
+		delete(data, "success")
+		results[label] = data
+	}
+	if len(results) == 0 {
+		return map[string]any{"success": false, "error": "All routine steps failed.", "errors": errs, "passed": 0, "failed": len(errs)}, true
+	}
+	instruction, _ := def["response_instruction"].(string)
+	length, _ := def["response_length"].(string)
+	if length == "" {
+		typ, _ := def["type"].(string)
+		length = cmp.Or(typeLengths[typ], "short")
+	}
+	return map[string]any{"success": true, "message": t.compose(ctx, results, errs, cmp.Or(instruction, "Summarize the results conversationally."), length),
+		"passed": len(results), "failed": len(errs)}, true
+}
+
+func (t *Routine) log() *slog.Logger {
+	if t.Log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return t.Log
+}
+
+// resolveDates turns today, tomorrow, ... into YYYY-MM-DD; anything else passes through.
+func (t *Routine) resolveDates(vals []any) []any {
+	out := make([]any, len(vals))
+	for i, v := range vals {
+		out[i] = v
+		if s, ok := v.(string); ok {
+			if off, ok := relativeDays[strings.ToLower(strings.TrimSpace(s))]; ok {
+				out[i] = t.now().AddDate(0, 0, off).Format(time.DateOnly)
+			}
+		}
+	}
+	return out
+}
+
+// compose is _compose_response: the live model's spoken summary of the results, else the
+// results' own messages.
+func (t *Routine) compose(ctx context.Context, results map[string]any, errs map[string]string, instruction, length string) string {
+	res, _ := json.MarshalIndent(results, "", "  ")
+	prompt := "/no_think\n" + instruction + "\n\nHere are the results from each step:\n" + string(res) + "\n\n" +
+		cmp.Or(lengthInstructions[length], lengthInstructions["short"]) +
+		" Do not mention steps that failed — only include information from successful steps."
+	if len(errs) > 0 {
+		e, _ := json.Marshal(errs)
+		prompt += "\n\nThese steps had errors (do not mention them): " + string(e)
+	}
+	if cc := t.CC(); cc != nil {
+		var resp struct {
+			Content *string `json:"content"`
+		}
+		body := map[string]any{"messages": []map[string]string{{"role": "system", "content": prompt}}, "model": "live", "temperature": 0}
+		err := cc.WithTimeout(composeTimeout).Do(ctx, http.MethodPost, "/api/v0/node/llm/chat", body, &resp)
+		if err == nil && resp.Content != nil {
+			if s := strings.TrimSpace(thinkRe.ReplaceAllString(*resp.Content, "")); s != "" {
+				return s
+			}
+		}
+		if err != nil {
+			t.log().Warn("routine: composition failed; using the steps' messages", "err", err)
+		}
+	}
+	var parts []string
+	for _, label := range slices.Sorted(maps.Keys(results)) {
+		if m, _ := results[label].(map[string]any)["message"].(string); m != "" {
+			parts = append(parts, m)
+		}
+	}
+	if len(parts) == 0 {
+		return "Routine completed."
+	}
+	return strings.Join(parts, " ")
+}

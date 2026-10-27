@@ -1185,6 +1185,16 @@ def _device_control(action_name: str, context: dict) -> dict:
     if fam is None:
         return {"success": False, "error": f"Device protocol '{protocol}' not found"}
     entity_id = context.get("entity_id") or ""
+    if context.get("color") and not context.get("rgb"):
+        # A spoken colour also as rgb, for the families that only take rgb (LIFX, Kasa), as
+        # N:'s control_device does.
+        try:
+            from jarvis_command_sdk import resolve_color
+        except ImportError:  # an SDK before the shared palette
+            resolve_color = None
+        rgb = resolve_color(context["color"]) if resolve_color else None
+        if rgb is not None:
+            context = {**context, "rgb": list(rgb)}
     dev = DiscoveredDevice(entity_id=entity_id, name=context.get("name") or entity_id,
                            domain=context.get("domain") or "switch", manufacturer=protocol,
                            model=context.get("model") or "", protocol=protocol, cloud_id=context.get("cloud_id"),

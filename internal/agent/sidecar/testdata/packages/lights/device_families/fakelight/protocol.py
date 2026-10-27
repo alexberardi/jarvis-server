@@ -41,7 +41,7 @@ class FakeLight(IJarvisDeviceProtocol):
             return DeviceControlResult(success=ok, entity_id=dev.entity_id, action=action,
                                        error=None if ok else f"pairing lost (same loop: {same})")
         got = (dev.entity_id, dev.name, dev.domain, dev.local_ip, dev.mac_address, (data or {}).get("brightness"))
-        JarvisStorage("fakelight").save("controlled", {"action": action, "device": list(got)})
+        JarvisStorage("fakelight").save("controlled", {"action": action, "device": list(got), "rgb": (data or {}).get("rgb")})
         return DeviceControlResult(success=True, entity_id=dev.entity_id, action=action)
 
     async def get_state(self, ip, **kwargs):

@@ -49,7 +49,8 @@ const NodeCommandsRequirement = "jarvis-node-setup @ https://github.com/alexbera
 
 // PiBuiltins are the built-in commands the Pi profile loads: every module of jarvis-node-setup's
 // commands package but those that still call the Python node's own code
-// (docs/decisions/2026-10-18-pi-builtin-commands.md).
+// (docs/decisions/2026-10-18-pi-builtin-commands.md). The skipped ones are Go built-ins
+// (internal/agent/builtins, docs/decisions/2026-10-27-go-builtins.md).
 func PiBuiltins(requirement string) *Builtins {
 	if requirement == "" {
 		requirement = NodeCommandsRequirement

@@ -14,9 +14,8 @@ import (
 // device-state), jarvisd's invalidate_device_cache and device_removed verbs and OAuth's
 // jarvis/auth/+/ready over the sidecar's device families (internal/agent/devices), reports the
 // configured families in the heartbeat, and keeps the registry of direct devices fresh from
-// the first connect. Call it after wireNodeSettings (which sets Topics and OnMQTTConnect).
-func wireDevices(r *node.Runner, live *sidecar.Live, log *slog.Logger) {
-	reg := &devices.Registry{}
+// the first connect (reg, which control_device reads too). Call it after wireNodeSettings (which sets Topics and OnMQTTConnect).
+func wireDevices(r *node.Runner, live *sidecar.Live, reg *devices.Registry, log *slog.Logger) {
 	n := &devices.Node{NodeID: r.Creds.NodeID, Families: live, Registry: reg, Log: log, Changed: r.BeatNow}
 	if r.Topics == nil {
 		r.Topics = map[string]func(context.Context, *node.CC, []byte){}
