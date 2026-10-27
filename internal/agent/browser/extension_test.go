@@ -255,6 +255,7 @@ func TestCommandParity(t *testing.T) {
 	if _, err := ts.Download(ctx, "firefox:1", "e1", ""); err != nil {
 		t.Errorf("Download: %v", err)
 	}
+	ts.Direct(ctx, "show numbers") // hints: the voice grammar's, no tool
 	mu.Lock()
 	var fromGo []string
 	for c := range sent {
