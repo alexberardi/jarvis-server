@@ -160,7 +160,7 @@ func NewTools(h *Hub) *Tools {
 			},
 			Keywords: []string{"browser", "scroll", "page", "down", "up"},
 			Examples: []node.Example{{VoiceCommand: "scroll down", Params: map[string]any{"direction": "down"}, Primary: true}}},
-			0, t.simple("scroll"), true},
+			0, t.scroll, true},
 		{node.Spec{Name: ToolFind, Description: "Find and highlight words on the browser's current page ('find X on this page').",
 			Params: []node.Param{
 				{Name: "text", Type: "string", Required: true, Description: ""},
@@ -491,6 +491,18 @@ func (t *Tools) simple(cmd string) func(context.Context, map[string]any) (map[st
 		}
 		return t.call(ctx, cmd, args, extra)
 	}
+}
+
+// scroll scrolls the page and reports whether it moved: at the end of the page it fails with
+// at_end, so neither the model nor the island says "scrolled" when nothing did (VOICE-FLOWS.md
+// Q32). An older extension that doesn't say keeps its plain success.
+func (t *Tools) scroll(ctx context.Context, args map[string]any) (map[string]any, error) {
+	out, err := t.simple("scroll")(ctx, args)
+	if err != nil || out["moved"] != false {
+		return out, err
+	}
+	where := map[string]string{"up": "the top", "top": "the top", "down": "the bottom", "bottom": "the bottom"}[str(out["direction"])]
+	return nil, &CommandError{Code: CodeAtEnd, Message: "the page didn't move: it's already at " + cmp.Or(where, "the end")}
 }
 
 // listTabs lists the tabs of every connected browser.

@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -39,5 +40,23 @@ func TestDirectScrollsWithNoModel(t *testing.T) {
 	off := node.WithEnabled(context.Background(), func(n string) bool { return n != ToolScroll })
 	if _, ok := ts.Direct(off, "scroll down"); ok {
 		t.Fatal("scrolled while turned off")
+	}
+}
+
+// Q32: at the bottom, "scroll down" says so on the island instead of a scroll that didn't happen.
+func TestDirectScrollAtTheEnd(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		return ok(map[string]any{"direction": m.Args["direction"], "moved": false, "position_percent": 100.0})
+	})
+	out, ok := ts.Direct(context.Background(), "scroll down")
+	if !ok || out["success"] != false || out["error_code"] != CodeAtEnd || out[node.IslandKey] != "Already at the bottom" {
+		t.Fatalf("%v %v", out, ok)
+	}
+	// The model's call says the same: no "scrolled" when nothing moved.
+	out, _ = ts.Call(context.Background(), ToolScroll, map[string]any{"direction": "down"}, node.Request{})
+	if out["success"] != false || !strings.Contains(out["error"].(string), "already at the bottom") {
+		t.Fatalf("model's call: %v", out)
 	}
 }
