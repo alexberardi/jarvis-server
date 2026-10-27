@@ -62,6 +62,19 @@ func Enabled(ctx context.Context, name string) bool {
 	return f == nil || f(name)
 }
 
+type speakerKey struct{}
+
+// WithSpeaker carries the recognised speaker (nil: unknown) to a Director.
+func WithSpeaker(ctx context.Context, userID *int64) context.Context {
+	return context.WithValue(ctx, speakerKey{}, userID)
+}
+
+// Speaker is the recognised speaker WithSpeaker set, or nil.
+func Speaker(ctx context.Context) *int64 {
+	u, _ := ctx.Value(speakerKey{}).(*int64)
+	return u
+}
+
 // Direct asks each Toolset that can carry out a command itself.
 func (m Multi) Direct(ctx context.Context, said string) (map[string]any, bool) {
 	for _, t := range m {
@@ -244,6 +257,9 @@ type Signals struct {
 	// OnResponseComplete is the command's deferred step (a media command starting playback),
 	// to run once the spoken reply and the follow-up window are over.
 	OnResponseComplete func() error
+	// Speak: a Director's result whose "message" is said aloud (a routine run by its trigger
+	// phrase) rather than shown and left silent like a desktop command.
+	Speak bool
 }
 
 // TakeSignals removes the Signals from out (if any) and returns them.

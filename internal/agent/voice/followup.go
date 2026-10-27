@@ -261,8 +261,15 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if tr.Speaker != nil && tr.Speaker.UserID != nil {
 			s.userID = tr.Speaker.UserID
 		}
-		if p.direct(ctx, s, &ex, text) { // funnel stage 1: done here, no command-center turn
+		if end, ok := p.direct(ctx, s, &ex, text); ok { // funnel stage 1: done here, no command-center turn
 			t.FollowUps = append(t.FollowUps, ex)
+			if end != "" {
+				t.FollowUpEnd = end
+				return
+			}
+			if ex.Message != "" { // a spoken routine: its tail is drained before listening again
+				lastSaid, afterReply = ex.Message, true
+			}
 			ignored, used = 0, 0
 			if !s.quietTurn {
 				it++

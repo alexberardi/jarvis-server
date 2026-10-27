@@ -614,8 +614,8 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		return "", true
 	}
 	activity := p.computerTurn(s, tr.Text, false) // a stop phrase stops it locally, at once; the server still hears it
-	if p.direct(ctx, s, ex, tr.Text) {
-		return "", true
+	if end, ok := p.direct(ctx, s, ex, tr.Text); ok {
+		return end, true
 	}
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
@@ -673,30 +673,35 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 // direct is funnel stage 1 (VOICE-FLOWS.md Q27): a clear one-step command the node's own tools
 // carry out ("switch to the Claude tab"), with no model and no command-center turn. It reports
 // like a silent desktop command: the island shows it, the next window waits for the next step,
-// a list on the island opens the choice window.
-func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text string) bool {
+// a list on the island opens the choice window. A result that asks to be spoken (Signals.Speak)
+// is a spoken reply instead; end is then why the follow-up window stays shut ("" opens it).
+func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text string) (end FollowUpEnd, handled bool) {
 	d, ok := p.Tools.(node.Director)
 	if !ok {
-		return false
+		return "", false
 	}
-	out, ok := d.Direct(ctx, text)
+	out, ok := d.Direct(node.WithSpeaker(ctx, s.userID), text)
 	if !ok {
-		return false
+		return "", false
 	}
+	sig := node.TakeSignals(out)
 	success, _ := out["success"].(bool)
 	choice, _ := out[node.ChoiceKey].(bool)
 	ex.Outcome = OutcomeSilent
 	ex.Tools = append(ex.Tools, ToolRun{Name: "direct", Args: map[string]any{"said": text}, Success: success})
 	s.log.Info("direct: done on the node", "transcript", text, "success", success, "choice", choice)
+	if msg, _ := out["message"].(string); sig.Speak && msg != "" {
+		return p.say(ctx, s, ex, msg, ""), true
+	}
 	if choice {
 		s.choice = true
-		return true
+		return "", true
 	}
 	if !success {
 		p.chime(ctx, errorChime)
 	}
 	s.quietTurn = true
-	return true
+	return "", true
 }
 
 // transcribe sends one recording to STT: the normalised command, and speaker_audio = the wake

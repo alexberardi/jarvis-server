@@ -55,6 +55,8 @@ var thinkRe = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
 // from the built-in defaults.
 type Routine struct {
 	Store *nodesettings.Store // nil: the defaults only
+	// Pantry are the routines installed packages ship (routine.json), by slug; nil: none.
+	Pantry func() map[string]map[string]any
 	// Tools runs the steps: the node's whole toolset, set once it is built.
 	Tools node.Toolset
 	CC    CC
@@ -66,7 +68,8 @@ func (t *Routine) Available(context.Context) []node.ToolDef {
 	return []node.ToolDef{routineSpec.Render()}
 }
 
-// definition is the named routine: the store's copy, then the default.
+// definition is the named routine: the store's copy, then a package's, then the default (N:'s
+// precedence).
 func (t *Routine) definition(slug string) map[string]any {
 	if t.Store != nil {
 		if o, ok := t.Store.Data(nodesettings.RoutineCommand, slug, t.now()); ok {
@@ -76,7 +79,17 @@ func (t *Routine) definition(slug string) map[string]any {
 			}
 		}
 	}
+	if d := t.pantry()[slug]; d != nil {
+		return d
+	}
 	return DefaultRoutines()[slug]
+}
+
+func (t *Routine) pantry() map[string]map[string]any {
+	if t.Pantry == nil {
+		return nil
+	}
+	return t.Pantry()
 }
 
 func (t *Routine) now() time.Time {
@@ -209,4 +222,102 @@ func (t *Routine) compose(ctx context.Context, results map[string]any, errs map[
 		return "Routine completed."
 	}
 	return strings.Join(parts, " ")
+}
+
+// Direct is pre_route (VOICE-FLOWS.md funnel stage 1): a transcript that matches a routine's
+// trigger phrase runs that routine on the node, with no model choosing it, and its reply is
+// spoken. Routines are tried in order: the defaults, then the rest as stored.
+func (t *Routine) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	if !node.Enabled(ctx, routineSpec.Name) {
+		return nil, false
+	}
+	text := normalizeSaid(said)
+	if text == "" {
+		return nil, false
+	}
+	for _, slug := range t.slugs() {
+		phrases, _ := t.definition(slug)["trigger_phrases"].([]any)
+		if !matchesTrigger(text, phrases) {
+			continue
+		}
+		t.log().Info("routine: run by its trigger phrase", "routine", slug, "said", said)
+		out, _ := t.Call(ctx, routineSpec.Name, map[string]any{"routine_name": slug},
+			node.Request{UserID: node.Speaker(ctx), VoiceCommand: said})
+		out[node.SignalsKey] = node.Signals{Speak: true}
+		return out, true
+	}
+	return nil, false
+}
+
+// slugs are the routines this node knows: the defaults first, then the packages', then the
+// stored ones.
+func (t *Routine) slugs() []string {
+	out := slices.Clone(nodesettings.DefaultRoutines)
+	for _, slug := range slices.Sorted(maps.Keys(t.pantry())) {
+		if !slices.Contains(out, slug) {
+			out = append(out, slug)
+		}
+	}
+	if t.Store != nil {
+		for _, r := range t.Store.Records(nodesettings.RoutineCommand, t.now()) {
+			if !slices.Contains(out, r.Key) {
+				out = append(out, r.Key)
+			}
+		}
+	}
+	return out
+}
+
+// normalizeSaid lowercases a transcript and drops the punctuation speech-to-text adds
+// ("Good night!").
+func normalizeSaid(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(".,!?;:\"", r) {
+			return -1
+		}
+		return r
+	}, strings.ToLower(s))
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// matchesTrigger is RoutineCommand._matches: the phrase exactly, the phrase inside what was
+// said, what was said inside the phrase, or 80% of either side's words shared. Unlike N:, the
+// last two need two words said: a lone "good" (a follow-up's "Good.") isn't "good morning".
+func matchesTrigger(text string, phrases []any) bool {
+	words := strings.Fields(text)
+	loose := len(words) >= 2
+	for _, p := range phrases {
+		s, _ := p.(string)
+		phrase := normalizeSaid(s)
+		if phrase == "" {
+			continue
+		}
+		if text == phrase || strings.Contains(text, phrase) {
+			return true
+		}
+		if !loose {
+			continue
+		}
+		if strings.Contains(phrase, text) {
+			return true
+		}
+		pw := strings.Fields(phrase)
+		shared := 0
+		for _, w := range uniq(pw) {
+			if slices.Contains(words, w) {
+				shared++
+			}
+		}
+		if float64(shared)/float64(len(uniq(pw))) >= 0.8 || float64(shared)/float64(len(uniq(words))) >= 0.8 {
+			return true
+		}
+	}
+	return false
+}
+
+// uniq is a word list as a set (Python's set(text.split())).
+func uniq(w []string) []string {
+	w = slices.Clone(w)
+	slices.Sort(w)
+	return slices.Compact(w)
 }

@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -72,6 +75,39 @@ func liveSidecar(tools node.Multi) *sidecar.Live {
 		}
 	}
 	return nil
+}
+
+// pantryRoutineDefs are the routines the installed packages ship, read from their routine.json
+// (one without trigger phrases or steps is skipped, as N: does).
+// shortcut: read on every lookup (each transcript's trigger check); cache by package list if a
+// Pi Zero shows it.
+func pantryRoutineDefs(pm *packages.Manager, log *slog.Logger) func() map[string]map[string]any {
+	return func() map[string]map[string]any {
+		if pm == nil {
+			return nil
+		}
+		out := map[string]map[string]any{}
+		for _, in := range pm.List() {
+			for _, c := range in.Manifest.Components {
+				if c.Type != "routine" || !filepath.IsLocal(c.Path) {
+					continue
+				}
+				b, err := os.ReadFile(filepath.Join(in.Dir, c.Path))
+				var def map[string]any
+				if err == nil {
+					err = json.Unmarshal(b, &def)
+				}
+				phrases, _ := def["trigger_phrases"].([]any)
+				steps, _ := def["steps"].([]any)
+				if err != nil || len(phrases) == 0 || len(steps) == 0 {
+					log.Warn("routines: a package's routine not loaded", "package", in.Manifest.Name, "routine", c.Name, "err", err)
+					continue
+				}
+				out[c.Name] = def
+			}
+		}
+		return out
+	}
 }
 
 // pantryRoutines are the routines the installed packages ship (their routine components): a

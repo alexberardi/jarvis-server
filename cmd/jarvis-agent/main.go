@@ -1174,7 +1174,7 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		cc = func() *node.CC { return nil }
 	}
 	f.registry = &devices.Registry{}
-	f.routine = &builtins.Routine{Store: st, CC: cc, Log: log}
+	f.routine = &builtins.Routine{Store: st, Pantry: pantryRoutineDefs(f.pkgs, log), CC: cc, Log: log}
 	tools = append(tools, &builtins.ControlDevice{Devices: f.registry, Families: live, CC: cc},
 		&builtins.SendLink{CC: cc}, f.routine, &clock.Tool{})
 	return tools, closeAll, nil
