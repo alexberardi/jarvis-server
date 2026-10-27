@@ -19,11 +19,11 @@ var controlDeviceSpec = node.Spec{
 		"request to turn on, turn off, play, pause, or control a physical device (TV, light, speaker, lock, " +
 		"thermostat). Common actions: turn_on, turn_off, play, pause, volume_up, volume_down, next, previous, lock, unlock.",
 	Params: []node.Param{
-		{Name: "device_name", Type: "string", Required: true,
+		{Name: "device_name", Type: "string", Required: true, OptionsSource: "devices",
 			Description: "Name of the device to control (e.g. 'Apple TV', 'living room light')."},
 		{Name: "action", Type: "string", Required: true, Enum: controlActions,
 			Description: "Action to perform: turn_on, turn_off, play, pause, volume_up, volume_down, next, previous, lock, unlock, set_temperature, set_mode, set_brightness, set_color."},
-		{Name: "entity_id", Type: "string",
+		{Name: "entity_id", Type: "string", OptionsSource: "entities",
 			Description: "Entity ID from the device list (e.g. 'light.office'). Pass if shown in context."},
 		{Name: "value", Type: "string",
 			Description: "Value for the action. Examples: temperature in degrees for set_temperature (e.g. '69'), mode name for set_mode (e.g. 'heat', 'cool', 'off'), brightness percentage for set_brightness (e.g. '50')."},

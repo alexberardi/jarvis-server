@@ -29,6 +29,7 @@ func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings
 				desc, _ := d.Command["description"].(string)
 				c = nodesettings.Command{Name: d.Name, Description: desc}
 			}
+			c.Parameters, _ = d.Command["parameters"].([]any)
 			out = append(out, c)
 		}
 		return out

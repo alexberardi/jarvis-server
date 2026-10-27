@@ -441,6 +441,29 @@ func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
 	}
 }
 
+// A command's parameters go in the snapshot, so the app's routine editor builds a step's fields
+// (and its device pickers) from them; a command without any has no "parameters" key, as on N:.
+func TestSnapshotCarriesCommandParameters(t *testing.T) {
+	h, f, _ := newHandler(t, "n1")
+	params := []any{map[string]any{"name": "device_name", "type": "string", "required": true, "options_source": "devices"}}
+	h.Commands = func(context.Context) []Command {
+		return []Command{{Name: "control_device", Parameters: params}, {Name: "tell_joke"}}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1"}`))
+	cmds := decryptUpload(t, f, h, "r1")["commands"].([]any)
+	cd, joke := cmds[0].(map[string]any), cmds[1].(map[string]any)
+	got, _ := cd["parameters"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["options_source"] != "devices" {
+		t.Fatalf("control_device parameters = %v", cd["parameters"])
+	}
+	if _, ok := joke["parameters"]; ok {
+		t.Fatalf("tell_joke has parameters %v", joke["parameters"])
+	}
+}
+
 // The sidecar's device families and managers go in the snapshot as N: builds them, their
 // secrets read from this store: a family's sensitive value only with include_values, a
 // manager's never (N:'s honor_include_values=False).
