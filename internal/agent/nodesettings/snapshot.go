@@ -33,6 +33,10 @@ type Command struct {
 	// Services tab, and the unit "Sync to other nodes" copies); SetupGuide is shown there.
 	AssociatedService string
 	SetupGuide        json.RawMessage
+	// Parameters are the command's parameters as its available_commands entry has them (name,
+	// type, required, enum_values, options_source, ...): the app's routine editor builds a
+	// step's fields, and its device pickers, from them.
+	Parameters []any
 }
 
 // DeviceComponent is a device family or manager in the snapshot: N:'s entry as the sidecar
@@ -119,6 +123,9 @@ func (st *Store) Snapshot(cmds []Command, dev Devices, nodeConfig map[string]any
 		}
 		if g := c.SetupGuide; len(g) > 0 && string(g) != "null" {
 			e["setup_guide"] = g
+		}
+		if len(c.Parameters) > 0 {
+			e["parameters"] = c.Parameters
 		}
 		entries = append(entries, e)
 	}

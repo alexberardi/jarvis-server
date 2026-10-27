@@ -118,6 +118,9 @@ type Param struct {
 	Description string
 	Required    bool
 	Enum        []string
+	// OptionsSource names the live list the app's routine editor offers for this parameter
+	// ("devices", "entities"): jarvis-command-sdk's JarvisParameter.options_source.
+	OptionsSource string
 }
 
 // Example is one prompt example.
@@ -165,8 +168,12 @@ func (s Spec) Render() ToolDef {
 		if p.Required {
 			required = append(required, p.Name)
 		}
+		var source any
+		if p.OptionsSource != "" {
+			source = p.OptionsSource
+		}
 		params = append(params, map[string]any{"name": p.Name, "type": p.Type, "description": p.Description,
-			"required": p.Required, "default_value": nil, "enum_values": enum, "options_source": nil})
+			"required": p.Required, "default_value": nil, "enum_values": enum, "options_source": source})
 	}
 	examples := []any{}
 	for _, e := range s.Examples {
