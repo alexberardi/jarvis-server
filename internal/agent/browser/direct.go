@@ -41,6 +41,10 @@ func (t *Tools) directScroll(ctx context.Context, said string) (map[string]any, 
 		return nil, false
 	}
 	out, ok := t.Call(ctx, ToolScroll, map[string]any{"direction": dir}, node.Request{VoiceCommand: said})
+	if ok && out["error_code"] == CodeAtEnd {
+		out[node.IslandKey], out[node.IslandOnlyKey] = "Already at "+map[bool]string{true: "the top", false: "the bottom"}[dir == "up" || dir == "top"], true
+		return out, true // done as far as it goes: the island says so, no model
+	}
 	if !ok || out["success"] != true {
 		return nil, false // the model can say why, or scroll some other way
 	}

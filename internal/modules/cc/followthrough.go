@@ -33,6 +33,7 @@ const (
 	nagNotCancelled  = "[NOT_CANCELLED]"
 	nagDeviceNotDone = "[DEVICE_NOT_DONE]"
 	nagPromised      = "[PROMISED_NOT_DONE]"
+	nagScreenNotDone = "[SCREEN_NOT_DONE]"
 )
 
 const (
@@ -58,6 +59,17 @@ const (
 		"Call the tool for it now (run_errand for a task on the computer or the web that takes several steps), or " +
 		"tell the user plainly, in one short sentence, that you can't."
 )
+
+// screenNotDoneRetry (VOICE-FLOWS.md Q32): success is what a tool did this turn, never the
+// reply's word for it.
+const screenNotDoneRetry = nagScreenNotDone + " Your reply says something was done on the computer, but no action " +
+	"tool succeeded this turn, so nothing changed and your reply is not true. If the user asked for an action (even " +
+	"one done before: \"again\", \"a bit more\"), call the tool for it now. Otherwise tell the user plainly what was " +
+	"not done."
+
+// readOnlyScreenTools look and change nothing: they don't make a claimed action true.
+var readOnlyScreenTools = map[string]bool{"desktop_list_windows": true, "desktop_list_apps": true, "desktop_views": true,
+	"desktop_read_screen": true, "desktop_controls": true, "browser_list_tabs": true, "browser_read_page": true}
 
 // serverToolKeywords are the force guard's keywords for offered server tools, whose definitions
 // carry none (a node's own tools carry theirs). Without them the guard's keyword half only knew
@@ -113,6 +125,10 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 	case conv.hasTool(desktopTypeTool) && countNags(msgs, nagUnfinished) < 1 && !calledThisTurn(msgs, desktopTypeTool) &&
 		tf.TypeAfterOpenWords(utterance) != "":
 		return fmt.Sprintf(unfinishedTypeFormat, tf.TypeAfterOpenWords(utterance))
+	// Near last: the guards above own their targets and say more.
+	case conv.hasScreenTools() && countNags(msgs, nagScreenNotDone) < 1 && tf.ClaimsScreenAction(reply) &&
+		!succeededThisTurn(msgs, func(name string) bool { return !readOnlyScreenTools[name] }):
+		return screenNotDoneRetry
 	// Last: "Let me open it in the browser instead…" or "I'll run an errand…" ended the turn (#575).
 	case countNags(msgs, nagPromised) < 1 && tf.PromisesAction(reply):
 		return promisedRetry
@@ -124,6 +140,12 @@ func followThroughNag(conv *conversation, utterance, reply string, msgs []chatMs
 // (#512: a reply may only say a device changed when its tool call confirmed it). A node's
 // result message carries no Name, so results are matched to calls by id.
 func deviceDoneThisTurn(msgs []chatMsg) bool {
+	return succeededThisTurn(msgs, func(name string) bool { return name == "control_device" })
+}
+
+// succeededThisTurn reports a successful result, since the turn's user message, of a tool whose
+// name counts.
+func succeededThisTurn(msgs []chatMsg, counts func(name string) bool) bool {
 	start := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == "user" && !strings.HasPrefix(msgs[i].Content, nagDoubleCheck) {
@@ -143,12 +165,11 @@ func deviceDoneThisTurn(msgs []chatMsg) bool {
 		if name == "" {
 			name = names[m.ToolCallID]
 		}
-		if name != "control_device" {
+		if !counts(name) {
 			continue
 		}
 		var o map[string]any
-		// A node's own control_device answers with whatever its client wrote, so success is
-		// read leniently ("true", 1) as the rest of the module reads node results.
+		// A node answers with whatever its client wrote, so success is read leniently ("true", 1) as the rest of the module reads node results.
 		dec := json.NewDecoder(strings.NewReader(m.Content))
 		dec.UseNumber()
 		if dec.Decode(&o) == nil {
@@ -180,7 +201,7 @@ func calledThisTurn(msgs []chatMsg, name string) bool {
 // isFollowThroughNag reports one of this file's nudges (scrubbed like the other nags).
 func isFollowThroughNag(m chatMsg) bool {
 	return isNag(m, nagRecallFirst) || isNag(m, nagUnfinished) || isNag(m, nagNoMemoryTool) || isNag(m, nagUnsaved) ||
-		isNag(m, nagNotCancelled) || isNag(m, nagDeviceNotDone) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) ||
+		isNag(m, nagNotCancelled) || isNag(m, nagDeviceNotDone) || isNag(m, nagScreenNotDone) || isNag(m, nagStopRecording) || isNag(m, nagNotStopped) ||
 		isNag(m, nagRecordingNotRun) || isNag(m, nagSwitchNotRun) || isNag(m, nagAnswerAfterTool) ||
 		isNag(m, nagPromised)
 }

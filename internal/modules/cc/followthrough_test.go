@@ -490,3 +490,49 @@ func TestFollowThroughPromisedEngine(t *testing.T) {
 		t.Fatalf("let me know: %q", nag)
 	}
 }
+
+// Q32: "Scroll down a bit more" got "Already scrolled down a bit." and "Click it again" got
+// "Already clicked on Wikipedia." after only a page read: a screen-action claim with no
+// successful action this turn is nudged once.
+func TestFollowThroughScreenNotDone(t *testing.T) {
+	defs, err := pyjson.Loads(desktopTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv := &conversation{}
+	for _, d := range defs.([]any) {
+		conv.tools = append(conv.tools, d.(*pyjson.Object))
+	}
+	utt := "Click it again."
+	read := []chatMsg{{Role: "user", Content: utt},
+		{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c1", Function: parse.FunctionCall{Name: "browser_read_page", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: `{"success": true, "text": "results"}`}}
+	reply := "Already clicked on Wikipedia. Want to see what it says or check out another result?"
+	if nag := followThroughNag(conv, utt, reply, read); nag != screenNotDoneRetry {
+		t.Fatalf("after a read: %q", nag)
+	}
+	if nag := followThroughNag(conv, "Scroll down a bit more.", "Already scrolled down a bit.", []chatMsg{{Role: "user", Content: "Scroll down a bit more."}}); nag != screenNotDoneRetry {
+		t.Fatalf("no call at all: %q", nag)
+	}
+	clicked := append(slices.Clone(read),
+		chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c2", Function: parse.FunctionCall{Name: "browser_click", Arguments: `{"text": "Wikipedia"}`}}}},
+		chatMsg{Role: "tool", ToolCallID: "c2", Content: `{"success": true}`})
+	if nag := followThroughNag(conv, utt, "Clicked Wikipedia again.", clicked); nag != "" {
+		t.Fatalf("after a click: %q", nag)
+	}
+	failed := append(slices.Clone(read),
+		chatMsg{Role: "assistant", ToolCalls: []parse.ToolCall{{ID: "c3", Function: parse.FunctionCall{Name: "browser_click", Arguments: `{"text": "Wikipedia"}`}}}},
+		chatMsg{Role: "tool", ToolCallID: "c3", Content: `{"success": false, "error": "no visible button matches"}`})
+	if nag := followThroughNag(conv, utt, reply, failed); nag != screenNotDoneRetry {
+		t.Fatalf("after a failed click: %q", nag)
+	}
+	if nag := followThroughNag(conv, utt, "I couldn't find that link again.", read); nag != "" {
+		t.Fatalf("honest reply: %q", nag)
+	}
+	if nag := followThroughNag(conv, utt, reply, append(slices.Clone(read), sysMsg(screenNotDoneRetry))); nag != "" {
+		t.Fatalf("second nag: %q", nag)
+	}
+	if nag := followThroughNag(&conversation{}, utt, reply, read); nag != "" {
+		t.Fatalf("no screen tools: %q", nag)
+	}
+}
