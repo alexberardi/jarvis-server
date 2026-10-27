@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 )
 
 // fakeCC is jarvisd's node API: the device registry, send-link and the LLM passthrough.
@@ -355,5 +356,34 @@ func TestTriggeredRoutineRunsForTheSpeaker(t *testing.T) {
 	tool.Direct(node.WithSpeaker(context.Background(), uid(9)), "good morning")
 	if st.got == nil || *st.got != 9 {
 		t.Fatalf("steps ran for %v", st.got)
+	}
+}
+
+// A routine whose phrases the household switched off isn't run by them; the others still are.
+func TestRoutineFastPathSwitches(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := &stepTools{calls: map[string]map[string]any{}, outs: map[string]map[string]any{
+		"control_device": {"success": true, "message": "ok"}, "get_calendar_events": {"success": true, "message": "ok"},
+		"get_weather": {"success": true, "message": "ok"}}}
+	tool := &Routine{Store: st, Tools: steps, CC: func() *node.CC { return nil }}
+
+	fps := tool.FastPaths("routine")
+	if len(fps) != 4 || fps[1].ID != "routine.good_night" || fps[1].Example != "good night" {
+		t.Fatalf("fast paths = %+v", fps)
+	}
+	if tool.FastPaths("get_weather") != nil {
+		t.Fatal("fast paths for another command")
+	}
+	if err := st.SetFastPathEnabled("routine", "routine.good_night", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tool.Direct(context.Background(), "good night"); ok {
+		t.Fatal("ran a routine whose phrases are off")
+	}
+	if _, ok := tool.Direct(context.Background(), "good morning"); !ok {
+		t.Fatal("another routine's phrases stopped working")
 	}
 }
