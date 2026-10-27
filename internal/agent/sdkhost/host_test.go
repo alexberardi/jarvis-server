@@ -368,6 +368,21 @@ func TestVolumeThroughPulseAndAmixer(t *testing.T) {
 	if got := m.take(); !strings.Contains(got, "pactl set-sink-volume @DEFAULT_SINK@ 20%") || !strings.Contains(got, "pactl set-sink-mute @DEFAULT_SINK@ 1") {
 		t.Fatalf("restore calls:\n%s", got)
 	}
+	// Turning a muted speaker up unmutes it (the app's slider moved a silent speaker); to 0 it
+	// stays muted.
+	if ask(t, h, "audio.set_volume_percent", map[string]any{"percent": 0}) != true || !a.Muted() {
+		t.Fatal("volume 0 unmuted")
+	}
+	m.take()
+	if ask(t, h, "audio.set_volume_percent", map[string]any{"percent": 70}) != true || a.Muted() {
+		t.Fatal("volume 70 left the speaker muted")
+	}
+	if got := m.take(); !strings.Contains(got, "pactl set-sink-mute @DEFAULT_SINK@ 0") {
+		t.Fatalf("unmute calls:\n%s", got)
+	}
+	if b, _ := os.ReadFile(a.Path); string(b) != `{"volume_percent":70,"is_muted":false}` {
+		t.Fatalf("persisted %s", b)
+	}
 }
 
 func TestSpeakQueuesWithoutBlocking(t *testing.T) {
