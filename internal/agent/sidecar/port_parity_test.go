@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,4 +180,213 @@ func asMap(t *testing.T, m map[string]any) map[string]any {
 	var out map[string]any
 	_ = json.Unmarshal(b, &out)
 	return out
+}
+
+// parityCase is one call through the Python command and the Go port.
+type parityCase struct {
+	name string
+	args map[string]any
+}
+
+// checkParity runs each case through the sidecar and the port and compares output and
+// wait_for_input.
+func checkParity(t *testing.T, sc *sidecar.Sidecar, port node.Toolset, cases []parityCase) {
+	t.Helper()
+	ctx := context.Background()
+	uid := int64(7)
+	for i, c := range cases {
+		req := node.Request{UserID: &uid, VoiceCommand: c.name}
+		pyOut, ok := sc.Call(ctx, c.name, c.args, req)
+		if !ok {
+			t.Fatalf("python didn't run %s", c.name)
+		}
+		goOut, ok := port.Call(ctx, c.name, c.args, req)
+		if !ok {
+			t.Fatalf("go didn't run %s", c.name)
+		}
+		p, pw := normal(t, pyOut)
+		g, gw := normal(t, goOut)
+		if !reflect.DeepEqual(p, g) || pw != gw {
+			t.Errorf("case %d %s %v:\n python %v (wait %v)\n go     %v (wait %v)", i, c.name, c.args, p, pw, g, gw)
+		}
+	}
+}
+
+// checkFastPaths compares which command claims each phrase, and with what arguments.
+func checkFastPaths(t *testing.T, py string, modules map[string]string, phrases []string, match func(string) (builtins.Match, bool)) {
+	t.Helper()
+	want := pythonPreRoute(t, py, modules, phrases)
+	for _, p := range phrases {
+		got, ok := match(p)
+		w, wok := want[p]
+		if ok != wok || (ok && (got.Command != w["command"] || !reflect.DeepEqual(asMap(t, got.Args), w["arguments"]))) {
+			t.Errorf("%q: go %+v (%v), python %v (%v)", p, got, ok, w, wok)
+		}
+	}
+}
+
+func TestCalculateMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc := pythonBuiltins(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	var cases []parityCase
+	for _, a := range [][3]any{
+		{6, 7, "multiply"}, {5, 3, "add"}, {50, 13, "subtract"}, {81, 9, "divide"}, {10, 3, "divide"}, {1, 0, "divide"},
+		{3.5, 2.1, "add"}, {0.1, 0.2, "add"}, {0.2, 150, "multiply"}, {1e17, 3, "multiply"}, {-4, 2.5, "multiply"},
+		{0.0001, 0.00002, "multiply"}, {2, 3, "power"}, {"6", 7, "add"}, {true, 2, "add"}, {7, nil, "add"},
+	} {
+		args := map[string]any{"num1": a[0], "num2": a[1], "operation": a[2]}
+		if a[1] == nil {
+			delete(args, "num2")
+		}
+		cases = append(cases, parityCase{"calculate", args})
+	}
+	checkParity(t, sc, &builtins.Calculate{}, cases)
+	checkFastPaths(t, py, map[string]string{"calculator_command": "CalculatorCommand"}, []string{
+		"what's 5 plus 3", "what is 12 times 8", "12 x 8", "100 divided by 7", "9 multiplied by 9", "what's 7 minus -2?",
+		"3.5 over 2", "add 5 and 3", "subtract 7 from 22", "multiply 6 by 7", "divide 72 by 8", "what's seven times nine",
+		"5 + 3", "5 / 2", "calculate 5 plus 3",
+	}, builtins.CalculateMatch)
+}
+
+func TestConvertMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc := pythonBuiltins(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	var cases []parityCase
+	for _, a := range []map[string]any{
+		{"value": 5, "from_unit": "miles", "to_unit": "kilometers"}, {"from_unit": "gallons", "to_unit": "cups"},
+		{"value": 1, "from_unit": "cups", "to_unit": "tablespoons"}, {"value": 350, "from_unit": "fahrenheit", "to_unit": "celsius"},
+		{"value": 0, "from_unit": "celsius", "to_unit": "kelvin"}, {"value": 300, "from_unit": "kelvin", "to_unit": "fahrenheit"},
+		{"value": 20, "from_unit": "celsius", "to_unit": "celsius"}, {"value": 2.5, "from_unit": "pounds", "to_unit": "grams"},
+		{"value": 1, "from_unit": "teaspoons", "to_unit": "gallons"}, {"value": 3, "from_unit": "milligrams", "to_unit": "tons"},
+		{"value": 12, "from_unit": "Inches", "to_unit": "FEET"}, {"value": 4, "from_unit": "miles", "to_unit": "liters"},
+		{"value": 4, "from_unit": "mile", "to_unit": "meters"}, {"value": 4, "from_unit": "meters", "to_unit": "furlongs"},
+		{"value": 4, "from_unit": "meters", "to_unit": "meters", "category": "Distance"}, {"value": nil, "from_unit": "cups", "to_unit": "liters"},
+		{"value": 4, "from_unit": "cups", "to_unit": "liters", "category": nil}, {"value": "4", "from_unit": "cups", "to_unit": "liters"},
+		{"from_unit": "cups"}, {"value": 0.0005, "from_unit": "grams", "to_unit": "kilograms"}, {"value": 1e20, "from_unit": "millimeters", "to_unit": "meters"},
+	} {
+		cases = append(cases, parityCase{"convert_measurement", a})
+	}
+	checkParity(t, sc, &builtins.Convert{}, cases)
+	checkFastPaths(t, py, map[string]string{"measurement_conversion_command": "MeasurementConversionCommand"}, []string{
+		"convert 5 miles to kilometers", "convert 3 cups into ml", "convert 10 fl oz to tbsp", "how many cups in a gallon",
+		"how many teaspoons are in 3 tablespoons?", "how many feet in an inch", "what's 350 fahrenheit in celsius",
+		"what is 100 degrees c in degrees f", "20 k in c", "5 km in miles", "what's 2 fluid ounces in ml",
+		"convert 5 parsecs to meters", "how many grams in a pound.", "convert 1 metric ton to kg", "what's 3 in in cm",
+	}, builtins.ConvertMatch)
+}
+
+func TestTalkMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc := pythonBuiltins(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	checkParity(t, sc, builtins.Talk{}, []parityCase{
+		{"answer_question", map[string]any{"query": "why is the sky blue"}}, {"answer_question", nil},
+		{"answer_question", map[string]any{"query": 42}}, {"chat", map[string]any{"message": "hi there"}},
+		{"chat", map[string]any{"message": ""}}, {"chat", nil}, {"chat", map[string]any{"message": 3}},
+	})
+}
+
+// fakeLLM is jarvisd's node LLM passthrough: it answers reply and records each prompt.
+type fakeLLM struct {
+	mu      sync.Mutex
+	reply   string
+	prompts []string
+}
+
+func (f *fakeLLM) start(t *testing.T) *node.CC {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		if len(body.Messages) > 0 {
+			f.prompts = append(f.prompts, body.Messages[0].Content)
+		}
+		reply := f.reply
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": reply})
+	}))
+	t.Cleanup(srv.Close)
+	return node.NewCC(srv.URL, node.Creds{NodeID: "n1", NodeKey: "k"})
+}
+
+func (f *fakeLLM) take() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.prompts
+	f.prompts = nil
+	return p
+}
+
+// The Python tell_joke reaches the model through the old node's own client and service
+// discovery, which a Go Pi doesn't have: it always fell back to the bank. The port asks the
+// model through jarvisd's node passthrough, so only the fallback is compared with Python; the
+// model path is checked against what the Python command's cleaning would give.
+func TestJokeMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	llm := &fakeLLM{}
+	cc := llm.start(t)
+	h := &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}}
+	h.SetCC(cc)
+	sc := pythonBuiltins(t, py, h)
+	port := &builtins.Joke{CC: func() *node.CC { return cc }}
+	ctx := context.Background()
+	for _, c := range []struct {
+		reply string
+		args  map[string]any
+		want  string // the joke from the model; "" when the bank answers
+	}{
+		{"Here's a joke: Why did the cat sit on the computer? To keep an eye on the mouse.", map[string]any{"topic": "cats"},
+			"Why did the cat sit on the computer? To keep an eye on the mouse."},
+		{"<think>hmm</think>Okay! \"I used to be a banker, but I lost interest.\"", nil, "I used to be a banker, but I lost interest."},
+		{"Ha.", map[string]any{"topic": "dad jokes"}, ""}, // too short: the bank answers
+		{"Knock knock. Who's there? Interrupting cow. Interrupting c- MOO!", map[string]any{"topic": "knock knock"},
+			"Knock knock. Who's there? Interrupting cow. Interrupting c- MOO!"},
+		{"", map[string]any{"topic": 7}, ""},
+	} {
+		llm.reply = c.reply
+		pyOut, _ := sc.Call(ctx, "tell_joke", c.args, node.Request{})
+		llm.take()
+		goOut, _ := port.Call(ctx, "tell_joke", c.args, node.Request{})
+		goPrompts := llm.take()
+		p, pw := normal(t, pyOut)
+		g, gw := normal(t, goOut)
+		if p["_validation_error"] == true || g["_validation_error"] == true {
+			if !reflect.DeepEqual(p, g) {
+				t.Errorf("%v:\n python %v\n go     %v", c.args, p, g)
+			}
+			continue
+		}
+		if p["fallback_used"] != true {
+			t.Errorf("%v: the Python command reached the model on a Go node: %v", c.args, p)
+		}
+		if len(asList(g["style_examples"])) != 2 || len(goPrompts) != 1 ||
+			!strings.Contains(goPrompts[0], "Generate ONE original, clean, family-friendly joke") {
+			t.Errorf("%v: go examples %v, prompts %q", c.args, g["style_examples"], goPrompts)
+		}
+		if c.want != "" {
+			if g["message"] != c.want || g["joke"] != c.want || g["fallback_used"] != false || gw {
+				t.Errorf("%v: go %v", c.args, g)
+			}
+			continue
+		}
+		for _, m := range []map[string]any{p, g} { // each side's own random joke from the bank
+			delete(m, "message")
+			delete(m, "joke")
+			delete(m, "style_examples")
+		}
+		if !reflect.DeepEqual(p, g) || pw != gw {
+			t.Errorf("%v fallback:\n python %v (wait %v)\n go     %v (wait %v)", c.args, p, pw, g, gw)
+		}
+	}
+	checkFastPaths(t, py, map[string]string{"tell_a_joke_command": "TellAJokeCommand"}, []string{
+		"tell me a joke", "Tell me a joke!", "tell me another joke", "make me laugh", "got any jokes?", "tell me a dad joke",
+		"give me a knock-knock joke", "give me a knock knock joke", "tell me a joke about cats", "got any jokes about the ocean",
+		"tell me a clean joke", "i want a joke about pizza.", "give me joke", "tell me something", "say something funny",
+	}, builtins.JokeMatch)
+}
+
+func asList(v any) []any {
+	l, _ := v.([]any)
+	return l
 }

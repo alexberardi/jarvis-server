@@ -63,7 +63,9 @@ func PiBuiltins(requirement string) *Builtins {
 // and the clock), so the sidecar doesn't load the Python copy, which would shadow the Go one.
 var PortedToGo = []string{
 	"timer_command", "check_timers_command", "cancel_timer_command", // builtins.Timers
-	"timezone_command", // the clock (get_current_time)
+	"timezone_command",                                                            // the clock (get_current_time)
+	"calculator_command", "measurement_conversion_command", "tell_a_joke_command", // Calculate, Convert, Joke
+	"answer_question_command", "chat_command", // Talk
 }
 
 // pythonVersion is the interpreter uv installs for the venv: its own standalone build, so the

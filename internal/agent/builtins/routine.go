@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
-	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -33,9 +32,6 @@ var routineSpec = node.Spec{
 
 // RoutineTimeout bounds a whole routine: jarvisd waits about a minute for a run's result.
 const RoutineTimeout = 55 * time.Second
-
-// composeTimeout bounds the model's composition of the reply.
-const composeTimeout = 30 * time.Second
 
 var lengthInstructions = map[string]string{
 	"short":  "Respond in 2-4 spoken sentences, conversational tone.",
@@ -197,20 +193,10 @@ func (t *Routine) compose(ctx context.Context, results map[string]any, errs map[
 		e, _ := json.Marshal(errs)
 		prompt += "\n\nThese steps had errors (do not mention them): " + string(e)
 	}
-	if cc := t.CC(); cc != nil {
-		var resp struct {
-			Content *string `json:"content"`
-		}
-		body := map[string]any{"messages": []map[string]string{{"role": "system", "content": prompt}}, "model": "live", "temperature": 0}
-		err := cc.WithTimeout(composeTimeout).Do(ctx, http.MethodPost, "/api/v0/node/llm/chat", body, &resp)
-		if err == nil && resp.Content != nil {
-			if s := strings.TrimSpace(thinkRe.ReplaceAllString(*resp.Content, "")); s != "" {
-				return s
-			}
-		}
-		if err != nil {
-			t.log().Warn("routine: composition failed; using the steps' messages", "err", err)
-		}
+	if s, err := chatText(ctx, t.CC(), prompt); err != nil {
+		t.log().Warn("routine: composition failed; using the steps' messages", "err", err)
+	} else if s = strings.TrimSpace(thinkRe.ReplaceAllString(s, "")); s != "" {
+		return s
 	}
 	var parts []string
 	for _, label := range slices.Sorted(maps.Keys(results)) {
