@@ -119,6 +119,15 @@ func (a *Audio) setLocked(ctx context.Context, pct int) bool {
 		return false
 	}
 	a.log().Info("audio: volume set", "percent", pct)
+	// Turning a muted speaker up unmutes it, as any speaker's volume does: the app's slider and
+	// "volume up" otherwise moved a level nobody could hear.
+	if s.Muted && pct > 0 {
+		if a.apply(ctx, []string{"set-sink-mute", "0"}, []string{"-q", "sset", "Master", "unmute"}) {
+			s.Muted = false
+			a.save(s)
+			a.log().Info("audio: unmuted by the volume")
+		}
+	}
 	return true
 }
 
