@@ -72,7 +72,7 @@ func calculate(args map[string]any) map[string]any {
 	resultText := pyRepr(result)
 	spoken := spokenNumber(result)
 	if op == "divide" && result != math.Trunc(result) {
-		spoken = fmt.Sprintf("%.2f", result)
+		spoken = trimZeros(fmt.Sprintf("%.2f", result))
 	}
 	return finish(map[string]any{
 		"result": result, "calculation": pyRepr(n1) + " " + text + " " + pyRepr(n2) + " = " + resultText,
@@ -117,6 +117,15 @@ func pyRepr(x float64) string {
 		s += ".0"
 	}
 	return s
+}
+
+// trimZeros drops a formatted number's trailing zeros and a bare point ("2.50" → "2.5",
+// "212.0" → "212"), which text-to-speech would otherwise read out. Unlike N:.
+func trimZeros(s string) string {
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	return strings.TrimSuffix(strings.TrimRight(s, "0"), ".")
 }
 
 // spokenNumber is the command's _fmt: a whole number without decimals, else Python's "{:g}".
