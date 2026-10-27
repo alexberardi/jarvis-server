@@ -433,3 +433,20 @@ func TestTimerFastPaths(t *testing.T) {
 		t.Fatalf("cancel none = %v, %v", out, ok)
 	}
 }
+
+// Spoken numbers carry no trailing zeros: "5 miles", "2.5", "212°F".
+func TestSpokenNumbersDropTrailingZeros(t *testing.T) {
+	c := &Convert{}
+	out, _ := c.Call(context.Background(), "convert_measurement", map[string]any{"value": 5.0, "from_unit": "miles", "to_unit": "kilometers"}, node.Request{})
+	if out["message"] != "5 miles equals 8.05 kilometers." {
+		t.Errorf("miles = %q", out["message"])
+	}
+	out, _ = c.Call(context.Background(), "convert_measurement", map[string]any{"value": 100.0, "from_unit": "celsius", "to_unit": "fahrenheit"}, node.Request{})
+	if out["message"] != "100 celsius equals 212°F." || out["result_text"] != "212°F" {
+		t.Errorf("temperature = %q / %q", out["message"], out["result_text"])
+	}
+	out, _ = (&Calculate{}).Call(context.Background(), "calculate", map[string]any{"num1": 5.0, "num2": 2.0, "operation": "divide"}, node.Request{})
+	if out["message"] != "5 divided by 2 equals 2.5." {
+		t.Errorf("divide = %q", out["message"])
+	}
+}

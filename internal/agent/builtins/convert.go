@@ -133,9 +133,9 @@ func convert(args map[string]any) map[string]any {
 	if slices.Contains(tempUnits, from) && slices.Contains(tempUnits, to) {
 		result := convertTemperature(value, from, to)
 		suffix := map[string]string{"celsius": "°C", "fahrenheit": "°F", "kelvin": "K"}[to]
-		text := fmt.Sprintf("%.1f", result) + suffix
+		text := trimZeros(fmt.Sprintf("%.1f", result)) + suffix
 		return finish(map[string]any{"value": value, "from_unit": from, "to_unit": to, "result": result, "result_text": text,
-			"conversion_type": "temperature", "message": pyRepr(value) + " " + from + " equals " + text + "."}, true, true)
+			"conversion_type": "temperature", "message": spokenNumber(value) + " " + from + " equals " + text + "."}, true, true)
 	}
 	var result float64
 	switch {
@@ -160,7 +160,8 @@ func convert(args map[string]any) map[string]any {
 	default:
 		text = fmt.Sprintf("%.2f", result)
 	}
-	msg := pyRepr(value) + " " + from + " equals " + text + " " + to
+	text = trimZeros(text)
+	msg := spokenNumber(value) + " " + from + " equals " + text + " " + to
 	if value == 1 {
 		msg = "There are " + text + " " + to + " in 1 " + from
 	}

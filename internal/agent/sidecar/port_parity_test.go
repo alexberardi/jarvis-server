@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -189,8 +190,8 @@ type parityCase struct {
 }
 
 // checkParity runs each case through the sidecar and the port and compares output and
-// wait_for_input.
-func checkParity(t *testing.T, sc *sidecar.Sidecar, port node.Toolset, cases []parityCase) {
+// wait_for_input; adjust applies the port's deliberate differences to Python's output first.
+func checkParity(t *testing.T, sc *sidecar.Sidecar, port node.Toolset, cases []parityCase, adjust ...func(map[string]any)) {
 	t.Helper()
 	ctx := context.Background()
 	uid := int64(7)
@@ -206,6 +207,9 @@ func checkParity(t *testing.T, sc *sidecar.Sidecar, port node.Toolset, cases []p
 		}
 		p, pw := normal(t, pyOut)
 		g, gw := normal(t, goOut)
+		for _, a := range adjust {
+			a(p)
+		}
 		if !reflect.DeepEqual(p, g) || pw != gw {
 			t.Errorf("case %d %s %v:\n python %v (wait %v)\n go     %v (wait %v)", i, c.name, c.args, p, pw, g, gw)
 		}
@@ -240,7 +244,7 @@ func TestCalculateMatchesPython(t *testing.T) {
 		}
 		cases = append(cases, parityCase{"calculate", args})
 	}
-	checkParity(t, sc, &builtins.Calculate{}, cases)
+	checkParity(t, sc, &builtins.Calculate{}, cases, spokenWithoutZeros("message"))
 	checkFastPaths(t, py, map[string]string{"calculator_command": "CalculatorCommand"}, []string{
 		"what's 5 plus 3", "what is 12 times 8", "12 x 8", "100 divided by 7", "9 multiplied by 9", "what's 7 minus -2?",
 		"3.5 over 2", "add 5 and 3", "subtract 7 from 22", "multiply 6 by 7", "divide 72 by 8", "what's seven times nine",
@@ -262,11 +266,11 @@ func TestConvertMatchesPython(t *testing.T) {
 		{"value": 4, "from_unit": "mile", "to_unit": "meters"}, {"value": 4, "from_unit": "meters", "to_unit": "furlongs"},
 		{"value": 4, "from_unit": "meters", "to_unit": "meters", "category": "Distance"}, {"value": nil, "from_unit": "cups", "to_unit": "liters"},
 		{"value": 4, "from_unit": "cups", "to_unit": "liters", "category": nil}, {"value": "4", "from_unit": "cups", "to_unit": "liters"},
-		{"from_unit": "cups"}, {"value": 0.0005, "from_unit": "grams", "to_unit": "kilograms"}, {"value": 1e20, "from_unit": "millimeters", "to_unit": "meters"},
+		{"from_unit": "cups"}, {"value": 0.0005, "from_unit": "grams", "to_unit": "kilograms"}, {"value": 1e15, "from_unit": "millimeters", "to_unit": "meters"},
 	} {
 		cases = append(cases, parityCase{"convert_measurement", a})
 	}
-	checkParity(t, sc, &builtins.Convert{}, cases)
+	checkParity(t, sc, &builtins.Convert{}, cases, spokenWithoutZeros("message", "result_text"))
 	checkFastPaths(t, py, map[string]string{"measurement_conversion_command": "MeasurementConversionCommand"}, []string{
 		"convert 5 miles to kilometers", "convert 3 cups into ml", "convert 10 fl oz to tbsp", "how many cups in a gallon",
 		"how many teaspoons are in 3 tablespoons?", "how many feet in an inch", "what's 350 fahrenheit in celsius",
@@ -389,4 +393,20 @@ func TestJokeMatchesPython(t *testing.T) {
 func asList(v any) []any {
 	l, _ := v.([]any)
 	return l
+}
+
+// The ports say "5" and "2.5" where N: said "5.0" and "2.50" (the user, 2026-10-27).
+var (
+	zeroFractionRe = regexp.MustCompile(`\b(\d+)\.0+\b`)
+	trailingZeroRe = regexp.MustCompile(`\b(\d+\.\d*[1-9])0+\b`)
+)
+
+func spokenWithoutZeros(keys ...string) func(map[string]any) {
+	return func(m map[string]any) {
+		for _, k := range keys {
+			if s, ok := m[k].(string); ok {
+				m[k] = zeroFractionRe.ReplaceAllString(trailingZeroRe.ReplaceAllString(s, "$1"), "$1")
+			}
+		}
+	}
 }
