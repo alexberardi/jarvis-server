@@ -419,7 +419,9 @@ const COMMANDS = {
     const res = r?.result;
     if (!res) throw fail("failed", "the page returned nothing");
     if (res.error) throw fail(res.code ?? "failed", res.error);
-    return { tab: describe(t), ...res };
+    // What the click changed, as act says it (VOICE-FLOWS.md Q32).
+    const after = await settled(t.id);
+    return { tab: describe(t), ...res, url_after: clip(after.url, URL_MAX), title_after: clip(after.title, TITLE_MAX) };
   },
 
   // snapshot lists the tab's visible interactive elements, every frame's, each stamped with a
@@ -946,10 +948,12 @@ function scrollPage(direction) {
     if (best) el = best;
   }
   const page = el.clientHeight * 0.85;
+  const before = el.scrollTop;
   const top = { up: el.scrollTop - page, down: el.scrollTop + page, top: 0, bottom: el.scrollHeight }[direction];
   el.scrollTo({ top, behavior: "instant" });
   const max = Math.max(el.scrollHeight - el.clientHeight, 1);
-  return { direction, position_percent: Math.round((Math.min(Math.max(top, 0), max) / max) * 100) };
+  // moved is what happened, not what was asked (VOICE-FLOWS.md Q32): false at the end of the page.
+  return { direction, moved: Math.abs(el.scrollTop - before) >= 1, position_percent: Math.round((Math.min(Math.max(el.scrollTop, 0), max) / max) * 100) };
 }
 
 function findText(text) {
