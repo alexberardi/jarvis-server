@@ -426,29 +426,20 @@ const COMMANDS = {
   // ref act can name. A ref is good for one snapshot (gen) of one document.
   async snapshot(args) {
     const t = await tabFor(args);
-    const max = clampInt(args.max, 1, SNAPSHOT_MAX, 300);
-    const gen = ++genSeq;
-    const probes = (await inject(t, { func: snapCollect, args: [gen, max], allFrames: true }))
-      .filter((p) => p?.result?.token)
-      .sort((a, b) => a.frameId - b.frameId);
-    const top = probes.find((p) => p.frameId === 0)?.result;
-    const elements = [];
-    const commit = {};
-    const frameOf = new Map();
-    for (const p of probes) {
-      const offset = elements.length;
-      const keep = Math.max(0, Math.min(p.result.elements.length, max - offset));
-      commit[p.result.token] = [offset, keep];
-      for (const e of p.result.elements.slice(0, keep)) {
-        const n = offset + e.k;
-        frameOf.set(n, p.frameId);
-        const { k, ...rest } = e;
-        elements.push({ ref: "e" + n, ...rest, frame: p.frameId });
-      }
+    return snapTake(t, clampInt(args.max, 1, SNAPSHOT_MAX, 300), false);
+  },
+
+  // hints numbers what can be clicked in view ("show numbers"): a snapshot of the elements on
+  // screen, each drawn with its ref's number, which act then presses. show false removes them.
+  async hints(args) {
+    const t = await tabFor(args);
+    if (args.show === false) {
+      await inject(t, { func: hintsDraw, args: [0, false], allFrames: true });
+      return { tab: describe(t) };
     }
-    await inject(t, { func: snapCommit, args: [gen, commit], allFrames: true });
-    snaps.set(t.id, { gen, frameOf });
-    return { gen, url: clip(top?.url ?? t.url, URL_MAX), title: clip(top?.title ?? t.title, TITLE_MAX), elements };
+    const snap = await snapTake(t, clampInt(args.max, 1, HINTS_MAX, HINTS_MAX), true);
+    await inject(t, { func: hintsDraw, args: [snap.gen, true], allFrames: true });
+    return { tab: describe(t), ...snap };
   },
 
   // act does one op on the element a snapshot ref names. It refuses a ref from another snapshot
@@ -563,6 +554,7 @@ const COMMANDS = {
 
 const FILL_MAX = 2000;
 const SNAPSHOT_MAX = 1000;
+const HINTS_MAX = 150;
 const ACT_OPS = new Set(["press", "set_value", "select", "check", "focus", "scroll_into_view", "keys"]);
 const ACT_KEYS = new Set(["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 const DOWNLOAD_START_MS = 10000;
@@ -594,6 +586,33 @@ async function settled(tabId) {
 
 // actOn does op on the element ref ("e12") of snapshot gen in tab t. It refuses a ref from
 // another snapshot or document (stale_ref), and typing into a password field (password_field).
+// snapTake snapshots tab t's interactive elements, every frame's (with viewport, only those on
+// screen), and stamps each with a ref act can name. A ref is good for one snapshot (gen).
+async function snapTake(t, max, viewport) {
+  const gen = ++genSeq;
+  const probes = (await inject(t, { func: snapCollect, args: [gen, max, viewport], allFrames: true }))
+    .filter((p) => p?.result?.token)
+    .sort((a, b) => a.frameId - b.frameId);
+  const top = probes.find((p) => p.frameId === 0)?.result;
+  const elements = [];
+  const commit = {};
+  const frameOf = new Map();
+  for (const p of probes) {
+    const offset = elements.length;
+    const keep = Math.max(0, Math.min(p.result.elements.length, max - offset));
+    commit[p.result.token] = [offset, keep];
+    for (const e of p.result.elements.slice(0, keep)) {
+      const n = offset + e.k;
+      frameOf.set(n, p.frameId);
+      const { k, ...rest } = e;
+      elements.push({ ref: "e" + n, ...rest, frame: p.frameId });
+    }
+  }
+  await inject(t, { func: snapCommit, args: [gen, commit], allFrames: true });
+  snaps.set(t.id, { gen, frameOf });
+  return { gen, url: clip(top?.url ?? t.url, URL_MAX), title: clip(top?.title ?? t.title, TITLE_MAX), elements };
+}
+
 async function actOn(t, gen, ref, op, value, keys) {
   const m = /^e([1-9][0-9]{0,5})$/.exec(String(ref ?? ""));
   if (!Number.isInteger(gen) || gen <= 0 || !m) throw fail("invalid_argument", "gen and ref (e.g. e12) from a snapshot are required");
@@ -1145,7 +1164,7 @@ function buttonAct(query, act) {
 // <label>, placeholder, title, then the text. Values are left out for password, card and
 // one-time-code fields. The elements stay in this extension's isolated world (__jarvisSnap), out
 // of the page's reach, so act finds the very element even if the page copies a ref attribute.
-function snapCollect(gen, max) {
+function snapCollect(gen, max, viewport) {
   const NAME_MAX = 120;
   const SEL = "button, input, select, textarea, [contenteditable], a[href], summary, [role]";
   const ROLES = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemcheckbox",
@@ -1158,6 +1177,10 @@ function snapCollect(gen, max) {
     return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + "…" : s;
   };
   const visible = (el) => (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : true) && el.getClientRects().length > 0;
+  const onScreen = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+  };
   const typeOf = (el) => (el.localName === "input" ? (el.getAttribute("type") || "text").toLowerCase() : el.localName);
   const isField = (el) => ["input", "select", "textarea"].includes(el.localName) || el.isContentEditable;
   const textOf = (id) => {
@@ -1228,7 +1251,7 @@ function snapCollect(gen, max) {
   for (const el of document.querySelectorAll(SEL)) {
     if (pending.length >= max) break;
     const role = roleOf(el);
-    if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]")) continue;
+    if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]") || (viewport && !onScreen(el))) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
     const v = valueOf(el);
@@ -1255,6 +1278,35 @@ function snapCommit(gen, commit) {
   s.pending = null;
   s.refs = refs;
   return { ok: true, count: refs.size };
+}
+
+// hintsDraw shows (with show false, removes) a numbered badge on each element snapshot gen
+// stamped in this frame. The badges sit in a closed shadow root that takes no clicks, placed in
+// page coordinates so they scroll with what they number.
+function hintsDraw(gen, show) {
+  document.getElementById("__jarvis-hints")?.remove();
+  const s = globalThis.__jarvisSnap;
+  if (!show || !s?.refs || s.gen !== gen) return { count: 0 };
+  const host = document.createElement("div");
+  host.id = "__jarvis-hints";
+  host.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;";
+  const root = host.attachShadow({ mode: "closed" });
+  const style = document.createElement("style");
+  style.textContent =
+    "b{position:absolute;font:700 12px/1 system-ui,sans-serif;padding:2px 4px;border-radius:4px;" +
+    "background:#ffd400;color:#000;border:1px solid #000;box-shadow:0 1px 3px rgba(0,0,0,.4);white-space:nowrap}";
+  root.append(style);
+  for (const [n, el] of s.refs) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    const b = document.createElement("b");
+    b.textContent = String(n);
+    b.style.left = Math.max(0, r.left + scrollX - 4) + "px";
+    b.style.top = Math.max(0, r.top + scrollY - 4) + "px";
+    root.append(b);
+  }
+  (document.body || document.documentElement).append(host);
+  return { count: s.refs.size };
 }
 
 // actFind says whether this frame holds ref n of snapshot gen (and this frame's gen). Refs live
