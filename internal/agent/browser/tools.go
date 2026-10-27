@@ -71,6 +71,9 @@ type Tools struct {
 	mu   sync.Mutex
 	task string    // the task tab ("KEY:T"): the one browser_open opened or a tool last named
 	used time.Time // when the task tab was last used
+
+	hints       *hintState // the numbers on screen ("show numbers"), nil when none
+	hintConfirm string     // the risky numbered click waiting for its yes
 }
 
 // TaskTabIdle is how long the task tab stays the default target of a command without a tab_id

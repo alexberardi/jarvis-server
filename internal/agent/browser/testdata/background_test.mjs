@@ -181,3 +181,28 @@ test("fill on a page that never shows the field fails with field_not_found", asy
   assert.equal(r.code, "field_not_found");
   assert.deepEqual(filled, []);
 });
+
+// "show numbers": hints snapshots only what is on screen, draws its numbers, and returns the refs
+// act presses; show false takes the numbers down.
+test("hints numbers the elements on screen and removes them", async () => {
+  const tab = { id: 4, url: "https://www.google.com/search?q=dogs", title: "dogs", active: true, windowId: 1 };
+  const b = load({ tabs: [tab] });
+  const calls = [];
+  b.api.tabs.get = async () => ({ ...tab, status: "complete" });
+  b.api.scripting.executeScript = async ({ func, args }) => {
+    calls.push([func.name, args]);
+    if (func.name === "snapCollect") {
+      return [{ frameId: 0, result: { token: "t", url: tab.url, title: tab.title, elements: [{ k: 1, role: "link", name: "Wikipedia" }, { k: 2, role: "button", name: "Search" }] } }];
+    }
+    return [{ frameId: 0, result: { ok: true, count: 2 } }];
+  };
+  const r = await b.call("hints", {});
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(Array.from(r.result.elements, (e) => e.ref), ["e1", "e2"]);
+  assert.equal(calls.find(([n]) => n === "snapCollect")[1][2], true, "only elements on screen");
+  const draw = calls.find(([n]) => n === "hintsDraw");
+  assert.deepEqual(Array.from(draw[1]), [r.result.gen, true]);
+  calls.length = 0;
+  await b.call("hints", { show: false });
+  assert.deepEqual(calls.map(([n, a]) => [n, Array.from(a)]), [["hintsDraw", [0, false]]]);
+});
