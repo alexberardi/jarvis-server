@@ -553,3 +553,56 @@ func TestDirectResultCanBeSpoken(t *testing.T) {
 		t.Fatalf("command-center was asked: %v", srv.callList())
 	}
 }
+
+// volumeDirector is control_node's shortcut: any "volume" phrase runs on the node and is spoken.
+type volumeDirector struct {
+	mu   sync.Mutex
+	said []string
+}
+
+func (d *volumeDirector) Available(context.Context) []node.ToolDef { return nil }
+func (d *volumeDirector) Call(context.Context, string, map[string]any, node.Request) (map[string]any, bool) {
+	return nil, false
+}
+func (d *volumeDirector) Direct(_ context.Context, said string) (map[string]any, bool) {
+	if !strings.Contains(strings.ToLower(said), "volume") && !strings.Contains(strings.ToLower(said), "mute") {
+		return nil, false
+	}
+	d.mu.Lock()
+	d.said = append(d.said, said)
+	d.mu.Unlock()
+	return map[string]any{"success": true, "message": "Volume 70 percent.", node.SignalsKey: node.Signals{Speak: true}}, true
+}
+
+// Right after the node said "Volume 70 percent.", the mic half-hearing it as "Volume 1." must
+// not run the shortcut (it set the volume to 10% on the lab Pi): it goes to command-center,
+// whose follow-up gate tells the node's voice from the user's. A follow-up sharing no word with
+// the reply still takes the shortcut.
+func TestShortcutsSkipFollowUpsLikeOurReply(t *testing.T) {
+	for _, c := range []struct {
+		followUp  string
+		shortcuts int
+		toCC      int
+	}{{"Volume 1.", 1, 1}, {"Mute.", 2, 0}} {
+		srv := newServer()
+		srv.text, srv.speakPCM = "Volume up.", pcmOf(300)
+		srv.texts = []string{c.followUp}
+		mic := oneWake()
+		r := newRig(t, mic, srv)
+		d := &volumeDirector{}
+		r.p.Tools = d
+		answer(r, mic, utterance)
+		stop := r.run(t)
+		r.turn(t)
+		_ = stop()
+		d.mu.Lock()
+		got := len(d.said)
+		d.mu.Unlock()
+		srv.mu.Lock()
+		cc := len(srv.commands)
+		srv.mu.Unlock()
+		if got != c.shortcuts || cc != c.toCC {
+			t.Errorf("%q: shortcuts %d (%v), command-center turns %d; want %d and %d", c.followUp, got, d.said, cc, c.shortcuts, c.toCC)
+		}
+	}
+}
