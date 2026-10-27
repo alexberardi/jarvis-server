@@ -1179,12 +1179,14 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		&builtins.SendLink{CC: cc}, f.routine, &builtins.Calculate{Store: st}, &builtins.Convert{Store: st},
 		&builtins.Joke{CC: cc, Store: st})
 	if f.host != nil && f.host.Timers != nil {
-		// A Pi's timers: the host's service rings them through the speaker.
-		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st})
+		// A Pi's timers, volume and alerts: the host's services, on its speaker.
+		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st},
+			&builtins.ControlNode{Audio: f.host.Audio, Store: st},
+			&builtins.CheckAlerts{Alerts: f.host.Alerts, CC: cc, Store: st})
 	}
 	if f.pi {
 		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
-		tools = append(tools, builtins.Talk{})
+		tools = append(tools, builtins.Talk{}, builtins.ActOnItems{})
 	}
 	tools = append(tools, &clock.Tool{})
 	return tools, closeAll, nil

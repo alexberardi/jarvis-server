@@ -95,14 +95,15 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	for _, tl := range sc.Available(ctx) {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"check_alerts", "shopping_list", "todo_list", "control_node", "reminder"} {
+	for _, want := range []string{"shopping_list", "todo_list", "reminder"} {
 		if !names[want] {
 			t.Errorf("no %s among %v", want, names)
 		}
 	}
 	// The Go agent serves these itself (packages.PortedToGo); a Python copy would shadow it.
 	for _, skipped := range []string{"control_device", "routine", "send_link", "set_timer", "check_timers", "cancel_timer",
-		"get_current_time", "calculate", "convert_measurement", "tell_joke", "answer_question", "chat"} {
+		"get_current_time", "calculate", "convert_measurement", "tell_joke", "answer_question", "chat",
+		"control_node", "check_alerts", "act_on_items"} {
 		if names[skipped] {
 			t.Errorf("%s is offered by the sidecar; the Go agent serves it", skipped)
 		}
@@ -122,27 +123,8 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 
 	// The timer commands are Go now (TestTimersMatchPython runs the Python ones against them).
 
-	// The volume, through the Go mixer.
-	if out := call("control_node", map[string]any{"action": "volume_up"}); out["success"] != true || out["volume_percent"] == nil {
-		t.Errorf("volume_up = %v", out)
-	}
-	if out := call("control_node", map[string]any{"action": "mute"}); out["success"] != true {
-		t.Errorf("mute = %v", out)
-	}
-	mu.Lock()
-	m := strings.Join(mixer, "\n")
-	mu.Unlock()
-	if !strings.Contains(m, "pactl set-sink-volume @DEFAULT_SINK@") || !strings.Contains(m, "pactl set-sink-mute @DEFAULT_SINK@ 1") {
-		t.Errorf("mixer calls:\n%s", m)
-	}
-
-	// What's up: the Go alert queue, composed by command-center's LLM.
-	now := time.Now()
-	h.Alerts.Add(sdkhost.Alert{ID: "a1", SourceAgent: "weather", Title: "Storm warning", Summary: "Storm tonight", Priority: 3,
-		CreatedAt: now, ExpiresAt: now.Add(time.Hour), Category: "weather"})
-	if out := call("check_alerts", nil); out["message"] != "You have one storm warning." || h.Alerts.Count() != 0 {
-		t.Errorf("check_alerts = %v, %d left", out, h.Alerts.Count())
-	}
+	// control_node and check_alerts are Go now (TestControlNodeMatchesPython and
+	// TestCheckAlertsMatchesPython run the Python ones against them).
 
 	// The shopping list, in the agent's settings store.
 	if out := call("shopping_list", map[string]any{"action": "add", "items": []any{"milk"}}); out["success"] != true {

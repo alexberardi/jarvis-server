@@ -410,3 +410,122 @@ func spokenWithoutZeros(keys ...string) func(map[string]any) {
 		}
 	}
 }
+
+// fakeMixer is pactl: a volume at 50% that every set or mute call changes.
+type fakeMixer struct {
+	mu    sync.Mutex
+	level int
+	fail  bool
+}
+
+func (m *fakeMixer) run(_ context.Context, name string, args ...string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail {
+		return "", fmt.Errorf("exit status 1")
+	}
+	if len(args) > 2 && args[0] == "set-sink-volume" {
+		fmt.Sscanf(args[2], "%d%%", &m.level)
+	}
+	return fmt.Sprintf("Volume: front-left: 1 / %d%% / 0 dB", m.level), nil
+}
+
+func TestControlNodeMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	dir := t.TempDir()
+	pyMix, goMix := &fakeMixer{level: 50}, &fakeMixer{level: 50}
+	sc := pythonBuiltins(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(dir, "t.json")}, Alerts: &sdkhost.Alerts{},
+		Audio: &sdkhost.Audio{Path: filepath.Join(dir, "py.json"), Run: pyMix.run}})
+	port := &builtins.ControlNode{Audio: &sdkhost.Audio{Path: filepath.Join(dir, "go.json"), Run: goMix.run}}
+	var cases []parityCase
+	for _, a := range []map[string]any{
+		{"action": "volume_up"}, {"action": "Volume_Down"}, {"action": "set_volume", "target_percent": 35},
+		{"action": "set_volume", "target_percent": 140}, {"action": "set_volume"}, {"action": "set_volume", "target_percent": "x"},
+		{"action": "mute"}, {"action": "unmute"}, {"action": "explode"}, {}, {"action": "set_volume", "target_percent": 7.0},
+	} {
+		cases = append(cases, parityCase{"control_node", a})
+	}
+	checkParity(t, sc, port, cases)
+	pyMix.fail, goMix.fail = true, true
+	checkParity(t, sc, port, []parityCase{{"control_node", map[string]any{"action": "volume_up"}},
+		{"control_node", map[string]any{"action": "set_volume", "target_percent": 20}}, {"control_node", map[string]any{"action": "mute"}}})
+	checkFastPaths(t, py, map[string]string{"control_node_command": "ControlNodeCommand"}, []string{
+		"volume up", "turn the volume up", "louder", "turn it down", "quieter please", "set the volume to 5", "set volume to 50%",
+		"change the volume to 80", "volume 7", "volume 30%", "mute", "please mute the speaker.", "unmute", "mute the tv",
+		"make it louder", "crank it up", "what's the volume", "volume", "put volume at 3",
+	}, builtins.ControlNodeMatch)
+}
+
+func TestCheckAlertsMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	llm := &fakeLLM{reply: "<think>x</think>Heads up: a storm is coming tonight."}
+	cc := llm.start(t)
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	pyQ, goQ := &sdkhost.Alerts{Now: clock}, &sdkhost.Alerts{Now: clock}
+	h := &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(dir, "t.json")}, Alerts: pyQ}
+	h.SetCC(cc)
+	sc := pythonBuiltins(t, py, h)
+	port := &builtins.CheckAlerts{Alerts: goQ, CC: func() *node.CC { return cc }}
+	add := func() {
+		for _, q := range []*sdkhost.Alerts{pyQ, goQ} {
+			q.Add(sdkhost.Alert{ID: "a1", SourceAgent: "weather", Title: "Storm warning", Summary: "Storm tonight", Priority: 3,
+				CreatedAt: now, ExpiresAt: now.Add(time.Hour), Category: "weather"})
+		}
+	}
+	add()
+	checkParity(t, sc, port, []parityCase{
+		{"check_alerts", nil}, {"check_alerts", nil}, // composed, then none left
+		{"check_alerts", map[string]any{"alerts_json": `[{"title": "Mail", "summary": "2 new"}]`}},
+		{"check_alerts", map[string]any{"alerts_json": "not json"}},
+		{"check_alerts", map[string]any{"dismiss": "true"}}, {"check_alerts", map[string]any{"dismiss": "maybe"}},
+	})
+	add()
+	checkParity(t, sc, port, []parityCase{{"check_alerts", map[string]any{"dismissed": true}}, {"check_alerts", nil}})
+	llm.reply = "" // the model down: the titles
+	add()
+	checkParity(t, sc, port, []parityCase{{"check_alerts", nil}})
+	if pyQ.Count() != 0 || goQ.Count() != 0 {
+		t.Fatalf("queues: python %d, go %d", pyQ.Count(), goQ.Count())
+	}
+
+	// Which fast path claims each phrase, with an alert waiting (pre_route's backends stubbed).
+	phrases := []string{"what's up", "Whats up?", "any alerts", "hey what's new with you today friend", "what did i miss",
+		"up", "check notifications", "clear my alerts", "dismiss all of the notifications", "cancel that alert",
+		"don't clear my alerts", "clear notification sounds", "cancel the timer and read my notifications",
+		"delete pending alerts please", "remove the notification settings", "what's the weather"}
+	script := `
+import json, sys
+import commands.whats_up_command as w
+w.alerts_count = lambda: 1
+w.alerts_flush = lambda: []
+c = w.WhatsUpCommand()
+out = {}
+for p in json.loads(sys.argv[1]):
+    r = c.pre_route(p)
+    out[p] = "" if r is None else ("dismiss" if "dismissed" in r.arguments else "greeting")
+print(json.dumps(out))
+`
+	ps, _ := json.Marshal(phrases)
+	raw, err := exec.Command(py, "-c", script, string(ps)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]string
+	_ = json.Unmarshal(raw, &want)
+	for _, p := range phrases {
+		if got := builtins.AlertsMatch(p); got != want[p] {
+			t.Errorf("%q: go %q, python %q", p, got, want[p])
+		}
+	}
+}
+
+func TestActOnItemsMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc := pythonBuiltins(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	checkParity(t, sc, builtins.ActOnItems{}, []parityCase{
+		{"act_on_items", map[string]any{"action": "mark_read", "ref_ids": []any{"e1"}}}, {"act_on_items", nil},
+		{"act_on_items", map[string]any{"action": "mark_read", "ref_ids": "e1"}},
+	})
+}
