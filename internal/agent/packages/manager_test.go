@@ -167,8 +167,8 @@ func TestInstallRefusals(t *testing.T) {
 			"made for Pi nodes"},
 		"apt": {map[string]string{"jarvis_package.yaml": "name: needs_apt\napt_packages: [mpv]\n", "command.py": ""},
 			"only a Pi node runs"},
-		"no commands": {map[string]string{"jarvis_package.yaml": "name: devices\n", "device_families/hue/protocol.py": ""},
-			"no commands a computer can run"},
+		"no commands": {map[string]string{"jarvis_package.yaml": "name: jobs\ncomponents:\n  - {type: agent, name: jobs, path: agents/jobs/agent.py}\n",
+			"agents/jobs/agent.py": ""}, "no commands a computer can run"},
 		"no manifest": {map[string]string{"README.md": ""}, "not a Jarvis package"},
 		"missing file": {map[string]string{"jarvis_package.yaml": "name: gone\ncomponents:\n  - {type: command, name: gone, path: commands/gone/command.py}\n"},
 			"commands/gone/command.py is missing"},
@@ -322,41 +322,26 @@ components:
 	}
 }
 
-// On a Pi (built-ins and System on) a package's device families and managers are listed for the sidecar
-// and not reported as skipped. A desktop refuses a package of only those, as before; with a
-// command too it skips them.
-func TestPiListsDeviceFamilies(t *testing.T) {
+// A package's device families and managers are listed for the sidecar and not reported as
+// skipped, on a Pi (built-ins and System on) and on a computer alike: a device-only package
+// installs on either (the user, 2026-10-26: devices on the desktop agent are mandatory).
+func TestDeviceFamiliesOnEveryNode(t *testing.T) {
 	r := newRepos(t)
 	repo := r.add(t, "o/govee", "HEAD", govee())
-	m, _, _, _ := newPiManager(t, r)
-	m.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands"}
-	details, err := m.Install(context.Background(), repo, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	list, _ := readList(filepath.Join(m.Root, "commands.json"))
-	if len(list) != 1 || details["skipped_components"] != nil ||
-		!reflect.DeepEqual(list[0].Families, []string{"device_families/govee/protocol.py"}) ||
-		!reflect.DeepEqual(list[0].Managers, []string{"device_managers/hub/manager.py"}) {
-		t.Fatalf("pi: details %v, list %+v", details, list)
-	}
-
+	pi, _, _, _ := newPiManager(t, r)
+	pi.Builtins = &Builtins{Requirement: "jarvis-node-setup @ https://x/a.tar.gz", Package: "commands"}
 	desk, _, _ := newTestManager(t, r)
-	if _, err := desk.Install(context.Background(), repo, ""); err == nil || !strings.Contains(err.Error(), "no commands a computer can run") {
-		t.Fatalf("desktop install = %v", err)
-	}
-	both := govee()
-	both["jarvis_package.yaml"] += "  - type: command\n    name: hi\n    path: commands/hi/command.py\n"
-	both["commands/hi/command.py"] = ""
-	repo2 := r.add(t, "o/govee2", "HEAD", both)
-	details, err = desk.Install(context.Background(), repo2, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	list, _ = readList(filepath.Join(desk.Root, "commands.json"))
-	if !reflect.DeepEqual(details["skipped_components"], []string{"device_protocol:govee", "device_manager:hub"}) ||
-		len(list) != 1 || list[0].Families != nil || list[0].Managers != nil {
-		t.Fatalf("desktop: details %v, list %+v", details, list)
+	for name, m := range map[string]*Manager{"pi": pi, "desktop": desk} {
+		details, err := m.Install(context.Background(), repo, "")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		list, _ := readList(filepath.Join(m.Root, "commands.json"))
+		if len(list) != 1 || details["skipped_components"] != nil ||
+			!reflect.DeepEqual(list[0].Families, []string{"device_families/govee/protocol.py"}) ||
+			!reflect.DeepEqual(list[0].Managers, []string{"device_managers/hub/manager.py"}) {
+			t.Fatalf("%s: details %v, list %+v", name, details, list)
+		}
 	}
 }
 
