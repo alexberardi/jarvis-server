@@ -33,8 +33,9 @@ class Cloudy(IJarvisDeviceProtocol):
     async def control(self, ip, action, data=None, **kwargs):
         return DeviceControlResult(success=True, entity_id="", action=action)
 
-    async def get_state(self, ip, **kwargs):
-        return {"state": "off"}
+    async def get_state(self, device: DiscoveredDevice) -> dict:
+        # Written from jarvis-node-setup's example, not the SDK's get_state(ip, **kwargs).
+        return {"state": "off", "seen": device.entity_id + "@" + str(device.cloud_id)}
 
     async def on_removed(self, device, **kwargs):
         # Records whose user-scoped secret a call without a user sees (none).

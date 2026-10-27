@@ -931,6 +931,33 @@ def _domain(domain: str, raw: dict, features):
     return None
 
 
+def _get_state(fam, details: dict):
+    """A family's get_state, called the way it is written. The SDK's signature is
+    get_state(ip, **kwargs) and gets the device's fields as keywords; families written from
+    jarvis-node-setup's documented example take get_state(device) (Apple, LIFX, Kasa, Schlage,
+    SimpliSafe, Home Connect) and get the DiscoveredDevice, as control() does."""
+    import inspect
+
+    from jarvis_command_sdk import DiscoveredDevice
+
+    entity_id = details.get("entity_id") or ""
+    try:
+        params = inspect.signature(fam.get_state).parameters
+    except (TypeError, ValueError):
+        params = {"ip": None}
+    if "ip" not in params:
+        protocol = details.get("protocol") or ""
+        return fam.get_state(DiscoveredDevice(
+            entity_id=entity_id, name=details.get("name") or entity_id,
+            domain=details.get("domain") or "switch", manufacturer=protocol, model=details.get("model") or "",
+            protocol=protocol, cloud_id=details.get("cloud_id"), local_ip=details.get("local_ip"),
+            mac_address=details.get("mac_address")))
+    return fam.get_state(ip=details.get("local_ip") or "", entity_id=entity_id,
+                         cloud_id=details.get("cloud_id") or "",
+                         mac_address=details.get("mac_address") or "",
+                         model=details.get("model") or "")
+
+
 def device_state(params: dict) -> dict:
     """The body for POST /device-state-results/{rid}: the device's state from its family,
     normalized for its domain, with UI hints; {"needs_pairing": true} with control_type
@@ -948,10 +975,7 @@ def device_state(params: dict) -> dict:
         fam = _active_families().get(details.get("protocol") or "")
         if fam is not None:
             try:
-                raw = _run(fam.get_state(ip=details.get("local_ip") or "", entity_id=entity_id,
-                                         cloud_id=details.get("cloud_id") or "",
-                                         mac_address=details.get("mac_address") or "",
-                                         model=details.get("model") or ""))
+                raw = _run(_get_state(fam, details))
             except Exception as exc:
                 print(f"sidecar: device state query failed for {entity_id}: {exc}", file=sys.stderr)
     if raw is None:
