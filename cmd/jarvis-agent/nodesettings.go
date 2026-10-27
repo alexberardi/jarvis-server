@@ -30,10 +30,21 @@ func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings
 				c = nodesettings.Command{Name: d.Name, Description: desc}
 			}
 			c.Parameters, _ = d.Command["parameters"].([]any)
+			for _, t := range tools {
+				if f, ok := t.(fastPather); ok {
+					c.FastPaths = append(c.FastPaths, f.FastPaths(d.Name)...)
+				}
+			}
 			out = append(out, c)
 		}
 		return out
 	}
+}
+
+// fastPather is a toolset with fast-path patterns for some of its commands (the routine
+// built-in's trigger phrases).
+type fastPather interface {
+	FastPaths(command string) []nodesettings.FastPath
 }
 
 // dataCommands are the commands whose records the app's "Stored data" tab browses: the

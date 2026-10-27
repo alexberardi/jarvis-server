@@ -33,5 +33,7 @@ The matching rules are N:'s, but the two loose ones need at least two words: N: 
 morning" for a lone "Good." in a follow-up window. The trigger phrases also come from routines
 in installed Pantry packages (`routine.json`), read from the package, not copied into the store.
 
-Not ported yet: the per-routine fast-path switches (the app's Inspect fast-paths screen, which
-lets the household turn off one routine's phrases when they collide with another command).
+**Per-routine switches** (user: "approved"). Each routine's phrases are a fast-path pattern
+(`routine.<slug>`, as on N:) in the snapshot's `fast_paths`, and the app's Inspect fast-paths
+screen turns one off with a `fast_path_registry` push, kept sparse in the node's settings store.
+A routine whose phrases are off still runs by name, from Run now and on its schedule.
