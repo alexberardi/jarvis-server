@@ -177,4 +177,27 @@ func TestPantryRoutines(t *testing.T) {
 	if got := pantryRoutines(nil)(); got != nil {
 		t.Fatalf("pantryRoutines(nil) = %v", got)
 	}
+
+	// Their definitions: the file is the manifest text here, so not a routine (skipped), until
+	// it is one.
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if got := pantryRoutineDefs(pm, log)(); len(got) != 0 {
+		t.Fatalf("defs of a non-routine file = %v", got)
+	}
+	def := `{"trigger_phrases": ["movie time"], "steps": [{"command": "projector", "args": {}}]}`
+	if err := os.WriteFile(filepath.Join(root, "pkgs", "cinema", "routines", "movie_night", "routine.json"), []byte(def), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := pantryRoutineDefs(pm, log)()
+	if phrases, _ := got["movie_night"]["trigger_phrases"].([]any); len(got) != 1 || len(phrases) != 1 || phrases[0] != "movie time" {
+		t.Fatalf("defs = %v", got)
+	}
+	// A component path that leaves the package isn't read.
+	write("sneaky", "name: sneaky\nversion: \"1.0\"\ncomponents:\n  - {type: routine, name: x, path: ../cinema/routines/movie_night/routine.json}\n")
+	if _, ok := pantryRoutineDefs(pm, log)()["x"]; ok {
+		t.Fatal("read a routine outside its package")
+	}
+	if got := pantryRoutineDefs(nil, log)(); got != nil {
+		t.Fatalf("pantryRoutineDefs(nil) = %v", got)
+	}
 }

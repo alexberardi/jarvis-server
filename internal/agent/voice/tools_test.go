@@ -511,3 +511,45 @@ func TestDirectCommandSkipsCommandCenter(t *testing.T) {
 		t.Fatalf("windows %v, want the 8 s next-step window", got)
 	}
 }
+
+// speakingDirector runs "good night" itself and asks for its message to be spoken (a routine's
+// trigger phrase), seeing who spoke.
+type speakingDirector struct{ speaker *int64 }
+
+func (d *speakingDirector) Available(context.Context) []node.ToolDef { return nil }
+func (d *speakingDirector) Call(context.Context, string, map[string]any, node.Request) (map[string]any, bool) {
+	return nil, false
+}
+func (d *speakingDirector) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	if !strings.Contains(strings.ToLower(said), "good night") {
+		return nil, false
+	}
+	d.speaker = node.Speaker(ctx)
+	return map[string]any{"success": true, "message": "Sleep well.", node.SignalsKey: node.Signals{Speak: true}}, true
+}
+
+// A routine's trigger phrase is run on the node and its reply spoken, with no command-center
+// turn.
+func TestDirectResultCanBeSpoken(t *testing.T) {
+	srv := newServer()
+	srv.text, srv.speakPCM = "Good night.", pcmOf(300)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	d := &speakingDirector{}
+	r.p.Tools = d
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSpoken || tr.Message != "Sleep well." {
+		t.Fatalf("turn %+v", tr)
+	}
+	srv.mu.Lock()
+	said := slices.Clone(srv.said)
+	srv.mu.Unlock()
+	if !slices.Contains(said, "Sleep well.") {
+		t.Fatalf("said %q", said)
+	}
+	if slices.Contains(srv.callList(), "stream") || slices.Contains(srv.callList(), "command") {
+		t.Fatalf("command-center was asked: %v", srv.callList())
+	}
+}
