@@ -280,3 +280,80 @@ func TestRoutine(t *testing.T) {
 		t.Fatalf("all failed = %v", out)
 	}
 }
+
+func TestMatchesTrigger(t *testing.T) {
+	phrases := []any{"good night", "bedtime", "going to bed", "time for bed"}
+	for said, want := range map[string]bool{
+		"good night":              true,
+		"Good night!":             true, // speech-to-text's punctuation
+		"okay good night jarvis":  true, // the phrase inside
+		"time for bed":            true,
+		"bed time for":            true, // 80% of the phrase's words
+		"going to bed now":        true,
+		"bedtime":                 true,
+		"good":                    false, // a lone word isn't the phrase (N: matched it)
+		"night":                   false,
+		"what's the weather":      false,
+		"good thanks":             false,
+		"is it time for the news": false,
+	} {
+		if got := matchesTrigger(normalizeSaid(said), phrases); got != want {
+			t.Errorf("%q: %v, want %v", said, got, want)
+		}
+	}
+}
+
+func TestRoutineRunsByItsTriggerPhrase(t *testing.T) {
+	f := &fakeCC{reply: "Sleep well."}
+	cc := f.start(t)
+	steps := &stepTools{calls: map[string]map[string]any{}, outs: map[string]map[string]any{
+		"control_device":      {"success": true},
+		"get_calendar_events": {"success": true, "message": "Nothing tomorrow."},
+		"get_weather":         {"success": true, "message": "Rain."},
+	}}
+	pantry := map[string]map[string]any{"rainy_day": {
+		"trigger_phrases": []any{"is it going to rain"},
+		"steps":           []any{map[string]any{"command": "get_weather", "label": "weather"}},
+	}}
+	tool := &Routine{Tools: steps, CC: func() *node.CC { return cc }, Pantry: func() map[string]map[string]any { return pantry }}
+	ctx := node.WithSpeaker(context.Background(), uid(5))
+
+	out, ok := tool.Direct(ctx, "Good night!")
+	if !ok || out["success"] != true || out["message"] != "Sleep well." || !node.TakeSignals(out).Speak {
+		t.Fatalf("good night = %v, %v", out, ok)
+	}
+	if _, ran := steps.calls["get_calendar_events"]; !ran {
+		t.Fatal("good_night's steps didn't run")
+	}
+	// A package's routine is found by its own phrase.
+	steps.calls = map[string]map[string]any{}
+	if _, ok := tool.Direct(ctx, "Hey, is it going to rain today?"); !ok || steps.calls["get_weather"] == nil {
+		t.Fatalf("pantry routine: ran %v", steps.calls)
+	}
+	if _, ok := tool.Direct(ctx, "What's the capital of France?"); ok {
+		t.Fatal("ran a routine for an ordinary question")
+	}
+	// The household turned the routine command off: no trigger runs.
+	off := node.WithEnabled(ctx, func(name string) bool { return name != "routine" })
+	if _, ok := tool.Direct(off, "good night"); ok {
+		t.Fatal("ran with the routine command off")
+	}
+}
+
+// speakerTools records who a step ran for.
+type speakerTools struct{ got *int64 }
+
+func (s *speakerTools) Available(context.Context) []node.ToolDef { return nil }
+func (s *speakerTools) Call(_ context.Context, _ string, _ map[string]any, req node.Request) (map[string]any, bool) {
+	s.got = req.UserID
+	return map[string]any{"success": true, "message": "ok"}, true
+}
+
+func TestTriggeredRoutineRunsForTheSpeaker(t *testing.T) {
+	st := &speakerTools{}
+	tool := &Routine{Tools: st, CC: func() *node.CC { return nil }}
+	tool.Direct(node.WithSpeaker(context.Background(), uid(9)), "good morning")
+	if st.got == nil || *st.got != 9 {
+		t.Fatalf("steps ran for %v", st.got)
+	}
+}
