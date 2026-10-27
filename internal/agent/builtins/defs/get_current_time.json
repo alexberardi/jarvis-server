@@ -1,0 +1,145 @@
+{
+  "client_tool": {
+    "allow_direct_answer": true,
+    "antipatterns": [
+      {
+        "command_name": "get_weather",
+        "description": "Weather conditions, temperature, forecasts. 'What time is it' is NOT weather."
+      },
+      {
+        "command_name": "search_web",
+        "description": "General web searches, news, current events. Use get_current_time for time queries."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "location": "California"
+        },
+        "is_primary": true,
+        "voice_command": "What time is it in California?"
+      },
+      {
+        "expected_parameters": {
+          "location": "Tokyo"
+        },
+        "is_primary": false,
+        "voice_command": "What time is it in Tokyo?"
+      },
+      {
+        "expected_parameters": {
+          "location": "London"
+        },
+        "is_primary": false,
+        "voice_command": "Current time in London"
+      },
+      {
+        "expected_parameters": {
+          "location": "New York"
+        },
+        "is_primary": false,
+        "voice_command": "What's the time in New York?"
+      }
+    ],
+    "function": {
+      "description": "Time and date somewhere else ('what time is it in Tokyo'). Local time and date are in the calendar above.",
+      "name": "get_current_time",
+      "parameters": {
+        "properties": {
+          "location": {
+            "description": "City, country or IANA time zone",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "time",
+      "current time",
+      "what time",
+      "time zone",
+      "timezone",
+      "clock",
+      "time in",
+      "what day",
+      "date",
+      "today"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": true,
+    "antipatterns": [
+      {
+        "command_name": "get_weather",
+        "description": "Weather conditions, temperature, forecasts. 'What time is it' is NOT weather."
+      },
+      {
+        "command_name": "search_web",
+        "description": "General web searches, news, current events. Use get_current_time for time queries."
+      }
+    ],
+    "command_name": "get_current_time",
+    "critical_rules": [
+      "TIME queries only, not weather. Extract location name only."
+    ],
+    "description": "Time and date somewhere else ('what time is it in Tokyo'). Local time and date are in the calendar above.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "location": "California"
+        },
+        "is_primary": true,
+        "voice_command": "What time is it in California?"
+      },
+      {
+        "expected_parameters": {
+          "location": "Tokyo"
+        },
+        "is_primary": false,
+        "voice_command": "What time is it in Tokyo?"
+      },
+      {
+        "expected_parameters": {
+          "location": "London"
+        },
+        "is_primary": false,
+        "voice_command": "Current time in London"
+      },
+      {
+        "expected_parameters": {
+          "location": "New York"
+        },
+        "is_primary": false,
+        "voice_command": "What's the time in New York?"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "time",
+      "current time",
+      "what time",
+      "time zone",
+      "timezone",
+      "clock",
+      "time in",
+      "what day",
+      "date",
+      "today"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": "City, country or IANA time zone",
+        "enum_values": null,
+        "name": "location",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      }
+    ]
+  }
+}

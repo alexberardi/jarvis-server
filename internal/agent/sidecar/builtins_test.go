@@ -95,15 +95,16 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	for _, tl := range sc.Available(ctx) {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"calculate", "set_timer", "check_timers", "cancel_timer", "check_alerts", "shopping_list",
-		"todo_list", "control_node", "tell_joke", "get_current_time", "answer_question", "convert_measurement", "reminder"} {
+	for _, want := range []string{"calculate", "check_alerts", "shopping_list",
+		"todo_list", "control_node", "tell_joke", "answer_question", "convert_measurement", "reminder"} {
 		if !names[want] {
 			t.Errorf("no %s among %v", want, names)
 		}
 	}
-	for _, skipped := range []string{"control_device", "routine", "send_link"} {
+	// The Go agent serves these itself (packages.PortedToGo); a Python copy would shadow it.
+	for _, skipped := range []string{"control_device", "routine", "send_link", "set_timer", "check_timers", "cancel_timer", "get_current_time"} {
 		if names[skipped] {
-			t.Errorf("%s is offered; it still needs the Python node", skipped)
+			t.Errorf("%s is offered by the sidecar; the Go agent serves it", skipped)
 		}
 	}
 
@@ -123,17 +124,7 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 		t.Errorf("calculate = %v", out)
 	}
 
-	// Timers: set, check, cancel, all in the Go service.
-	out := call("set_timer", map[string]any{"duration_seconds": 600, "label": "pasta"})
-	if a := h.Timers.Active(); out["success"] != true || len(a) != 1 || *a[0]["label"].(*string) != "pasta" || a[0]["duration_seconds"] != 600 {
-		t.Errorf("set_timer = %v, timers %v", out, h.Timers.Active())
-	}
-	if out := call("check_timers", map[string]any{"label": "pasta"}); out["success"] != true || !strings.Contains(asJSON(out), "pasta") {
-		t.Errorf("check_timers = %v", out)
-	}
-	if out := call("cancel_timer", map[string]any{"label": "pasta"}); out["success"] != true || len(h.Timers.Active()) != 0 {
-		t.Errorf("cancel_timer = %v, timers %v", out, h.Timers.Active())
-	}
+	// The timer commands are Go now (TestTimersMatchPython runs the Python ones against them).
 
 	// The volume, through the Go mixer.
 	if out := call("control_node", map[string]any{"action": "volume_up"}); out["success"] != true || out["volume_percent"] == nil {
@@ -169,7 +160,7 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	}
 
 	// Reminders: set by the command into the agent's store, nothing due yet.
-	out = call("reminder", map[string]any{"action": "set", "text": "check the oven", "relative_minutes": 30})
+	out := call("reminder", map[string]any{"action": "set", "text": "check the oven", "relative_minutes": 30})
 	if out["success"] != true {
 		t.Fatalf("reminder set = %v", out)
 	}

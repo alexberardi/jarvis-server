@@ -1,0 +1,97 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "todo_list",
+        "description": "Adding/reading/completing tasks is the todo_list command — this one only sends the list to your phone as a checklist."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {},
+        "is_primary": true,
+        "voice_command": "Send my to-do list to my phone"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Export the to-do list"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Send me my task list"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Show me my to-do list on my phone"
+      }
+    ],
+    "function": {
+      "description": "Send the to-do list to the user's phone, only when asked to send or export it.",
+      "name": "export_todo_list",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "export",
+      "send",
+      "to-do list",
+      "todo list",
+      "task list",
+      "checklist",
+      "phone"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "todo_list",
+        "description": "Adding/reading/completing tasks is the todo_list command — this one only sends the list to your phone as a checklist."
+      }
+    ],
+    "command_name": "export_todo_list",
+    "description": "Send the to-do list to the user's phone, only when asked to send or export it.",
+    "examples": [
+      {
+        "expected_parameters": {},
+        "is_primary": true,
+        "voice_command": "Send my to-do list to my phone"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Export the to-do list"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Send me my task list"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Show me my to-do list on my phone"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "export",
+      "send",
+      "to-do list",
+      "todo list",
+      "task list",
+      "checklist",
+      "phone"
+    ],
+    "parameters": []
+  }
+}

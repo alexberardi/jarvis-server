@@ -1176,7 +1176,12 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 	f.registry = &devices.Registry{}
 	f.routine = &builtins.Routine{Store: st, Pantry: pantryRoutineDefs(f.pkgs, log), CC: cc, Log: log}
 	tools = append(tools, &builtins.ControlDevice{Devices: f.registry, Families: live, CC: cc},
-		&builtins.SendLink{CC: cc}, f.routine, &clock.Tool{})
+		&builtins.SendLink{CC: cc}, f.routine)
+	if f.host != nil && f.host.Timers != nil {
+		// A Pi's timers: the host's service rings them through the speaker.
+		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st})
+	}
+	tools = append(tools, &clock.Tool{})
 	return tools, closeAll, nil
 }
 

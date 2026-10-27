@@ -1,0 +1,149 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "examples": [
+      {
+        "expected_parameters": {
+          "duration_seconds": 300
+        },
+        "is_primary": true,
+        "voice_command": "Set a timer for 5 minutes"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 30
+        },
+        "is_primary": false,
+        "voice_command": "Timer for 30 seconds"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 600,
+          "label": "pasta"
+        },
+        "is_primary": false,
+        "voice_command": "Set a 10 minute timer for pasta"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 3600
+        },
+        "is_primary": false,
+        "voice_command": "Remind me in 1 hour"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 5400
+        },
+        "is_primary": false,
+        "voice_command": "Set a timer for 1 hour and 30 minutes"
+      }
+    ],
+    "function": {
+      "description": "Countdown timer for a length of time ('5 minutes', 'an hour'). Not for a clock time, date or alarm: use reminder.",
+      "name": "set_timer",
+      "parameters": {
+        "properties": {
+          "duration_seconds": {
+            "description": "Total seconds",
+            "type": "integer"
+          },
+          "label": {
+            "description": "What it's for, e.g. 'pasta'",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_seconds"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "timer",
+      "set timer",
+      "countdown",
+      "notify me"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "command_name": "set_timer",
+    "critical_rules": [
+      "duration_seconds must be a positive integer."
+    ],
+    "description": "Countdown timer for a length of time ('5 minutes', 'an hour'). Not for a clock time, date or alarm: use reminder.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "duration_seconds": 300
+        },
+        "is_primary": true,
+        "voice_command": "Set a timer for 5 minutes"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 30
+        },
+        "is_primary": false,
+        "voice_command": "Timer for 30 seconds"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 600,
+          "label": "pasta"
+        },
+        "is_primary": false,
+        "voice_command": "Set a 10 minute timer for pasta"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 3600
+        },
+        "is_primary": false,
+        "voice_command": "Remind me in 1 hour"
+      },
+      {
+        "expected_parameters": {
+          "duration_seconds": 5400
+        },
+        "is_primary": false,
+        "voice_command": "Set a timer for 1 hour and 30 minutes"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "timer",
+      "set timer",
+      "countdown",
+      "notify me"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": "Total seconds",
+        "enum_values": null,
+        "name": "duration_seconds",
+        "options_source": null,
+        "required": true,
+        "type": "int"
+      },
+      {
+        "default_value": null,
+        "description": "What it's for, e.g. 'pasta'",
+        "enum_values": null,
+        "name": "label",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "rules": [
+      "Always convert spoken time to total seconds before calling",
+      "Extract labels from context: 'timer for pasta' → label='pasta', 'nap timer' → label='nap'",
+      "Compound times must be summed: '2 minutes 30 seconds' → 150 seconds"
+    ]
+  }
+}

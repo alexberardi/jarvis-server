@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 )
 
 // fakeCC is jarvisd's node API: the device registry, send-link and the LLM passthrough.
@@ -385,5 +387,49 @@ func TestRoutineFastPathSwitches(t *testing.T) {
 	}
 	if _, ok := tool.Direct(context.Background(), "good morning"); !ok {
 		t.Fatal("another routine's phrases stopped working")
+	}
+}
+
+// "Set a timer for 5 minutes." runs with no model and is spoken; the period speech-to-text adds
+// isn't a label (N: answered "Timer set for 5 minutes for ."). A switched-off pattern falls
+// through to the model, and a fast path whose command fails does too.
+func TestTimerFastPaths(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &timers.Service{Path: filepath.Join(t.TempDir(), "timers.json")}
+	tm := &Timers{Service: svc, Store: st}
+	ctx := context.Background()
+
+	out, ok := tm.Direct(ctx, "Set a timer for 5 minutes.")
+	if !ok || out["message"] != "Timer set for 5 minutes" || !node.TakeSignals(out).Speak || len(svc.Active()) != 1 {
+		t.Fatalf("set = %v, %v, timers %v", out, ok, svc.Active())
+	}
+	if out, ok := tm.Direct(ctx, "How much time is left?"); !ok || !strings.HasPrefix(out["message"].(string), "Your timer has ") {
+		t.Fatalf("check = %v, %v", out, ok)
+	}
+	if err := st.SetFastPathEnabled("set_timer", "timer.set", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tm.Direct(ctx, "set a timer for 10 minutes"); ok {
+		t.Fatal("a switched-off pattern ran")
+	}
+	if _, ok := tm.Direct(ctx, "wake me in 20 minutes"); !ok {
+		t.Fatal("another pattern of the command stopped working")
+	}
+	if fps := tm.FastPaths("set_timer"); len(fps) != 3 || fps[0].ID != "timer.set" {
+		t.Fatalf("fast paths = %+v", fps)
+	}
+	off := node.WithEnabled(ctx, func(name string) bool { return name != "cancel_timer" })
+	if _, ok := tm.Direct(off, "cancel all timers"); ok {
+		t.Fatal("ran a command the household turned off")
+	}
+	if out, ok := tm.Direct(ctx, "cancel all timers"); !ok || out["message"] != "Cancelled all 2 timers" {
+		t.Fatalf("cancel = %v, %v", out, ok)
+	}
+	// Nothing to cancel is still a success with words, as on N:; nothing to say falls through.
+	if out, ok := tm.Direct(ctx, "cancel my timer"); !ok || out["message"] != "No active timers to cancel" {
+		t.Fatalf("cancel none = %v, %v", out, ok)
 	}
 }
