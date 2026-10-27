@@ -41,6 +41,10 @@ The three requests are examples, not the scope. Every flow follows these:
    editor and terminal tabs, channels: one way for all of them, never one tool per app.
 10. **A funnel, cheapest stage first** (Q27). Each stage settles what it is sure of and passes
     the rest down with what it learned; any stage may ask instead of guessing.
+11. **Steered steps are direct; delegated work is a goal** (Q32). When you are steering ("click
+    7", "scroll down") it acts at once, deterministically. Whenever the model acts, it works
+    toward a goal: act, observe what actually changed, retry within a budget sized to what was
+    delegated. Success is the observed state, never the model's word.
 
 ## Decided
 
@@ -158,6 +162,24 @@ The three requests are examples, not the scope. Every flow follows these:
   with what's on screen. Nothing clearly close: every tool, as today. New tools feed it through
   their examples. A model classification pass and keyword rules were rejected for now (an extra
   model call per request; brittle and hand-kept). Revisit with toolbench numbers.
+
+- **2026-10-27: steered steps are direct; anything the model does is goal-oriented, judged by
+  observed state** (Q32). Real use: the model answered "scroll down a bit more" with "already
+  scrolled" and "click it again" with "already clicked", both doing nothing, and took seven
+  calls and two wrong pages for "open the second link". Mapping every request to a goal loop
+  was weighed against keeping commands direct:
+  - **Steering (stage 1): direct and deterministic.** The user is the planner; a reply must come
+    in well under a second and be the same every time. A goal loop costs a model call and an
+    observation per step (2–5 s for a trivial step) and adds surprises.
+  - **The model (stage 3): a short goal loop.** Act, observe through the tools what changed (URL,
+    title, focused window, scroll position, field value), retry if the goal isn't met; about 3
+    steps or 10 s, with progress on the island. A turn that claims an action with no successful
+    tool call, or whose observed state didn't change, isn't done.
+  - **Errands (stage 4): the long budget.** Minutes, step-by-step progress on the island,
+    interruptible (Q29), a spoken yes before anything irreversible (Q14).
+  Rejected: one goal loop for everything (latency, compounding error on local 9B–27B models,
+  less predictable, harder to interrupt) and a bare time budget ("3 minutes") as the success
+  test: a deadline bounds cost, it doesn't tell success from a claim.
 
 ## Where we are (origin/main @ 5ef4d899, survey 2026-10-25)
 
