@@ -26,8 +26,12 @@ follow one at a time.
 - A node without one doesn't offer the tool, so jarvisd's server-side `control_device` keeps
   the turn and sends it to the node that does have the family.
 
-Not ported yet:
-- the routine's trigger-phrase pre-route (the node's Director path is silent, and a routine
-  speaks its reply), so "good morning" goes through the model;
-- the per-routine fast-path switches;
-- Pantry `routine.json` files, which are protected from a pull but never loaded into the store.
+**Routine trigger phrases** (user: "My wife loves them so support is a must"). A transcript that
+matches a routine's trigger phrase runs the routine on the node, with no model, and its reply
+is spoken: the routine is a Director whose result asks to be spoken (`node.Signals.Speak`).
+The matching rules are N:'s, but the two loose ones need at least two words: N: ran "good
+morning" for a lone "Good." in a follow-up window. The trigger phrases also come from routines
+in installed Pantry packages (`routine.json`), read from the package, not copied into the store.
+
+Not ported yet: the per-routine fast-path switches (the app's Inspect fast-paths screen, which
+lets the household turn off one routine's phrases when they collide with another command).
