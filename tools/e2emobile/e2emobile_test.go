@@ -467,17 +467,21 @@ func TestRunRetriesUpToThreeTries(t *testing.T) {
 func TestRecoverDeviceWaitsOutABurstOfDrops(t *testing.T) {
 	c, _, calls := dropConfig(t, map[string]string{"a.yaml": "a"})
 	c.settle = 30 * time.Millisecond
+	// A clock that moves 5 ms per reading, whatever the runner's speed: the burst's runs of
+	// "up" (at most 3 polls) stay shorter than the window, as on a fast machine.
+	clock := time.Unix(0, 0)
+	c.now = func() time.Time { clock = clock.Add(5 * time.Millisecond); return clock }
 	flaps := filepath.Join(filepath.Dir(calls), "flaps")
 	write(t, flaps, "down\nup\nup\nup\ndown\nup\nup\ndown\n")
-	start := time.Now()
+	start := clock
 	if err := c.recoverDevice(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if left, _ := os.ReadFile(flaps); len(left) != 0 {
 		t.Errorf("back before the burst was over (%q left)", left)
 	}
-	if time.Since(start) < c.settle {
-		t.Errorf("back after %s, want at least the settle window", time.Since(start))
+	if took := clock.Sub(start); took < c.settle {
+		t.Errorf("back after %s, want at least the settle window", took)
 	}
 	log, _ := os.ReadFile(calls)
 	if !strings.Contains(string(log), "force-stop dev.mobile.maestro") {
