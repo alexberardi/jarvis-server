@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -269,5 +270,20 @@ func TestLocalTimezoneHonoursTZ(t *testing.T) {
 	t.Setenv("TZ", "")
 	if got := LocalTimezone(); got == "" || got == "Local" {
 		t.Fatalf("got %q, want an IANA name or UTC", got)
+	}
+}
+
+// levelSummary: 10 chunks at levels 100..1000 against a threshold of 650 put 4 at or above it.
+func TestLevelSummary(t *testing.T) {
+	var pcm []int16
+	for i := 1; i <= 10; i++ {
+		pcm = append(pcm, slices.Repeat([]int16{int16(i * 100)}, ChunkSamples)...)
+	}
+	got := fmt.Sprint(levelSummary(pcm, 650))
+	if want := "[threshold 650 loud_s 0.32 rms_p50 500 rms_p90 900 rms_max 1000]"; got != want {
+		t.Errorf("levelSummary = %s; want %s", got, want)
+	}
+	if got := fmt.Sprint(levelSummary(nil, 300)); got != "[threshold 300]" {
+		t.Errorf("empty = %s", got)
 	}
 }
