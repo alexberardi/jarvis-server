@@ -478,8 +478,24 @@ func itemsAction(re *regexp.Regexp, action string) func([]string) (map[string]an
 	}
 }
 
+// asRegularRe is a trailing "as a regular" (or staple) in what to add. N:'s fast path kept it
+// in the item's name ("soda as a regular"), not a regular, so a trip clear removed it.
+var asRegularRe = regexp.MustCompile(`(?i)\s+as\s+(?:a\s+)?(?:regular|staple)s?$`)
+
+// addAction is the add fast path's handler: the items, and regular when they end "as a regular".
+func addAction(m []string) (map[string]any, bool) {
+	phrase := group(shopAddRe, m, "items")
+	regular := asRegularRe.MatchString(phrase)
+	items := splitItems(asRegularRe.ReplaceAllString(phrase, ""))
+	args := map[string]any{"action": "add", "items": toAny(items)}
+	if regular {
+		args["regular"] = true
+	}
+	return args, len(items) > 0
+}
+
 var shoppingPatterns = []pattern{
-	regexPattern("shopping_list.add", "Bypass LLM for 'add X to the shopping list'", "add milk to the shopping list", shopAddRe, itemsAction(shopAddRe, "add")),
+	regexPattern("shopping_list.add", "Bypass LLM for 'add X to the shopping list'", "add milk to the shopping list", shopAddRe, addAction),
 	regexPattern("shopping_list.read", "Bypass LLM for 'what's on the shopping list'", "what's on the shopping list", shopReadRe, action("read")),
 	regexPattern("shopping_list.check_off", "Bypass LLM for 'check X off the shopping list'", "check milk off the shopping list",
 		shopCheckOffRe, itemsAction(shopCheckOffRe, "check_off")),
