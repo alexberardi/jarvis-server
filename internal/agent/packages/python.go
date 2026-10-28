@@ -67,6 +67,7 @@ var PortedToGo = []string{
 	"calculator_command", "measurement_conversion_command", "tell_a_joke_command", // Calculate, Convert, Joke
 	"answer_question_command", "chat_command", // Talk
 	"control_node_command", "whats_up_command", "act_on_items_command", // ControlNode, CheckAlerts, ActOnItems
+	"shopping_list_command", "todo_list_command", // Shopping, Todo
 }
 
 // pythonVersion is the interpreter uv installs for the venv: its own standalone build, so the

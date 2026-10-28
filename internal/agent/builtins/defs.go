@@ -213,3 +213,22 @@ func pyStr(v any) string {
 	}
 	return fmt.Sprint(v)
 }
+
+// browserDef is a ported command's data-browser settings as the Python command had them
+// (defs/<name>.browser.json, written with the definitions).
+func browserDef(name string) nodesettings.DataCommand {
+	b, err := defs.ReadFile("defs/" + name + ".browser.json")
+	if err != nil {
+		panic(err)
+	}
+	var d nodesettings.DataCommand
+	if err := json.Unmarshal(b, &d); err != nil {
+		panic(err)
+	}
+	return d
+}
+
+// noCreate is Create for a command whose browser has no create (supports_create false).
+func noCreate(command string) error {
+	return &nodesettings.ErrRejected{Message: command + " doesn't create records from the app"}
+}

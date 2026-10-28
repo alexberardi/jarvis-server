@@ -1,0 +1,74 @@
+{
+  "command_name": "reminder",
+  "mode": "enabled",
+  "storage_name": "set_reminder",
+  "supports_create": false,
+  "fields": [
+    {
+      "name": "reminder_id",
+      "type": "id",
+      "label": "ID",
+      "editable": false
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "label": "What",
+      "required": true
+    },
+    {
+      "name": "due_at",
+      "type": "datetime",
+      "label": "When",
+      "required": true
+    },
+    {
+      "name": "recurrence",
+      "type": "enum",
+      "label": "Repeat",
+      "enum_values": [
+        "daily",
+        "weekdays",
+        "weekly",
+        "biweekly",
+        "monthly"
+      ]
+    },
+    {
+      "name": "snooze_until",
+      "type": "datetime",
+      "label": "Snoozed until",
+      "editable": false
+    },
+    {
+      "name": "user_id",
+      "type": "user_ref",
+      "label": "Owner",
+      "editable": false
+    },
+    {
+      "name": "announced",
+      "type": "bool",
+      "label": "Fired",
+      "editable": false
+    },
+    {
+      "name": "announce_count",
+      "type": "int",
+      "label": "Times fired",
+      "editable": false
+    },
+    {
+      "name": "last_announced_at",
+      "type": "datetime",
+      "label": "Last fired",
+      "editable": false
+    },
+    {
+      "name": "created_at",
+      "type": "datetime",
+      "label": "Created",
+      "editable": false
+    }
+  ]
+}

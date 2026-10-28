@@ -1,0 +1,21 @@
+{
+  "command_name": "export_shopping_list",
+  "mode": "enabled",
+  "storage_name": "walmart_items",
+  "supports_create": false,
+  "fields": [
+    {
+      "name": "item",
+      "type": "string",
+      "label": "Item",
+      "editable": false,
+      "required": true
+    },
+    {
+      "name": "walmart_item_id",
+      "type": "string",
+      "label": "Walmart item ID",
+      "placeholder": "e.g. 10450114"
+    }
+  ]
+}
