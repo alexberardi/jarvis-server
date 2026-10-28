@@ -36,11 +36,25 @@ func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings
 				if f, ok := t.(fastPather); ok {
 					c.FastPaths = append(c.FastPaths, f.FastPaths(d.Name)...)
 				}
+				if s, ok := t.(secretsDeclarer); ok && !fromSidecar(pkgs, d.Name) {
+					c.Secrets = append(c.Secrets, s.Secrets(d.Name)...)
+				}
 			}
 			out = append(out, c)
 		}
 		return out
 	}
+}
+
+// secretsDeclarer is a Go built-in with settings of its own (the shopping export's store).
+type secretsDeclarer interface {
+	Secrets(command string) []nodesettings.SecretSpec
+}
+
+// fromSidecar reports whether the sidecar has the command (its secrets came with it).
+func fromSidecar(pkgs map[string]nodesettings.Command, name string) bool {
+	_, ok := pkgs[name]
+	return ok
 }
 
 // fastPather is a toolset with fast-path patterns for some of its commands (the routine

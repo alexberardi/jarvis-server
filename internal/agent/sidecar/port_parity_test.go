@@ -672,3 +672,221 @@ func TestTodoMatchesPython(t *testing.T) {
 		"mark the laundry as unfinished on my to-do list", "cross out buy milk on the to-do list",
 	}, builtins.TodoMatch)
 }
+
+// fakeInbox is jarvisd's /node/inbox-item: it records each posted item and answers sent.
+type fakeInbox struct {
+	mu    sync.Mutex
+	items []map[string]any
+	sent  bool
+}
+
+func (f *fakeInbox) start(t *testing.T) *node.CC {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		f.items = append(f.items, body)
+		sent := f.sent
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": sent})
+	}))
+	t.Cleanup(srv.Close)
+	return node.NewCC(srv.URL, node.Creds{NodeID: "n1", NodeKey: "k"})
+}
+
+func (f *fakeInbox) take() []map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.items
+	f.items = nil
+	return out
+}
+
+func TestExportTodoMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	inbox := &fakeInbox{sent: true}
+	cc := inbox.start(t)
+	h := &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}}
+	h.SetCC(cc)
+	sc, pySt := pythonBuiltinsStore(t, py, h)
+	goSt, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := &builtins.ExportTodo{Store: goSt, CC: func() *node.CC { return cc }}
+	ctx := context.Background()
+	// The same to-do list in both stores, added in a known order (read sorts by added_at).
+	for i, task := range []map[string]any{{"task": "Fold the laundry", "completed": false}, {"task": "pay rent", "completed": true},
+		{"task": "call mom", "completed": false}, {"task": strings.Repeat("x", 130), "completed": false}} {
+		task["added_at"] = fmt.Sprintf("2026-10-27T1%d:00:00+00:00", i)
+		task["completed_at"] = nil
+		o, _ := nodesettings.ObjectOf(task)
+		key := strings.ToLower(strings.ReplaceAll(task["task"].(string), " ", "_"))
+		_ = pySt.SaveData("todo_list", key, o, nil)
+		_ = goSt.SaveData("todo_list", key, o, nil)
+	}
+	compare := func(label string, args map[string]any, uid *int64) {
+		t.Helper()
+		pyOut, _ := sc.Call(ctx, "export_todo_list", args, node.Request{UserID: uid})
+		pyPosted := inbox.take()
+		goOut, _ := port.Call(ctx, "export_todo_list", args, node.Request{UserID: uid})
+		goPosted := inbox.take()
+		p, pw := normal(t, pyOut)
+		g, gw := normal(t, goOut)
+		if !reflect.DeepEqual(p, g) || pw != gw {
+			t.Errorf("%s:\n python %v\n go     %v", label, p, g)
+		}
+		if a, b := asJSON(pyPosted), asJSON(goPosted); a != b {
+			t.Errorf("%s posted:\n python %s\n go     %s", label, a, b)
+		}
+		if wantPost := uid != nil; (len(goPosted) == 1) != wantPost {
+			t.Errorf("%s: %d items posted", label, len(goPosted))
+		}
+		if label == "export" {
+			t.Logf("posted: %s", asJSON(goPosted))
+		}
+	}
+	seven := int64(7)
+	compare("unknown speaker", nil, nil)
+	compare("export", nil, &seven)
+	inbox.sent = false
+	compare("not delivered", nil, &seven)
+	inbox.sent = true
+
+	// Save: the user ticked call mom and left pay rent unticked; laundry stays open.
+	for _, data := range []map[string]any{
+		{"selected": []any{map[string]any{"key": "call_mom"}}, "context": map[string]any{"keys": []any{"fold_the_laundry", "pay_rent", "call_mom", "gone"}}},
+		{"selected": []any{map[string]any{"key": "call_mom"}}, "context": map[string]any{"keys": []any{"call_mom"}}},
+		{"selected": []any{}},
+	} {
+		params := map[string]any{"command_name": "export_todo_list", "callback_name": "save_todo_state", "data": data, "user_id": 7,
+			"conversation_id": "c", "voice_command": "cb", "enabled": true}
+		pyRes, err := sc.Callback(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		goRes, _ := port.Callback(params)
+		if a, b := asJSON(pyRes), asJSON(goRes); a != b {
+			t.Errorf("save %v:\n python %s\n go     %s", data, a, b)
+		}
+		if a, b := storedRecords(t, pySt, "todo_list"), storedRecords(t, goSt, "todo_list"); a != b {
+			t.Errorf("records after save:\n python %s\n go     %s", a, b)
+		}
+	}
+	for _, params := range []map[string]any{
+		{"command_name": "export_todo_list", "callback_name": "nope", "data": map[string]any{}, "enabled": true},
+		{"command_name": "export_todo_list", "callback_name": "save_todo_state", "data": map[string]any{}, "enabled": false},
+	} {
+		pyRes, _ := sc.Callback(params)
+		goRes, _ := port.Callback(params)
+		if a, b := asJSON(pyRes), asJSON(goRes); a != b {
+			t.Errorf("%v:\n python %s\n go     %s", params, a, b)
+		}
+	}
+	checkFastPaths(t, py, map[string]string{"export_todo_list_command": "ExportTodoListCommand"}, []string{
+		"send my to-do list to my phone", "export the task list", "send me my todo list", "show my to-do list on my phone",
+		"pull up the to do list on phone.", "show me my to-do list", "send my shopping list",
+	}, builtins.ExportTodoMatch)
+}
+
+func TestExportShoppingMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	inbox := &fakeInbox{sent: true}
+	cc := inbox.start(t)
+	h := &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}}
+	h.SetCC(cc)
+	sc, pySt := pythonBuiltinsStore(t, py, h)
+	goSt, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := &builtins.ExportShopping{Store: goSt, CC: func() *node.CC { return cc }}
+	ctx := context.Background()
+	both := func(f func(st *nodesettings.Store)) { f(pySt); f(goSt) }
+	both(func(st *nodesettings.Store) {
+		for _, r := range []map[string]any{ // a fixed order: the store keeps insertion order
+			{"item": "milk", "checked": false, "regular": true, "quantity": 2},
+			{"item": "eggs", "checked": false, "regular": false, "quantity": 1},
+			{"item": "bread", "checked": true, "regular": false, "quantity": 1},
+			{"item": "coffee", "checked": false, "regular": false, "quantity": 150},
+		} {
+			o, _ := nodesettings.ObjectOf(r)
+			_ = st.SaveData("shopping_list", r["item"].(string), o, nil)
+		}
+		w, _ := nodesettings.ObjectOf(map[string]any{"item": "milk", "walmart_item_id": " 10450114 "})
+		_ = st.SaveData("walmart_items", "milk", w, nil)
+	})
+	seven := int64(7)
+	compare := func(label string, args map[string]any, req node.Request) {
+		t.Helper()
+		pyOut, _ := sc.Call(ctx, "export_shopping_list", args, req)
+		pyPosted := inbox.take()
+		goOut, _ := port.Call(ctx, "export_shopping_list", args, req)
+		goPosted := inbox.take()
+		p, pw := normal(t, pyOut)
+		g, gw := normal(t, goOut)
+		if !reflect.DeepEqual(p, g) || pw != gw {
+			t.Errorf("%s:\n python %v\n go     %v", label, p, g)
+		}
+		if a, b := asJSON(pyPosted), asJSON(goPosted); a != b {
+			t.Errorf("%s posted:\n python %s\n go     %s", label, a, b)
+		}
+		if (len(goPosted) == 1) != (req.UserID != nil) || (req.UserID != nil && !strings.Contains(asJSON(goPosted), "checkbox_stepper")) {
+			t.Errorf("%s: posted %s", label, asJSON(goPosted))
+		}
+	}
+	compare("unknown speaker", nil, node.Request{})
+	compare("walmart", nil, node.Request{UserID: &seven, VoiceCommand: "send my shopping list"})
+	if a, b := storedRecords(t, pySt, "walmart_items"), storedRecords(t, goSt, "walmart_items"); a != b || !strings.Contains(a, "eggs") {
+		t.Errorf("seeded walmart_items:\n python %s\n go     %s", a, b)
+	}
+	compare("notes by voice", map[string]any{"provider": "walmart"}, node.Request{UserID: &seven, VoiceCommand: "send my list to my notes"})
+	both(func(st *nodesettings.Store) {
+		_ = st.SetSecret("EXPORT_PROVIDER", " Notes ", "integration", "string", nil)
+	})
+	compare("notes by setting", nil, node.Request{UserID: &seven, VoiceCommand: "send it"})
+
+	cb := func(label string, data map[string]any) {
+		t.Helper()
+		params := map[string]any{"command_name": "export_shopping_list", "callback_name": "export_selected", "data": data,
+			"user_id": 7, "conversation_id": "c", "voice_command": "cb", "enabled": true}
+		pyRes, _ := sc.Callback(params)
+		goRes, _ := port.Callback(params)
+		if a, b := asJSON(pyRes), asJSON(goRes); a != b {
+			t.Errorf("%s:\n python %s\n go     %s", label, a, b)
+		}
+		if a, b := storedRecords(t, pySt, "shopping_list"), storedRecords(t, goSt, "shopping_list"); a != b {
+			t.Errorf("%s records:\n python %s\n go     %s", label, a, b)
+		}
+	}
+	cb("nothing selected", map[string]any{"selected": []any{map[string]any{"key": ""}}, "context": map[string]any{"provider": "walmart"}})
+	cb("no walmart ids", map[string]any{"selected": []any{map[string]any{"key": "eggs"}}, "context": map[string]any{"provider": "walmart"}})
+	cb("walmart", map[string]any{"selected": []any{map[string]any{"key": "milk", "quantity": 3}, map[string]any{"key": "eggs"}},
+		"context": map[string]any{"provider": "walmart"}})
+	cb("notes", map[string]any{"selected": []any{map[string]any{"key": "coffee", "quantity": "x"}, map[string]any{"key": "gone", "quantity": 120}},
+		"provider": "notes"})
+
+	var records []nodesettings.Object
+	for _, r := range []map[string]any{{"item": "milk", "walmart_item_id": "123"}, {"item": "eggs", "walmart_item_id": " "}, {}} {
+		o, _ := nodesettings.ObjectOf(r)
+		records = append(records, o)
+	}
+	pySum, _ := sc.Summaries(ctx, "export_shopping_list", records)
+	goSum, _ := port.Summaries(ctx, "export_shopping_list", records)
+	if a, b := asJSON(pySum), asJSON(goSum); a != b {
+		t.Errorf("summaries:\n python %s\n go     %s", a, b)
+	}
+	var pySecrets []nodesettings.SecretSpec
+	for _, c := range sc.Commands() {
+		if c.Name == "export_shopping_list" {
+			pySecrets = c.Secrets
+		}
+	}
+	if a, b := asJSON(pySecrets), asJSON(port.Secrets("export_shopping_list")); a != b {
+		t.Errorf("secrets:\n python %s\n go     %s", a, b)
+	}
+	checkFastPaths(t, py, map[string]string{"export_shopping_list_command": "ExportShoppingListCommand"}, []string{
+		"send my shopping list", "export the grocery list to walmart", "send our groceries list to the store.",
+		"send my shopping list to my notes", "send my shopping list to target", "export my contacts", "send the shopping list to notes?",
+	}, builtins.ExportShoppingMatch)
+}

@@ -855,7 +855,7 @@ func runAgent(ctx context.Context, args []string) error {
 	wirePackages(r, tf.pkgs, log)
 	// action, callback and toggle_command: the app's device control, a command's buttons and
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
-	wireActions(r, sc, st, sayNow(mic), log)
+	wireActions(r, sc, tools, st, sayNow(mic), log)
 	if sc != nil {
 		wireDevices(r, sc, tf.registry, log)
 		wireRoutineVerb(r, served, log)
@@ -1180,7 +1180,8 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		&builtins.Joke{CC: cc, Store: st})
 	if st != nil {
 		// The household's lists, in the node's store as the Python commands kept them.
-		tools = append(tools, &builtins.Shopping{Store: st}, &builtins.Todo{Store: st})
+		tools = append(tools, &builtins.Shopping{Store: st}, &builtins.Todo{Store: st},
+			&builtins.ExportTodo{Store: st, CC: cc, Log: log}, &builtins.ExportShopping{Store: st, CC: cc, Log: log})
 	}
 	if f.host != nil && f.host.Timers != nil {
 		// A Pi's timers, volume and alerts: the host's services, on its speaker.

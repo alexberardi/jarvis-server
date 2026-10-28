@@ -2,10 +2,12 @@ package voice
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -188,5 +190,28 @@ func TestVoiceProfileBoundsTheDuration(t *testing.T) {
 	profiles(rec).Enroll(context.Background(), srv, det)
 	if rec.takes[0].Secs != maxTakeSecs {
 		t.Fatalf("secs = %v, want the %v s cap", rec.takes[0].Secs, maxTakeSecs)
+	}
+}
+
+// A quiet take is uploaded normalised (as a voice turn's audio is), so jarvisd's -45 dBFS
+// speech gate counts the reading, not just its loudest syllables.
+func TestEnrollUploadsTheTakeNormalised(t *testing.T) {
+	quiet := make([]int16, 2*CaptureRate)
+	for i := range quiet {
+		quiet[i] = int16(150 * math.Sin(float64(i)*2*math.Pi*220/CaptureRate)) // about -50 dBFS
+	}
+	rec := &fakeRecorder{pcm: quiet}
+	p, srv := newProfileCC(t, 0, `{"status":"enrolled"}`)
+	profiles(rec).Enroll(context.Background(), srv, details("r1"))
+	if len(p.uploads) != 1 {
+		t.Fatalf("uploads = %d", len(p.uploads))
+	}
+	pcm := make([]int16, (len(p.uploads[0].wav)-44)/2)
+	for i := range pcm {
+		pcm[i] = int16(binary.LittleEndian.Uint16(p.uploads[0].wav[44+2*i:]))
+	}
+	gain := RMS(pcm) / RMS(quiet)
+	if db := 20 * math.Log10(gain); db < 17.5 || db > 18.5 { // capped at +18 dB
+		t.Fatalf("uploaded %.1f dB louder, want +18", db)
 	}
 }

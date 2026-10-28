@@ -183,8 +183,11 @@ func (r rec) str(k string) string {
 	}
 	return pyStr(r.obj.Value(k))
 }
-func (r rec) truthy(k string) bool {
-	switch v := r.obj.Value(k).(type) {
+func (r rec) truthy(k string) bool { return pyTruthy(r.obj.Value(k)) }
+
+// pyTruthy is Python's bool() of a JSON value.
+func pyTruthy(v any) bool {
+	switch v := v.(type) {
 	case nil:
 		return false
 	case bool:
@@ -194,6 +197,12 @@ func (r rec) truthy(k string) bool {
 	case json.Number:
 		f, _ := v.Float64()
 		return f != 0
+	case float64:
+		return v != 0
+	case []any:
+		return len(v) > 0
+	case map[string]any:
+		return len(v) > 0
 	}
 	return true
 }
