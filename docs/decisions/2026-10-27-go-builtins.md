@@ -37,3 +37,18 @@ in installed Pantry packages (`routine.json`), read from the package, not copied
 (`routine.<slug>`, as on N:) in the snapshot's `fast_paths`, and the app's Inspect fast-paths
 screen turns one off with a `fast_path_registry` push, kept sparse in the node's settings store.
 A routine whose phrases are off still runs by name, from Run now and on its schedule.
+
+**`reminder`, the last Python built-in (2026-10-27).** `builtins.Reminder` is the command and
+`services.reminder_service` in one. The records are the same `set_reminder` records, in the same
+field order, so a Pi's existing reminders carry over. The Pi's poller now asks it, not the
+sidecar's `reminders_due`. It also covers the `set_at` callback, the push setting
+(`REMINDER_PUSH_NOTIFICATIONS`) and the app's edits: through `nodesettings.RecordUpdater`, which
+applies `update_reminder`'s checks and clears the firing history when the recurrence changes.
+Three differences are deliberate:
+
+- A date is placed at its own day's UTC offset. Python used today's offset, so "Monday at 9"
+  set before a DST change fired at 8.
+- A recurring reminder advances on the local clock: "every day at 8" stays at 8 across the change.
+- The records are read from the store each time rather than cached at boot, so an edit or a
+  delete from the app is what fires. On the Python node, an edit made outside the service was
+  missed until a restart.

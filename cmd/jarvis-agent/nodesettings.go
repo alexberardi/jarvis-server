@@ -125,6 +125,13 @@ func (m mergedData) Create(ctx context.Context, command string, values nodesetti
 	return "", nil, fmt.Errorf("no command %q", command)
 }
 
+func (m mergedData) UpdateRecord(command, key string, patch nodesettings.Object, visible func(nodesettings.Object) bool) (nodesettings.Object, bool, error) {
+	if u, ok := m.owner(command).(nodesettings.RecordUpdater); ok {
+		return u.UpdateRecord(command, key, patch, visible)
+	}
+	return nodesettings.Object{}, false, nil
+}
+
 // wireNodeSettings makes the runner a participant in the K2 settings protocol (DESIGN §16):
 // the K2 relay, settings snapshots and config pushes over MQTT nudges, the backstop on every
 // connect, and needs_k2 in the heartbeat until a key is stored. It also answers the app's

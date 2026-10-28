@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/reminders"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
@@ -37,13 +39,17 @@ func pythonBuiltins(t *testing.T, py string, h *sdkhost.Host) *sidecar.Sidecar {
 	return sc
 }
 
-// pythonBuiltinsStore is pythonBuiltins with the settings store its commands keep data in.
-func pythonBuiltinsStore(t *testing.T, py string, h *sdkhost.Host) (*sidecar.Sidecar, *nodesettings.Store) {
+// pythonBuiltinsStore is pythonBuiltins with the settings store its commands keep data in;
+// seed writes to it before the commands load (the reminder service reads its records at boot).
+func pythonBuiltinsStore(t *testing.T, py string, h *sdkhost.Host, seed ...func(*nodesettings.Store)) (*sidecar.Sidecar, *nodesettings.Store) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := nodesettings.OpenStore(dir, "n1")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, f := range seed {
+		f(st)
 	}
 	b, _ := json.Marshal(map[string]any{"packages": []any{}, "builtins": map[string]any{"package": "commands",
 		"skip": []string{"control_device_command", "routine_command", "send_link_command"}}})
@@ -889,4 +895,190 @@ func TestExportShoppingMatchesPython(t *testing.T) {
 		"send my shopping list", "export the grocery list to walmart", "send our groceries list to the store.",
 		"send my shopping list to my notes", "send my shopping list to target", "export my contacts", "send the shopping list to notes?",
 	}, builtins.ExportShoppingMatch)
+}
+
+// reminderNoise blanks what differs between two runs of the same reminder calls: the random
+// ids and the stamps read from the clock mid-call (microseconds). A due time computed from a
+// date or a clock time is whole seconds and still compared. Python 3.14's datetime adds
+// ", not N" to a range error that 3.12 (CI's, the Pi's) doesn't.
+var reminderNoise = regexp.MustCompile(`rem_[0-9a-f]{8}|"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00"`)
+
+var py314Range = regexp.MustCompile(`(must be in \d+\.\.\d+), not -?\d+`)
+
+func reminderJSON(v any) string {
+	return py314Range.ReplaceAllString(reminderNoise.ReplaceAllString(asJSON(v), "X"), "$1")
+}
+
+// reminderRecords is the set_reminder records, noise blanked.
+func reminderRecords(st *nodesettings.Store) string {
+	var out []string
+	for _, r := range st.Records("set_reminder", time.Now()) {
+		out = append(out, reminderJSON(r.Data))
+	}
+	return strings.Join(out, "\n")
+}
+
+func TestReminderMatchesPython(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The reference can't run there: Windows Python ignores TZ, and reminder_service's
+		// strftime("%-I") is invalid on Windows (its human times fall back to raw ISO).
+		t.Skip("the Python reminder command is Linux/macOS only")
+	}
+	py := nodeCommandsPython(t)
+	// A zone without DST, the same for both: Python places dates at today's offset, which the
+	// port deliberately doesn't (Reminder's doc); across a DST change they would differ.
+	t.Setenv("TZ", "Asia/Kolkata")
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Skip("no tzdata:", err)
+	}
+	// Seeded reminders, due or not: one-shot, daily, weekdays (a Friday), monthly (the 31st),
+	// snoozed, long fired (cleaned up), in the future, another speaker's. Times whose UTC and
+	// Kolkata weekdays agree (Python advances in UTC, the port on the local clock).
+	seed := func(st *nodesettings.Store) {
+		for _, r := range []map[string]any{
+			{"reminder_id": "rem_00000001", "text": "water the plants", "due_at": "2026-10-01T03:00:00+00:00", "recurrence": nil, "user_id": 7},
+			{"reminder_id": "rem_00000002", "text": "take my meds", "due_at": "2026-10-20T02:30:00+00:00", "recurrence": "daily", "user_id": 7},
+			{"reminder_id": "rem_00000003", "text": "standup", "due_at": "2026-10-23T03:30:00+00:00", "recurrence": "weekdays", "user_id": 7},
+			{"reminder_id": "rem_00000004", "text": "pay rent", "due_at": "2026-01-31T03:30:00+00:00", "recurrence": "monthly", "user_id": 7},
+			{"reminder_id": "rem_00000005", "text": "call the bank", "due_at": "2026-10-01T03:00:00+00:00", "snooze_until": "2099-01-01T00:00:00+00:00", "user_id": 7},
+			{"reminder_id": "rem_00000006", "text": "old one", "due_at": "2026-09-01T03:00:00+00:00", "announced": true, "announce_count": 1,
+				"last_announced_at": "2026-09-01T03:00:00+00:00", "user_id": 7},
+			{"reminder_id": "rem_00000007", "text": "dentist", "due_at": "2099-03-01T04:30:00+00:00", "user_id": 7},
+			{"reminder_id": "rem_00000008", "text": "feed the cat", "due_at": "2026-10-02T03:00:00+00:00", "user_id": 9},
+		} {
+			for k, v := range map[string]any{"created_at": "2026-09-01T00:00:00+00:00", "recurrence": nil, "announced": false,
+				"snooze_until": nil, "announce_count": 0, "last_announced_at": nil} {
+				if _, ok := r[k]; !ok {
+					r[k] = v
+				}
+			}
+			o, _ := nodesettings.ObjectOf(r)
+			_ = st.SaveData("set_reminder", r["reminder_id"].(string), o, nil)
+		}
+	}
+	sc, pySt := pythonBuiltinsStore(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}}, seed)
+	goSt, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(goSt)
+	port := &builtins.Reminder{Store: goSt, Loc: loc}
+	ctx := context.Background()
+
+	// The poller's check: what fires, and the records after (twice: the daily is still behind).
+	for i := range 2 {
+		pyDue, pyPending, err := sc.RemindersDue(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		goDue, goPending, _ := port.Due(ctx)
+		var want []reminders.Due
+		for _, d := range pyDue {
+			want = append(want, reminders.Due(d))
+		}
+		if a, b := asJSON(want), asJSON(goDue); a != b || pyPending != goPending {
+			t.Errorf("due %d:\n python %s (%d pending)\n go     %s (%d pending)", i, a, pyPending, b, goPending)
+		}
+		if a, b := reminderRecords(pySt), reminderRecords(goSt); a != b {
+			t.Errorf("records after due %d:\n python %s\n go     %s", i, a, b)
+		}
+	}
+
+	seven, nine := int64(7), int64(9)
+	call := func(args map[string]any, user *int64) {
+		t.Helper()
+		req := node.Request{UserID: user, VoiceCommand: "x"}
+		pyOut, _ := sc.Call(ctx, "reminder", args, req)
+		goOut, _ := port.Call(ctx, "reminder", args, req)
+		p, pw := normal(t, pyOut)
+		g, gw := normal(t, goOut)
+		if a, b := reminderJSON(p), reminderJSON(g); a != b || pw != gw {
+			t.Errorf("%v (user %v):\n python %s (wait %v)\n go     %s (wait %v)", args, user, a, pw, b, gw)
+		}
+	}
+	for _, a := range []map[string]any{
+		{"action": "list"}, {"action": "list", "filter": "recurring"}, {"action": "list", "filter": "today"},
+		{"action": "set"}, {"action": "set", "text": "call mom"}, {"action": "set", "text": "call mom", "recurrence": "daily"},
+		{"action": "set", "text": "check the laundry", "relative_minutes": 30}, {"action": "set", "text": "call mom", "time": "15:00"},
+		{"action": "set", "text": "pick up the package", "resolved_datetimes": []any{"tomorrow"}, "time": "08:30"},
+		{"action": "set", "text": "timesheet", "resolved_datetimes": []any{"next_monday"}, "time": "09:00", "recurrence": "weekly"},
+		{"action": "set", "text": "trash", "resolved_datetimes": []any{"tonight"}},
+		{"action": "set", "text": "water plants", "resolved_datetimes": []any{"tomorrow_morning"}},
+		{"action": "set", "text": "groceries", "resolved_datetimes": []any{"next_monday", "morning"}},
+		{"action": "set", "text": "hike", "resolved_datetimes": []any{"this_weekend"}, "time": "10:00"},
+		{"action": "set", "text": "late", "time": "25:00"}, {"action": "set", "text": "odd", "time": "7:xx"},
+		{"action": "set", "text": "noon", "time": "noon"}, {"action": "set", "text": "x", "recurrence": "hourly"},
+		{"action": "list"}, {"action": "list", "filter": "recurring"}, {"action": "list", "filter": "today"},
+		{"action": "delete"}, {"action": "delete", "text": "MOM"}, {"action": "delete", "text": "nothing like it"},
+		{"action": "snooze"}, {"action": "snooze", "text": "laundry", "minutes": 15}, {"action": "snooze", "text": "nope"},
+		{}, {"text": "buy milk"},
+	} {
+		call(a, &seven)
+	}
+	call(map[string]any{"action": "set", "text": "who am i", "time": "10:00"}, nil)
+	call(map[string]any{"action": "list"}, &nine)
+	call(map[string]any{"action": "list"}, nil)
+	if a, b := reminderRecords(pySt), reminderRecords(goSt); a != b {
+		t.Errorf("records:\n python %s\n go     %s", a, b)
+	}
+
+	// set_at, the proposable action's callback.
+	for _, data := range []map[string]any{
+		{"text": "leave for the airport", "due_at_iso": "2099-05-01T06:15:00-04:00", "idempotency_key": "k"},
+		{"text": "naive", "due_at_iso": "2099-05-01T06:15:00"}, {"text": "", "due_at_iso": "2099-05-01T06:15:00Z"},
+		{"text": "bad", "due_at_iso": "soon"},
+	} {
+		for _, uid := range []any{7, nil} {
+			params := map[string]any{"command_name": "reminder", "callback_name": "set_at", "data": data, "user_id": uid,
+				"conversation_id": "c", "voice_command": "cb", "enabled": true}
+			pyRes, _ := sc.Callback(params)
+			goRes, _ := port.Callback(params)
+			if a, b := reminderJSON(pyRes), reminderJSON(goRes); a != b {
+				t.Errorf("set_at %v (user %v):\n python %s\n go     %s", data, uid, a, b)
+			}
+		}
+	}
+	if a, b := reminderRecords(pySt), reminderRecords(goSt); a != b {
+		t.Errorf("records after set_at:\n python %s\n go     %s", a, b)
+	}
+	call(map[string]any{"action": "delete", "scope": "all"}, &nine)
+	call(map[string]any{"action": "delete", "scope": "all"}, &seven)
+	call(map[string]any{"action": "delete", "scope": "all"}, &seven)
+
+	var records []nodesettings.Object
+	for _, r := range []map[string]any{
+		{"text": "call mom", "due_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, {"text": "meds", "due_at": "2099-01-01T08:00:00+00:00", "recurrence": "daily"},
+		{"recurrence": "weekly"}, {"text": "", "due_at": "not a date"}, {},
+	} {
+		o, _ := nodesettings.ObjectOf(r)
+		records = append(records, o)
+	}
+	pySum, _ := sc.Summaries(ctx, "reminder", records)
+	goSum, _ := port.Summaries(ctx, "reminder", records)
+	if a, b := asJSON(pySum), asJSON(goSum); a != b {
+		t.Errorf("summaries:\n python %s\n go     %s", a, b)
+	}
+	want := asJSON(sc.DataCommands())
+	for _, d := range port.DataCommands() {
+		if !strings.Contains(want, asJSON(d)) {
+			t.Errorf("browser settings %s not among python's %s", asJSON(d), want)
+		}
+	}
+	var pySecrets []nodesettings.SecretSpec
+	for _, c := range sc.Commands() {
+		if c.Name == "reminder" {
+			pySecrets = c.Secrets
+		}
+	}
+	if a, b := asJSON(pySecrets), asJSON(port.Secrets("reminder")); a != b {
+		t.Errorf("secrets:\n python %s\n go     %s", a, b)
+	}
+	checkFastPaths(t, py, map[string]string{"reminder_command": "ReminderCommand"}, []string{
+		"what reminders do I have?", "list my reminders", "show me my reminders", "do I have any upcoming reminders",
+		"any reminders for today", "reminders today", "do i have reminders today?", "show me my recurring reminders",
+		"recurring reminders", "delete all my reminders", "clear all of my reminders.", "snooze", "snooze that",
+		"snooze the reminder", "snooze for 15 minutes", "snooze it for 2 hours", "snooze for 1 hr", "snooze the mom reminder for 5 minutes",
+		"remind me to call mom at 3", "any reminders", "any reminder for",
+	}, builtins.ReminderMatch)
 }

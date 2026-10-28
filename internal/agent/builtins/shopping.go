@@ -162,12 +162,14 @@ func spokenJoin(items []string) string {
 }
 
 // pyISO is Python's datetime.now(timezone.utc).isoformat().
-func pyISO(t time.Time) string {
-	t = t.UTC()
+func pyISO(t time.Time) string { return isoformat(t.UTC()) }
+
+// isoformat is an aware datetime's isoformat() in t's own zone (microseconds when non-zero).
+func isoformat(t time.Time) string {
 	if t.Nanosecond()/1000 != 0 {
-		return t.Format("2006-01-02T15:04:05.000000+00:00")
+		return t.Format("2006-01-02T15:04:05.000000-07:00")
 	}
-	return t.Format("2006-01-02T15:04:05+00:00")
+	return t.Format("2006-01-02T15:04:05-07:00")
 }
 
 // rec is a stored record's values (numbers as json.Number).
