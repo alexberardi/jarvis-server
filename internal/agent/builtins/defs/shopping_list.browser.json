@@ -1,0 +1,48 @@
+{
+  "command_name": "shopping_list",
+  "mode": "enabled",
+  "storage_name": "shopping_list",
+  "supports_create": false,
+  "fields": [
+    {
+      "name": "item",
+      "type": "string",
+      "label": "Item",
+      "editable": false,
+      "required": true
+    },
+    {
+      "name": "checked",
+      "type": "bool",
+      "label": "Checked off"
+    },
+    {
+      "name": "regular",
+      "type": "bool",
+      "label": "Regular item"
+    },
+    {
+      "name": "quantity",
+      "type": "int",
+      "label": "Quantity"
+    },
+    {
+      "name": "added_by",
+      "type": "user_ref",
+      "label": "Added by",
+      "editable": false
+    },
+    {
+      "name": "added_at",
+      "type": "datetime",
+      "label": "Added",
+      "editable": false
+    },
+    {
+      "name": "checked_at",
+      "type": "datetime",
+      "label": "Checked",
+      "editable": false
+    }
+  ]
+}

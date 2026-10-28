@@ -95,7 +95,7 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	for _, tl := range sc.Available(ctx) {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"shopping_list", "todo_list", "reminder"} {
+	for _, want := range []string{"reminder", "export_shopping_list", "export_todo_list"} {
 		if !names[want] {
 			t.Errorf("no %s among %v", want, names)
 		}
@@ -103,7 +103,7 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	// The Go agent serves these itself (packages.PortedToGo); a Python copy would shadow it.
 	for _, skipped := range []string{"control_device", "routine", "send_link", "set_timer", "check_timers", "cancel_timer",
 		"get_current_time", "calculate", "convert_measurement", "tell_joke", "answer_question", "chat",
-		"control_node", "check_alerts", "act_on_items"} {
+		"control_node", "check_alerts", "act_on_items", "shopping_list", "todo_list"} {
 		if names[skipped] {
 			t.Errorf("%s is offered by the sidecar; the Go agent serves it", skipped)
 		}
@@ -125,14 +125,6 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 
 	// control_node and check_alerts are Go now (TestControlNodeMatchesPython and
 	// TestCheckAlertsMatchesPython run the Python ones against them).
-
-	// The shopping list, in the agent's settings store.
-	if out := call("shopping_list", map[string]any{"action": "add", "items": []any{"milk"}}); out["success"] != true {
-		t.Errorf("shopping add = %v", out)
-	}
-	if out := call("shopping_list", map[string]any{"action": "read"}); !strings.Contains(asJSON(out), "milk") {
-		t.Errorf("shopping read = %v", out)
-	}
 
 	// Reminders: set by the command into the agent's store, nothing due yet.
 	out := call("reminder", map[string]any{"action": "set", "text": "check the oven", "relative_minutes": 30})

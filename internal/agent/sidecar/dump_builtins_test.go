@@ -64,5 +64,21 @@ func TestDumpPythonBuiltins(t *testing.T) {
 		}
 		n++
 	}
+	// The data browser's settings for the commands that keep records.
+	for _, d := range sc.DataCommands() {
+		var fields []any
+		_ = json.Unmarshal(d.Fields, &fields)
+		if d.Mode == "enabled" && d.StorageName == d.Name && len(fields) == 0 && !d.SupportsCreate {
+			continue // the default: a command that keeps no records
+		}
+		b, err := json.MarshalIndent(d, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(out, d.Name+".browser.json"), append(b, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		n++
+	}
 	t.Logf("wrote %d fixtures to %s", n, out)
 }

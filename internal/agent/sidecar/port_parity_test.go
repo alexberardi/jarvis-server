@@ -33,6 +33,13 @@ import (
 // pythonBuiltins starts the sidecar on the pinned built-ins as the Pi first loaded them.
 func pythonBuiltins(t *testing.T, py string, h *sdkhost.Host) *sidecar.Sidecar {
 	t.Helper()
+	sc, _ := pythonBuiltinsStore(t, py, h)
+	return sc
+}
+
+// pythonBuiltinsStore is pythonBuiltins with the settings store its commands keep data in.
+func pythonBuiltinsStore(t *testing.T, py string, h *sdkhost.Host) (*sidecar.Sidecar, *nodesettings.Store) {
+	t.Helper()
 	dir := t.TempDir()
 	st, err := nodesettings.OpenStore(dir, "n1")
 	if err != nil {
@@ -49,7 +56,7 @@ func pythonBuiltins(t *testing.T, py string, h *sdkhost.Host) *sidecar.Sidecar {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sc.Close() })
-	return sc
+	return sc, st
 }
 
 // normal is a call's output as JSON sees it, and its wait_for_input.
@@ -528,4 +535,140 @@ func TestActOnItemsMatchesPython(t *testing.T) {
 		{"act_on_items", map[string]any{"action": "mark_read", "ref_ids": []any{"e1"}}}, {"act_on_items", nil},
 		{"act_on_items", map[string]any{"action": "mark_read", "ref_ids": "e1"}},
 	})
+}
+
+// storedRecords is a command's records as JSON, timestamps blanked (Python reads the real clock).
+func storedRecords(t *testing.T, st *nodesettings.Store, command string) string {
+	t.Helper()
+	var out []string
+	for _, r := range st.Records(command, time.Now()) {
+		b, _ := json.Marshal(r.Data)
+		out = append(out, r.Key+"="+isoStamp.ReplaceAllString(string(b), `"T"`))
+	}
+	return strings.Join(out, "\n")
+}
+
+var isoStamp = regexp.MustCompile(`"\d{4}-\d\d-\d\dT[0-9:.]+\+00:00"`)
+
+func TestShoppingMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc, pySt := pythonBuiltinsStore(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	goSt, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := &builtins.Shopping{Store: goSt}
+	var cases []parityCase
+	for _, a := range []map[string]any{
+		{"action": "read"}, {"action": "add", "items": []any{"milk", "Almond Butter", "eggs"}},
+		{"action": "add", "items": "bread, cheese and some apples"}, {"items": []any{"milk"}},
+		{"action": "add", "items": []any{"milk"}, "regular": "true"}, {"action": "add", "items": []any{"coffee"}, "regular": true},
+		{"action": "read"}, {"action": "check_off", "items": []any{"milk", "butter", "kiwi"}},
+		{"action": "add", "items": []any{"milk"}}, {"action": "remove", "items": []any{"eggs", "kiwi"}},
+		{"action": "remove", "items": []any{"kiwi"}}, {"action": "check_off"}, {"action": "add", "items": []any{"  ", "!!"}},
+		{"action": "fly"}, {"action": "clear", "scope": "sometimes"}, {"action": "read"}, {"action": "check_off", "items": []any{"coffee"}},
+		{"action": "clear"}, {"action": "read"}, {"action": "clear", "scope": "everything"}, {"action": "clear", "scope": "everything"},
+		{"action": "add", "items": 5}, {},
+	} {
+		cases = append(cases, parityCase{"shopping_list", a})
+	}
+	checkParity(t, sc, port, cases)
+	// The same records, key for key and field for field.
+	cases = cases[:0]
+	for _, a := range []map[string]any{
+		{"action": "add", "items": []any{"oat milk", "Peanut Butter"}}, {"action": "add", "items": []any{"rice"}, "regular": true},
+		{"action": "check_off", "items": []any{"butter"}},
+	} {
+		cases = append(cases, parityCase{"shopping_list", a})
+	}
+	checkParity(t, sc, port, cases)
+	p, g := storedRecords(t, pySt, "shopping_list"), storedRecords(t, goSt, "shopping_list")
+	t.Logf("records:\n%s", p)
+	if p != g || p == "" {
+		t.Errorf("stored records:\n python %s\n go     %s", p, g)
+	}
+	checkFastPaths(t, py, map[string]string{"shopping_list_command": "ShoppingListCommand"}, []string{
+		"add milk to the shopping list", "put some eggs, bread, and a few apples on my grocery list", "add milk to my list",
+		"what's on the shopping list?", "read me the grocery list", "check milk off the shopping list",
+		"cross out eggs from the groceries list", "remove the milk from our shopping list", "take bread off of the grocery list",
+		"clear the shopping list", "wipe my grocery list.", "remind me to buy milk", "add mac and cheese to the shopping list",
+	}, builtins.ShoppingMatch)
+}
+
+func TestShoppingSummariesMatchPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc := pythonBuiltins(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	var records []nodesettings.Object
+	for _, r := range []map[string]any{
+		{"item": "milk", "checked": false, "regular": false, "quantity": 1},
+		{"item": "Eggs", "checked": true, "regular": true, "quantity": 3},
+		{"checked": true}, {"item": "bread", "quantity": nil, "regular": true},
+	} {
+		o, _ := nodesettings.ObjectOf(r)
+		records = append(records, o)
+	}
+	pySum, err := sc.Summaries(context.Background(), "shopping_list", records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goSum, _ := (&builtins.Shopping{}).Summaries(context.Background(), "shopping_list", records)
+	if p, g := asJSON(pySum), asJSON(goSum); p != g {
+		t.Errorf("summaries:\n python %s\n go     %s", p, g)
+	}
+	want := asJSON(sc.DataCommands())
+	for _, d := range (&builtins.Shopping{}).DataCommands() {
+		if !strings.Contains(want, asJSON(d)) {
+			t.Errorf("browser settings %s not among python's %s", asJSON(d), want)
+		}
+	}
+}
+
+func TestTodoMatchesPython(t *testing.T) {
+	py := nodeCommandsPython(t)
+	sc, pySt := pythonBuiltinsStore(t, py, &sdkhost.Host{Timers: &timers.Service{Path: filepath.Join(t.TempDir(), "t.json")}, Alerts: &sdkhost.Alerts{}})
+	goSt, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := &builtins.Todo{Store: goSt}
+	var cases []parityCase
+	for _, a := range []map[string]any{
+		{"action": "read"}, {"action": "add", "tasks": []any{"call mom and dad", "Fold the Laundry"}},
+		{"action": "add", "tasks": "walk the dog"}, {"tasks": []any{"call mom and dad"}}, {"action": "read"},
+		{"action": "complete", "tasks": []any{"laundry", "taxes"}}, {"action": "add", "tasks": []any{"fold the laundry"}},
+		{"action": "uncomplete", "tasks": []any{"fold the laundry"}}, {"action": "complete", "tasks": []any{"walk the dog"}},
+		{"action": "remove", "tasks": []any{"mom", "taxes"}}, {"action": "complete"}, {"action": "add", "tasks": []any{" "}},
+		{"action": "fly"}, {"action": "clear", "scope": "someday"}, {"action": "add", "tasks": []any{"pay rent"}},
+		{"action": "complete", "tasks": []any{"pay rent"}}, {"action": "clear", "scope": "completed"}, {"action": "read"},
+		{"action": "clear", "scope": "completed"},
+	} {
+		cases = append(cases, parityCase{"todo_list", a})
+	}
+	checkParity(t, sc, port, cases)
+	checkParity(t, sc, port, []parityCase{{"todo_list", map[string]any{"action": "add", "tasks": []any{"book flights"}}}})
+	p, g := storedRecords(t, pySt, "todo_list"), storedRecords(t, goSt, "todo_list")
+	if p != g || p == "" {
+		t.Errorf("stored records:\n python %s\n go     %s", p, g)
+	}
+	checkParity(t, sc, port, []parityCase{{"todo_list", map[string]any{"action": "clear"}}, {"todo_list", map[string]any{"action": "clear"}}})
+
+	var records []nodesettings.Object
+	for _, r := range []map[string]any{{"task": "call mom", "completed": false}, {"task": "taxes", "completed": true}, {}} {
+		o, _ := nodesettings.ObjectOf(r)
+		records = append(records, o)
+	}
+	pySum, _ := sc.Summaries(context.Background(), "todo_list", records)
+	goSum, _ := port.Summaries(context.Background(), "todo_list", records)
+	if a, b := asJSON(pySum), asJSON(goSum); a != b {
+		t.Errorf("summaries:\n python %s\n go     %s", a, b)
+	}
+	checkFastPaths(t, py, map[string]string{"todo_list_command": "TodoListCommand"}, []string{
+		"add call the dentist to my to-do list", "put walk the dog and feed the cat on the todo list", "what's on my to do list?",
+		"mark the laundry done on my to-do list", "mark the laundry as completed on my task list",
+		"mark the laundry on my to-do list as done", "mark the laundry as not done on my to-do list",
+		"mark the laundry on my todo list as not finished", "mark do not disturb on my todo list as done",
+		"mark do not disturb as done on my todo list", "check off the taxes from my to-do list", "uncheck the taxes on my todo list",
+		"remove pay rent from my to-do list", "clear out my to-do list", "wipe the task list.", "remind me to call mom",
+		"mark the laundry as unfinished on my to-do list", "cross out buy milk on the to-do list",
+	}, builtins.TodoMatch)
 }

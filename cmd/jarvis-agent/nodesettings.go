@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -48,14 +50,65 @@ type fastPather interface {
 }
 
 // dataCommands are the commands whose records the app's "Stored data" tab browses: the
-// sidecar's packages (the agent's built-in tools keep no JarvisStorage records).
+// sidecar's packages and the Go built-ins that keep records (the shopping list), in the
+// toolset's order. One source is returned as is.
 func dataCommands(tools node.Multi) nodesettings.DataCommands {
+	var all mergedData
 	for _, t := range tools {
-		if sc, ok := t.(*sidecar.Live); ok {
-			return sc
+		if d, ok := t.(nodesettings.DataCommands); ok {
+			all = append(all, d)
+		}
+	}
+	switch len(all) {
+	case 0:
+		return nil
+	case 1:
+		return all[0]
+	}
+	return all
+}
+
+// mergedData is several sources of browsable commands, each command answered by the first
+// that lists it.
+type mergedData []nodesettings.DataCommands
+
+func (m mergedData) DataCommands() []nodesettings.DataCommand {
+	var out []nodesettings.DataCommand
+	seen := map[string]bool{}
+	for _, d := range m {
+		for _, c := range d.DataCommands() {
+			if !seen[c.Name] {
+				seen[c.Name] = true
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+func (m mergedData) owner(command string) nodesettings.DataCommands {
+	for _, d := range m {
+		for _, c := range d.DataCommands() {
+			if c.Name == command {
+				return d
+			}
 		}
 	}
 	return nil
+}
+
+func (m mergedData) Summaries(ctx context.Context, command string, records []nodesettings.Object) ([]map[string]any, error) {
+	if d := m.owner(command); d != nil {
+		return d.Summaries(ctx, command, records)
+	}
+	return nil, fmt.Errorf("no command %q", command)
+}
+
+func (m mergedData) Create(ctx context.Context, command string, values nodesettings.Object, uid json.Number) (string, json.RawMessage, error) {
+	if d := m.owner(command); d != nil {
+		return d.Create(ctx, command, values, uid)
+	}
+	return "", nil, fmt.Errorf("no command %q", command)
 }
 
 // wireNodeSettings makes the runner a participant in the K2 settings protocol (DESIGN §16):

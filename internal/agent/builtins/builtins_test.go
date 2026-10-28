@@ -467,3 +467,28 @@ func TestControlNodeEndsTheExchange(t *testing.T) {
 		t.Fatalf("a failure ended the exchange: %v", out)
 	}
 }
+
+// "Add soda as a regular to my shopping list" adds a regular called soda, which a trip clear
+// keeps (N:'s fast path added an item named "soda as a regular" and the clear removed it).
+func TestShoppingAddAsARegular(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Shopping{Store: st}
+	ctx := context.Background()
+	for _, said := range []string{"Add soda as a regular on my shopping list.", "add chips and salsa as regulars to the grocery list"} {
+		if out, ok := s.Direct(ctx, said); !ok || !strings.Contains(out["message"].(string), "as a regular") && !strings.Contains(out["message"].(string), "as regulars") {
+			t.Fatalf("%q = %v, %v", said, out, ok)
+		}
+	}
+	s.Direct(ctx, "add bread to the shopping list")
+	out, _ := s.Direct(ctx, "clear the shopping list")
+	if out["regulars_reset"] != 3 || out["removed_count"] != 1 {
+		t.Fatalf("clear = %v", out)
+	}
+	out, _ = s.Direct(ctx, "what's on my shopping list")
+	if out["message"] != "You have 3 items on your shopping list: chips, salsa, and soda." {
+		t.Fatalf("read = %v", out["message"])
+	}
+}

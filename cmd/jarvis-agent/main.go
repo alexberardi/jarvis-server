@@ -1178,6 +1178,10 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 	tools = append(tools, &builtins.ControlDevice{Devices: f.registry, Families: live, CC: cc},
 		&builtins.SendLink{CC: cc}, f.routine, &builtins.Calculate{Store: st}, &builtins.Convert{Store: st},
 		&builtins.Joke{CC: cc, Store: st})
+	if st != nil {
+		// The household's lists, in the node's store as the Python commands kept them.
+		tools = append(tools, &builtins.Shopping{Store: st}, &builtins.Todo{Store: st})
+	}
 	if f.host != nil && f.host.Timers != nil {
 		// A Pi's timers, volume and alerts: the host's services, on its speaker.
 		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st},
