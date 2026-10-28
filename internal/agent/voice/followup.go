@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -365,7 +366,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 	// lose the start), trimmed to 1.5 s before onset.
 	required := min(onsetMax, onsetBase+(iteration-1))
 	var heard [][]int16
-	run := 0
+	run, longest, peak := 0, 0, 0.0
 	detected := false
 	for seen < budget {
 		c, err := next()
@@ -373,8 +374,11 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 			return nil, mapChunkTimeout(err)
 		}
 		heard = append(heard, c)
-		if RMS(c) >= s.threshold {
+		r := RMS(c)
+		peak = max(peak, r)
+		if r >= s.threshold {
 			run++
+			longest = max(longest, run)
 			if run >= required {
 				detected = true
 				break
@@ -384,6 +388,9 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		}
 	}
 	if !detected {
+		// What the window heard, so "it didn't hear me" can be told from a quiet mic.
+		s.log.Info("follow-up: no speech onset", "peak_rms", math.Round(peak), "threshold", s.threshold,
+			"longest_run", longest, "required", required, "wake_level_db", ptrVal(s.wakeLevel))
 		return nil, nil
 	}
 	if keep := max(1, frames(preOnsetKeepSecs)); len(heard) > keep {
