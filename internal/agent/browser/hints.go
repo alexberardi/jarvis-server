@@ -21,6 +21,8 @@ var (
 	reShowHints = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?(?:show|give me)\s+(?:me\s+)?(?:the\s+)?(?:numbers|hints|links|labels)(?:\s+on\s+(?:the|this)\s+page)?[\s.!?]*$|^\s*(?:numbers|hints)[\s.!?]*$`)
 	reHideHints = regexp.MustCompile(`(?i)^\s*(?:(?:hide|clear|close|remove)\s+(?:the\s+)?(?:numbers|hints|links|labels)|hide|cancel|never\s*mind|stop)[\s.!?]*$`)
 	// "click 7", "number 7", "click on number seven", "open 12"; with numbers shown, just "7".
+	// "type ABC into 29", "enter hello in number 4", "put my email in 12".
+	reTypeInto = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?(?:type|enter|put)\s+(.+?)\s+(?:in|into|in\s+to|on)\s+(?:number\s+|box\s+|field\s+)?([\w-]+(?:\s+[\w-]+)?)[\s.!?]*$`)
 	reHintVerb = regexp.MustCompile(`(?i)^\s*(?:click|press|open|tap|select|choose|pick)\s+(?:on\s+)?(?:number\s+)?(.+?)[\s.!?]*$|^\s*number\s+(.+?)[\s.!?]*$`)
 )
 
@@ -93,19 +95,39 @@ func (t *Tools) directHints(ctx context.Context, said string) (map[string]any, b
 	if !on {
 		return nil, false
 	}
+	if m := reTypeInto.FindStringSubmatch(said); m != nil {
+		if n, ok := spokenNumber(m[2]); ok {
+			text := strings.TrimSpace(m[1])
+			if q := reQuoted.FindStringSubmatch(text); q != nil {
+				text = q[1]
+			}
+			return t.fillHint(ctx, n, text), true
+		}
+	}
 	if n, ok := hintNumber(said, true); ok {
 		return t.clickHint(ctx, n, said), true
 	}
 	return nil, false
 }
 
-func (t *Tools) showHints(ctx context.Context) map[string]any {
+// reQuoted is text said in quotes, which keeps its own punctuation.
+var reQuoted = regexp.MustCompile(`^["“'‘](.+?)["”'’][.!?,]?$`)
+
+func (t *Tools) showHints(ctx context.Context) map[string]any { return t.drawHints(ctx, false) }
+
+// drawHints numbers what's on screen; wait lets a page that is loading (after a click or an
+// open) finish first.
+func (t *Tools) drawHints(ctx context.Context, wait bool) map[string]any {
 	if err := t.notJarvisPage(ctx, map[string]any{}, "No numbers were shown"); err != nil {
 		return t.hintFail(err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	res, err := t.call(ctx, "hints", map[string]any{}, map[string]any{"show": true})
+	extra := map[string]any{"show": true}
+	if wait {
+		extra["wait"] = true
+	}
+	res, err := t.call(ctx, "hints", map[string]any{}, extra)
 	if err != nil {
 		return t.hintFail(err)
 	}
@@ -135,36 +157,75 @@ func (t *Tools) showHints(ctx context.Context) map[string]any {
 // clickHint presses number n. A risky label ("Send", "Buy") asks first, as browser_click does;
 // the spoken yes comes back to AnswerChoice.
 func (t *Tools) clickHint(ctx context.Context, n int, said string) map[string]any {
+	return t.actHint(ctx, n, "press", "")
+}
+
+// fillHint types text into number n ("type ABC into 29"), as browser_fill does: the text is
+// sanitized, a password field is refused by the page, and confirmation follows the same gate.
+func (t *Tools) fillHint(ctx context.Context, n int, text string) map[string]any {
+	clean, err := dictate.Sanitize(text)
+	if err != nil {
+		return t.hintFail(fmt.Errorf("%w: %w", errDictate, err))
+	}
+	return t.actHint(ctx, n, "set_value", clean)
+}
+
+// actHint does op on number n: press, or set_value with value.
+func (t *Tools) actHint(ctx context.Context, n int, op, value string) map[string]any {
 	t.mu.Lock()
 	h := t.hints
 	t.mu.Unlock()
+	if h == nil {
+		return map[string]any{"success": false, "error_code": "no_numbers",
+			"error":        "no numbers are on the page right now; use the field's or button's label instead",
+			node.IslandKey: "No numbers on the page", node.IslandOnlyKey: true}
+	}
 	name, ok := h.names[n]
 	if !ok {
-		return map[string]any{"success": false, "error": fmt.Sprintf("there's no number %d on the page", n),
+		return map[string]any{"success": false, "error_code": "no_such_number", "error": fmt.Sprintf("there's no number %d on the page", n),
 			node.IslandKey: fmt.Sprintf("No number %d — say another", n), node.IslandOnlyKey: true, node.ChoiceKey: true}
+	}
+	label := cmp.Or(name, fmt.Sprint(n))
+	press := op == "press"
+	what, outcome, question := "Clicking ", "Nothing was clicked", fmt.Sprintf("Click %q in the browser?", dictate.Preview(label, 60))
+	if !press {
+		what, outcome = "Typing into ", "Nothing was typed"
+		question = fmt.Sprintf("Type %q into %q?", dictate.Preview(value, 60), dictate.Preview(label, 40))
 	}
 	args := map[string]any{"tab_id": h.tab}
 	act := func(ctx context.Context) (map[string]any, error) {
-		if err := t.notJarvisPage(ctx, args, "Nothing was clicked"); err != nil {
+		if err := t.notJarvisPage(ctx, args, outcome); err != nil {
 			return nil, err
 		}
-		t.show("Clicking " + dictate.Preview(cmp.Or(name, fmt.Sprint(n)), 60))
-		res, err := t.call(ctx, "act", args, map[string]any{"gen": h.gen, "ref": fmt.Sprintf("e%d", n), "op": "press"})
-		t.hideHints(ctx) // a number pressed is used up; the page has likely changed
+		t.show(what + dictate.Preview(label, 60))
+		extra := map[string]any{"gen": h.gen, "ref": fmt.Sprintf("e%d", n), "op": op}
+		if !press {
+			extra["value"] = value
+		}
+		res, err := t.call(ctx, "act", args, extra)
+		if press {
+			t.hideHints(ctx) // a number pressed is used up; the page has likely changed
+		}
 		if err != nil {
 			return nil, err
 		}
-		res["success"], res["clicked"] = true, cmp.Or(name, fmt.Sprint(n))
+		if press {
+			t.refreshHints(ctx)
+			res["clicked"] = label
+		} else {
+			res["filled"] = label
+		}
+		res["success"] = true
 		return res, nil
 	}
 	g := dictate.GateType
 	// A number with no readable label is asked about too (DESKTOP-COMMANDS.md Q8): its risk can't be told.
-	if t.Confirm.Needs(dictate.GateSubmit) && (strings.TrimSpace(name) == "" || clickRisk(name, h.url) != "") {
+	if press && t.Confirm.Needs(dictate.GateSubmit) && (strings.TrimSpace(name) == "" || clickRisk(name, h.url) != "") {
 		g = dictate.GateSubmit
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	out, err := t.gate(ctx, g, fmt.Sprintf("Click %q in the browser?", dictate.Preview(cmp.Or(name, fmt.Sprint(n)), 60)), act)
+	out, err := t.gate(ctx, g, question, act)
 	if err != nil {
 		return t.hintFail(err)
 	}
@@ -178,6 +239,47 @@ func (t *Tools) clickHint(ctx context.Context, n int, said string) map[string]an
 	}
 	out[node.IslandOnlyKey] = true
 	return out
+}
+
+// TurnListening shows numbers on the page while a voice turn listens, when the browser is the
+// window in front, and takes them down when the turn ends: no "show numbers" turn (user,
+// 2026-10-27).
+func (t *Tools) TurnListening(ctx context.Context, on bool) {
+	t.mu.Lock()
+	t.listening = on
+	t.mu.Unlock()
+	if !on {
+		t.hideHints(ctx)
+		return
+	}
+	if node.Enabled(ctx, ToolClick) && t.browserInFront() {
+		t.showHints(ctx)
+	}
+}
+
+// refreshHints numbers the page again after a step changed it, while the turn listens and the
+// browser is in front, in the background.
+func (t *Tools) refreshHints(ctx context.Context) {
+	t.mu.Lock()
+	on := t.listening
+	t.mu.Unlock()
+	if !on || !t.browserInFront() {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	go func() { // off the turn: the next listen mustn't wait for the page to load
+		t.hideHints(ctx) // the old numbers, maybe on the tab just left
+		t.drawHints(ctx, true)
+	}()
+}
+
+func (t *Tools) browserInFront() bool {
+	for _, b := range t.Hub.Browsers() {
+		if b.Focused {
+			return true
+		}
+	}
+	return false
 }
 
 // hideHints takes the numbers down (best effort: the page may be gone) and forgets them.
@@ -212,6 +314,18 @@ func (t *Tools) AnswerChoice(ctx context.Context, said string) (map[string]any, 
 	return t.directHints(ctx, said)
 }
 
+// hintToolOut is a numbered action's result for the model's browser_fill or browser_click: no
+// island markers (the model speaks for itself), and a failure as an error.
+func hintToolOut(out map[string]any) (map[string]any, error) {
+	delete(out, node.IslandKey)
+	delete(out, node.IslandOnlyKey)
+	delete(out, node.ChoiceKey)
+	if out["success"] == false && out["status"] != "awaiting_confirmation" {
+		return nil, &CommandError{Code: cmp.Or(str(out["error_code"]), "failed"), Message: str(out["error"])}
+	}
+	return out, nil
+}
+
 func (t *Tools) hintFail(err error) map[string]any {
 	msg, shown := message(err), dictate.Preview(message(err), 80)
 	if code(err) == "extension_outdated" {
@@ -224,4 +338,7 @@ func (t *Tools) hintFail(err error) map[string]any {
 func num(v any) float64 { f, _ := v.(float64); return f }
 func str(v any) string  { s, _ := v.(string); return s }
 
-var _ node.ChoiceAnswerer = (*Tools)(nil)
+var (
+	_ node.ChoiceAnswerer = (*Tools)(nil)
+	_ node.TurnWatcher    = (*Tools)(nil)
+)

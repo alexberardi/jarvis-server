@@ -519,6 +519,23 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: w.clip, held: h,
 		preWakeSpeech: preSecs, selfPlaying: w.selfPlaying}
 	p.cue(CueListening, 0)
+	// The toolsets hear the turn start and end (the browser's numbers), off the pipeline: the
+	// end waits for the start, so numbers drawn late are still taken down.
+	started := make(chan struct{})
+	go func() {
+		defer close(started)
+		if w, ok := p.Tools.(node.TurnWatcher); ok {
+			w.TurnListening(ctx, true)
+		}
+	}()
+	defer func() {
+		go func() {
+			<-started
+			if w, ok := p.Tools.(node.TurnWatcher); ok {
+				w.TurnListening(context.WithoutCancel(ctx), false)
+			}
+		}()
+	}()
 	defer func() {
 		p.releaseComputer(s)
 		if t.Err != nil || t.FollowUpEnd == EndError {

@@ -114,3 +114,82 @@ func TestNumbersOffWhenClickIsTurnedOff(t *testing.T) {
 		t.Fatal("numbers shown while clicking is turned off")
 	}
 }
+
+// Numbers without "show numbers" (user, 2026-10-27): up when a turn starts listening with the
+// browser in front, redrawn after a step changes the page, down when the turn ends.
+func TestNumbersFollowTheTurn(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	f := connectExt(t, h, path, "Firefox", true, hintsPage)
+	ctx := context.Background()
+	shows := func() (n int) {
+		for _, m := range f.received() {
+			if m.Cmd == "hints" && m.Args["show"] == true {
+				n++
+			}
+		}
+		return n
+	}
+	ts.TurnListening(ctx, true)
+	if shows() != 1 {
+		t.Fatal("no numbers when the turn started")
+	}
+	if out, ok := ts.Direct(ctx, "1"); !ok || out["success"] != true {
+		t.Fatalf("a bare number with numbers up: %v %v", out, ok)
+	}
+	waitFor(t, func() bool { return shows() == 2 }) // redrawn after the click
+	if a := lastArgs(t, f, "hints"); a["show"] != true || a["wait"] != true {
+		t.Fatalf("redraw %v", a)
+	}
+	ts.Direct(ctx, "scroll down")
+	waitFor(t, func() bool { return shows() == 3 })
+	ts.TurnListening(ctx, false)
+	if lastArgs(t, f, "hints")["show"] != false {
+		t.Fatal("numbers left up after the turn")
+	}
+	ts.Direct(ctx, "scroll down") // no turn: no redraw
+	if shows() != 3 {
+		t.Fatal("numbers drawn outside a turn")
+	}
+}
+
+func TestNoNumbersWhenTheBrowserIsBehind(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	f := connectExt(t, h, path, "Firefox", false, hintsPage)
+	ts.TurnListening(context.Background(), true)
+	for _, m := range f.received() {
+		if m.Cmd == "hints" {
+			t.Fatal("numbers drawn on a browser that isn't in front")
+		}
+	}
+}
+
+// "type ABC into 29" fills that number on the node; "fill out 33 with a summary of me" is the
+// model's (it writes the text), through browser_fill's number.
+func TestTypeIntoANumber(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	f := connectExt(t, h, path, "Firefox", true, hintsPage)
+	ctx := context.Background()
+	ts.Direct(ctx, "show numbers")
+	out, ok := ts.Direct(ctx, `Type "ABC, 123" into 1.`)
+	if !ok || out["success"] != true || out["filled"] != "Dog - Wikipedia" {
+		t.Fatalf("type into: %v %v", out, ok)
+	}
+	if a := lastArgs(t, f, "act"); a["op"] != "set_value" || a["value"] != "ABC, 123" || a["ref"] != "e1" {
+		t.Fatalf("act %v", a)
+	}
+	if out, ok := ts.Direct(ctx, "type hello into number nine"); !ok || out["success"] != false {
+		t.Fatalf("a number not on the page: %v %v", out, ok)
+	}
+	// The model's call: no island markers, a plain result.
+	res, handled := ts.Call(ctx, ToolFill, map[string]any{"number": 1.0, "text": "A short bio."}, node.Request{})
+	if !handled || res["success"] != true || res[node.IslandOnlyKey] != nil || lastArgs(t, f, "act")["value"] != "A short bio." {
+		t.Fatalf("browser_fill number: %v", res)
+	}
+	res, _ = ts.Call(ctx, ToolClick, map[string]any{"number": 7.0}, node.Request{})
+	if res["success"] != false || res["error_code"] != "no_such_number" {
+		t.Fatalf("browser_click unknown number: %v", res)
+	}
+}

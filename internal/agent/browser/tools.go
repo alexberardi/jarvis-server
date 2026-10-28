@@ -74,6 +74,7 @@ type Tools struct {
 
 	hints       *hintState // the numbers on screen ("show numbers"), nil when none
 	hintConfirm string     // the risky numbered click waiting for its yes
+	listening   bool       // a voice turn is listening: numbers follow the page (TurnListening)
 }
 
 // TaskTabIdle is how long the task tab stays the default target of a command without a tab_id
@@ -172,6 +173,7 @@ func NewTools(h *Hub) *Tools {
 		{node.Spec{Name: ToolFill, Description: "Type into a field on the browser's current page ('search for X on this page', 'fill in username X'). For a desktop app use desktop_type_text.",
 			Params: []node.Param{
 				{Name: "field", Type: "string", Description: "The field's label as the user said it, e.g. username, search"},
+				{Name: "number", Type: "int", Description: "The number shown on the field (the page's yellow numbers) when the user names one, instead of field"},
 				{Name: "text", Type: "string", Required: true, Description: "The text to put in the field"},
 				{Name: "submit", Type: "bool", Description: "Submit the form after"},
 				optionalTab("the current tab"),
@@ -181,10 +183,12 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "fill in username abcde on browser", Params: map[string]any{"field": "username", "text": "abcde"}, Primary: true},
 				{VoiceCommand: "put hello@example.com in the email field", Params: map[string]any{"field": "email", "text": "hello@example.com"}},
 				{VoiceCommand: "type pizza near me in the search box and search", Params: map[string]any{"field": "search", "text": "pizza near me", "submit": true}},
+				{VoiceCommand: "fill out 33 with a short bio of me", Params: map[string]any{"number": 33, "text": "…"}},
 			}, Risky: true}, 0, t.fill, true},
 		{node.Spec{Name: ToolClick, Description: "Click a button or link on the browser's current page by its label ('click OK on the browser'). Desktop dialogs and the browser's own pop-ups: use desktop_press_key.",
 			Params: []node.Param{
-				{Name: "text", Type: "string", Required: true, Description: "The label as shown, e.g. Sign in"},
+				{Name: "text", Type: "string", Description: "The label as shown, e.g. Sign in"},
+				{Name: "number", Type: "int", Description: "The number shown on it (the page's yellow numbers) when the user names one, instead of text"},
 				optionalTab("the current tab"),
 			},
 			Keywords: []string{"browser", "click", "button", "ok", "cancel", "press", "accept", "submit", "link", "dialog"},
@@ -192,6 +196,7 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "click OK on the browser", Params: map[string]any{"text": "OK"}, Primary: true},
 				{VoiceCommand: "hit cancel", Params: map[string]any{"text": "Cancel"}},
 				{VoiceCommand: "click sign in", Params: map[string]any{"text": "Sign in"}},
+				{VoiceCommand: "click 12", Params: map[string]any{"number": 12}},
 			}, Risky: true}, 0, t.click, true},
 	}
 	return t
@@ -851,6 +856,9 @@ func (t *Tools) gate(ctx context.Context, g dictate.Gate, question string, act f
 
 func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, error) {
 	raw, _ := args["text"].(string)
+	if n, ok := intArg(args, "number"); ok && n > 0 {
+		return hintToolOut(t.fillHint(ctx, n, raw))
+	}
 	text, err := dictate.Sanitize(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errDictate, err)
@@ -904,6 +912,9 @@ func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, 
 }
 
 func (t *Tools) click(ctx context.Context, args map[string]any) (map[string]any, error) {
+	if n, ok := intArg(args, "number"); ok && n > 0 {
+		return hintToolOut(t.clickHint(ctx, n, ""))
+	}
 	label, _ := args["text"].(string)
 	label = strings.TrimSpace(label)
 	if label == "" {

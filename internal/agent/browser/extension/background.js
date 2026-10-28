@@ -439,6 +439,7 @@ const COMMANDS = {
       await inject(t, { func: hintsDraw, args: [0, false], allFrames: true });
       return { tab: describe(t) };
     }
+    if (args.wait === true) await settled(t.id); // after a click or an open: the page that loads
     const snap = await snapTake(t, clampInt(args.max, 1, HINTS_MAX, HINTS_MAX), true);
     await inject(t, { func: hintsDraw, args: [snap.gen, true], allFrames: true });
     return { tab: describe(t), ...snap };

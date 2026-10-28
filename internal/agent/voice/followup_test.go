@@ -654,3 +654,37 @@ func TestShortAnswerHeardLateInAChain(t *testing.T) {
 		t.Fatalf("%d follow-ups heard (%s), %d listens; want all four short words", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
 	}
 }
+
+// turnWatch records what the voice loop tells a toolset about the turn.
+type turnWatch struct {
+	node.Toolset
+	mu  sync.Mutex
+	got []bool
+}
+
+func (w *turnWatch) TurnListening(_ context.Context, on bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.got = append(w.got, on)
+}
+
+func (w *turnWatch) calls() []bool { w.mu.Lock(); defer w.mu.Unlock(); return slices.Clone(w.got) }
+
+// The browser's numbers show while a turn listens: the toolset hears the turn start and end.
+func TestTurnStartAndEndReachTheTools(t *testing.T) {
+	srv := newServer()
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	w := &turnWatch{Toolset: node.Multi{}}
+	r.p.Tools = node.Multi{w}
+	stop := r.run(t)
+	r.turn(t)
+	_ = stop()
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Equal(w.calls(), []bool{true, false}) {
+		if time.Now().After(deadline) {
+			t.Fatalf("turn calls %v, want start then end", w.calls())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

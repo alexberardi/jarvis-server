@@ -972,6 +972,14 @@
         },
         "is_primary": false,
         "voice_command": "type pizza near me in the search box and search"
+      },
+      {
+        "expected_parameters": {
+          "number": 33,
+          "text": "…"
+        },
+        "is_primary": false,
+        "voice_command": "fill out 33 with a short bio of me"
       }
     ],
     "function": {
@@ -982,6 +990,10 @@
           "field": {
             "description": "The field's label as the user said it, e.g. username, search",
             "type": "string"
+          },
+          "number": {
+            "description": "The number shown on the field (the page's yellow numbers) when the user names one, instead of field",
+            "type": "integer"
           },
           "submit": {
             "description": "Submit the form after",
@@ -1040,6 +1052,13 @@
         },
         "is_primary": false,
         "voice_command": "click sign in"
+      },
+      {
+        "expected_parameters": {
+          "number": 12
+        },
+        "is_primary": false,
+        "voice_command": "click 12"
       }
     ],
     "function": {
@@ -1047,6 +1066,10 @@
       "name": "browser_click",
       "parameters": {
         "properties": {
+          "number": {
+            "description": "The number shown on it (the page's yellow numbers) when the user names one, instead of text",
+            "type": "integer"
+          },
           "tab_id": {
             "type": "string"
           },
@@ -1055,9 +1078,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": [],
         "type": "object"
       }
     },
