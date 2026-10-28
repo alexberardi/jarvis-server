@@ -92,10 +92,7 @@ func DefaultFollowUp() FollowUpConfig {
 const (
 	quietConsecutiveSecs = 0.16 // listen_quiet_consecutive_secs: quiet this long = the tail is over
 	quietFactor          = 1.5  // listen_quiet_rms_threshold = silence threshold × 1.5
-	listenNoiseFactor    = 2.5  // follow-up speech: this many times the room's noise...
-	listenMinRMS         = 60   // ...and never under this
-	onsetBase            = 3    // chunks above the threshold that make speech onset...
-	onsetMax             = 8    // ...one more per iteration, up to this
+	onsetChunks          = 3    // chunks above the threshold in a row that make speech onset
 	preOnsetKeepSecs     = 1.5  // audio kept from before onset
 	// validationQuietWaitSecs is listen()'s listen_quiet_max_wait_secs, which the Python
 	// validation handler uses before recording an answer.
@@ -155,7 +152,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if ignored > 0 {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
 		}
-		choosing, chained := s.choice, s.quietTurn
+		choosing := s.choice
 		if s.choice {
 			// The island lists choices: a longer window, listening at once (nothing was
 			// spoken, so there is no reply tail to drain).
@@ -178,13 +175,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		// Again before each listen: the last reply's command may have just started a player.
 		p.duck(ctx)
 		p.cue(CueFollowUp, time.Duration(timeout*float64(time.Second)))
-		onsetIt := it
-		if choosing || chained {
-			// A step of a process or an answer to a list: "7" is four chunks long, and the
-			// stricter onset of a long conversation's later windows missed it.
-			onsetIt = 1
-		}
-		pcm, err := p.listenFollowUp(ctx, s, timeout, onsetIt, afterReply, &used)
+		pcm, err := p.listenFollowUp(ctx, s, timeout, afterReply, &used)
 		if err != nil {
 			t.FollowUpEnd = EndError
 			if ctx.Err() == nil {
@@ -345,7 +336,7 @@ func ptrVal(v *float64) any {
 // afterReply: we just spoke, so what was captured meanwhile is dropped and the reply's tail
 // drained first; after an ignored answer nothing was said, and nothing is dropped. used (may
 // be nil) is advanced by every chunk heard, waiting and recording.
-func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs float64, iteration int, afterReply bool, used *int) ([]int16, error) {
+func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs float64, afterReply bool, used *int) ([]int16, error) {
 	cfg := p.Cfg.FollowUp
 	seen, recorded := 0, 0
 	if used != nil {
@@ -372,8 +363,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 
 	// Onset: enough loud chunks in a row. Everything heard is kept (a dip mid-word must not
 	// lose the start), trimmed to 1.5 s before onset.
-	required := min(onsetMax, onsetBase+(iteration-1))
-	at := cmp.Or(s.listenAt, s.threshold)
+	required, at := onsetChunks, s.threshold
 	var heard [][]int16
 	run, longest, peak := 0, 0, 0.0
 	detected := false
@@ -510,19 +500,6 @@ const (
 	echoOfTranscript = 0.9 // this much of the transcript is the reply's words, in order...
 	echoOfReply      = 0.5 // ...and it covers at least this much of the reply
 )
-
-// followUpThreshold is the level that counts as speech in a follow-up window: the pre-wake noise
-// (median) × listenNoiseFactor, at least listenMinRMS, at most the silence threshold. The silence
-// threshold's floor (200) is a Pi mic's; a Bluetooth headset's speech peaked at 154–240 and no
-// follow-up was ever heard, while the wake turn, which needs no onset, was.
-func followUpThreshold(preRMS []float64, silence float64) float64 {
-	if len(preRMS) == 0 {
-		return silence
-	}
-	s := slices.Clone(preRMS)
-	slices.Sort(s)
-	return min(silence, max(listenMinRMS, s[len(s)/2]*listenNoiseFactor))
-}
 
 // AsksQuestion reports a reply that ends by asking the user something.
 func AsksQuestion(reply string) bool {

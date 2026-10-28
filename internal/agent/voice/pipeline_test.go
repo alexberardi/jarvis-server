@@ -406,7 +406,7 @@ func TestTurnStreamsTheReplyToTheSpeaker(t *testing.T) {
 	if tr.Outcome != OutcomeSpoken || tr.Err != nil || tr.Transcript != "What time is it?" || tr.Message != "It is three." {
 		t.Fatalf("turn %+v", tr)
 	}
-	if tr.WakeScore != 0.95 || tr.Threshold != 200 || tr.ConversationID != "conv-1" {
+	if tr.WakeScore != 0.95 || tr.Threshold != 125 || tr.ConversationID != "conv-1" {
 		t.Fatalf("wake score / adaptive threshold / id: %+v", tr)
 	}
 	// The command ran until 0.8 s of silence after at least 2 s.
