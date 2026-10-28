@@ -95,7 +95,7 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	for _, tl := range sc.Available(ctx) {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"reminder", "export_shopping_list", "export_todo_list"} {
+	for _, want := range []string{"reminder"} {
 		if !names[want] {
 			t.Errorf("no %s among %v", want, names)
 		}
@@ -103,7 +103,7 @@ func TestSidecarRunsTheNodesBuiltins(t *testing.T) {
 	// The Go agent serves these itself (packages.PortedToGo); a Python copy would shadow it.
 	for _, skipped := range []string{"control_device", "routine", "send_link", "set_timer", "check_timers", "cancel_timer",
 		"get_current_time", "calculate", "convert_measurement", "tell_joke", "answer_question", "chat",
-		"control_node", "check_alerts", "act_on_items", "shopping_list", "todo_list"} {
+		"control_node", "check_alerts", "act_on_items", "shopping_list", "todo_list", "export_shopping_list", "export_todo_list"} {
 		if names[skipped] {
 			t.Errorf("%s is offered by the sidecar; the Go agent serves it", skipped)
 		}
