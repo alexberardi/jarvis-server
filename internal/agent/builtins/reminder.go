@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -392,10 +393,10 @@ func (r *Reminder) resolveDue(keys []string, clock string, rel int) (time.Time, 
 	}
 	inRange := func(h int) error {
 		if h < 0 || h > 23 {
-			return fmt.Errorf("hour must be in 0..23, not %d", h)
+			return errors.New("hour must be in 0..23") // Python 3.12's text (the Pi's); 3.14 adds ", not N"
 		}
 		if minute < 0 || minute > 59 {
-			return fmt.Errorf("minute must be in 0..59, not %d", minute)
+			return errors.New("minute must be in 0..59")
 		}
 		return nil
 	}

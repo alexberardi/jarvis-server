@@ -898,10 +898,15 @@ func TestExportShoppingMatchesPython(t *testing.T) {
 
 // reminderNoise blanks what differs between two runs of the same reminder calls: the random
 // ids and the stamps read from the clock mid-call (microseconds). A due time computed from a
-// date or a clock time is whole seconds and still compared.
+// date or a clock time is whole seconds and still compared. Python 3.14's datetime adds
+// ", not N" to a range error that 3.12 (CI's, the Pi's) doesn't.
 var reminderNoise = regexp.MustCompile(`rem_[0-9a-f]{8}|"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00"`)
 
-func reminderJSON(v any) string { return reminderNoise.ReplaceAllString(asJSON(v), "X") }
+var py314Range = regexp.MustCompile(`(must be in \d+\.\.\d+), not -?\d+`)
+
+func reminderJSON(v any) string {
+	return py314Range.ReplaceAllString(reminderNoise.ReplaceAllString(asJSON(v), "X"), "$1")
+}
 
 // reminderRecords is the set_reminder records, noise blanked.
 func reminderRecords(st *nodesettings.Store) string {
