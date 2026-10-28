@@ -155,7 +155,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if ignored > 0 {
 			timeout = max(cfg.IgnoredGraceSecs, window-float64(used)*chunkSecs)
 		}
-		choosing := s.choice
+		choosing, chained := s.choice, s.quietTurn
 		if s.choice {
 			// The island lists choices: a longer window, listening at once (nothing was
 			// spoken, so there is no reply tail to drain).
@@ -178,7 +178,13 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		// Again before each listen: the last reply's command may have just started a player.
 		p.duck(ctx)
 		p.cue(CueFollowUp, time.Duration(timeout*float64(time.Second)))
-		pcm, err := p.listenFollowUp(ctx, s, timeout, it, afterReply, &used)
+		onsetIt := it
+		if choosing || chained {
+			// A step of a process or an answer to a list: "7" is four chunks long, and the
+			// stricter onset of a long conversation's later windows missed it.
+			onsetIt = 1
+		}
+		pcm, err := p.listenFollowUp(ctx, s, timeout, onsetIt, afterReply, &used)
 		if err != nil {
 			t.FollowUpEnd = EndError
 			if ctx.Err() == nil {

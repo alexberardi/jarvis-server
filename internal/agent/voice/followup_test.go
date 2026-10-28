@@ -638,3 +638,35 @@ func TestFollowUpThresholdFollowsTheRoom(t *testing.T) {
 		}
 	}
 }
+
+// listChooser is a toolset whose stage 1 puts a list on the island for every request and
+// takes any answer as a pick.
+type listChooser struct{ node.Toolset }
+
+func (listChooser) Direct(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, node.ChoiceKey: true, node.IslandOnlyKey: true}, true
+}
+
+func (listChooser) AnswerChoice(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, node.ChoiceKey: true, node.IslandOnlyKey: true}, true
+}
+
+// "Show numbers… scroll down… show numbers… 7": "7" is four chunks long and, as the third
+// window of the turn, needed five loud chunks in a row; it was never heard (2026-10-27). A
+// list's answer or a chained step keeps the first window's onset.
+func TestShortAnswerHeardLateInAChain(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"show numbers", "scroll down", "show numbers", "seven"}
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = listChooser{node.Multi{}}
+	short := rep(speech, 4)
+	l := answer(r, mic, short, short, short, short)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 4 {
+		t.Fatalf("%d follow-ups heard (%s), %d listens; want all four short words", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
+	}
+}
