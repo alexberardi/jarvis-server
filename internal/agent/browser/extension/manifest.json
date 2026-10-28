@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jarvis Browser Control",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Lets your Jarvis desktop agent manage tabs, read pages, fill fields, click buttons and control media. Talks only to the local agent.",
   "permissions": ["tabs", "scripting", "nativeMessaging", "alarms", "downloads"],
   "host_permissions": ["<all_urls>"],

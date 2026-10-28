@@ -6,7 +6,7 @@ privacy policy is the project's, at https://docs.jarvisautomation.dev/security/p
 `docs/security/privacy-policy.md`, section "Browser extension and desktop agent"); the images are
 in [images/](images/).
 
-Everything here was checked against the extension's code (`../extension/`) at version 0.3.4 (0.2.0 added
+Everything here was checked against the extension's code (`../extension/`) at version 0.3.5 (0.2.0 added
 `fill` and `click`: dictation, docs/agent/DESIGN.md §14; 0.2.1 added the toolbar popup, install plan 3.5;
 0.3.0 added `snapshot` and `act` and background task windows: computer control, docs/agent/COMPUTER_CONTROL.md;
 0.3.1 added `screenshot` of a task window and `download`, with the `downloads` permission;
