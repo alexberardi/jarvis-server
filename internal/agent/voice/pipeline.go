@@ -743,6 +743,17 @@ func (p *Pipeline) record(ctx context.Context, s *session) (pcm []int16, hitMax 
 			break
 		}
 	}
+	ended := "silence"
+	switch {
+	case rec.hitMax:
+		ended = "max"
+	case !rec.done:
+		ended = "no_audio"
+	case rec.n == rec.minFrames+1:
+		ended = "silence_at_min" // stopped the first moment it could: speech under the threshold?
+	}
+	s.log.Info("voice: recorded", append([]any{"secs", fmt.Sprintf("%.2f", float64(len(rec.pcm))/CaptureRate), "ended", ended},
+		levelSummary(rec.pcm, s.threshold)...)...)
 	return rec.pcm, rec.hitMax, nil
 }
 

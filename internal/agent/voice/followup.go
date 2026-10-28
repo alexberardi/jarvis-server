@@ -400,11 +400,12 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		maxSecs = p.Cfg.Endpointing.MaxSecs
 	}
 	maxF := max(1, frames(maxSecs))
-	silent := 0
+	silent, ended := 0, "max"
 	for post := 1; post <= maxF; post++ {
 		c, err := recv(ctx, s.chunks, time.Second)
 		if errors.Is(err, errChunkTimeout) {
 			s.log.Warn("follow-up recording stopped: no audio for 1 s")
+			ended = "no_audio"
 			break
 		}
 		if err != nil {
@@ -419,14 +420,21 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 			silent = 0
 		}
 		if post >= minAfter && silent >= silenceF {
+			ended = "silence"
+			if post == minAfter {
+				ended = "silence_at_min"
+			}
 			break
 		}
 	}
+	all := slices.Concat(heard...)
+	s.log.Info("follow-up: recorded", append([]any{"secs", fmt.Sprintf("%.2f", float64(len(heard))*chunkSecs), "ended", ended},
+		levelSummary(all, s.threshold)...)...)
 	if secs := float64(len(heard)) * chunkSecs; secs < cfg.MinSpeechSecs {
 		s.log.Info("follow-up recording too short; noise", "secs", secs)
 		return nil, nil
 	}
-	return slices.Concat(heard...), nil
+	return all, nil
 }
 
 // mapChunkTimeout: a microphone that stalls during the window closes it, like a timeout.
