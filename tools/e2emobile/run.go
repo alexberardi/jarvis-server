@@ -38,7 +38,10 @@ type config struct {
 	// poll (default 250 ms), how long the device must stay up before the retry (default 30 s)
 	// and how long it waits for that (default 2 min).
 	retryPause, pollPause, settle, recoverTimeout time.Duration
-	retries                                       int // the retries after a drop this run (results.json)
+	// now is recoverDevice's clock for its settle window (nil: time.Now); tests step it, so a
+	// slow runner can't end the window early.
+	now     func() time.Time
+	retries int // the retries after a drop this run (results.json)
 }
 
 // Record is one flow in results.json: the record shape of e2e/web/reporter.ts (merged into the
@@ -416,6 +419,13 @@ func (c *config) retryOnDrop(ctx context.Context, base Record, play func() (Reco
 //     installs and starts it afresh.
 //
 // prepDevice then sets the tunnels again and probes the sandbox, as before every flow.
+func (c *config) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
 func (c *config) recoverDevice(ctx context.Context) error {
 	poll := c.pollPause
 	if poll == 0 {
@@ -429,7 +439,7 @@ func (c *config) recoverDevice(ctx context.Context) error {
 	if limit == 0 {
 		limit = 2 * time.Minute
 	}
-	deadline := time.Now().Add(limit)
+	deadline := c.clock().Add(limit)
 	stable, sinceKick := 0, -1
 	var upSince time.Time
 	var last string
@@ -447,7 +457,7 @@ func (c *config) recoverDevice(ctx context.Context) error {
 		}
 		if up {
 			if stable == 0 {
-				upSince = time.Now()
+				upSince = c.clock()
 			}
 			stable++
 		} else {
@@ -461,12 +471,12 @@ func (c *config) recoverDevice(ctx context.Context) error {
 		if sinceKick >= 0 {
 			sinceKick++
 		}
-		if stable >= 2 && time.Since(upSince) >= settle {
+		if stable >= 2 && c.clock().Sub(upSince) >= settle {
 			break
 		}
-		if time.Now().After(deadline) {
+		if c.clock().After(deadline) {
 			if stable > 0 {
-				last = fmt.Sprintf("up for only %s of %s", time.Since(upSince).Round(time.Second), settle)
+				last = fmt.Sprintf("up for only %s of %s", c.clock().Sub(upSince).Round(time.Second), settle)
 			}
 			return fmt.Errorf("not back in %s: %s", limit, last)
 		}
