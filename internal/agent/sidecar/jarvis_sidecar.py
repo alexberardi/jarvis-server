@@ -1160,10 +1160,17 @@ def call(commands: dict, params: dict) -> dict:
         conversation_id=req.get("tool_call_id") or "desktop",
         user_id=req.get("user_id"),
     )
+    arguments = dict(params.get("arguments") or {})
+    # The model's arguments fixed up first, as N:'s command execution does for every tool call
+    # (a string where the command takes a list, "true" for a boolean, a missing query).
+    try:
+        arguments = cmd.post_process_tool_call(arguments, req.get("voice_command") or "") or arguments
+    except Exception as exc:
+        print(f"sidecar: {name}: post_process_tool_call failed: {exc}", file=sys.stderr)
     # User-scoped secrets resolve to the requesting user, as on a Pi.
     set_current_user_id(req.get("user_id"))
     try:
-        resp = cmd.execute(ri, **(params.get("arguments") or {}))
+        resp = cmd.execute(ri, **arguments)
     except Exception as exc:
         return {"output": {"success": False, "error": str(exc)}}
     finally:
