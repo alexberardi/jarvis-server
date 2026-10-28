@@ -31,8 +31,8 @@ type Endpointing struct {
 	SilenceSecs      float64 // listen_silence_duration_secs, 0.8
 	MinSecs          float64 // min_record_seconds, 2
 	MaxSecs          float64 // max_record_seconds, 7
-	AutoMultiplier   float64 // silence_threshold_auto_multiplier, 2 (0 disables adaptive)
-	AutoFloor        float64 // 200
+	AutoMultiplier   float64 // the room's noise × this is speech (0 disables adaptive), 2.5
+	AutoFloor        float64 // 60: a Bluetooth headset's speech peaked at 154–240 (the Python node's 200 missed it)
 	AutoCeiling      float64 // 1000
 	// OnsetWaitSecs holds off the silence stop until speech is heard (a chunk at or above the
 	// threshold) or this long has gone by, so a pause after the wake word longer than
@@ -47,10 +47,11 @@ type Endpointing struct {
 	PreRollSecs float64
 }
 
-// DefaultEndpointing is the Python node's configuration out of the box.
+// DefaultEndpointing is the Python node's configuration out of the box, but for the adaptive
+// threshold: one level per turn, from the room's noise, for every recording of the turn.
 func DefaultEndpointing() Endpointing {
 	return Endpointing{SilenceThreshold: 300, SilenceSecs: 0.8, MinSecs: 2, MaxSecs: 7,
-		AutoMultiplier: 2, AutoFloor: 200, AutoCeiling: 1000}
+		AutoMultiplier: 2.5, AutoFloor: 60, AutoCeiling: 1000}
 }
 
 // RMS of 16-bit samples (calculate_rms).

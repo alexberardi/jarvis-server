@@ -378,7 +378,7 @@ func (g *gateEval) followUp(s *session, answer []float64) (pcm []int16, truncate
 		}
 	}
 	g.p.Cfg.FollowUp.SilenceSecs = g.silSec
-	out, err := g.p.listenFollowUp(context.Background(), s, 8, 1, true, nil)
+	out, err := g.p.listenFollowUp(context.Background(), s, 8, true, nil)
 	if err != nil {
 		g.t.Fatal(err)
 	}

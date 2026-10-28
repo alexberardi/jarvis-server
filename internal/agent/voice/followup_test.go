@@ -623,22 +623,6 @@ func TestSilentStepsChainPastFiveIterations(t *testing.T) {
 	}
 }
 
-func TestFollowUpThresholdFollowsTheRoom(t *testing.T) {
-	for _, c := range []struct {
-		pre           []float64
-		silence, want float64
-	}{
-		{[]float64{40, 45, 50}, 200, 112.5},  // a quiet headset: under the 200 floor
-		{[]float64{10, 12, 15}, 200, 60},     // a silent room: never under 60
-		{[]float64{300, 320, 350}, 640, 640}, // a loud room: the silence threshold
-		{nil, 200, 200},
-	} {
-		if got := followUpThreshold(c.pre, c.silence); got != c.want {
-			t.Errorf("pre %v silence %v: %v, want %v", c.pre, c.silence, got, c.want)
-		}
-	}
-}
-
 // listChooser is a toolset whose stage 1 puts a list on the island for every request and
 // takes any answer as a pick.
 type listChooser struct{ node.Toolset }
@@ -652,8 +636,8 @@ func (listChooser) AnswerChoice(context.Context, string) (map[string]any, bool) 
 }
 
 // "Show numbers… scroll down… show numbers… 7": "7" is four chunks long and, as the third
-// window of the turn, needed five loud chunks in a row; it was never heard (2026-10-27). A
-// list's answer or a chained step keeps the first window's onset.
+// window of the turn, needed five loud chunks in a row; it was never heard (2026-10-27). Onset
+// is three chunks in every window.
 func TestShortAnswerHeardLateInAChain(t *testing.T) {
 	srv := newServer()
 	srv.texts = []string{"show numbers", "scroll down", "show numbers", "seven"}

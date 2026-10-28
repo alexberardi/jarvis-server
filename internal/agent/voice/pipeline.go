@@ -563,7 +563,6 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 	// Row 8: record with RMS endpointing.
 	t.Threshold = p.Cfg.Endpointing.Threshold(preRMS)
 	s.threshold = t.Threshold
-	s.listenAt = followUpThreshold(preRMS, s.threshold)
 	pcm, hitMax, err := p.record(ctx, s)
 	s.at.recorded = p.Now()
 	// The level reference leaves the pre-roll out: it may hold the chime's own echo.
