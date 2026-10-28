@@ -25,6 +25,9 @@ func (t *Tools) Direct(ctx context.Context, said string) (map[string]any, bool) 
 	if out, ok := t.directHints(ctx, said); ok {
 		return out, true
 	}
+	if out, ok := t.directWeb(ctx, said); ok {
+		return out, true
+	}
 	return t.directScroll(ctx, said)
 }
 

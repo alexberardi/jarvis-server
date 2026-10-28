@@ -213,9 +213,12 @@ func (t *Tools) AnswerChoice(ctx context.Context, said string) (map[string]any, 
 }
 
 func (t *Tools) hintFail(err error) map[string]any {
-	msg := message(err)
+	msg, shown := message(err), dictate.Preview(message(err), 80)
+	if code(err) == "extension_outdated" {
+		shown = "Numbers need the newer Jarvis browser extension"
+	}
 	return map[string]any{"success": false, "error": msg, "error_code": code(err),
-		node.IslandKey: dictate.Preview(msg, 80), node.IslandOnlyKey: true}
+		node.IslandKey: shown, node.IslandOnlyKey: true}
 }
 
 func num(v any) float64 { f, _ := v.(float64); return f }

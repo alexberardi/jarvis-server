@@ -1108,6 +1108,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		hub, stopBrowser := startBrowser(ctx, log)
 		bt = browser.NewTools(hub)
 		bt.Confirm = dt.Confirm
+		opener.OpenLink = bt.OpenLink // links in a new tab, not the system's new window
 		bt.Origins = f.origins
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)

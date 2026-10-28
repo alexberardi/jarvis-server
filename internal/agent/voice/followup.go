@@ -166,6 +166,11 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 				timeout = cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs)
 			}
 		}
+		if afterReply && AsksQuestion(lastSaid) {
+			// A question waits for its answer (VOICE-FLOWS.md Q14): 3 s after "what are you
+			// looking for?" closed before the user had started answering.
+			timeout = max(timeout, cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs))
+		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
 		p.duck(ctx)
@@ -489,6 +494,11 @@ const (
 	echoOfTranscript = 0.9 // this much of the transcript is the reply's words, in order...
 	echoOfReply      = 0.5 // ...and it covers at least this much of the reply
 )
+
+// AsksQuestion reports a reply that ends by asking the user something.
+func AsksQuestion(reply string) bool {
+	return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(reply), `"'”’)`), "?")
+}
 
 // LooksLikeSelfEcho reports whether the transcript is the mic hearing what we last said rather
 // than the user: nearly all of it (90 % of its words, stopwords included) must be the reply's
