@@ -137,6 +137,36 @@ func TestFollowUpWindowIsThreeSecondsEveryIteration(t *testing.T) {
 	}
 }
 
+// A reply that asks something waits for the answer: 8 s, not 3 ("Google's open. What are you
+// looking for?" closed before the user had started answering).
+func TestFollowUpWindowAfterAQuestion(t *testing.T) {
+	srv := newServer()
+	srv.texts, srv.speakPCM = []string{"Dogs."}, pcmOf(50)
+	srv.reply = func(context.Context) (Reply, error) {
+		return audioReply(24000, "Google's open. What are you looking for?", pcmOf(100)), nil
+	}
+	srv.followUp = func(StreamRequest) (*Control, error) { return complete("Here are dogs."), nil }
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second, 3 * time.Second}) {
+		t.Fatalf("follow-up windows %v, want 8 s after the question, then 3 s (turn %+v)", got, tr)
+	}
+	for _, r := range []string{"What are you looking for?", `Want me to open "Dogs"?`} {
+		if !AsksQuestion(r) {
+			t.Errorf("%q is a question", r)
+		}
+	}
+	if AsksQuestion("Done. Anything else? Just say.") {
+		t.Error("a question mid-reply isn't the ending")
+	}
+}
+
 // A window shorter than the old 5 s floor (follow_up_min_timeout_secs) is not raised to it.
 func TestShortFollowUpWindowIsKept(t *testing.T) {
 	mic := oneWake()

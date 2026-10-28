@@ -615,6 +615,12 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if res := t.reuseTaskTab(ctx, u); res != nil {
 		return res, nil
 	}
+	return t.openURL(ctx, u)
+}
+
+// openURL opens u in a new tab of the user's browser window (behind the Jarvis page when that is
+// in front), never reusing one.
+func (t *Tools) openURL(ctx context.Context, u string) (map[string]any, error) {
 	extra := map[string]any{"url": u}
 	behind := false
 	if t.Origins.Known() {
@@ -637,6 +643,22 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		res["opened_behind_chat"] = true
 	}
 	return res, nil
+}
+
+// OpenLink opens an http(s) link in a new tab of the connected browser; ok false with none
+// connected. desktop_open sends links here: the system's handler opened a new window each time.
+func (t *Tools) OpenLink(ctx context.Context, link string) (bool, error) {
+	if len(t.Hub.Browsers()) == 0 {
+		return false, nil
+	}
+	u, err := webURL(link)
+	if err != nil {
+		return false, nil // mailto: and the like stay the system's
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+	_, err = t.openURL(ctx, u)
+	return err == nil, err
 }
 
 // reuseTaskTab answers an open of a site's home page (https://www.google.com) while the task tab
