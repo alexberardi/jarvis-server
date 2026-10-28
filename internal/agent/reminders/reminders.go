@@ -1,8 +1,8 @@
 // Package reminders fires the Pi's reminders: the schedule of N:agents/reminder_agent.py. The
-// reminders themselves stay with the Python node's services.reminder_service in the sidecar
-// (the one owner of their state, persisted in the agent's store); each poll asks it for the
-// due ones, which it marks announced and pushes, and queues each as a priority-3 alert, which
-// the announcer speaks between turns, the LED shows and the button reads.
+// reminders themselves are the reminder built-in's (builtins.Reminder, the one owner of their
+// state, persisted in the agent's store); each poll asks it for the due ones, which it marks
+// announced and pushes, and queues each as a priority-3 alert, which the announcer speaks
+// between turns, the LED shows and the button reads.
 package reminders
 
 import (
@@ -27,7 +27,7 @@ const (
 // AlertTTL is how long a fired reminder stays queued unheard (N: now + 10 minutes).
 const AlertTTL = 10 * time.Minute
 
-// Due is one reminder the sidecar found due and marked announced.
+// Due is one reminder the check found due and marked announced.
 type Due struct {
 	ID     string
 	Text   string
@@ -36,8 +36,8 @@ type Due struct {
 
 // Poller polls Check on its schedule and queues what is due in Alerts.
 type Poller struct {
-	// Check is one run of the reminder agent in the sidecar: the due reminders and how many
-	// were pending before it.
+	// Check is one run of the reminder agent: the due reminders and how many were pending
+	// before it.
 	Check  func(ctx context.Context) ([]Due, int, error)
 	Alerts *sdkhost.Alerts
 	Log    *slog.Logger

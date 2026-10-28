@@ -808,7 +808,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
 	if tf.host != nil {
-		alerts := startAlerts(ctx, tf.host, mic, tf.live, log)
+		alerts := startAlerts(ctx, tf.host, mic, tf.reminder, log)
 		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
 	}
 	hd := openHat(hf, press, log)
@@ -1041,6 +1041,8 @@ type toolFlags struct {
 	cc       func() *node.CC
 	registry *devices.Registry
 	routine  *builtins.Routine
+	// reminder is the reminder built-in (with a store), whose due reminders a Pi's poller fires.
+	reminder *builtins.Reminder
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
@@ -1182,6 +1184,8 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		// The household's lists, in the node's store as the Python commands kept them.
 		tools = append(tools, &builtins.Shopping{Store: st}, &builtins.Todo{Store: st},
 			&builtins.ExportTodo{Store: st, CC: cc, Log: log}, &builtins.ExportShopping{Store: st, CC: cc, Log: log})
+		f.reminder = &builtins.Reminder{Store: st, CC: cc, Log: log}
+		tools = append(tools, f.reminder)
 	}
 	if f.host != nil && f.host.Timers != nil {
 		// A Pi's timers, volume and alerts: the host's services, on its speaker.
@@ -1192,10 +1196,6 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 	if f.pi {
 		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
 		tools = append(tools, builtins.Talk{}, builtins.ActOnItems{})
-	}
-	if f.pi {
-		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
-		tools = append(tools, builtins.Talk{})
 	}
 	tools = append(tools, &clock.Tool{})
 	return tools, closeAll, nil
