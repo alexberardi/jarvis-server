@@ -92,6 +92,8 @@ func DefaultFollowUp() FollowUpConfig {
 const (
 	quietConsecutiveSecs = 0.16 // listen_quiet_consecutive_secs: quiet this long = the tail is over
 	quietFactor          = 1.5  // listen_quiet_rms_threshold = silence threshold × 1.5
+	listenNoiseFactor    = 2.5  // follow-up speech: this many times the room's noise...
+	listenMinRMS         = 60   // ...and never under this
 	onsetBase            = 3    // chunks above the threshold that make speech onset...
 	onsetMax             = 8    // ...one more per iteration, up to this
 	preOnsetKeepSecs     = 1.5  // audio kept from before onset
@@ -365,6 +367,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 	// Onset: enough loud chunks in a row. Everything heard is kept (a dip mid-word must not
 	// lose the start), trimmed to 1.5 s before onset.
 	required := min(onsetMax, onsetBase+(iteration-1))
+	at := cmp.Or(s.listenAt, s.threshold)
 	var heard [][]int16
 	run, longest, peak := 0, 0, 0.0
 	detected := false
@@ -376,7 +379,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		heard = append(heard, c)
 		r := RMS(c)
 		peak = max(peak, r)
-		if r >= s.threshold {
+		if r >= at {
 			run++
 			longest = max(longest, run)
 			if run >= required {
@@ -389,7 +392,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 	}
 	if !detected {
 		// What the window heard, so "it didn't hear me" can be told from a quiet mic.
-		s.log.Info("follow-up: no speech onset", "peak_rms", math.Round(peak), "threshold", s.threshold,
+		s.log.Info("follow-up: no speech onset", "peak_rms", math.Round(peak), "threshold", at,
 			"longest_run", longest, "required", required, "wake_level_db", ptrVal(s.wakeLevel))
 		return nil, nil
 	}
@@ -419,7 +422,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		heard = append(heard, c)
 		recorded++
 		p.level(c)
-		if RMS(c) < s.threshold {
+		if RMS(c) < at {
 			silent++
 		} else {
 			silent = 0
@@ -501,6 +504,19 @@ const (
 	echoOfTranscript = 0.9 // this much of the transcript is the reply's words, in order...
 	echoOfReply      = 0.5 // ...and it covers at least this much of the reply
 )
+
+// followUpThreshold is the level that counts as speech in a follow-up window: the pre-wake noise
+// (median) × listenNoiseFactor, at least listenMinRMS, at most the silence threshold. The silence
+// threshold's floor (200) is a Pi mic's; a Bluetooth headset's speech peaked at 154–240 and no
+// follow-up was ever heard, while the wake turn, which needs no onset, was.
+func followUpThreshold(preRMS []float64, silence float64) float64 {
+	if len(preRMS) == 0 {
+		return silence
+	}
+	s := slices.Clone(preRMS)
+	slices.Sort(s)
+	return min(silence, max(listenMinRMS, s[len(s)/2]*listenNoiseFactor))
+}
 
 // AsksQuestion reports a reply that ends by asking the user something.
 func AsksQuestion(reply string) bool {

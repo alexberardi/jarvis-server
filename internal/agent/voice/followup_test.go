@@ -622,3 +622,19 @@ func TestSilentStepsChainPastFiveIterations(t *testing.T) {
 		t.Fatalf("window %s after %d follow-ups, %d listens", tr.FollowUpEnd, len(tr.FollowUps), len(l.list()))
 	}
 }
+
+func TestFollowUpThresholdFollowsTheRoom(t *testing.T) {
+	for _, c := range []struct {
+		pre           []float64
+		silence, want float64
+	}{
+		{[]float64{40, 45, 50}, 200, 112.5},  // a quiet headset: under the 200 floor
+		{[]float64{10, 12, 15}, 200, 60},     // a silent room: never under 60
+		{[]float64{300, 320, 350}, 640, 640}, // a loud room: the silence threshold
+		{nil, 200, 200},
+	} {
+		if got := followUpThreshold(c.pre, c.silence); got != c.want {
+			t.Errorf("pre %v silence %v: %v, want %v", c.pre, c.silence, got, c.want)
+		}
+	}
+}

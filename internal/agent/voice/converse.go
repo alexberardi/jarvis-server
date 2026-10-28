@@ -31,6 +31,7 @@ type session struct {
 	chunks     <-chan []int16
 	wakeClip   []int16  // prepended to every speaker_audio in this conversation
 	threshold  float64  // the wake's silence threshold, reused by every later recording
+	listenAt   float64  // follow-up speech threshold: the room's noise × listenNoiseFactor, at most threshold
 	wakeLevel  *float64 // the woken command's speech level (dBFS); follow-ups report theirs against it
 	userID     *int64   // the last speaker STT identified
 	onComplete []func() error
