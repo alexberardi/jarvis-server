@@ -1188,6 +1188,10 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
 		tools = append(tools, builtins.Talk{}, builtins.ActOnItems{})
 	}
+	if f.pi {
+		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
+		tools = append(tools, builtins.Talk{})
+	}
 	tools = append(tools, &clock.Tool{})
 	return tools, closeAll, nil
 }
