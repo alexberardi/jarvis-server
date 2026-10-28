@@ -189,6 +189,9 @@ func (q *Alerts) Count() int {
 }
 
 // wire is a as the child rebuilds it: Python isoformat times.
+// Wire is the alert as the SDK's Alert.to_dict.
+func (a Alert) Wire() map[string]any { return a.wire() }
+
 func (a Alert) wire() map[string]any {
 	return map[string]any{"id": a.ID, "source_agent": a.SourceAgent, "title": a.Title, "summary": a.Summary,
 		"priority": a.Priority, "created_at": isoformat(a.CreatedAt), "expires_at": isoformat(a.ExpiresAt),

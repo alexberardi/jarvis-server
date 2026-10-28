@@ -261,7 +261,13 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if tr.Speaker != nil && tr.Speaker.UserID != nil {
 			s.userID = tr.Speaker.UserID
 		}
-		if end, ok := p.direct(ctx, s, &ex, text); ok { // funnel stage 1: done here, no command-center turn
+		// A shortcut skips command-center's follow-up gate, so right after a reply it never runs
+		// on a transcript that shares a word with that reply: the mic may have half-heard it
+		// ("Volume 70 percent." came back as "Volume 1." and set the volume to 10%). Such a
+		// transcript goes to command-center, whose gate tells the node's voice from the user's.
+		if heardAfterReply && sharesAWord(text, lastSaid) {
+			s.log.Info("follow-up: like our reply, so no shortcut", "transcript", text)
+		} else if end, ok := p.direct(ctx, s, &ex, text); ok { // funnel stage 1: done here, no command-center turn
 			t.FollowUps = append(t.FollowUps, ex)
 			if end != "" {
 				t.FollowUpEnd = end
@@ -481,6 +487,25 @@ var echoWord = regexp.MustCompile(`[a-z0-9']+`)
 // echoTokens are s's words in order, lower-cased, apostrophes kept ("it's" is one word).
 func echoTokens(s string) []string {
 	return echoWord.FindAllString(strings.ToLower(s), -1)
+}
+
+// fillerWords don't make a transcript look like our reply (sharesAWord).
+var fillerWords = map[string]bool{"a": true, "an": true, "the": true, "to": true, "is": true, "it": true, "of": true,
+	"and": true, "i": true, "you": true, "your": true, "my": true, "for": true, "in": true, "on": true, "at": true,
+	"that": true, "this": true, "be": true, "are": true, "it's": true, "i'm": true}
+
+// sharesAWord reports whether the transcript has any word of what we last said, filler aside.
+func sharesAWord(text, lastSaid string) bool {
+	said := map[string]bool{}
+	for _, w := range echoTokens(lastSaid) {
+		said[w] = true
+	}
+	for _, w := range echoTokens(text) {
+		if said[w] && !fillerWords[w] {
+			return true
+		}
+	}
+	return false
 }
 
 // Self-echo thresholds (LooksLikeSelfEcho).

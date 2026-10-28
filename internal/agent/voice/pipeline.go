@@ -691,7 +691,11 @@ func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text st
 	ex.Tools = append(ex.Tools, ToolRun{Name: "direct", Args: map[string]any{"said": text}, Success: success})
 	s.log.Info("direct: done on the node", "transcript", text, "success", success, "choice", choice)
 	if msg, _ := out["message"].(string); sig.Speak && msg != "" {
-		return p.say(ctx, s, ex, msg, ""), true
+		end := FollowUpEnd("")
+		if sig.ClearHistory {
+			end = EndClearHistory
+		}
+		return p.say(ctx, s, ex, msg, end), true
 	}
 	if choice {
 		s.choice = true
