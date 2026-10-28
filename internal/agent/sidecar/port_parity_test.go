@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -918,6 +919,11 @@ func reminderRecords(st *nodesettings.Store) string {
 }
 
 func TestReminderMatchesPython(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The reference can't run there: Windows Python ignores TZ, and reminder_service's
+		// strftime("%-I") is invalid on Windows (its human times fall back to raw ISO).
+		t.Skip("the Python reminder command is Linux/macOS only")
+	}
 	py := nodeCommandsPython(t)
 	// A zone without DST, the same for both: Python places dates at today's offset, which the
 	// port deliberately doesn't (Reminder's doc); across a DST change they would differ.
