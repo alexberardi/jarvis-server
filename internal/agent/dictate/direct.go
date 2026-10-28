@@ -22,7 +22,9 @@ var (
 	rePlaceLast  = regexp.MustCompile(`(?i)^(.+?)\s+(?:in|into)\s+(?:the\s+|my\s+)?([\w' -]+?)$`)
 	reSubmit     = regexp.MustCompile(`(?i),?\s+and\s+(?:then\s+)?(?:(?:press|hit)\s+(?:enter|return)|send(?:\s+it)?|submit(?:\s+it)?)$`)
 	reQuoted     = regexp.MustCompile(`^["“'‘](.+?)["”'’][.!?,]?$`) // quoted text keeps its own punctuation
-	reEnter      = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?(?:(?:press|hit)\s+(?:enter|return)|send\s+it|submit(?:\s+it)?)[\s.!?]*$`)
+	// reNumberPlace is a place named by a number on screen: "29", "number 4", "box 7".
+	reNumberPlace = regexp.MustCompile(`(?i)^(?:(?:number|box|field)\s+)?\d+$`)
+	reEnter       = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?(?:(?:press|hit)\s+(?:enter|return)|send\s+it|submit(?:\s+it)?)[\s.!?]*$`)
 )
 
 // fieldWords name a place in the window in front, not an app: typing goes where the caret is.
@@ -45,6 +47,9 @@ func parseType(said string) (typeRequest, bool) {
 	var r typeRequest
 	if loc := reSubmit.FindStringIndex(body); loc != nil {
 		r.submit, body = true, strings.TrimSpace(body[:loc[0]])
+	}
+	if pm := rePlaceLast.FindStringSubmatch(body); pm != nil && reNumberPlace.MatchString(strings.TrimSpace(pm[2])) {
+		return typeRequest{}, false // "type ABC into 29": a number on the page, the browser's (browser/hints.go)
 	}
 	if pm := rePlaceFirst.FindStringSubmatch(body); pm != nil {
 		r.place, body = strings.TrimSpace(pm[1]), strings.TrimSpace(pm[2])

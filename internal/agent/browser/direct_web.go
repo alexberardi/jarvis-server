@@ -75,5 +75,6 @@ func (t *Tools) directWeb(ctx context.Context, said string) (map[string]any, boo
 		return nil, false // the model can say why
 	}
 	out["success"], out[node.IslandOnlyKey] = true, true
+	t.refreshHints(ctx)
 	return out, true
 }

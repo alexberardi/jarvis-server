@@ -52,6 +52,7 @@ func (t *Tools) directScroll(ctx context.Context, said string) (map[string]any, 
 		return nil, false // the model can say why, or scroll some other way
 	}
 	out[node.IslandOnlyKey] = true
+	t.refreshHints(ctx)
 	return out, true
 }
 
