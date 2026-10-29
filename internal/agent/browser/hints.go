@@ -168,6 +168,9 @@ func (t *Tools) readTargets(ctx context.Context, wait bool) map[string]any {
 	if err != nil {
 		return t.hintFail(err)
 	}
+	for i := range snap.Elements {
+		snap.Elements[i].Value = "" // voice never holds a field's value, even one sent by mistake (§2, A11)
+	}
 	h := &hintState{snap: snap}
 	if tab, ok := res["tab"].(map[string]any); ok {
 		h.tab = tab["tab_id"]

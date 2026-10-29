@@ -251,3 +251,26 @@ func TestNextCommandSeesThePageTheClickOpened(t *testing.T) {
 	}
 	ts.TurnListening(ctx, false)
 }
+
+// A11 (Astra's reproduction): a voice snapshot holds no field values, even an ordinary draft an
+// extension sent by mistake (ELEMENT-LAYER-WORK.md §2, §10); a computer snapshot keeps its own.
+func TestVoiceSnapshotCarriesNoValues(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		return ok(map[string]any{"tab": map[string]any{"tab_id": 4.0}, "gen": 9.0,
+			"elements": []any{map[string]any{"ref": "e1", "role": "textbox", "name": "Draft",
+				"value": "UNSENT_PRIVATE_DRAFT", "context": "Reply to Bob"}}})
+	})
+	ctx := context.Background()
+	if out := ts.readTargets(ctx, false); out["success"] != true {
+		t.Fatalf("voice snapshot failed: %v", out)
+	}
+	if got := ts.hints.snap.Elements[0].Value; got != "" {
+		t.Errorf("voice snapshot retained the draft: %q", got)
+	}
+	computer, err := ts.Snapshot(ctx, "", 10)
+	if err != nil || computer.Elements[0].Value != "UNSENT_PRIVATE_DRAFT" {
+		t.Errorf("ordinary computer snapshot must keep its existing values: %+v %v", computer, err)
+	}
+}
