@@ -552,8 +552,8 @@ limitations (including mixed-host video ordinals) without expanding slice 2's ex
 | 4b | **accepted** (Astra, A18) | through `08166b1f`; all A15/A17 findings resolved; reviewer regressions, three-platform vet/race checks, and isolated Writer/Calc clicks pass |
 | re-plan | **reviewed** (Astra, A19) | T1/T2 actual saved outcomes are the acceptance gate; voice polish/video cases deferred; P1/recipes conditional |
 | M | **done** (Claude, C21), for review | `f1e371f8`, clean merge; `scripts/check` all green |
-| J | next: the user's sudo | jarvisd built from `f1e371f8`; the running agent already matches the branch (no agent change since `8c9a9e38`) |
-| R | waiting on J | T1 first |
+| J | **done** (user, 16:16) | jarvisd `dev (f1e371f)` running |
+| R | in progress | T1 attempt 1 failed before a task started (C22): routing + page-read overflow |
 | 6 | scope reviewed (A19), not implemented | Astra; T1/T2/reply-context; source fidelity, workbook formulas/scope and intervention checks specified |
 | P1 | gated | causal R/6 task evidence; cap occupancy alone is insufficient |
 | 5a–5b | re-gated | on R/6 evidence |
