@@ -69,6 +69,7 @@ type promptInput struct {
 	Hint        string // a replay's: where the step was recorded
 	Clipboard   string // what the last batch read from the clipboard (content, like the page)
 	Desktop     bool   // the task is in a desktop app: its window, not a page
+	Source      *Source
 }
 
 // renderPrompt is the user turn's text for one round.
@@ -88,6 +89,12 @@ func renderPrompt(in promptInput) string {
 	}
 	if in.Answer != "" {
 		fmt.Fprintf(&b, "The user answered your question: %s\n", oneLine(in.Answer))
+	}
+
+	if src := in.Source; src != nil {
+		// A desktop task can't read the browser: the page it works from comes with the task (C25).
+		fmt.Fprintf(&b, "\nSource: %s (the text the task works from; write from this text, not from memory)\n", defang(src.URL))
+		b.WriteString(PageBegin + "\n" + renderText(src.Text) + "\n" + PageEnd + "\n")
 	}
 
 	b.WriteString("\nWhat you did so far:\n")
