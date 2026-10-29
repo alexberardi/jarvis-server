@@ -15,13 +15,14 @@ embeds the installed display assets, so the shell, clocks, photos and themes wor
 - The server's `/api/v0/node/display` endpoints, which the node reaches with its existing credentials.
 
 Tested hardware: a Surface Pro 6 (x86-64) with a real touchscreen, see the pilot notes below, and a
-Raspberry Pi 3 Model B (aarch64, Debian 13) under a virtual display (Xvfb, no window manager, no real
-screen or touch). On the Pi, `go test` for the display packages passes natively, the engine serves the
-shell, and it starts the dedicated Chromium window, which renders the Home view
-([screenshot](touch-display-screenshots/raspberry-pi-3b-arm64.png)). Chromium used roughly 200 MB of
-the Pi's 905 MB of RAM at the time. Not tried on a Pi: a physical screen, touch, full-screen mode under a
-window manager, a connected server, or `--profile pi` together with `--display` (the Pi profile is
-headless by default).
+Raspberry Pi 3 Model B (aarch64, Debian 13) under a virtual display (Xvfb with the Openbox window manager). On the
+Pi, `go test` for the display packages passes natively, and the engine serves the shell and starts the dedicated
+Chromium window, which fills the 1280x800 screen. Driving the real UI with `xdotool` mouse and keyboard events, the
+Home, Devices and Media views open, a wrong exit PIN is rejected ("Incorrect PIN") and the right PIN closes Chromium
+([Home](touch-display-screenshots/raspberry-pi-3b-arm64.png), [Devices](touch-display-screenshots/raspberry-pi-3b-devices.png),
+[PIN exit](touch-display-screenshots/raspberry-pi-3b-pin-exit.png)). Chromium used roughly 200 MB of the Pi's 905 MB of
+RAM. This ran offline, with no `jarvisd`, so server-delivered configuration was not exercised on the Pi. Not tried on a
+Pi: a physical screen, touch input, or `--profile pi` together with `--display` (the Pi profile is headless by default).
 
 ## Configure and enable
 
