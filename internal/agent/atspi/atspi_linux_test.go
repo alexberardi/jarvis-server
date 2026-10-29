@@ -331,13 +331,15 @@ func TestSnapshotFromFakeTree(t *testing.T) {
 // Slice 4a: a desktop element's Position is from its bounds in the window's, and its Context is
 // the name of the nearest named container above it (a toolbar, a dialog), never a text's value.
 func TestSnapshotPositionAndContext(t *testing.T) {
-	bold := &fakeNode{role: roleButton, name: "Bold", states: usable, box: [4]int32{20, 20, 30, 30}}
-	ok := &fakeNode{role: roleButton, name: "OK", states: usable, box: [4]int32{700, 500, 60, 30}}
-	far := &fakeNode{role: roleButton, name: "Offscreen", states: usable, box: [4]int32{2000, 20, 30, 30}}
-	field := &fakeNode{role: roleEntry, name: "Size", states: usable, text: "12 pt", box: [4]int32{400, 300, 60, 20}}
-	main := &fakeNode{role: roleFrame, name: "Untitled 1 - LibreOffice Writer", states: with(stateActive), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
+	// Everything here is on screen (SHOWING), as in the scenario it stands for.
+	shown := append(with(), stateShowingT)
+	bold := &fakeNode{role: roleButton, name: "Bold", states: shown, box: [4]int32{20, 20, 30, 30}}
+	ok := &fakeNode{role: roleButton, name: "OK", states: shown, box: [4]int32{700, 500, 60, 30}}
+	far := &fakeNode{role: roleButton, name: "Offscreen", states: shown, box: [4]int32{2000, 20, 30, 30}}
+	field := &fakeNode{role: roleEntry, name: "Size", states: shown, text: "12 pt", box: [4]int32{400, 300, 60, 20}}
+	main := &fakeNode{role: roleFrame, name: "Untitled 1 - LibreOffice Writer", states: append(with(stateActive), stateShowingT), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
 		{role: roleToolBar, name: "Formatting", states: []int{stateShowingT}, kids: []*fakeNode{
-			{role: rolePanel, kids: []*fakeNode{bold}}, // an unnamed panel in between
+			{role: rolePanel, states: []int{stateShowingT}, kids: []*fakeNode{bold}}, // an unnamed panel in between
 		}},
 		{role: roleDialog, name: "Character", states: []int{stateShowingT}, kids: []*fakeNode{field, ok}},
 		far,
