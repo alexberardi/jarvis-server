@@ -54,13 +54,21 @@ func (t *Tools) Snapshot(ctx context.Context, tab string, max int) (computeruse.
 		max = DefaultSnapshotMax
 	}
 	max = min(max, MaxSnapshotMax)
-	res, err := t.call(ctx, "snapshot", map[string]any{"tab_id": tab}, map[string]any{"max": max})
+	s, _, err := t.snapshot(ctx, map[string]any{"tab_id": tab}, map[string]any{"max": max}, max)
+	return s, err
+}
+
+// snapshot runs the extension's snapshot command (extra: max, and for voice viewport and wait)
+// and returns it decoded and cleaned, with the raw result (its tab). Computer tasks and voice
+// targeting share it, so both get the same limits and secret-field rules.
+func (t *Tools) snapshot(ctx context.Context, args, extra map[string]any, max int) (computeruse.Snapshot, map[string]any, error) {
+	res, err := t.call(ctx, "snapshot", args, extra)
 	if err != nil {
-		return computeruse.Snapshot{}, err
+		return computeruse.Snapshot{}, nil, err
 	}
 	var s computeruse.Snapshot
 	if err := decode(res, &s); err != nil || s.Gen <= 0 {
-		return computeruse.Snapshot{}, fmt.Errorf("the extension's snapshot is malformed: %v", cmpErr(err, "no gen"))
+		return computeruse.Snapshot{}, nil, fmt.Errorf("the extension's snapshot is malformed: %v", cmpErr(err, "no gen"))
 	}
 	if len(s.Elements) > max {
 		s.Elements = s.Elements[:max]
@@ -80,7 +88,7 @@ func (t *Tools) Snapshot(ctx context.Context, tab string, max int) (computeruse.
 			e.Value = "" // never, even from an extension that sent it
 		}
 	}
-	return s, nil
+	return s, res, nil
 }
 
 // secretField is snapCollect's secret(): a password, hidden, card or one-time-code field,
