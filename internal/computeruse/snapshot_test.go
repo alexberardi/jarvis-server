@@ -41,3 +41,27 @@ func TestValidPosition(t *testing.T) {
 		}
 	}
 }
+
+// PositionIn: where an element's centre sits in its window, for sources that know both as screen
+// bounds (AT-SPI now; Windows UIA and macOS AX later). Nothing when the centre is outside.
+func TestPositionIn(t *testing.T) {
+	win := [4]int{100, 50, 900, 600} // x, y, width, height on screen
+	for _, c := range []struct {
+		el   [4]int
+		want string
+	}{
+		{[4]int{110, 60, 20, 20}, "top-left"},
+		{[4]int{500, 300, 100, 50}, "middle-center"},
+		{[4]int{960, 600, 30, 30}, "bottom-right"},
+		{[4]int{1100, 300, 20, 20}, ""}, // right of the window
+		{[4]int{500, 700, 20, 20}, ""},  // below it
+		{[4]int{500, 300, 0, 0}, ""},    // no size
+	} {
+		if got := PositionIn(c.el, win); got != c.want {
+			t.Errorf("PositionIn(%v) = %q, want %q", c.el, got, c.want)
+		}
+	}
+	if got := PositionIn([4]int{10, 10, 5, 5}, [4]int{0, 0, 0, 0}); got != "" {
+		t.Errorf("an empty window gave %q", got)
+	}
+}
