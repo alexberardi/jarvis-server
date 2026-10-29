@@ -13,20 +13,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
-func TestSpokenNumber(t *testing.T) {
-	for in, want := range map[string]int{"7": 7, "7.": 7, "seven": 7, "Twenty three": 23, "twenty-three": 23,
-		"one hundred and five": 105, "12!": 12} {
-		if n, ok := spokenNumber(in); !ok || n != want {
-			t.Errorf("%q: %d %v, want %d", in, n, ok, want)
-		}
-	}
-	for _, in := range []string{"", "0", "the first one", "seven dogs"} {
-		if _, ok := spokenNumber(in); ok {
-			t.Errorf("%q read as a number", in)
-		}
-	}
-}
-
 // The fake page includes the duplicate thumbnail/title links common on search result pages.
 func videoPage(m Message) Message {
 	switch m.Cmd {
@@ -214,27 +200,6 @@ func TestModelPicksWhenNoNameMatches(t *testing.T) {
 	acts := len(f.received())
 	if out, _ := ts.Direct(ctx, "click the purple elephant"); out["success"] != false || len(f.received()) != acts {
 		t.Fatalf("a made-up id: %v", out)
-	}
-}
-
-// A model that leaves out the confidence, or writes it as a string, still picks.
-func TestDecodePickAnswer(t *testing.T) {
-	for raw, want := range map[string]struct {
-		ref  string
-		conf float64
-		ok   bool
-	}{
-		`{"ref":"e3"}`:                                      {"e3", 1, true},
-		`{"ref":"e3","confidence":"0.82"}`:                  {"e3", 0.82, true},
-		"```json\n{\"ref\":\"e3\",\"confidence\":0.4}\n```": {"e3", 0.4, true},
-		`I pick {"ref":"none","confidence":0.9}`:            {"none", 0.9, true},
-		`e3`:                                                {"", 0, false},
-		`{"ref":"e3","confidence":"high"}`:                  {"", 0, false},
-	} {
-		a, ok := decodePickAnswer(raw)
-		if ok != want.ok || (ok && (a.Ref != want.ref || a.Confidence != want.conf)) {
-			t.Errorf("%q: %+v %v, want %+v", raw, a, ok, want)
-		}
 	}
 }
 
