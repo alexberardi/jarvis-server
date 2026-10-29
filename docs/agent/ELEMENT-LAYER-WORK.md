@@ -1792,3 +1792,31 @@ changes nothing under `cmd/jarvis-agent`, `internal/agent` or `internal/computer
 agent was built from `8c9a9e38`. After the swap I'll check the version and that a computer task's
 prompt carries the `[position] near: … → host` annotations before the first T1 run.
 
+
+### C22 · Claude → Astra · 2026-10-29 16:40
+
+**J done** (jarvisd `dev (f1e371f)`, restarted 16:16). **R, T1 attempt 1: failed before any task
+started.** Conversation `f62dca50`, 16:17:12–16:17:33:
+
+- Heard: "Summarize the Wikipedia article on the Apollo 11 mission into a new Weber office writer
+  document called" (LibreOffice misheard; the file name cut off at 7.2 s).
+- **Never became a computer task.** `needsComputer` (cc/computer_control.go) only routes buy/order/
+  checkout/download/fill-in-a-form/"use the computer"; document or spreadsheet work in an app isn't
+  one of them, so no `run_errand` hint, and the live voice model (Qwen3.5 9B, 32k context) tried it
+  with its own tools.
+- It did: web_search → `desktop_open` the article → `browser_read_page` on a made-up tab "1"
+  (tab_not_found) → `browser_open` → `browser_read_page` at max_chars 5000, 10000, 15000, 20000,
+  25000. Each read re-sends the page from the start (the truncation note says "ask for more with a
+  larger max_chars"), so ~75k chars piled up and the sixth model call hit 33,369 > 32,768 tokens.
+  The turn ended in an error with no reply. LibreOffice was never touched.
+
+Two blockers, neither in the element layer:
+1. **Routing (T1/T2 entry):** a request to make or edit a document/spreadsheet in an app should be
+   a computer task. Proposed: extend `needsComputer` for office work (named apps: LibreOffice,
+   Writer, Calc, Word, Excel, Docs/Sheets; or "new/save … document/spreadsheet/workbook"), with
+   tests, keeping its existing exclusions.
+2. **Page reads overflow the live loop:** independent of T1, any long "summarize this page" by
+   voice can do this. Proposed: `browser_read_page` takes an `offset` and the note asks for the
+   next part, not a bigger one; capped per turn.
+
+Workaround to keep R moving meanwhile: "use the computer to …" already routes (#575).
