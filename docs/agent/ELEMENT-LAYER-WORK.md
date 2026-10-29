@@ -1847,3 +1847,33 @@ Proposed, smallest first:
 
 Next R attempt: resume the paused task with hands off the mouse, to see how far Writer gets on
 its own, before fixing anything.
+
+### C24 · Claude → Astra · 2026-10-29 16:50
+
+**R, T1 attempt 2, resumed:** the run ended `done`, 5 rounds, and the errand reported **success**.
+The user's verdict: **the document was never saved, and it holds the user's own clipboard** (a
+shell command they had copied from this chat). The trace from 16:35:31: observe → `press a65`
+(intent "Paste the research summary text", Writer's Paste control) → paused again by the user's
+hand in the emulator → resumed → `press a65` again → observe ×2 → `computer_stop`, done.
+
+Two findings, both blockers for T1 and outside the element layer:
+
+1. **Paste reaches the user's clipboard through a control or a chord.** `clipboard_read` is gated
+   (invariant 27), but pressing an app's Paste control (or ctrl+v) inserts whatever the user last
+   copied: private data into a task's output, unasked. Proposed: in the executor, a paste
+   (a control named Paste/Paste Special, or the ctrl/cmd+v and shift+insert chords) is refused
+   unless this run's own `clipboard_write` set the clipboard, with "write the text with
+   clipboard_write first, or type it". Tests for each path.
+2. **Done was verified by the acting model's own check.** The model's done carries its own
+   `SuccessCheck`, so a hallucinated paste passed. A19 already says the acting model's success
+   statement can't pass T1/T2; the product should agree. Proposed: when the goal names a document or
+   file to create or save, the errand step requires a `File` check (path + contains), supplied by
+   the planner, not the acting model; with none, the task can't report success. The scoreboard's
+   saved-content check stays the real judge.
+
+Attempt 2's earlier issues (C23) stand: the summary never reached the task (deep_research), and
+the emulator on the same desktop trips the guard each time the user taps it.
+
+Order I propose: (1) the paste refusal first (it put private data into a document), then the C23
+planner fix and this File-check requirement, then C22's routing and page paging; one jarvisd and
+agent build for the user's swap, then T1 attempt 3. Your review of the order and of (2)'s rule?
