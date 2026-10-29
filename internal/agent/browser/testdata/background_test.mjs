@@ -205,7 +205,7 @@ test("snapshot lists visible controls without drawing an overlay", async () => {
 
 // fakePage is the document snapCollect reads: Bob's comment (a list item with a Reply link), a
 // link far below the fold, and a draft in a text box. top is the frame's top window.
-function fakePage(ctx, { subframe = false, hiddenText = false } = {}) {
+function fakePage(ctx, { subframe = false, hiddenText = false, href = "https://forum.test/c/1" } = {}) {
   const node = (props) => {
     const e = { localName: "a", attrs: {}, parentElement: null, labels: null, isContentEditable: false,
       innerText: "", textContent: "", rect: { left: 10, top: 10, width: 100, height: 20 }, ...props };
@@ -223,7 +223,7 @@ function fakePage(ctx, { subframe = false, hiddenText = false } = {}) {
   const texts = ["Bob", "· 2h ·", "Great point"];
   if (hiddenText) texts.unshift({ text: "CSS-HIDDEN-DRAFT", hidden: true });
   const comment = node({ localName: "li", container: true, texts });
-  const reply = node({ attrs: { href: "/c/1" }, href: "https://forum.test/c/1", innerText: "Reply", parentElement: comment });
+  const reply = node({ attrs: { href: "/c/1" }, href, innerText: "Reply", parentElement: comment });
   const far = node({ attrs: { href: "/old" }, href: "https://forum.test/old", innerText: "Older posts", rect: { left: 10, top: 5000, width: 100, height: 20 } });
   const draft = node({ localName: "input", attrs: { type: "text" }, value: "my draft" });
   ctx.innerWidth = 1200;
@@ -283,6 +283,28 @@ test("context leaves out text hidden with CSS", () => {
   for (const viewport of [false, true]) {
     const [reply] = ctx.snapCollect(1, 300, viewport).elements;
     assert.equal(reply.context, "Bob · 2h · Great point", viewport ? "voice snapshot" : "computer snapshot");
+  }
+});
+
+// A9: a link's destination longer than 2048 UTF-8 bytes is dropped in the page, before the native
+// message (8 MiB cap) is built; the element and the rest of the snapshot stay. Never truncated.
+test("a target over 2048 bytes is dropped in the extension, the element kept", () => {
+  const { ctx } = load();
+  const at = (n) => "https://forum.test/" + "a".repeat(n - "https://forum.test/".length);
+  const cases = [
+    [at(2048), true],
+    [at(2049), false],
+    ["https://forum.test/" + "é".repeat(1015), false], // 2049 bytes in UTF-8, 1034 characters
+    ["data:text/plain," + "a".repeat(9 * 1024 * 1024), false],
+  ];
+  for (const [href, kept] of cases) {
+    fakePage(ctx, { href });
+    for (const viewport of [false, true]) {
+      const [reply] = ctx.snapCollect(1, 300, viewport).elements;
+      assert.equal(reply.name, "Reply");
+      assert.equal(reply.context, "Bob · 2h · Great point");
+      assert.equal(reply.target, kept ? href : undefined, `${href.length} chars, viewport ${viewport}`);
+    }
   }
 });
 
