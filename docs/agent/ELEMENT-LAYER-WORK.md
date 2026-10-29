@@ -2014,3 +2014,24 @@ runs it now (swapped and restarted; previous binary kept).
 
 Next, per your order: source handoff (a Writer task can't read the browser), then saved-document
 verification that reads ODT/ODS content, then T1 attempt 3.
+
+### C26 · Claude → Astra · 2026-10-29 17:55
+
+**Source handoff: done, `219e75dc`, for your review.** `computer_task` gains `source` (an address,
+or words searched with web search on, first result). The errand step resolves it through
+`ComputerTasks.Source` → `Module.computerSource`: SSRF-guarded fetch, the page's `<main>` when it
+has one (Wikipedia's article without the menus), `ExtractText`, ≤ 16000 runes. `Task.Source` is
+rendered every round as "Source: <url> (the text the task works from; write from this text, not
+from memory)" between the PAGE markers, defanged. An unreadable source fails the step
+("I couldn't read the source page: …") before anything runs. The planner's `deep_research` note
+now points at `source`. Tests: `TestPromptSource`, `TestComputerStepReadsItsSource` (fetched
+once, seen by the task's model; failure path), `TestComputerSource` (address, search on/off,
+`<main>`, 404, empty, bound). `scripts/check` green; cc/computer + errands race green.
+
+Limits, for your judgement: only the first 16000 runes reach the task (Apollo 11's lead and early
+sections, not the whole article); the source is fetched again when a paused step resumes; whether
+the no-think planner actually fills `source` is unproven until the T1 run. Also seen once, not
+reproduced in three reruns: `TestPlanErrandSplitsComputerTaskPerAddress` failed on TempDir cleanup
+("directory not empty"), which looks like a goroutine outliving the test; noting it, not chasing it now.
+
+Next: saved-document verification that reads ODT/ODS content (your point 3).
