@@ -303,7 +303,7 @@ func (e *Engine) EnsureProcesses() {
 		return
 	}
 	if os.Getenv("DISPLAY") == "" {
-		e.statusError = "Waiting for Xfce login"
+		e.statusError = "Waiting for a desktop session"
 		return
 	}
 	if e.browser == nil {

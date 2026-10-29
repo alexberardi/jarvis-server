@@ -584,7 +584,7 @@ const voiceByDefault = true
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
-		displayOn: fs.Bool("display", false, "offer the local touch display, configured by the server; Linux/Xfce"),
+		displayOn: fs.Bool("display", false, "offer the local touch display, configured by the server; needs a Linux graphical session with a screen"),
 		cp:        fs.String("creds", "", "credentials file"),
 		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
 		tf:        addToolFlags(fs),

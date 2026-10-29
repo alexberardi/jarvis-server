@@ -1,9 +1,22 @@
 # Use the Jarvis touch display
 
-The Linux agent offers a local touch display when started with `run --display`. Other agents and
-nodes retain their existing behaviour. Build the React assets before building both Go binaries:
+The Linux agent offers a local touch display on any device with a screen when started with
+`run --display`. It is not tied to one model of hardware. Other agents and nodes retain their existing
+behaviour. Build the React assets before building both Go binaries:
 `npm ci && npm run build` in `web/admin`, then the usual `CGO_ENABLED=0 go build` commands. The agent
 embeds the installed display assets, so the shell, clocks, photos and themes work without the server.
+
+## Requirements
+
+- Linux, with a graphical session whose `DISPLAY` is visible to the agent. The agent reports
+  "Waiting for a desktop session" until one exists, so start it from the session (or import the
+  session environment into its service). Wayland-only sessions without XWayland are not covered.
+- `chromium` and `mpv` on the `PATH`, and a screen. The shell is built for touch.
+- The server's `/api/v0/node/display` endpoints, which the node reaches with its existing credentials.
+
+Tested hardware is a Surface Pro 6 only (see the pilot notes below). Other devices, including a
+Raspberry Pi, are expected to work if they meet the list above but have not been tried. The Pi
+agent profile is headless by default, so combining `--profile pi` with `--display` is untested.
 
 ## Configure and enable
 
@@ -54,7 +67,7 @@ The dedicated Chromium profile starts full-screen with `--password-store=basic` 
 keyring prompt in auto-login accounts. This profile is local-only and must never be used for website
 credentials. Streaming sites retain a separate profile with normal credential storage and may ask
 for a keyring password on first sign-in. See [Chromium password storage](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/linux/password_storage.md).
-Xfce shortcuts remain available. PIN exit closes the display, its media and receivers, leaving
+The desktop environment's own shortcuts remain available. PIN exit closes the display, its media and receivers, leaving
 the agent's voice service running. Five failed attempts impose a
 one-minute delay. The salted bcrypt verifier is delivered only to the authenticated node and stored
 in its private configuration cache with mode `0600`. Neither settings reads nor the shell/theme API
@@ -137,7 +150,7 @@ horizontal overflow in landscape, portrait and phone viewports. It writes screen
 Hardware, receiver sender compatibility and subscription sign-in require their own recorded results;
 passing these checks alone does not establish compatibility with a phone application or website.
 
-The Surface Pro 6 pilot required the linux-surface kernel and `iptsd`; the stock Debian kernel did
+The pilot device, a Surface Pro 6, required the linux-surface kernel and `iptsd`; the stock Debian kernel did
 not expose its Intel touchscreen. The original kernel remains available for rollback. After reboot,
 the user confirmed finger navigation, the full-screen speech circle and PIN exit with voice
 continuing. This hardware acceptance does not establish subscription or stock Cast sender support.

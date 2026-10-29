@@ -87,7 +87,7 @@ try {
     assert.ok(Math.min(circle.width, circle.height) >= Math.min(viewport.width, viewport.height) * 0.8, 'circle should dominate the speech screen')
     const exit = page.getByRole('button', { name: 'Exit', exact: true })
     await exit.tap()
-    await page.getByRole('heading', { name: 'Return to Xfce' }).waitFor()
+    await page.getByRole('heading', { name: 'Return to the desktop' }).waitFor()
     await page.getByRole('button', { name: 'Cancel', exact: true }).tap()
     await page.screenshot({ path: path.join(output, `Speech-${viewport.width}x${viewport.height}.png`), fullPage: true })
     voice = 'idle'
