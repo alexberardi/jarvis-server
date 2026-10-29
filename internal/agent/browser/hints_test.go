@@ -274,3 +274,23 @@ func TestVoiceSnapshotCarriesNoValues(t *testing.T) {
 		t.Errorf("ordinary computer snapshot must keep its existing values: %+v %v", computer, err)
 	}
 }
+
+// A page that can't be read (no website access) is said as such, not as a control that isn't
+// there; the voice test of 2026-10-29 got "couldn't find that control" four times.
+func TestUnreadablePageSaysWhy(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		if m.Cmd == "snapshot" {
+			return Message{OK: false, Code: "no_site_access", Error: "Jarvis doesn't have access to this page: allow it in the add-on's Permissions"}
+		}
+		return ok(map[string]any{})
+	})
+	out, ok := ts.Direct(context.Background(), "Click Videos.")
+	if !ok || out["success"] != false || out["error_code"] != "no_site_access" {
+		t.Fatalf("unreadable page: %v %v", out, ok)
+	}
+	if s, _ := out[node.IslandKey].(string); !strings.Contains(s, "access") {
+		t.Errorf("island %q doesn't say why", s)
+	}
+}
