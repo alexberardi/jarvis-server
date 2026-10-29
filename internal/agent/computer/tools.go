@@ -78,6 +78,8 @@ type Tools struct {
 	Activity *Activity
 	// Home is the user's home folder for computer_files ("": os.UserHomeDir).
 	Home string
+	// Office reads and edits documents (doc_read, doc_edit; nil: headless LibreOffice).
+	Office Office
 
 	once sync.Once
 	rs   *Runs
@@ -108,11 +110,14 @@ var (
 		Params: []node.Param{runParam, targetParam,
 			{Name: "actions", Type: "array", Required: true, Description: "computeruse actions"},
 			{Name: "blocked", Type: "object", Description: `{"sites": [], "apps": []}`}}}
-	filesSpec = node.Spec{Name: computeruse.ToolFiles, Description: "List, read or write a file in Downloads or ~/Documents/Jarvis.",
+	filesSpec = node.Spec{Name: computeruse.ToolFiles, Description: "List, read or write a file in Downloads or ~/Documents/Jarvis; " +
+		"read, create or edit a document (.odt, .docx, .ods, .xlsx) in ~/Documents.",
 		Params: []node.Param{
-			{Name: "op", Type: "string", Required: true, Enum: []string{"list", "read", "write"}},
+			{Name: "op", Type: "string", Required: true, Enum: []string{"list", "read", "write", "doc_read", "doc_edit"}},
 			{Name: "path", Type: "string", Required: true},
-			{Name: "content_b64", Type: "string", Description: "write: the file's bytes"}}}
+			{Name: "content_b64", Type: "string", Description: "write: the file's bytes"},
+			{Name: "create", Type: "bool", Description: "doc_edit: make the document (it must not exist yet)"},
+			{Name: "ops", Type: "array", Description: "doc_edit: the edits, in order (office.py)"}}}
 	stopSpec = node.Spec{Name: computeruse.ToolStop, Description: "Stop a computer task.",
 		Params: []node.Param{runParam}}
 )
@@ -145,6 +150,14 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		}
 		return t.act(ctx, a), true
 	case computeruse.ToolFiles:
+		switch args["op"] {
+		case "doc_read":
+			return t.docRead(ctx, stringArg(args, "path")), true
+		case "doc_edit":
+			create, _ := args["create"].(bool)
+			ops, _ := args["ops"].([]any)
+			return t.docEdit(ctx, stringArg(args, "path"), create, ops), true
+		}
 		return t.files(args), true
 	}
 	id, _ := args["run_id"].(string)
