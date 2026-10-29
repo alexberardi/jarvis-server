@@ -145,6 +145,8 @@ func (o obj) role(ctx context.Context) (uint32, error) {
 }
 
 // children are GetChildren's, else ChildCount × GetChildAtIndex for a toolkit without it.
+// children are o's children, at most maxChildren of them, or maxVirtualChildren when o lists none
+// and only reports a count (a spreadsheet's sheet: millions of virtual cells; A15 F1).
 func (o obj) children(ctx context.Context) ([]obj, error) {
 	var refs []objRef
 	if err := o.call(ctx, ifAccessible+".GetChildren").Store(&refs); err != nil {
@@ -154,12 +156,18 @@ func (o obj) children(ctx context.Context) ([]obj, error) {
 		} else if n, _ = v.(int32); n <= 0 {
 			return nil, nil
 		}
-		for i := range n {
+		for i := range min(n, maxVirtualChildren) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			var r objRef
 			if err := o.call(ctx, ifAccessible+".GetChildAtIndex", i).Store(&r); err == nil {
 				refs = append(refs, r)
 			}
 		}
+	}
+	if len(refs) > maxChildren {
+		refs = refs[:maxChildren]
 	}
 	out := make([]obj, 0, len(refs))
 	for _, r := range refs {
@@ -399,7 +407,9 @@ func (w *walker) visit(o obj, depth int, near string) {
 	}
 	if role, ok := roleNames[r]; ok {
 		w.keep(o, role, r == rolePasswordText, near)
-	} else if containerRoles[r] {
+	} else if containerRoles[r] && o.state(w.ctx).has(stateShowing) {
+		// Only a container on screen names its elements: a closed menu or hidden panel never
+		// becomes context, in either snapshot kind (A15 F7).
 		if n := strings.TrimSpace(o.name(w.ctx)); n != "" {
 			near = n
 		}
@@ -435,7 +445,7 @@ func (w *walker) keep(o obj, role string, secure bool, near string) {
 		if st.has(stateChecked) {
 			el.State = append(el.State, "checked")
 		}
-	case textRoles[role]:
+	case textRoles[role] && !w.showing: // a voice snapshot never reads what was typed (§2, A15 F6)
 		el.Value = clip(o.text(ctx))
 	}
 	if st != nil && (!st.has(stateEnabled) || !st.has(stateSensitive)) {

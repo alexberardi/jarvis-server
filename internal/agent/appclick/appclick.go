@@ -48,6 +48,22 @@ type Source struct {
 
 	mu      sync.Mutex
 	confirm string // the risky click waiting for its yes
+	// bound is the window in front when the turn began listening, or after the last click:
+	// a command never lands in another one (§3, A15 F4).
+	bound *computer.DesktopWindow
+}
+
+// TurnListening binds the turn to the window in front as it starts listening; the end unbinds.
+func (s *Source) TurnListening(ctx context.Context, on bool) {
+	var w *computer.DesktopWindow
+	if on {
+		if f, ok := s.front(ctx); ok {
+			w = &f
+		}
+	}
+	s.mu.Lock()
+	s.bound = w
+	s.mu.Unlock()
 }
 
 // Direct carries out a click on a control of the focused app window; ok false passes it on.
@@ -59,6 +75,14 @@ func (s *Source) Direct(ctx context.Context, said string) (map[string]any, bool)
 	win, ok := s.front(ctx)
 	if !ok {
 		return nil, false
+	}
+	s.mu.Lock()
+	bound := s.bound
+	s.bound = &win // said again, it goes to this window
+	s.mu.Unlock()
+	if bound != nil && (bound.ID != win.ID || bound.PID != win.PID) {
+		return fail("window_changed", "the window in front changed since listening began",
+			"The window changed since you started. Say it again."), true
 	}
 	snap, err := s.Snapshot(ctx, win.PID, snapshotMax)
 	if err != nil || len(snap.Elements) == 0 {
@@ -109,11 +133,16 @@ func (s *Source) AnswerChoice(ctx context.Context, said string) (map[string]any,
 // same window still has the focus (§3: a change is a stale snapshot, never a retarget).
 func (s *Source) press(ctx context.Context, win computer.DesktopWindow, snap computeruse.Snapshot, ref string) map[string]any {
 	e := snap.Find(ref)
-	label := e.Name
-	if label == "" {
+	label := strings.TrimSpace(e.Name)
+	nameless := label == "" // "  " is no name either (A15 F5)
+	if nameless {
 		label = e.Role
 	}
 	act := func(ctx context.Context) (map[string]any, error) {
+		if s.Allowed == nil || !s.Allowed() {
+			// Turned off while a question or a slow pick waited (A15 F2).
+			return nil, fmt.Errorf("computer control is off")
+		}
 		if now, ok := s.front(ctx); !ok || now.ID != win.ID || now.PID != win.PID {
 			return nil, fmt.Errorf("the window changed; say it again")
 		}
@@ -123,11 +152,16 @@ func (s *Source) press(ctx context.Context, win computer.DesktopWindow, snap com
 		return map[string]any{"success": true, "clicked": label, node.IslandKey: "Clicked " + label, node.IslandOnlyKey: true}, nil
 	}
 	risk := computeruse.Classify(computeruse.Action{Kind: "press"}, e.Element(), computeruse.Target{Kind: "desktop", App: win.App, WindowID: win.ID})
+	// The gate as the browser's: an ordinary click is GateType (asked only in "all" mode); a
+	// risky control, or one with no name to judge it by, GateSubmit (DESKTOP-COMMANDS.md Q8).
+	g := dictate.GateType
+	if risk.Level == computeruse.LevelConfirm || nameless {
+		g = dictate.GateSubmit
+	}
 	switch {
 	case risk.Level == computeruse.LevelDeny:
 		return fail("denied", risk.Reason, "Jarvis won't click "+label)
-	case (risk.Level == computeruse.LevelConfirm || label == e.Role) && s.Confirm.Needs(dictate.GateSubmit):
-		// A risky control, or one with no name to judge it by, asks first (DESKTOP-COMMANDS.md Q8).
+	case s.Confirm.Needs(g):
 		q := fmt.Sprintf("Click %q in %s?", dictate.Preview(label, 60), appName(win))
 		out := s.Confirm.Ask(q, act)
 		s.mu.Lock()
@@ -195,4 +229,5 @@ var (
 	_ node.Toolset        = (*Source)(nil)
 	_ node.Director       = (*Source)(nil)
 	_ node.ChoiceAnswerer = (*Source)(nil)
+	_ node.TurnWatcher    = (*Source)(nil)
 )

@@ -12,7 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
@@ -32,6 +34,10 @@ type fakeNode struct {
 	kids   []*fakeNode
 	// actions are GetActions' names; none: a single unnamed action (DoAction 0 still works).
 	actions []string
+	// virtual, when set, is a spreadsheet's ChildCount: GetChildren fails, as for Calc's sheet,
+	// and GetChildAtIndex answers every index with the first kid, counting the calls.
+	virtual int32
+	atIndex atomic.Int64
 
 	app  *fakeApp
 	path dbus.ObjectPath
@@ -65,11 +71,22 @@ func (n *fakeNode) ref() objRef { return objRef{n.app.conn.Names()[0], n.path} }
 func (n *fakeNode) GetRole() (uint32, *dbus.Error) { return n.role, nil }
 
 func (n *fakeNode) GetChildren() ([]objRef, *dbus.Error) {
+	if n.virtual > 0 {
+		return nil, dbus.MakeFailedError(errors.New("too many children"))
+	}
 	out := []objRef{}
 	for _, k := range n.kids {
 		out = append(out, k.ref())
 	}
 	return out, nil
+}
+
+func (n *fakeNode) GetChildAtIndex(i int32) (objRef, *dbus.Error) {
+	n.atIndex.Add(1)
+	if len(n.kids) == 0 {
+		return objRef{}, dbus.MakeFailedError(errors.New("no child"))
+	}
+	return n.kids[0].ref(), nil
 }
 
 func (n *fakeNode) GetState() ([]uint32, *dbus.Error) {
@@ -155,6 +172,7 @@ func (a *fakeApp) export(t *testing.T, n *fakeNode) {
 	if _, err := prop.Export(a.conn, n.path, prop.Map{ifAccessible: {
 		"Name":        {Value: n.name},
 		"Description": {Value: ""},
+		"ChildCount":  {Value: max(n.virtual, int32(len(n.kids)))},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +247,7 @@ const (
 	roleMenu        = 33
 	roleMenuBar     = 34
 	stateShowingT   = 25
+	roleTable       = 55
 	roleLabel       = 29
 	rolePanel       = 39
 )
@@ -317,10 +336,10 @@ func TestSnapshotPositionAndContext(t *testing.T) {
 	far := &fakeNode{role: roleButton, name: "Offscreen", states: usable, box: [4]int32{2000, 20, 30, 30}}
 	field := &fakeNode{role: roleEntry, name: "Size", states: usable, text: "12 pt", box: [4]int32{400, 300, 60, 20}}
 	main := &fakeNode{role: roleFrame, name: "Untitled 1 - LibreOffice Writer", states: with(stateActive), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
-		{role: roleToolBar, name: "Formatting", kids: []*fakeNode{
+		{role: roleToolBar, name: "Formatting", states: []int{stateShowingT}, kids: []*fakeNode{
 			{role: rolePanel, kids: []*fakeNode{bold}}, // an unnamed panel in between
 		}},
-		{role: roleDialog, name: "Character", kids: []*fakeNode{field, ok}},
+		{role: roleDialog, name: "Character", states: []int{stateShowingT}, kids: []*fakeNode{field, ok}},
 		far,
 	}}
 	fakeDesktop(t, &fakeNode{role: roleApplication, name: "soffice", kids: []*fakeNode{main}})
@@ -386,6 +405,44 @@ func TestSnapshotShowingSkipsClosedMenus(t *testing.T) {
 	}
 	if all.Elements[0].Bounds != nil {
 		t.Errorf("a placeholder position kept bounds %v", all.Elements[0].Bounds)
+	}
+}
+
+// A15 F1: Calc's sheet reports millions of virtual cells and fails GetChildren; reading each one
+// hung the walk past its deadline (965 MB in Calc). One object's children are bounded, the walk
+// stops when cancelled, and the controls after the sheet are still reached.
+func TestHugeChildCountIsBoundedAndCancellable(t *testing.T) {
+	shown := func(s ...int) []int { return append(with(s...), stateShowingT) }
+	sheet := &fakeNode{role: roleTable, name: "Sheet1", states: shown(), virtual: 2_000_000, kids: []*fakeNode{
+		{role: roleTableCell, name: "A1", states: shown(), box: [4]int32{100, 200, 80, 20}},
+	}}
+	main := &fakeNode{role: roleFrame, name: "Untitled 1 - LibreOffice Calc", states: append(with(stateActive), stateShowingT), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
+		sheet,
+		{role: roleToolBar, name: "Formatting", states: shown(), kids: []*fakeNode{
+			{role: roleToggleButton, name: "Bold", states: shown(), box: [4]int32{20, 20, 30, 30}},
+		}},
+	}}
+	fakeDesktop(t, &fakeNode{role: roleApplication, name: "soffice", kids: []*fakeNode{main}})
+
+	for _, snap := range []func(context.Context, int, int) (computeruse.Snapshot, error){Snapshot, SnapshotShowing} {
+		sheet.atIndex.Store(0)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		s, err := snap(ctx, os.Getpid(), 0)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := sheet.atIndex.Load(); n > maxVirtualChildren {
+			t.Errorf("read %d of the sheet's children, want at most %d", n, maxVirtualChildren)
+		}
+		if !slices.ContainsFunc(s.Elements, func(e computeruse.SnapElement) bool { return e.Name == "Bold" }) {
+			t.Errorf("Bold, after the sheet, not reached: %d elements", len(s.Elements))
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Snapshot(ctx, os.Getpid(), 0); err == nil {
+		t.Error("a cancelled snapshot still walked")
 	}
 }
 

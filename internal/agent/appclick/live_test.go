@@ -31,13 +31,17 @@ func TestLiveLibreOffice(t *testing.T) {
 	if st := atspi.Enable(ctx); !st.Enabled || st.Err != nil {
 		t.Fatalf("accessibility bus: %+v", st)
 	}
+	app := map[string]string{"": "Writer", "writer": "Writer", "calc": "Calc"}[os.Getenv("JARVIS_APPCLICK_APP")]
+	if app == "" {
+		t.Fatalf("JARVIS_APPCLICK_APP %q: writer or calc", os.Getenv("JARVIS_APPCLICK_APP"))
+	}
 	ws := computer.NativeWindows()
 	var win computer.DesktopWindow
 	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
 		list, err := ws.List(ctx)
 		if err == nil {
 			for _, w := range list {
-				if w.Focused && w.PID > 0 && strings.Contains(w.Title, "Writer") {
+				if w.Focused && w.PID > 0 && strings.Contains(w.Title, app) {
 					win = w
 				}
 			}
@@ -49,7 +53,7 @@ func TestLiveLibreOffice(t *testing.T) {
 		}
 	}
 	if win.PID == 0 {
-		t.Fatal("no focused Writer window appeared")
+		t.Fatalf("no focused %s window appeared", app)
 	}
 	t.Logf("window: %+v", win)
 
@@ -77,7 +81,7 @@ func TestLiveLibreOffice(t *testing.T) {
 
 	bold := find(s, "Bold")
 	if bold == nil {
-		t.Fatal(`no control named "Bold" in Writer's snapshot`)
+		t.Fatalf(`no control named "Bold" in %s's snapshot`, app)
 	}
 	src := &Source{Windows: ws, Snapshot: atspi.SnapshotShowing, Press: atspi.Press, Allowed: func() bool { return true }}
 	out, ok := src.Direct(ctx, "click Bold")

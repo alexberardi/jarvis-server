@@ -24,8 +24,14 @@ import (
 const DefaultMax = 300
 
 const (
-	maxDepth = 64  // a broken app can report a cycle; the walk stops here
-	maxText  = 200 // runes kept of a name or value (a text view's text can be a whole document)
+	maxDepth = 64 // a broken app can report a cycle; the walk stops here
+	// maxChildren is how many children one object contributes; maxVirtualChildren, when it lists
+	// none and only reports a count, as a spreadsheet's sheet does for its millions of virtual
+	// cells: reading each one hung the walk (A15 F1), and even 512 cells filled a snapshot before
+	// the toolbars after the sheet.
+	maxChildren        = 512
+	maxVirtualChildren = 32
+	maxText            = 200 // runes kept of a name or value (a text view's text can be a whole document)
 )
 
 // RolePassword is the snapshot role of an AT-SPI password text (ROLE_PASSWORD_TEXT).
