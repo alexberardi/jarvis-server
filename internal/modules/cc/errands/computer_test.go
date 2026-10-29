@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -953,5 +954,52 @@ func TestCheckpointReadsTheDownloads(t *testing.T) {
 	}
 	if last := w.Steps[len(w.Steps)-1]; last.Command != cmdReplan {
 		t.Fatalf("steps %+v", w.Steps)
+	}
+}
+
+// A step's source is fetched once by the server and reaches the task's model as page content
+// (C25: a Writer task can't read the browser); a source that can't be read fails the step.
+func TestComputerStepReadsItsSource(t *testing.T) {
+	c := newComputerEnv(t)
+	var refs []string
+	c.s.Computer.Source = func(_ context.Context, _, ref string) (computer.Source, error) {
+		refs = append(refs, ref)
+		return computer.Source{URL: "https://en.wikipedia.org/wiki/Apollo_11", Text: "Apollo 11 landed on 20 July 1969."}, nil
+	}
+	c.llm.say("computer", doneReply)
+	st := computerStep("summarize the Apollo 11 article into a document")
+	st.Args.Set("source", "Apollo 11 Wikipedia")
+	c.launchRun("wf_c", "errand", st)
+	c.idle()
+	if w := c.wf("wf_c"); w.State != "done" {
+		t.Fatalf("run = %s %+v", w.State, w.Results)
+	}
+	if len(refs) != 1 || refs[0] != "Apollo 11 Wikipedia" {
+		t.Errorf("source fetched for %q, want once for the step's", refs)
+	}
+	c.llm.mu.Lock()
+	var seen bool
+	for _, r := range c.llm.reqs {
+		if promptKind(*r.Messages[0].Content.Text) == "computer" && len(r.Messages) > 1 && r.Messages[1].Content != nil &&
+			len(r.Messages[1].Content.Parts) > 0 && strings.Contains(r.Messages[1].Content.Parts[0].Text, "Apollo 11 landed on 20 July 1969.") {
+			seen = true
+		}
+	}
+	c.llm.mu.Unlock()
+	if !seen {
+		t.Error("the task's model never saw the source text")
+	}
+
+	c = newComputerEnv(t)
+	c.s.Computer.Source = func(context.Context, string, string) (computer.Source, error) {
+		return computer.Source{}, errors.New("HTTP 404")
+	}
+	st = computerStep("summarize it")
+	st.Args.Set("source", "https://example.com/gone")
+	c.launchRun("wf_c", "errand", st)
+	c.idle()
+	if w := c.wf("wf_c"); w.State != "failed" || len(w.Results) != 1 || w.Results[0].Error != "I couldn't read the source page: HTTP 404" ||
+		len(c.comp.acted()) > 0 {
+		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
 }

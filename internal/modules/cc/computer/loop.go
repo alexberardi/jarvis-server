@@ -119,7 +119,10 @@ type Task struct {
 	// address the user gave, with its scheme, port and path.
 	StartURL string
 	Success  *SuccessCheck
-	Rules    string // the household's rules as one line for the model ("" = the defaults)
+	// Source is the web page the task works from, fetched by the server (a desktop task can't
+	// read the browser), or nil.
+	Source *Source
+	Rules  string // the household's rules as one line for the model ("" = the defaults)
 	// Approved are the digests of held actions the user approved: the loop mints their tokens
 	// and runs the held batch before anything else.
 	Approved []string
@@ -130,6 +133,11 @@ type Task struct {
 	// Progress, when set, is called after every round with the run as saved (its history), so
 	// the errand's card can show what the task is doing.
 	Progress func(run *Run)
+}
+
+// Source is a web page's address and its readable text.
+type Source struct {
+	URL, Text string
 }
 
 // Outcome is where a Run call ended.
@@ -614,6 +622,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		Goal: t.Goal, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
+		Source: t.Source,
 	})
 	parts := []llm.Part{{Type: "text", Text: text}}
 	for _, im := range r.shots {
