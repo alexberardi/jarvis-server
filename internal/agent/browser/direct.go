@@ -16,11 +16,14 @@ var (
 	reEdge   = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?(?:scroll|go|jump)\s+(?:back\s+)?(?:up\s+|down\s+)?to\s+the\s+(top|bottom)(?:\s+of\s+the\s+page)?[\s.!?]*$`)
 )
 
-// Direct scrolls the page and shows and presses numbered hints itself (funnel stage 1); ok
-// false passes it on.
+// Direct resolves page controls and simple browser actions locally (funnel stage 1); ok false
+// passes the request on.
 func (t *Tools) Direct(ctx context.Context, said string) (map[string]any, bool) {
 	if !node.Enabled(ctx, ToolClick) || len(t.Hub.Browsers()) == 0 {
 		return t.directScroll(ctx, said)
+	}
+	if out, ok := t.directMedia(ctx, said); ok { // before control matching: "click the video" is media
+		return out, true
 	}
 	if out, ok := t.directHints(ctx, said); ok {
 		return out, true

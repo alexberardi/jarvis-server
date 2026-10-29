@@ -428,20 +428,8 @@ const COMMANDS = {
   // ref act can name. A ref is good for one snapshot (gen) of one document.
   async snapshot(args) {
     const t = await tabFor(args);
-    return snapTake(t, clampInt(args.max, 1, SNAPSHOT_MAX, 300), false);
-  },
-
-  // hints numbers what can be clicked in view ("show numbers"): a snapshot of the elements on
-  // screen, each drawn with its ref's number, which act then presses. show false removes them.
-  async hints(args) {
-    const t = await tabFor(args);
-    if (args.show === false) {
-      await inject(t, { func: hintsDraw, args: [0, false], allFrames: true });
-      return { tab: describe(t) };
-    }
-    if (args.wait === true) await settled(t.id); // after a click or an open: the page that loads
-    const snap = await snapTake(t, clampInt(args.max, 1, HINTS_MAX, HINTS_MAX), true);
-    await inject(t, { func: hintsDraw, args: [snap.gen, true], allFrames: true });
+    if (args.wait === true) await settled(t.id);
+    const snap = await snapTake(t, clampInt(args.max, 1, SNAPSHOT_MAX, 300), args.viewport === true);
     return { tab: describe(t), ...snap };
   },
 
@@ -458,7 +446,9 @@ const COMMANDS = {
     if (op === "keys" && (!keys.length || keys.some((k) => !ACT_KEYS.has(k)))) {
       throw fail("invalid_argument", `keys must be some of ${[...ACT_KEYS].join(", ")}`);
     }
-    await actOn(t, gen, args.ref, op, value, keys);
+    const submit = args.submit === true;
+    if (submit && op !== "set_value") throw fail("invalid_argument", "submit is only valid when setting a field value");
+    await actOn(t, gen, args.ref, op, value, keys, submit);
     const after = await settled(t.id);
     return { ok: true, url_after: clip(after.url, URL_MAX), title_after: clip(after.title, TITLE_MAX) };
   },
@@ -557,7 +547,6 @@ const COMMANDS = {
 
 const FILL_MAX = 2000;
 const SNAPSHOT_MAX = 1000;
-const HINTS_MAX = 150;
 const ACT_OPS = new Set(["press", "set_value", "select", "check", "focus", "scroll_into_view", "keys"]);
 const ACT_KEYS = new Set(["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 const DOWNLOAD_START_MS = 10000;
@@ -616,7 +605,7 @@ async function snapTake(t, max, viewport) {
   return { gen, url: clip(top?.url ?? t.url, URL_MAX), title: clip(top?.title ?? t.title, TITLE_MAX), elements };
 }
 
-async function actOn(t, gen, ref, op, value, keys) {
+async function actOn(t, gen, ref, op, value, keys, submit = false) {
   const m = /^e([1-9][0-9]{0,5})$/.exec(String(ref ?? ""));
   if (!Number.isInteger(gen) || gen <= 0 || !m) throw fail("invalid_argument", "gen and ref (e.g. e12) from a snapshot are required");
   const n = Number(m[1]);
@@ -632,7 +621,7 @@ async function actOn(t, gen, ref, op, value, keys) {
   if (holders.length > 1 || (was != null && was !== frame)) {
     throw fail("stale_ref", `${ref} moved to another frame; take a new snapshot`);
   }
-  const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys], frameIds: [frame] });
+  const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys, submit], frameIds: [frame] });
   const res = r?.result;
   if (!res) throw fail("failed", "the page returned nothing");
   if (res.error) throw fail(res.code ?? "failed", res.error);
@@ -1223,6 +1212,52 @@ function snapCollect(gen, max, viewport) {
     if (el.localName === "input" && INPUT_ROLE[typeOf(el)] === "button") out.push(el.value, el.getAttribute("alt"));
     return short(out.map(clean).find(Boolean) || "");
   };
+  // Small nearby context helps distinguish repeated controls. Read text nodes from only the
+  // nearest semantic container; avoid innerText (layout) and skip editable subtrees so drafts
+  // never leak into selection context. Cache by container because many controls share a row.
+  const contextCache = new WeakMap();
+  const contextLimit = 200;
+  const contextOf = (el) => {
+    let parent = el.parentElement;
+    for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+      if (!parent.matches("article, li, fieldset, blockquote, [role=article], [role=group], [role=listitem], [role=comment], [role=row]")) continue;
+      let text = contextCache.get(parent);
+      if (text === undefined) {
+        const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
+        const chunks = [];
+        let size = 0;
+        let visited = 0;
+        for (let node = walker.nextNode(); node && visited < 40 && size < contextLimit; node = walker.nextNode()) {
+          visited++;
+          const owner = node.parentElement;
+          if (!owner || owner.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [aria-hidden=true], [hidden], [inert], script, style, noscript")) continue;
+          const chunk = clean(node.nodeValue);
+          if (!chunk) continue;
+          const part = chunk.slice(0, contextLimit - size);
+          chunks.push(part);
+          size += part.length + 1;
+        }
+        text = clean(chunks.join(" ")).slice(0, contextLimit);
+        contextCache.set(parent, text);
+      }
+      if (text && text !== nameOf(el)) return short(text);
+      break;
+    }
+    return "";
+  };
+  const targetOf = (el, role) => {
+    if (role !== "link") return "";
+    const anchor = el.localName === "a" ? el : el.closest("a[href]");
+    return anchor?.href || "";
+  };
+  const positionOf = (el) => {
+    const r = el.getBoundingClientRect();
+    const x = (r.left + r.width / 2) / Math.max(innerWidth, 1);
+    const y = (r.top + r.height / 2) / Math.max(innerHeight, 1);
+    const horizontal = x < 1 / 3 ? "left" : x > 2 / 3 ? "right" : "center";
+    const vertical = y < 1 / 3 ? "top" : y > 2 / 3 ? "bottom" : "middle";
+    return `${vertical}-${horizontal}`;
+  };
   const secret = (el) => {
     const t = typeOf(el);
     const auto = (el.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
@@ -1259,8 +1294,16 @@ function snapCollect(gen, max, viewport) {
     if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]") || (viewport && !onScreen(el))) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
-    const v = valueOf(el);
-    if (v) e.value = v;
+    if (viewport) {
+      e.context = contextOf(el);
+      e.position = positionOf(el);
+      e.target = targetOf(el, role);
+    }
+    // Voice target snapshots only need names and context; don't read drafts from visible fields.
+    if (!viewport) {
+      const v = valueOf(el);
+      if (v) e.value = v;
+    }
     elements.push(e);
   }
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -1285,35 +1328,6 @@ function snapCommit(gen, commit) {
   return { ok: true, count: refs.size };
 }
 
-// hintsDraw shows (with show false, removes) a numbered badge on each element snapshot gen
-// stamped in this frame. The badges sit in a closed shadow root that takes no clicks, placed in
-// page coordinates so they scroll with what they number.
-function hintsDraw(gen, show) {
-  document.getElementById("__jarvis-hints")?.remove();
-  const s = globalThis.__jarvisSnap;
-  if (!show || !s?.refs || s.gen !== gen) return { count: 0 };
-  const host = document.createElement("div");
-  host.id = "__jarvis-hints";
-  host.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;";
-  const root = host.attachShadow({ mode: "closed" });
-  const style = document.createElement("style");
-  style.textContent =
-    "b{position:absolute;font:700 12px/1 system-ui,sans-serif;padding:2px 4px;border-radius:4px;" +
-    "background:#ffd400;color:#000;border:1px solid #000;box-shadow:0 1px 3px rgba(0,0,0,.4);white-space:nowrap}";
-  root.append(style);
-  for (const [n, el] of s.refs) {
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) continue;
-    const b = document.createElement("b");
-    b.textContent = String(n);
-    b.style.left = Math.max(0, r.left + scrollX - 4) + "px";
-    b.style.top = Math.max(0, r.top + scrollY - 4) + "px";
-    root.append(b);
-  }
-  (document.body || document.documentElement).append(host);
-  return { count: s.refs.size };
-}
-
 // actFind says whether this frame holds ref n of snapshot gen (and this frame's gen). Refs live
 // only in this extension's isolated world: a new document has none (stale_ref), and data-jarvis-*
 // attributes, which the page can write too, never pick the element.
@@ -1327,7 +1341,7 @@ function actFind(gen, n) {
 
 // actDo does op on ref n of snapshot gen in this frame. Typing goes through execCommand so
 // frameworks see input events, with the native value setter as the fallback (fieldAct's writer).
-function actDo(gen, n, op, value, keys) {
+function actDo(gen, n, op, value, keys, submit) {
   const s = globalThis.__jarvisSnap;
   const el = s?.refs && s.gen === gen ? s.refs.get(n) : null;
   if (!el || !el.isConnected || el.ownerDocument !== document) return { error: "the element is no longer on the page; take a new snapshot", code: "stale_ref" };
@@ -1435,7 +1449,20 @@ function actDo(gen, n, op, value, keys) {
     default:
       return { error: "unknown op", code: "invalid_argument" };
   }
-  return { done: op };
+  let submitted = false;
+  if (op === "set_value" && submit) {
+    const form = el.form || el.closest("form");
+    if (form && typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+      submitted = "form";
+    } else {
+      for (const type of ["keydown", "keypress", "keyup"]) {
+        el.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      }
+      submitted = "enter_key";
+    }
+  }
+  return { done: op, submitted };
 }
 
 // recInstall starts recording this frame's user actions for recording rid; installing it again
