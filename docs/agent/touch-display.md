@@ -141,3 +141,20 @@ The Surface Pro 6 pilot required the linux-surface kernel and `iptsd`; the stock
 not expose its Intel touchscreen. The original kernel remains available for rollback. After reboot,
 the user confirmed finger navigation, the full-screen speech circle and PIN exit with voice
 continuing. This hardware acceptance does not establish subscription or stock Cast sender support.
+
+## Screenshots
+
+Captured from the rendered touch shell and admin pages, and from the Surface itself. Files are in
+[touch-display-screenshots](touch-display-screenshots/).
+
+| Speech                                              | Home                                          | Devices                                           |
+| --------------------------------------------------- | --------------------------------------------- | ------------------------------------------------- |
+| ![Speech](touch-display-screenshots/speech-1280x800.png) | ![Home](touch-display-screenshots/home-1280x800.png) | ![Devices](touch-display-screenshots/devices-1280x800.png) |
+
+| Media                                             | Idle clocks                                            | Phone width                                        |
+| ------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------- |
+| ![Media](touch-display-screenshots/media-1280x800.png) | ![Idle](touch-display-screenshots/idle-combined-1280x800.png) | ![Home, phone](touch-display-screenshots/home-390x844.png) |
+
+| Settings, dark                                          | Settings, light                                          | On the Surface                                      |
+| ------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| ![Dark](touch-display-screenshots/settings-1440-dark.png) | ![Light](touch-display-screenshots/settings-1440-light.png) | ![Surface](touch-display-screenshots/surface-pilot.png) |
