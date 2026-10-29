@@ -222,6 +222,8 @@ func reset() {
 
 const (
 	roleApplication = 75
+	roleDialog      = 16
+	roleToolBar     = 63
 	roleLabel       = 29
 	rolePanel       = 39
 )
@@ -299,6 +301,41 @@ func TestSnapshotFromFakeTree(t *testing.T) {
 	var e *Error
 	if !errors.As(err, &e) || e.Code != CodeNotFound {
 		t.Errorf("another pid: %v, want not_found", err)
+	}
+}
+
+// Slice 4a: a desktop element's Position is from its bounds in the window's, and its Context is
+// the name of the nearest named container above it (a toolbar, a dialog), never a text's value.
+func TestSnapshotPositionAndContext(t *testing.T) {
+	bold := &fakeNode{role: roleButton, name: "Bold", states: usable, box: [4]int32{20, 20, 30, 30}}
+	ok := &fakeNode{role: roleButton, name: "OK", states: usable, box: [4]int32{700, 500, 60, 30}}
+	far := &fakeNode{role: roleButton, name: "Offscreen", states: usable, box: [4]int32{2000, 20, 30, 30}}
+	field := &fakeNode{role: roleEntry, name: "Size", states: usable, text: "12 pt", box: [4]int32{400, 300, 60, 20}}
+	main := &fakeNode{role: roleFrame, name: "Untitled 1 - LibreOffice Writer", states: with(stateActive), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
+		{role: roleToolBar, name: "Formatting", kids: []*fakeNode{
+			{role: rolePanel, kids: []*fakeNode{bold}}, // an unnamed panel in between
+		}},
+		{role: roleDialog, name: "Character", kids: []*fakeNode{field, ok}},
+		far,
+	}}
+	fakeDesktop(t, &fakeNode{role: roleApplication, name: "soffice", kids: []*fakeNode{main}})
+
+	s, err := Snapshot(context.Background(), os.Getpid(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range s.Elements {
+		got = append(got, fmt.Sprintf("%s %q pos=%q near=%q value=%q", e.Ref, e.Name, e.Position, e.Context, e.Value))
+	}
+	want := []string{
+		`a1 "Bold" pos="top-left" near="Formatting" value=""`,
+		`a2 "Size" pos="middle-center" near="Character" value="12 pt"`,
+		`a3 "OK" pos="bottom-right" near="Character" value=""`,
+		`a4 "Offscreen" pos="" near="" value=""`, // the window's own title is never context
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("elements:\n got %q\nwant %q", got, want)
 	}
 }
 

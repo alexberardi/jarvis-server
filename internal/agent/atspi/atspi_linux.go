@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +67,28 @@ var roleNames = map[uint32]string{
 	roleCheckMenuItem: "menuitemcheckbox", roleRadioMenuItem: "menuitemradio", roleLink: "link",
 	roleListItem: "listitem", roleTreeItem: "treeitem", roleTableCell: "cell", roleTableRow: "row",
 	rolePageTab: "tab",
+}
+
+// containerRoles name a group of controls (a toolbar, a dialog, a menu): the nearest named one
+// above an element is its Context (ELEMENT-LAYER-WORK.md §2). The window (frame) itself isn't
+// one: its title would be every element's context. Numbers are AtspiRole's (atspi-constants.h).
+var containerRoles = map[uint32]bool{
+	16:  true, // dialog
+	20:  true, // filler
+	31:  true, // list
+	33:  true, // menu
+	34:  true, // menu bar
+	38:  true, // page tab list
+	39:  true, // panel
+	54:  true, // status bar
+	55:  true, // table
+	63:  true, // tool bar
+	71:  true, // header
+	72:  true, // footer
+	85:  true, // section
+	87:  true, // form
+	99:  true, // grouping
+	110: true, // landmark
 }
 
 // textRoles hold what the user typed in their Text: it's their value, never their name.
@@ -329,8 +352,8 @@ func snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, erro
 	if max <= 0 {
 		max = DefaultMax
 	}
-	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}}
-	w.visit(win, 0)
+	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx)}
+	w.visit(win, 0, "")
 	if w.err != nil {
 		return computeruse.Snapshot{}, w.err
 	}
@@ -347,11 +370,14 @@ type walker struct {
 	out   []computeruse.SnapElement
 	nodes map[string]entry
 	err   error
+	win   *[4]int // the window's screen bounds, for Position; nil when unknown
 }
 
 func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
 
-func (w *walker) visit(o obj, depth int) {
+// visit keeps o when it is a control and walks its children; near is the name of the nearest
+// named container above o.
+func (w *walker) visit(o obj, depth int, near string) {
 	if err := w.ctx.Err(); err != nil {
 		w.err = err
 		return
@@ -361,7 +387,11 @@ func (w *walker) visit(o obj, depth int) {
 		return // gone mid-walk, or not an accessible
 	}
 	if role, ok := roleNames[r]; ok {
-		w.keep(o, role, r == rolePasswordText)
+		w.keep(o, role, r == rolePasswordText, near)
+	} else if containerRoles[r] {
+		if n := strings.TrimSpace(o.name(w.ctx)); n != "" {
+			near = n
+		}
 	}
 	if depth >= maxDepth || w.full() {
 		return
@@ -371,13 +401,22 @@ func (w *walker) visit(o obj, depth int) {
 		if w.full() {
 			return
 		}
-		w.visit(k, depth+1)
+		w.visit(k, depth+1, near)
 	}
 }
 
-func (w *walker) keep(o obj, role string, secure bool) {
+func (w *walker) keep(o obj, role string, secure bool, near string) {
 	ctx := w.ctx
 	el := computeruse.SnapElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: o.name(ctx), Bounds: o.bounds(ctx)}
+	if el.Bounds != nil && w.win != nil {
+		el.Position = computeruse.PositionIn(*el.Bounds, *w.win)
+	}
+	if near != el.Name {
+		if r := []rune(near); len(r) > computeruse.ContextMax {
+			near = string(r[:computeruse.ContextMax])
+		}
+		el.Context = near // a container's name, never a value
+	}
 	st := o.state(ctx)
 	switch {
 	case secure: // a password's text is never read
