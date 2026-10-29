@@ -1,15 +1,18 @@
 # One element layer: spec and working doc (Claude ↔ Astra)
 
-The spec for one element layer that voice steering and model-driven computer control both stand
-on, and the **line of communication** between the two agents building it. The user relays: each
+The spec for one element layer that **model-driven computer control** stands on (voice steering
+uses it too, as a side door), and the **line of communication** between the two agents building
+it. The user relays: each
 agent reads this file before a turn and writes to it when done. Started 2026-10-28.
 
 - **Claude**: the Claude Code session that built the browser voice work (`jarvis-de`).
 - **Astra**: second agent. The user facilitates.
 
-**State of this doc: milestone-1 spec agreed by Claude (C3), Astra (A7) and the user (2026-10-28,
-§12).** Implementation follows the Plan and §12's order. Open items in §11 and milestone 2
-are outside the agreed first milestone; slice 5b remains conditional on the baseline evidence.
+**State of this doc: re-planned by the user on 2026-10-29 ("Re-plan" below); Astra's review of the
+re-plan is pending (C19).** Slices 1–4b are done and accepted. The remaining work follows the
+Plan and §12's order *as re-planned*: computer tasks built from the user's examples, scored from
+what they leave behind. The original 2026-10-28 order (§12) is superseded; voice-steering polish
+is parked (§11).
 
 ## How we talk here
 
@@ -91,16 +94,19 @@ Proposed consequences, **for Astra's review (C19), then built together as before
 
 ## §1 Goals and non-goals
 
-**Goals**
+**Goals** (re-ordered by the 2026-10-29 re-plan: the first is the point, the rest serve it)
 
-1. One element model, filled by every source (browser now, AT-SPI now, Windows UI Automation and
-   macOS AX next), that both voice steering and computer tasks read.
-2. One matcher (names, partial names, sound-alikes, ordinals, the narrow model pick) over that
-   model, used by voice in the browser and in desktop apps.
-3. The model in computer tasks sees enough of each element (position, nearby text, destination
+1. **Jarvis completes real tasks on the computer by itself**: the user's examples, T1 "summarize
+   a Wikipedia article into a new LibreOffice Writer document and save it" and T2 "fill in this
+   month's budget sheet in Calc and save it", judged by the file they leave, never the model's
+   words.
+2. The model in computer tasks sees enough of each element (position, nearby text, destination
    host) to act on descriptions, and every action is checked from observed state.
-4. A measured baseline: scripted computer-task scenarios scored from fixture state, run before and
-   after each slice that should move them.
+3. A measured baseline: those tasks as scripted scenarios scored from fixture state, run before and
+   after each change that should move them.
+4. One element model, filled by every source (browser now, AT-SPI now, Windows UI Automation and
+   macOS AX next). *Done for Linux and the browser (slices 1, 4a).*
+5. One matcher over it for voice steering. *Done (slices 2, 4b); further voice polish is parked.*
 
 **Non-goals (for this spec)**
 
@@ -111,6 +117,8 @@ Proposed consequences, **for Astra's review (C19), then built together as before
 - Open mic, wake arbitration, listening tuning (follow-up windows, short answers): separate work,
   listed in §11 so they aren't lost.
 - New model tools or endpoints. Slices change what existing tools see and how voice resolves.
+  (P1's expand-on-demand would be the first exception, with its own contract: A16.)
+- Voice-steering polish (re-plan, 2026-10-29): parked in §11; not on the autonomy path.
 - Beating platform accessibility tools at their own job (see Why).
 
 ## §2 The element model
@@ -248,6 +256,10 @@ more than 6000 code points, Unicode/escaping, and unchanged ref ordering/count.
 
 ## §7 Per-app recipes (slice 5, Claude; A5 with C3's evidence gate, agreed in A7)
 
+**Re-gated by the 2026-10-29 re-plan: 5a as well as 5b is built only if the task runs show the
+model failing for want of these** (it already knows common shortcuts). The design below stands
+for if and when that happens.
+
 Keyboard-level commands per app (Calc: go to cell, next sheet; Writer: bold, heading 1),
 usable by voice directly and readable by the model as hints in computer tasks. Recipes are an
 improvement over the desktop baseline, not a prerequisite for measuring it (A2).
@@ -283,7 +295,7 @@ kinds and malformed arguments. No shell commands, arbitrary scripts or unbounded
 
 Split implementation into 5a (catalog, validation and guarded voice execution) and 5b (observation
 ID and server hint rendering), both Claude-owned and Astra-reviewed. **5b is gated on evidence
-(C3/A7):** build it only if the 6b baseline shows the model failing for want of an app's shortcuts;
+(C3/A7):** build it only if the task runs (R, 6) shows the model failing for want of an app's shortcuts;
 otherwise record the evidence and leave it deferred. A deferred 5b does not prevent milestone 1
 from finishing. The suite compares recipes enabled/disabled with the same starting files and
 outcome checks; it never judges success by which shortcut the model or voice handler happened
@@ -301,12 +313,14 @@ to choose.
 
 - **Unit and JS:** each slice's own tests plus `scripts/check` (race suite, extension `node --test`)
   before committing; commands and exit codes recorded here.
-- **Scenarios (6a/6b, Astra):** extend `tools/ccsuite`, the existing suite that scores computer
+- **Scenarios (6, Astra; T1, T2 and `elements_reply_context` per the re-plan):** extend `tools/ccsuite`, the existing suite that scores computer
   tasks from fixture state. Proposed cases and rules are in "Scenario spec" below. New cases
   start `pending` and never count as passes while skipped.
-- **By voice (Claude, after slices 2 and 4):** the browser script from `VOICE-HANDOFF.md`, then a
-  Writer/Calc script, with the agent's journal checked for each step (`direct: done`, `browser:
-  model pick`, `follow-up` lines).
+- **Attended task runs (re-plan):** T1 and T2 on the user's own desktop with computer control on,
+  the product as designed, before the isolated suite exists; Claude reads the agent and jarvisd
+  logs and the observe payloads (including which elements reached the model) and writes up where
+  each run breaks. Then the same tasks repeatably in the isolated harness.
+- *Voice scripts (done for 2 and 4, 2026-10-29; further voice testing parked with §11).*
 - **Model and configuration:** runs use this box's installed jarvisd (`--llm shared`), never prod
   (`docs/` and the user's standing rule). Pin the model label per comparison and keep every
   attempt.
@@ -342,13 +356,13 @@ Kept here so it isn't lost; each needs its own small fix and owner.
   Claude (C3), separate from slice 2's mechanical extraction.
 
 - **Proposal P1, ranked view with expand-on-demand** (user idea 2026-10-29, written up in C14;
-  **gated on 6b evidence**, not milestone 1). Each computer-task round sends a bounded, ranked
+  **gated on R/6 evidence**, not milestone 1). Each computer-task round sends a bounded, ranked
   view instead of the raw tree: (1) the focused window's showing elements in full; (2) its hidden
   elements (closed menus, collapsed panels), only the top N by relevance to the task, each marked
   hidden with its menu path; (3) other windows as one line each plus their top few matches. A new
   action lets the model expand: a window's full tree, or everything matching a word. Ranking
-  starts lexical (task words against name, context, menu path); embeddings (Q28) only if 6b shows
-  synonym misses. Build only if the 6b baseline shows on-screen elements cut by the cap or the
+  starts lexical (task words against name, context, menu path); embeddings (Q28) only if R or 6 show
+  synonym misses. Build only if R or 6 show on-screen elements cut by the cap or the
   model drowning in hidden items; measure before and after with the same pinned model.
 
 - **Parked by the re-plan (2026-10-29), voice steering;** from the user's voice test, kept for
@@ -375,10 +389,16 @@ Kept here so it isn't lost; each needs its own small fix and owner.
   concrete failure and a severity).
 - **A slice is done** when its tests and `scripts/check` pass on the reviewer's run, every finding
   is fixed or explicitly accepted by the user, and Status records the commit.
-- **Order:** spec agreed (both agents + the user) → slice 1 (Claude, review Astra) → slices 2
-  (Claude, review Astra) and 3 (Astra, review Claude) in parallel → 6a (Astra, review Claude)
-  and 4 (Claude, review Astra) → 5a and 6b → 5b only if the baseline justifies it.
-- **Milestone 1 (A6, agreed in C3): slices 1–6**, Linux and the browser. Windows UI Automation
+- **Order (re-plan, 2026-10-29; proposed in C19, pending Astra):** done: 1, 2, 3, 4a, 4b →
+  **M** merge slice 3 into `feat/element-layer` → **J** the user swaps the dev box's jarvisd to a
+  build from it → **R** attended runs of T1 and T2 on the user's desktop, written up → **6** the
+  scoreboard: T1, T2 and `elements_reply_context` as `ccsuite` scenarios scored from artifacts →
+  **P1** if R or 6 show the 300-element cap starving the model (A16's contract) → **5a/5b**
+  only if the runs show the model failing for want of recipes.
+- *Superseded order (2026-10-28):* 1 → 2 and 3 → 6a and 4 → 5a and 6b → 5b if justified. Slices
+  1–4b were built in that order; it no longer governs what's next.
+- **Milestone 1 (A6, agreed in C3; re-scoped by the re-plan): done when T1 and T2 pass as
+  scenarios on Linux**, with slices 1–4b, M, J, R and 6 (and P1, 5a/5b only if triggered). Windows UI Automation
   and macOS AX enrichment are milestone 2, with their own complete spec (observation and action
   contract, verification environment, owners) written when milestone 1 is done.
 - **Spec review complete:** Claude agrees in C3; Astra agrees in A7. No unresolved milestone-1
@@ -395,10 +415,13 @@ Kept here so it isn't lost; each needs its own small fix and owner.
 | 3 | Server carries the fields through `computerExec.Observe` and `computer.Element`; `renderElement` shows position, context and host (§5). | Astra | Claude | 1 (pushed) |
 | 4a | AT-SPI fills Position (and Context where a container is named); tests. | Claude | Astra | 2 |
 | 4b | Voice "click X" in desktop apps through `targets`, LibreOffice Writer/Calc first; focus changes, duplicates, stale refs covered. | Claude | Astra | 4a |
-| 5a | Recipe catalog, validation and guarded voice execution (§7, agreed C3/A7). | Claude | Astra | 4b |
-| 5b | Optional catalog ID in desktop observations and model hint rendering (§7, agreed C3/A7). **Built only if 6b shows the model needs the hints**. | Claude | Astra | 5a, 6b baseline |
-| 6a | `tools/ccsuite` browser element scenarios and fixture-state checks. | Astra | Claude | 3 for model runs |
-| 6b | LibreOffice scenarios, isolated app launch, ODF document checks. | Astra | Claude | 4a |
+| M | Merge slice 3 (`feat/element-model-view`) into `feat/element-layer`; `scripts/check`. *(re-plan)* | Claude | Astra | 3, 4b |
+| J | The user swaps the dev box's jarvisd to a build from `feat/element-layer` (sudo). *(re-plan)* | user (Claude builds) | Claude checks the logs | M |
+| R | Attended runs of T1 and T2 on the user's desktop; write-up of where they break, with which elements reached the model. *(re-plan)* | Claude | Astra | J |
+| 6 | Scoreboard: T1, T2 and `elements_reply_context` in `tools/ccsuite`, isolated, scored from artifacts (ODF content and formatting, cell values and formulas). Replaces 6a/6b's scope. *(re-plan; scope proposed in C19 Q1)* | Astra | Claude | 4a; M for model runs |
+| P1 | Ranked view with expand-on-demand (§11, A16's contract). **Only if R or 6 show the cap starving the model.** | open | open | R or 6 evidence |
+| 5a | Recipe catalog, validation and guarded voice execution (§7). **Re-gated: only if the runs show the need.** | Claude | Astra | R/6 evidence |
+| 5b | Optional catalog ID in desktop observations and model hint rendering (§7). **Re-gated, as 5a.** | Claude | Astra | 5a |
 | 7 | Windows UI Automation source in the Win11 VM. **Milestone 2**, own spec (C3). | open | open | milestone 1 |
 
 ## Slice 3 acceptance (Astra, A2; reviewed in C2)
@@ -419,6 +442,12 @@ their existing test files. No new tool or endpoint is needed.
    reorders an element, changes its ref, or changes the stored observation.
 
 ## Scenario spec (6a/6b, Astra, A2; reviewed in C2)
+
+> **Re-plan note (2026-10-29, proposed in C19 Q1, pending Astra):** the milestone-1 case list is
+> T1 (Wikipedia → Writer document), T2 (Calc budget sheet) and `elements_reply_context`. The
+> isolation, artifact-check and reporting rules below stand; `writer_format_save`,
+> `calc_formula_save` and `calc_sheet_scope` become T1/T2's building blocks or stay as smaller
+> cases at Astra's call; the video cases leave milestone 1 (a steering case with costly setup).
 
 Use deterministic local pages and scratch documents. LibreOffice runs under the suite's
 **headless sway session with its own `dbus-run-session` and AT-SPI bus**, HOME, runtime directory
@@ -487,8 +516,13 @@ limitations (including mixed-host video ordinals) without expanding slice 2's ex
 | 3 | **accepted** (Claude, C9) | `d07afd27` + `fd03c586` on `feat/element-model-view`; reviewer race green; not merged into `feat/element-layer` yet |
 | 4a | **accepted** (Astra, A18) | through `08166b1f`; protected-ancestry regressions, standard checks, and live Writer/Calc metadata verified |
 | 4b | **accepted** (Astra, A18) | through `08166b1f`; all A15/A17 findings resolved; reviewer regressions, three-platform vet/race checks, and isolated Writer/Calc clicks pass |
-| 5a–5b | not started | Claude |
-| 6a–6b | C2 review points incorporated | Astra; reply-context first, isolated AT-SPI, separate media profiles and effective ODF checks specified |
+| re-plan | **proposed** (user, 2026-10-29) | awaiting Astra's review (C19) |
+| M | next, Claude | after Astra's C19 answer on Q2 |
+| J | waiting on M | the user's sudo |
+| R | waiting on J | T1 first |
+| 6 | scope proposed (C19 Q1) | Astra; supersedes 6a/6b's case list; the A2/A4 harness and check rules stand |
+| P1 | gated | on R/6 evidence |
+| 5a–5b | re-gated | on R/6 evidence |
 | 7 | not started | owner and Windows verification environment open |
 
 ## Comms log
@@ -1640,4 +1674,25 @@ Questions for you, one per item, my recommendation first:
 4. **P1 timing:** if T1 shows Writer's 300-element snapshot full of closed-menu items, I'd start
    P1 with your A16 contract (bounded showing set first, truncation reported, expansion bound to
    one window and generation, query-only observe). Is that the right trigger?
+
+### C20 · Claude → Astra · 2026-10-29 14:55
+
+Follow-up to C19, at the user's request: **the older plan and order are now reconciled with the
+re-plan**, so the doc can't steer us back to the voice-first sequence. Changed, all marked as
+proposed pending your C19 review:
+
+- Header "State of this doc": re-planned 2026-10-29; the 2026-10-28 order superseded.
+- §1 Goals: re-ordered: real tasks (T1, T2) first; the element model and the voice matcher marked
+  done; voice polish added to non-goals (parked in §11).
+- §7: 5a re-gated as well as 5b, on the task runs.
+- §9: "by voice" testing replaced by attended task runs (R), then the isolated scoreboard.
+- §12 Order: done 1–4b → M (merge slice 3) → J (jarvisd swap) → R (attended T1/T2) → 6 (scoreboard)
+  → P1 if triggered → 5a/5b if triggered. The old order kept, marked superseded. Milestone 1 is
+  now "done when T1 and T2 pass as scenarios on Linux".
+- Plan: rows M, J, R, 6 (replacing 6a/6b's scope), P1; 5a/5b marked re-gated. Status rows to match.
+- Scenario spec: a leading re-plan note (case list T1, T2, reply-context; video cases out); your
+  isolation, artifact-check and reporting rules unchanged, and your text untouched.
+- P1 and 5b gates now refer to R/6 evidence instead of "the 6b baseline".
+
+If any of this misstates your sections, correct it in your review and I'll follow.
 
