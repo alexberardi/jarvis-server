@@ -111,6 +111,7 @@ const (
 	stateSelected  = 23
 	stateSensitive = 24
 	stateShowing   = 25
+	stateEditable  = 7
 	stateRequired  = 33
 )
 
@@ -367,7 +368,7 @@ func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computerus
 		max = DefaultMax
 	}
 	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
-	w.visit(win, 0, "")
+	w.visit(win, 0, "", true)
 	if w.err != nil {
 		return computeruse.Snapshot{}, w.err
 	}
@@ -392,8 +393,9 @@ type walker struct {
 func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
 
 // visit keeps o when it is a control and walks its children; near is the name of the nearest
-// named container above o.
-func (w *walker) visit(o obj, depth int, near string) {
+// named container above o, and context whether o's ancestry may give one at all: nothing hidden,
+// editable or secret above it (§2, A17 R3).
+func (w *walker) visit(o obj, depth int, near string, context bool) {
 	if err := w.ctx.Err(); err != nil {
 		w.err = err
 		return
@@ -402,17 +404,26 @@ func (w *walker) visit(o obj, depth int, near string) {
 	if err != nil {
 		return // gone mid-walk, or not an accessible
 	}
-	if w.showing && !o.state(w.ctx).has(stateShowing) {
+	st := o.state(w.ctx)
+	if w.showing && !st.has(stateShowing) {
 		return // a closed menu, a hidden panel: nothing in it is on screen
+	}
+	if !st.has(stateShowing) {
+		context = false // hidden: it and everything in it lose context (A15 F7, A17 R3)
+	}
+	if !context {
+		near = ""
 	}
 	if role, ok := roleNames[r]; ok {
 		w.keep(o, role, r == rolePasswordText, near)
-	} else if containerRoles[r] && o.state(w.ctx).has(stateShowing) {
-		// Only a container on screen names its elements: a closed menu or hidden panel never
-		// becomes context, in either snapshot kind (A15 F7).
+	} else if containerRoles[r] && context {
+		// Only a container on screen names its elements (A15 F7).
 		if n := strings.TrimSpace(o.name(w.ctx)); n != "" {
 			near = n
 		}
+	}
+	if st.has(stateEditable) || r == rolePasswordText {
+		context, near = false, "" // what's inside a text or a password never names anything
 	}
 	if depth >= maxDepth || w.full() {
 		return
@@ -422,7 +433,7 @@ func (w *walker) visit(o obj, depth int, near string) {
 		if w.full() {
 			return
 		}
-		w.visit(k, depth+1, near)
+		w.visit(k, depth+1, near, context)
 	}
 }
 

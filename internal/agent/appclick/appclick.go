@@ -53,12 +53,15 @@ type Source struct {
 	bound *computer.DesktopWindow
 }
 
-// TurnListening binds the turn to the window in front as it starts listening; the end unbinds.
+// TurnListening binds the turn to the window in front as it starts listening, a browser's
+// included (a turn begun there never clicks in an app, A17 R1); the end unbinds.
 func (s *Source) TurnListening(ctx context.Context, on bool) {
 	var w *computer.DesktopWindow
 	if on {
-		if f, ok := s.front(ctx); ok {
+		if f, ok := s.focused(ctx); ok {
 			w = &f
+		} else {
+			w = &computer.DesktopWindow{} // listening began with no window in front
 		}
 	}
 	s.mu.Lock()
@@ -75,14 +78,6 @@ func (s *Source) Direct(ctx context.Context, said string) (map[string]any, bool)
 	win, ok := s.front(ctx)
 	if !ok {
 		return nil, false
-	}
-	s.mu.Lock()
-	bound := s.bound
-	s.bound = &win // said again, it goes to this window
-	s.mu.Unlock()
-	if bound != nil && (bound.ID != win.ID || bound.PID != win.PID) {
-		return fail("window_changed", "the window in front changed since listening began",
-			"The window changed since you started. Say it again."), true
 	}
 	snap, err := s.Snapshot(ctx, win.PID, snapshotMax)
 	if err != nil || len(snap.Elements) == 0 {
@@ -102,10 +97,20 @@ func (s *Source) Direct(ctx context.Context, said string) (map[string]any, bool)
 				"I'm not sure which control you mean. Say it again with another detail."), true
 		}
 	}
+	if !found && !literal {
+		return nil, false // "Good morning": speech, not a misheard click; the binding stays (A17 R2)
+	}
+	// A command from here on. It never lands in another window than the turn's: refused once,
+	// and re-bound, so said again it acts (A15 F4).
+	s.mu.Lock()
+	bound := s.bound
+	s.bound = &win
+	s.mu.Unlock()
+	if bound != nil && (bound.ID != win.ID || bound.PID != win.PID) {
+		return fail("window_changed", "the window in front changed since listening began",
+			"The window changed since you started. Say it again."), true
+	}
 	if !found {
-		if !literal {
-			return nil, false // "Good morning": speech, not a misheard click
-		}
 		return fail("target_not_found", fmt.Sprintf("no control like %q in %s", target, appName(win)),
 			"I couldn't find that control. Say it again with another detail."), true
 	}
@@ -179,13 +184,19 @@ func (s *Source) press(ctx context.Context, win computer.DesktopWindow, snap com
 
 // front is the focused ordinary window with a process, unless it is a browser's.
 func (s *Source) front(ctx context.Context) (computer.DesktopWindow, bool) {
+	w, ok := s.focused(ctx)
+	return w, ok && !winmatch.IsBrowser([]string{w.App})
+}
+
+// focused is the focused ordinary window with a process, whatever app it is.
+func (s *Source) focused(ctx context.Context) (computer.DesktopWindow, bool) {
 	ws, err := s.Windows.List(ctx)
 	if err != nil {
 		return computer.DesktopWindow{}, false
 	}
 	for _, w := range ws {
 		if w.Focused && w.Layer == 0 && w.PID > 0 {
-			return w, !winmatch.IsBrowser([]string{w.App})
+			return w, true
 		}
 	}
 	return computer.DesktopWindow{}, false
