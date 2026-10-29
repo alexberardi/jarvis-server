@@ -1231,6 +1231,7 @@ function snapCollect(gen, max, viewport) {
           visited++;
           const owner = node.parentElement;
           if (!owner || owner.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [aria-hidden=true], [hidden], [inert], script, style, noscript")) continue;
+          if (!visible(owner)) continue; // display:none or visibility:hidden (A8)
           const chunk = clean(node.nodeValue);
           if (!chunk) continue;
           const part = chunk.slice(0, contextLimit - size);
