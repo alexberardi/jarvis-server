@@ -1,8 +1,14 @@
 package targets
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
@@ -96,5 +102,35 @@ func TestOrdinal(t *testing.T) {
 	plain.URL = "https://news.test/"
 	if ref, ok := Ordinal(plain, "the first result"); ok {
 		t.Errorf("a result ordinal off a video results page: %q", ref)
+	}
+}
+
+// The pick's prompt names the surface: unchanged for the browser, "app window" for desktop apps.
+func TestPickSurface(t *testing.T) {
+	var prompts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		prompts = append(prompts, b.Messages[0].Content)
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": `{"ref":"a2"}`})
+	}))
+	defer srv.Close()
+	cc := node.NewCC(srv.URL, node.Creds{NodeID: "n1", NodeKey: "k1"})
+	s := snap("", computeruse.SnapElement{Ref: "a1", Role: "button", Name: "Bold"},
+		computeruse.SnapElement{Ref: "a2", Role: "button", Name: "Italic"})
+	wrap := func(s string) string { return "<<<" + s + ">>>" }
+	for _, c := range []struct{ surface, want string }{{"", "on the current web page."}, {"app window", "on the current app window."}} {
+		p := Picker{CC: func() *node.CC { return cc }, Wrap: wrap, Surface: c.surface}
+		if ref, r := p.Pick(context.Background(), s, "click the slanted one"); ref != "a2" || r != Selected {
+			t.Fatalf("%q: %q %v", c.surface, ref, r)
+		}
+		if got := prompts[len(prompts)-1]; !strings.Contains(got, c.want) {
+			t.Errorf("surface %q: prompt lacks %q", c.surface, c.want)
+		}
+	}
+	if ref, r := (Picker{CC: func() *node.CC { return cc }}).Pick(context.Background(), s, "click bold"); r != None || ref != "" {
+		t.Errorf("a pick without Wrap ran: %q %v", ref, r)
 	}
 }
