@@ -61,19 +61,24 @@ type ComputerTasks struct {
 	Targets func(ctx context.Context, hh string) (nodeIDs []string, off string)
 	// Taught are the saved workflows a step may replay (replay.go; nil: none).
 	Taught TaughtWorkflows
+	// Source reads the page a step works from: its address, or words to search for (nil: a
+	// step's source is ignored).
+	Source func(ctx context.Context, householdID, ref string) (computer.Source, error)
 }
 
 // computerEntry is computer_task in the planner's menu.
 func computerEntry() MenuEntry {
 	return MenuEntry{Command: cmdComputer, IsRisky: false,
 		Description: "Do a multi-step task on the user's computer: in their browser (shopping, bank sites, forms) " +
-			"or in a desktop app. Args: goal, target browser|desktop, site?, app?, success?",
+			"or in a desktop app. Args: goal, target browser|desktop, site?, app?, success?, source?",
 		Args: servertools.Obj(
 			"goal", "what to get done, in the user's words with every detail they gave",
 			"target", "browser or desktop",
 			"site", "the website to start on, e.g. amazon.com (browser)",
 			"app", "the app to use (desktop)",
 			"success", "how to tell it worked, e.g. an order confirmation page",
+			"source", "a web page the task writes from, e.g. an article to summarize into a document: its address, "+
+				"or what to search for. A desktop task can't open the browser, so it gets this page's text",
 		)}
 }
 
@@ -121,6 +126,13 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		}
 		if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
 			t.Success = &computer.SuccessCheck{Screen: ok}
+		}
+		if ref := parse.PyStrip(truthyStr(args, "source")); ref != "" && s.Computer.Source != nil {
+			src, err := s.Computer.Source(ctx, rc.householdID, ref)
+			if err != nil {
+				return failed("I couldn't read the source page: " + err.Error())
+			}
+			t.Source = &src
 		}
 	}
 	// A run of this step that hasn't ended is resumed (after its confirmation or question).

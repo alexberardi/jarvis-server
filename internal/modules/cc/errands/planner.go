@@ -71,7 +71,8 @@ var menuDeny = map[string]bool{
 var menuNotes = map[string]string{
 	"deep_research": "In an errand this only STARTS a long report that arrives later on its own; " +
 		"the errand cannot report what it finds. To look something up that the errand should " +
-		"report back (answer, list, comparison, summary), use quick_search.",
+		"report back (answer, list, comparison, summary), use quick_search. A computer_task that writes " +
+		"from a web page (summarize an article into a document) gets the page through its own source arg, never from this.",
 }
 
 // controlCommands are control-flow commands the planner may emit that are not capabilities;
