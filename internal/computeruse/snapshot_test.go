@@ -25,3 +25,19 @@ func TestSnapElement(t *testing.T) {
 		t.Error("found a ref the snapshot doesn't have")
 	}
 }
+
+// Position is one of nine labels (ELEMENT-LAYER-WORK.md §2); anything else is no position.
+func TestValidPosition(t *testing.T) {
+	for _, v := range []string{"top", "middle", "bottom"} {
+		for _, h := range []string{"left", "center", "right"} {
+			if !ValidPosition(v + "-" + h) {
+				t.Errorf("%s-%s rejected", v, h)
+			}
+		}
+	}
+	for _, p := range []string{"", "below-the-fold", "TOP-LEFT", "top_left", "middle", "top-left "} {
+		if ValidPosition(p) {
+			t.Errorf("%q accepted", p)
+		}
+	}
+}

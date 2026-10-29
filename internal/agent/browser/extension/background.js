@@ -1250,10 +1250,14 @@ function snapCollect(gen, max, viewport) {
     const anchor = el.localName === "a" ? el : el.closest("a[href]");
     return anchor?.href || "";
   };
+  // positionOf is where the element's centre sits in the viewport, one of nine labels; "" when the
+  // centre is off screen, or in a subframe (its viewport isn't the page's: not mapped yet).
   const positionOf = (el) => {
+    if (window.top !== window) return "";
     const r = el.getBoundingClientRect();
     const x = (r.left + r.width / 2) / Math.max(innerWidth, 1);
     const y = (r.top + r.height / 2) / Math.max(innerHeight, 1);
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return "";
     const horizontal = x < 1 / 3 ? "left" : x > 2 / 3 ? "right" : "center";
     const vertical = y < 1 / 3 ? "top" : y > 2 / 3 ? "bottom" : "middle";
     return `${vertical}-${horizontal}`;
@@ -1294,11 +1298,13 @@ function snapCollect(gen, max, viewport) {
     if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]") || (viewport && !onScreen(el))) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
-    if (viewport) {
-      e.context = contextOf(el);
-      e.position = positionOf(el);
-      e.target = targetOf(el, role);
-    }
+    // Both snapshot kinds: voice targeting and computer tasks (ELEMENT-LAYER-WORK.md §2).
+    const context = contextOf(el);
+    const position = positionOf(el);
+    const target = targetOf(el, role);
+    if (context) e.context = context;
+    if (position) e.position = position;
+    if (target) e.target = target;
     // Voice target snapshots only need names and context; don't read drafts from visible fields.
     if (!viewport) {
       const v = valueOf(el);

@@ -202,3 +202,67 @@ test("snapshot lists visible controls without drawing an overlay", async () => {
   assert.equal(calls.some(([n]) => n === "hintsDraw"), false, "snapshot stays invisible");
   assert.ok(calls.some(([n]) => n === "snapCommit"), "snapshot refs are retained for act");
 });
+
+// fakePage is the document snapCollect reads: Bob's comment (a list item with a Reply link), a
+// link far below the fold, and a draft in a text box. top is the frame's top window.
+function fakePage(ctx, { subframe = false } = {}) {
+  const node = (props) => {
+    const e = { localName: "a", attrs: {}, parentElement: null, labels: null, isContentEditable: false,
+      innerText: "", textContent: "", rect: { left: 10, top: 10, width: 100, height: 20 }, ...props };
+    e.getAttribute = (k) => e.attrs[k] ?? null;
+    e.hasAttribute = (k) => k in e.attrs;
+    e.removeAttribute = () => {};
+    e.closest = () => null;
+    e.matches = () => e.container === true;
+    e.querySelector = () => null;
+    e.getClientRects = () => [e.rect];
+    e.getBoundingClientRect = () => ({ ...e.rect, right: e.rect.left + e.rect.width, bottom: e.rect.top + e.rect.height });
+    e.checkVisibility = () => true;
+    return e;
+  };
+  const comment = node({ localName: "li", container: true, texts: ["Bob", "· 2h ·", "Great point"] });
+  const reply = node({ attrs: { href: "/c/1" }, href: "https://forum.test/c/1", innerText: "Reply", parentElement: comment });
+  const far = node({ attrs: { href: "/old" }, href: "https://forum.test/old", innerText: "Older posts", rect: { left: 10, top: 5000, width: 100, height: 20 } });
+  const draft = node({ localName: "input", attrs: { type: "text" }, value: "my draft" });
+  ctx.innerWidth = 1200;
+  ctx.innerHeight = 800;
+  ctx.location = { href: "https://forum.test/" };
+  ctx.NodeFilter = { SHOW_TEXT: 4 };
+  ctx.document = {
+    title: "Forum",
+    getElementById: () => null,
+    querySelectorAll: (sel) => (sel === "[data-jarvis-ref]" ? [] : [reply, far, draft]),
+    createTreeWalker: (root) => {
+      const nodes = (root.texts ?? []).map((t) => ({ nodeValue: t, parentElement: node({ localName: "span" }) }));
+      let i = 0;
+      return { nextNode: () => nodes[i++] ?? null };
+    },
+  };
+  ctx.window = ctx;
+  ctx.top = subframe ? {} : ctx;
+}
+
+test("both snapshot kinds carry context, position and target; no position offscreen or in a subframe", () => {
+  const { ctx } = load();
+  fakePage(ctx);
+  const task = ctx.snapCollect(1, 300, false).elements; // a computer task's snapshot: the whole page
+  assert.deepEqual(Array.from(task, (e) => e.name), ["Reply", "Older posts", ""]);
+  assert.equal(task[0].context, "Bob · 2h · Great point");
+  assert.equal(task[0].position, "top-left");
+  assert.equal(task[0].target, "https://forum.test/c/1");
+  assert.equal(task[1].position, undefined, "a link below the fold has no position");
+  assert.equal(task[1].target, "https://forum.test/old");
+  assert.equal(task[2].value, "my draft", "computer snapshots keep field values");
+  assert.equal(task[2].context, undefined);
+
+  const voice = ctx.snapCollect(2, 150, true).elements; // a voice snapshot: what's on screen
+  assert.deepEqual(Array.from(voice, (e) => e.name), ["Reply", ""]);
+  assert.equal(voice[0].context, "Bob · 2h · Great point");
+  assert.equal(voice[1].value, undefined, "voice snapshots never carry a field's value");
+
+  fakePage(ctx, { subframe: true });
+  const framed = ctx.snapCollect(3, 300, false).elements;
+  assert.equal(framed[0].position, undefined, "positions inside a subframe aren't mapped to the page yet");
+  assert.equal(framed[0].context, "Bob · 2h · Great point");
+  assert.equal(framed[0].target, "https://forum.test/c/1");
+});
