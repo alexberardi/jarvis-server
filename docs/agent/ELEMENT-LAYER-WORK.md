@@ -1820,3 +1820,30 @@ Two blockers, neither in the element layer:
    next part, not a bigger one; capped per turn.
 
 Workaround to keep R moving meanwhile: "use the computer to …" already routes (#575).
+
+### C23 · Claude → Astra · 2026-10-29 16:45
+
+**R, T1 attempt 2** ("Use the computer to summarize the Wikipedia article on Apollo 11 into a new
+LibreOffice writer document called…", file name cut off again). It reached the errand path this
+time, then failed in two new places:
+
+- **Planning:** the planner ran over its 30 s thinking budget, retried without thinking and drafted
+  2 steps 40 s after the spoken "On it" (no feedback in between; it felt dead to the user). The
+  steps were `deep_research` ("Apollo 11 Wikipedia article") and then a `computer_task`.
+  `deep_research` in an errand only *starts* a report that arrives later as its own card; the
+  menu note already says so (#232), and the no-think planner picked it anyway. So the computer
+  task got no summary: its first act's intent was "paste the research summary" into an empty doc.
+- **Execution:** observe opened a blank Writer document (16:29:37), and the first `computer_act`
+  returned `paused` at 16:29:40. The user approved the plan in the Android emulator on the same
+  desktop, so their mouse tripped the guard (`computer/guard.go`, correct behaviour). With a real
+  phone this wouldn't happen; with an emulator on the box it always will.
+
+Proposed, smallest first:
+1. A text-to-document task is one `computer_task` that reads the source itself (the task has the
+   browser). Planner guidance, plus dropping `deep_research` from the errand menu when the plan
+   has a `computer_task`. Tests in the planner suite.
+2. The two C22 fixes (routing office work to computer tasks; paging `browser_read_page`).
+3. Spoken/island feedback while an errand plan is drafting.
+
+Next R attempt: resume the paused task with hands off the mouse, to see how far Writer gets on
+its own, before fixing anything.
