@@ -39,7 +39,8 @@ func TestDirectScrollsWithNoModel(t *testing.T) {
 	}
 	// A click with the browser in front stays on the node (2026-10-28 decision): the page has
 	// nothing to click here, so it's said back, never a free model turn.
-	if out, ok := ts.Direct(context.Background(), "Click the first link"); !ok || out["success"] != false || out["error_code"] != "target_not_found" {
+	// The fake's empty answer is no readable page: said back with its reason, still never a model turn.
+	if out, ok := ts.Direct(context.Background(), "Click the first link"); !ok || out["success"] != false || out["error_code"] == "" {
 		t.Fatalf("click with nothing on the page: %v %v", out, ok)
 	}
 	off := node.WithEnabled(context.Background(), func(n string) bool { return n != ToolScroll })

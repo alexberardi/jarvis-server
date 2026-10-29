@@ -46,18 +46,26 @@ func (t *Tools) directHints(ctx context.Context, said string) (map[string]any, b
 		t.mu.Unlock()
 		heardClick := reClickHeard.FindStringSubmatch(said)
 		click := reClickVerb.MatchString(said) || (heardClick != nil && strings.EqualFold(heardClick[1], "click"))
-		if !(on || click) || !node.Enabled(ctx, ToolClick) || !t.browserInFront() {
+		if !(on || click) || !node.Enabled(ctx, ToolClick) {
 			return nil, false
 		}
-		t.readTargets(ctx, true)
+		if !t.browserInFront() {
+			t.logInfo("browser: not in front, passing on", "said", said)
+			return nil, false
+		}
+		out := t.readTargets(ctx, true)
 		t.mu.Lock()
 		h = t.hints
 		t.mu.Unlock()
 		if h == nil {
-			if click {
-				return noSuchTarget(strings.TrimSpace(said)), true
+			t.logInfo("browser: couldn't read the page", "said", said, "code", out["error_code"], "error", out["error"])
+			if !click {
+				return nil, false
 			}
-			return nil, false
+			if code, _ := out["error_code"].(string); code != "" {
+				return out, true // why the page can't be read (no website access), not "no such control"
+			}
+			return noSuchTarget(strings.TrimSpace(said)), true
 		}
 	}
 	if m := reTypeInto.FindStringSubmatch(said); m != nil {
@@ -134,6 +142,12 @@ func (t *Tools) namedRef(said string) (ref string, h *hintState, handled bool) {
 	}
 	ref, ok := targets.Resolve(h.snap, said, true)
 	return ref, h, ok
+}
+
+func (t *Tools) logInfo(msg string, args ...any) {
+	if t.Log != nil {
+		t.Log.Info(msg, args...)
+	}
 }
 
 // picker is the narrow model pick for this browser: page text wrapped as untrusted (Wrap).
