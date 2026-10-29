@@ -16,6 +16,8 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // fakeNode is one accessible object a fake app exports on a private bus: the Accessible,
@@ -224,6 +226,9 @@ const (
 	roleApplication = 75
 	roleDialog      = 16
 	roleToolBar     = 63
+	roleMenu        = 33
+	roleMenuBar     = 34
+	stateShowingT   = 25
 	roleLabel       = 29
 	rolePanel       = 39
 )
@@ -336,6 +341,51 @@ func TestSnapshotPositionAndContext(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("elements:\n got %q\nwant %q", got, want)
+	}
+}
+
+// What a voice click reads: only what is on screen. Live, LibreOffice Writer's closed menus put
+// hundreds of items (bounds at the INT_MIN "nowhere" placeholder) ahead of its toolbars, filling
+// the 150-element cap before "Bold" (2026-10-29). SnapshotShowing skips a subtree whose root
+// isn't SHOWING; Snapshot (computer tasks) keeps them; neither gives a placeholder a position.
+func TestSnapshotShowingSkipsClosedMenus(t *testing.T) {
+	shown := func(s ...int) []int { return append(with(s...), stateShowingT) }
+	nowhere := [4]int32{-2147483648, -2147483648, 1, 1}
+	main := &fakeNode{role: roleFrame, name: "Untitled 1 - LibreOffice Writer", states: append(with(stateActive), stateShowingT), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
+		{role: roleMenuBar, states: shown(), kids: []*fakeNode{
+			{role: roleMenu, name: "Edit", states: usable, kids: []*fakeNode{ // closed: not showing
+				{role: roleMenuItem, name: "Paste", states: usable, box: nowhere},
+				{role: roleMenuItem, name: "Cut", states: usable, box: nowhere},
+			}},
+		}},
+		{role: roleToolBar, name: "Formatting", states: shown(), kids: []*fakeNode{
+			{role: roleToggleButton, name: "Bold", states: shown(), box: [4]int32{20, 20, 30, 30}},
+			{role: roleToggleButton, name: "Hidden tool", states: usable, box: [4]int32{60, 20, 30, 30}},
+		}},
+	}}
+	fakeDesktop(t, &fakeNode{role: roleApplication, name: "soffice", kids: []*fakeNode{main}})
+	names := func(s computeruse.Snapshot) (out []string) {
+		for _, e := range s.Elements {
+			out = append(out, e.Name+"@"+e.Position)
+		}
+		return out
+	}
+	voice, err := SnapshotShowing(context.Background(), os.Getpid(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := names(voice), []string{"Bold@top-left"}; !slices.Equal(got, want) {
+		t.Errorf("showing: %q, want %q", got, want)
+	}
+	all, err := Snapshot(context.Background(), os.Getpid(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := names(all), []string{"Paste@", "Cut@", "Bold@top-left", "Hidden tool@top-left"}; !slices.Equal(got, want) {
+		t.Errorf("full: %q, want %q", got, want)
+	}
+	if all.Elements[0].Bounds != nil {
+		t.Errorf("a placeholder position kept bounds %v", all.Elements[0].Bounds)
 	}
 }
 

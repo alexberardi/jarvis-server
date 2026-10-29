@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -109,6 +110,7 @@ const (
 	stateFocused   = 12
 	stateSelected  = 23
 	stateSensitive = 24
+	stateShowing   = 25
 	stateRequired  = 33
 )
 
@@ -204,6 +206,9 @@ func (o obj) bounds(ctx context.Context) *[4]int {
 	var e struct{ X, Y, W, H int32 }
 	if o.call(ctx, ifComponent+".GetExtents", coordScreen).Store(&e) != nil || e.W <= 0 || e.H <= 0 {
 		return nil
+	}
+	if e.X == math.MinInt32 || e.Y == math.MinInt32 {
+		return nil // the toolkit's "nowhere": not on screen (LibreOffice's closed menu items)
 	}
 	return &[4]int{int(e.X), int(e.Y), int(e.W), int(e.H)}
 }
@@ -344,7 +349,8 @@ type refTable struct {
 // refs is the process's table: one window is observed at a time.
 var refs refTable
 
-func snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
+// snapshotOf walks the pid's active window; showing skips subtrees not on screen.
+func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computeruse.Snapshot, error) {
 	win, err := activeWindow(ctx, pid)
 	if err != nil {
 		return computeruse.Snapshot{}, err
@@ -352,7 +358,7 @@ func snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, erro
 	if max <= 0 {
 		max = DefaultMax
 	}
-	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx)}
+	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
 	w.visit(win, 0, "")
 	if w.err != nil {
 		return computeruse.Snapshot{}, w.err
@@ -371,6 +377,8 @@ type walker struct {
 	nodes map[string]entry
 	err   error
 	win   *[4]int // the window's screen bounds, for Position; nil when unknown
+	// showing: only what is on screen (SnapshotShowing); a subtree that isn't is skipped whole.
+	showing bool
 }
 
 func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
@@ -385,6 +393,9 @@ func (w *walker) visit(o obj, depth int, near string) {
 	r, err := o.role(w.ctx)
 	if err != nil {
 		return // gone mid-walk, or not an accessible
+	}
+	if w.showing && !o.state(w.ctx).has(stateShowing) {
+		return // a closed menu, a hidden panel: nothing in it is on screen
 	}
 	if role, ok := roleNames[r]; ok {
 		w.keep(o, role, r == rolePasswordText, near)

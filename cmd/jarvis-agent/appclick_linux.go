@@ -18,5 +18,5 @@ func newAppClick(on func() bool, p targets.Picker, c *dictate.Confirmer) node.To
 	if ws == nil {
 		return nil
 	}
-	return &appclick.Source{Windows: ws, Snapshot: atspi.Snapshot, Press: atspi.Press, Allowed: on, Picker: p, Confirm: c}
+	return &appclick.Source{Windows: ws, Snapshot: atspi.SnapshotShowing, Press: atspi.Press, Allowed: on, Picker: p, Confirm: c}
 }
