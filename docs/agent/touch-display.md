@@ -14,9 +14,14 @@ embeds the installed display assets, so the shell, clocks, photos and themes wor
 - `chromium` and `mpv` on the `PATH`, and a screen. The shell is built for touch.
 - The server's `/api/v0/node/display` endpoints, which the node reaches with its existing credentials.
 
-Tested hardware is a Surface Pro 6 only (see the pilot notes below). Other devices, including a
-Raspberry Pi, are expected to work if they meet the list above but have not been tried. The Pi
-agent profile is headless by default, so combining `--profile pi` with `--display` is untested.
+Tested hardware: a Surface Pro 6 (x86-64) with a real touchscreen, see the pilot notes below, and a
+Raspberry Pi 3 Model B (aarch64, Debian 13) under a virtual display (Xvfb, no window manager, no real
+screen or touch). On the Pi, `go test` for the display packages passes natively, the engine serves the
+shell, and it starts the dedicated Chromium window, which renders the Home view
+([screenshot](touch-display-screenshots/raspberry-pi-3b-arm64.png)). Chromium used roughly 200 MB of
+the Pi's 905 MB of RAM at the time. Not tried on a Pi: a physical screen, touch, full-screen mode under a
+window manager, a connected server, or `--profile pi` together with `--display` (the Pi profile is
+headless by default).
 
 ## Configure and enable
 
@@ -171,3 +176,7 @@ Captured from the rendered touch shell and admin pages, and from the Surface its
 | Settings, dark                                          | Settings, light                                          | On the Surface                                      |
 | ------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
 | ![Dark](touch-display-screenshots/settings-1440-dark.png) | ![Light](touch-display-screenshots/settings-1440-light.png) | ![Surface](touch-display-screenshots/surface-pilot.png) |
+
+| Raspberry Pi 3B (aarch64, virtual display) |
+| ------------------------------------------ |
+| ![Pi](touch-display-screenshots/raspberry-pi-3b-arm64.png) |
