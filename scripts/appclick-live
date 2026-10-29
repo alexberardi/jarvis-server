@@ -2,7 +2,8 @@
 # scripts/appclick-live: voice clicks (internal/agent/appclick) against a real LibreOffice Writer,
 # in an isolated headless desktop (ELEMENT-LAYER-WORK.md slice 4b's live check).
 #
-#   scripts/appclick-live           run TestLiveLibreOffice once; logs stay in the printed dir
+#   scripts/appclick-live           run TestLiveLibreOffice on Writer, then Calc, each in a fresh
+#                                   session; logs stay in the printed dirs
 #
 # Isolation, as scripts/desktop-shot: `env -i` so nothing of the user's session leaks in, its own
 # XDG_RUNTIME_DIR under /tmp (a fresh Wayland socket), HOME, session bus (dbus-run-session) and
@@ -61,12 +62,12 @@ if [ "${1:-}" = __session ]; then
   /usr/lib/at-spi2-registryd >"$OUT/registryd.log" 2>&1 &
   pids+=($!)
 
-  SAL_USE_VCLPLUGIN=gtk3 GDK_BACKEND=wayland soffice --writer --norestore --nologo \
+  SAL_USE_VCLPLUGIN=gtk3 GDK_BACKEND=wayland soffice "--$APP" --norestore --nologo \
     --nofirststartwizard "-env:UserInstallation=file://$OUT/lo-profile" >"$OUT/soffice.log" 2>&1 &
   pids+=($!)
 
   set +e
-  JARVIS_APPCLICK_LIVE=1 "$OUT/appclick.test" -test.run '^TestLiveLibreOffice$' -test.v -test.count=1 2>&1 | tee "$OUT/test.log"
+  JARVIS_APPCLICK_LIVE=1 JARVIS_APPCLICK_APP=$APP "$OUT/appclick.test" -test.run '^TestLiveLibreOffice$' -test.v -test.count=1 2>&1 | tee "$OUT/test.log"
   rc=${PIPESTATUS[0]}
   set -e
   exit "$rc"
@@ -84,19 +85,26 @@ for c in soffice dbus-run-session gdbus /usr/lib/at-spi-bus-launcher /usr/lib/at
   command -v "$c" >/dev/null || [ -x "$c" ] || { say "missing $c"; exit 2; }
 done
 
-OUT=$(mktemp -d /tmp/jac.XXXXXX) # short: Unix socket paths are limited
-RT=$OUT/run
-mkdir -m 700 "$RT" "$OUT/home"
-say "logs and profile: $OUT"
-(cd "$ROOT" && CGO_ENABLED=0 mise exec go@1.27 -- go test -c -o "$OUT/appclick.test" ./internal/agent/appclick)
+BUILD=$(mktemp -d /tmp/jac-build.XXXXXX)
+(cd "$ROOT" && CGO_ENABLED=0 mise exec go@1.27 -- go test -c -o "$BUILD/appclick.test" ./internal/agent/appclick)
 
-set +e
-env -i "PATH=$(dirname "$SWAY"):/usr/local/bin:/usr/bin:/bin" "HOME=$OUT/home" "TMPDIR=/tmp" \
-  "XDG_RUNTIME_DIR=$RT" "XDG_CONFIG_HOME=$OUT/home/.config" "XDG_CACHE_HOME=$OUT/home/.cache" \
-  XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland "JARVIS_APPCLICK_ISOLATED=$RT" \
-  "SWAY=$SWAY" "OUT=$OUT" \
-  dbus-run-session -- bash "$0" __session
-rc=$?
-set -e
-say "exit $rc; logs in $OUT"
-exit "$rc"
+status=0
+for APP in writer calc; do
+  OUT=$(mktemp -d /tmp/jac.XXXXXX) # short: Unix socket paths are limited
+  RT=$OUT/run
+  mkdir -m 700 "$RT" "$OUT/home"
+  cp "$BUILD/appclick.test" "$OUT/"
+  say "$APP: logs and profile in $OUT"
+  set +e
+  env -i "PATH=$(dirname "$SWAY"):/usr/local/bin:/usr/bin:/bin" "HOME=$OUT/home" "TMPDIR=/tmp" \
+    "XDG_RUNTIME_DIR=$RT" "XDG_CONFIG_HOME=$OUT/home/.config" "XDG_CACHE_HOME=$OUT/home/.cache" \
+    XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland "JARVIS_APPCLICK_ISOLATED=$RT" \
+    "SWAY=$SWAY" "OUT=$OUT" "APP=$APP" \
+    timeout 180 dbus-run-session -- bash "$0" __session
+  rc=$?
+  set -e
+  say "$APP: exit $rc"
+  [ "$rc" = 0 ] || status=1
+done
+rm -rf "$BUILD"
+exit "$status"
