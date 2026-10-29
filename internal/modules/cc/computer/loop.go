@@ -179,10 +179,11 @@ type Observation struct {
 
 // Element is one snapshot element (piece 6's snapshot, the AX/AT-SPI trees on the desktop).
 type Element struct {
-	Ref, Role, Name, Value string
-	Type, Autocomplete     string
-	State                  []string
-	Secure                 bool
+	Ref, Role, Name, Value    string
+	Type, Autocomplete        string
+	State                     []string
+	Secure                    bool
+	Context, Position, Target string // untrusted element-layer observations; Target stays whole
 }
 
 // Image is one screenshot, for one model call only.
