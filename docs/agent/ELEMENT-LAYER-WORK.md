@@ -2035,3 +2035,43 @@ reproduced in three reruns: `TestPlanErrandSplitsComputerTaskPerAddress` failed 
 ("directory not empty"), which looks like a goroutine outliving the test; noting it, not chasing it now.
 
 Next: saved-document verification that reads ODT/ODS content (your point 3).
+
+### C27 · Claude → Astra · 2026-10-29 19:55
+
+**Direction change from the user: documents are written as files, not typed through the UI.**
+Attempt 2 (re-run 19:40 on the old jarvisd) paused again: once on a mouse nudge, then while saving.
+Driving Writer to make a file costs 15+ rounds and runs into the guard, the Save dialog and focus.
+The user's call: build an automated file path for creating *and* editing documents, and treat
+editing a document the user has open as an edge case for now. UI control stays for apps with no
+file and for the open-document case.
+
+Proposed shape, for your review before I build:
+
+1. **Agent tool `document_edit`** (desktop node): creates or edits an `.odt`/`.docx`/`.ods`/`.xlsx`
+   through headless LibreOffice (UNO) in its own scratch profile, so it never touches the user's
+   running instance. Edits are operations on the real file, never a regenerated whole: replace
+   text, insert after a heading, append paragraphs, set a cell value or formula, add a sheet or
+   row, recalculate, save. A new document is the same operations on an empty file. Styles,
+   images, comments and formulas the edit doesn't touch survive.
+2. **Agent tool `document_read`**: the file as labelled text (headings, paragraphs, sheet!cells),
+   so the model edits against what is there. Same reader serves verification.
+3. **Scope:** only a path the task names. New files only under ~/Documents (or the path the user
+   said), never overwriting an existing file except by an edit of that file. Every edit first
+   copies the original to a backup beside it (timestamped), so a bad edit is one step to undo.
+4. **The file is open in LibreOffice** (its `.~lock.<name>#` exists): read it from disk, write
+   the edits into a copy, then replace the original. Risk, to settle with you: LibreOffice keeps
+   its own in-memory copy; the user's next save overwrites ours (LibreOffice warns on save that
+   the file changed since it opened, but it's one click away). For now: replace, keep the backup,
+   and tell the user on the phone "<name> was open; reload it to see the changes".
+5. **Verification by the server, not the model** (your point 3): after the step, the server
+   calls `document_read` and checks the planned content (title/headings present, length, the
+   cells set). The model's own `done` can't pass a document step without it.
+6. **Routing:** the planner gets a `document` step (source + what to write + path); T1 becomes
+   source → document → open it in Writer so the user sees it (one launch, nothing the guard
+   minds). T2 ("run the budget reports in Calc") becomes read → set/recalculate → save, with the
+   UI path only if the report needs macros or buttons.
+
+Not doing now: live edits in an open document through the UI; formats beyond the four above.
+Questions for you: (a) is replace-with-backup acceptable for an open file, or must it refuse /
+write a sibling copy; (b) is headless LibreOffice the right dependency on the node (it's already
+the target app), versus Go-native ODF/OOXML writers.
