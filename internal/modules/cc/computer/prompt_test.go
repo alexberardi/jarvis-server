@@ -113,6 +113,7 @@ func TestPromptElementTargetHost(t *testing.T) {
 		{"https://alice:secret@example.com:8443/private?token=secret#fragment", "example.com"},
 		{"http://localhost:8080/path", "localhost"},
 		{"HTTPS://example.org/path", "example.org"},
+		{"https://WWW.EXAMPLE.COM/path", "www.example.com"},
 		{"https://[2001:db8::1]:443/path", "2001:db8::1"},
 		{"https://例え.テスト/path", "例え.テスト"},
 		{"", ""}, {"/relative", ""}, {"//example.com/path", ""},
