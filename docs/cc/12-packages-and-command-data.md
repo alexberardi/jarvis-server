@@ -112,6 +112,14 @@ There are no background loops in this subsystem. There is no row cleanup and no 
 
 ---
 
+### 2.3 Central assignments (jarvisd-only; [decision](../decisions/2026-10-30-central-package-assignments.md))
+
+| Method + path | Auth | Does |
+|---|---|---|
+| `GET /api/v0/households/{household_id}/package-assignments` | household member (or admin key) | Each assignment with every node's status: `waiting`, `installing`, `installed`, `failed` or `skipped` (with an `error` reason) |
+| `PUT …/package-assignments/{command_name}` | household admin (or admin key) | Body `{github_repo_url, git_tag?, all_nodes?, node_ids?}`. Needs the Pantry on; the repository must be the Pantry's own. Replaces the assignment and installs now on every online target node |
+| `DELETE …/package-assignments/{command_name}[?uninstall=true]` | household admin (or admin key) | Stops managing the package; with `uninstall`, asks each node that finished installing it to uninstall |
+
 ## 3. Behaviour
 
 ### 3.1 Install / uninstall / revert sequence (the verify handshake)
@@ -296,6 +304,8 @@ The file handoff exists because of multiple uvicorn workers. It is not needed in
 | `created_at`, `expires_at`, `completed_at` | naive UTC | |
 
 Install, uninstall and revert rows are **indistinguishable**: there is no `action` column.
+
+**`cc_package_assignments`** and **`cc_package_assignment_nodes`** (jarvisd-only, migration `00330`). One assignment per household and package (`all_nodes`, repository, optional `git_tag`); one row per target node holding its latest `request_id`, `attempts`, `last_attempt_at` and a `note` for a skipped node. A node's status comes from that request's status (a pending one past its deadline reads as expired).
 
 **`test_install_requests`** (`models.py:518-542`, migration `m3h4i5j6k7l8`). Same shape, but `share_code` varchar(6) and `package_name` replace the repo, URL and tag columns, and there is no `restarting` status.
 

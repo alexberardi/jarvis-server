@@ -187,6 +187,12 @@ func isCommitSHA(s string) bool {
 	return true
 }
 
+// pinFailure is a refused desktop install: the status and stable code the apps branch on.
+type pinFailure struct {
+	status       int
+	detail, code string
+}
+
 // pinDesktopInstall is the Pantry check for an install on a computer, which runs the package
 // as its signed-in member (loop item #101, decision 2026-10-17-desktop-installs-pinned-to-pantry).
 // It fails closed: the repository is Pantry's (the caller's must name the same one), the
@@ -194,15 +200,24 @@ func isCommitSHA(s string) bool {
 // from Pantry's /download), or else Pantry's newest. It writes the refusal and returns false
 // when the install can't go ahead.
 func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, hh, name, repo string, tag *string) (string, *string, bool) {
-	unavailable := func(err error) (string, *string, bool) {
-		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "err", err)
-		detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached to check "+name+
-			", so it can't be installed on a computer right now. Try again later.", pantryUnavailableCode)
+	repo, tag, f := m.pinDesktopInstallCheck(ctx, hh, name, repo, tag)
+	if f != nil {
+		detailCode(w, f.status, f.detail, f.code)
 		return "", nil, false
 	}
-	notFound := func() (string, *string, bool) {
-		detailCode(w, http.StatusUnprocessableEntity, "The Pantry has no package "+name+" to install on a computer", packageNotFoundCode)
-		return "", nil, false
+	return repo, tag, true
+}
+
+// pinDesktopInstallCheck is pinDesktopInstall's decision, returned rather than written, for
+// callers with no response (the package assignments' reconciler).
+func (m *Module) pinDesktopInstallCheck(ctx context.Context, hh, name, repo string, tag *string) (string, *string, *pinFailure) {
+	unavailable := func(err error) (string, *string, *pinFailure) {
+		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "err", err)
+		return "", nil, &pinFailure{http.StatusServiceUnavailable, "The Pantry package store can't be reached to check " + name +
+			", so it can't be installed on a computer right now. Try again later.", pantryUnavailableCode}
+	}
+	notFound := func() (string, *string, *pinFailure) {
+		return "", nil, &pinFailure{http.StatusUnprocessableEntity, "The Pantry has no package " + name + " to install on a computer", packageNotFoundCode}
 	}
 	var d pantryCommand
 	switch err := m.pantryGet(ctx, hh, "/v1/commands/"+url.PathEscape(name), &d); {
@@ -212,23 +227,21 @@ func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, h
 		return unavailable(err)
 	}
 	if reason := d.piOnlyReason(name); reason != "" {
-		detailCode(w, http.StatusUnprocessableEntity, reason, notForComputersCode)
-		return "", nil, false
+		return "", nil, &pinFailure{http.StatusUnprocessableEntity, reason, notForComputersCode}
 	}
 	pinned := strings.TrimSpace(d.GithubRepoURL)
 	if pinned == "" {
 		return notFound()
 	}
 	if !sameRepo(repo, pinned) {
-		detailCode(w, http.StatusUnprocessableEntity, "That repository isn't the one the Pantry lists for "+name, repoMismatchCode)
-		return "", nil, false
+		return "", nil, &pinFailure{http.StatusUnprocessableEntity, "That repository isn't the one the Pantry lists for " + name, repoMismatchCode}
 	}
 	want := ""
 	if tag != nil {
 		want = strings.TrimSpace(*tag)
 	}
 	if isCommitSHA(want) {
-		return pinned, &want, true
+		return pinned, &want, nil
 	}
 	var vs struct {
 		Versions []struct {
@@ -243,15 +256,14 @@ func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, h
 	}
 	for _, v := range vs.Versions { // newest first
 		if v.GitTag != nil && *v.GitTag != "" && (want == "" || *v.GitTag == want) {
-			return pinned, v.GitTag, true
+			return pinned, v.GitTag, nil
 		}
 	}
 	msg := "The Pantry lists no version of " + name + " to install"
 	if want != "" {
 		msg = "The Pantry lists no version " + want + " of " + name
 	}
-	detailCode(w, http.StatusUnprocessableEntity, msg, versionNotFoundCode)
-	return "", nil, false
+	return "", nil, &pinFailure{http.StatusUnprocessableEntity, msg, versionNotFoundCode}
 }
 
 func (m *Module) registerPackages(mux *http.ServeMux) {
@@ -533,11 +545,16 @@ func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	// The node ignores the repo info here and installs only what verify returns; it is kept
 	// for wire parity (D40 12.Q12). On a computer both are Pantry's (pinDesktopInstall).
+	m.publishInstall(r.Context(), p)
+	writeCreated(w, p)
+}
+
+// publishInstall nudges the node to pick up an install request.
+func (m *Module) publishInstall(ctx context.Context, p *pkgRequest) {
 	m.publishPkg(p.nodeID, opInstall, map[string]any{
 		"request_id": p.id, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
-		"pantry_url": m.PantryBaseURL(r.Context(), p.householdID),
+		"pantry_url": m.PantryBaseURL(ctx, p.householdID),
 	})
-	writeCreated(w, p)
 }
 
 func (m *Module) handleRequestUninstall(w http.ResponseWriter, r *http.Request) {
@@ -634,8 +651,19 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 			return nil, false
 		}
 	}
+	p, err = m.insertPkg(ctx, nodeID, hh, name, repo, tag)
+	if err != nil {
+		m.internalError(w, err)
+		return nil, false
+	}
+	return p, true
+}
+
+// insertPkg writes a pending request row with the 5-minute pickup deadline. The caller has
+// already checked access, the Pantry switch and, on a computer, Pantry's pin.
+func (m *Module) insertPkg(ctx context.Context, nodeID, hh, name, repo string, tag *string) (*pkgRequest, error) {
 	now := m.now()
-	p = &pkgRequest{id: uuid4(), nodeID: nodeID, householdID: hh, commandName: name, repoURL: repo,
+	p := &pkgRequest{id: uuid4(), nodeID: nodeID, householdID: hh, commandName: name, repoURL: repo,
 		status: pkgPending, createdAt: now, expiresAt: now.Add(pkgPickupTTL)}
 	if tag != nil {
 		p.gitTag = sql.NullString{String: *tag, Valid: true}
@@ -643,11 +671,10 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	if _, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_package_install_requests (id, node_id, household_id,
 		command_name, github_repo_url, git_tag, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.id, p.nodeID, p.householdID, p.commandName, p.repoURL, p.gitTag, p.status, dbTime(now), dbTime(p.expiresAt)); err != nil {
-		m.internalError(w, err)
-		return nil, false
+		return nil, err
 	}
 	m.deps.Log.Info("cc: package request created", "op", "package", "node", nodeID, "command", name, "request_id", p.id)
-	return p, true
+	return p, nil
 }
 
 // publishPkg nudges the node on jarvis/nodes/{id}/package-{op}. Like legacy, a missing broker
