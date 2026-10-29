@@ -1011,6 +1011,14 @@ def device_state(params: dict) -> dict:
                 raw = _run(_get_state(fam, details))
             except Exception as exc:
                 print(f"sidecar: device state query failed for {entity_id}: {exc}", file=sys.stderr)
+    if raw is None and details.get("source") == "home_assistant":
+        try:
+            from ha_shared.home_assistant_service import HomeAssistantService
+            result = _run(HomeAssistantService().get_state(entity_id))
+            if result.success:
+                raw = {**result.attributes, "state": result.state}
+        except Exception:
+            pass
     if raw is None:
         return {"entity_id": entity_id, "domain": domain, "state": {"state": "unknown"},
                 "error": "Failed to query device state"}
@@ -1025,6 +1033,47 @@ def device_state(params: dict) -> dict:
     handled = _domain(domain, raw, available or None)
     state, hints = handled if handled else (raw, _hints("toggle", None))
     return {"entity_id": entity_id, "domain": domain, "state": state, "ui_hints": hints}
+
+
+def InvokeDisplayMedia(params: dict) -> dict:
+    """Use the installed Home Assistant integration and its existing node credentials."""
+    entity = params.get("entity_id", "")
+    action = params.get("action", "")
+    if not entity.startswith("media_player."):
+        return {"success": False, "error": "Invalid media destination"}
+    services = {"play": "play_media", "pause": "media_pause", "resume": "media_play",
+                "stop": "media_stop", "seek": "media_seek"}
+    try:
+        from ha_shared.home_assistant_service import HomeAssistantService
+        ha = HomeAssistantService()
+        state = _run(ha.get_state(entity))
+        if not state.success or state.state in ("unavailable", "unknown"):
+            return {"success": False, "error": "Media destination unavailable"}
+        if action == "status":
+            return {"success": True, "state": state.state, "position": state.attributes.get("media_position")}
+        service = services.get(action)
+        if not service:
+            return {"success": False, "error": "Unsupported media action"}
+        features = int(state.attributes.get("supported_features", 0))
+        required = {"play": 512, "pause": 1, "resume": 16384, "stop": 4096, "seek": 2}[action]
+        if not features & required:
+            return {"success": False, "error": "Destination does not advertise this media action"}
+        data = {}
+        if action == "play":
+            from urllib.parse import urlparse
+            target = params.get("url", "")
+            if urlparse(target).scheme not in ("http", "https"):
+                return {"success": False, "error": "Use a direct HTTP(S) media link"}
+            data = {"media_content_id": target, "media_content_type": "video"}
+        elif action == "seek":
+            seconds = float(params.get("seconds", 0))
+            if not 0 <= seconds <= 864000:
+                return {"success": False, "error": "Invalid seek position"}
+            data = {"seek_position": seconds}
+        result = _run(ha.call_service("media_player", service, entity, data))
+        return {"success": bool(result.success), "error": None if result.success else result.error}
+    except Exception:
+        return {"success": False, "error": "Home Assistant media integration unavailable"}
 
 
 def device_removed(params: dict) -> dict:
@@ -1342,7 +1391,7 @@ def callback(commands: dict, params: dict) -> dict:
     return out
 
 
-DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "device_state": device_state,
+DEVICE_METHODS = {"display_media": InvokeDisplayMedia, "device_scan": device_scan, "device_list": device_list, "device_state": device_state,
                   "device_removed": device_removed, "device_families": lambda params: device_families()}
 
 

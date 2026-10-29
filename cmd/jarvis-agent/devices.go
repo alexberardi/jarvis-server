@@ -27,6 +27,24 @@ func wireDevices(r *node.Runner, live *sidecar.Live, reg *devices.Registry, log 
 	for verb, h := range n.Verbs() {
 		verbs[verb] = func(ctx context.Context, cc *node.CC, det map[string]any) { h(ctx, cc, det) }
 	}
+	verbs["display_media"] = func(ctx context.Context, cc *node.CC, details map[string]any) {
+		rid, _ := details["reply_request_id"].(string)
+		if rid == "" {
+			return
+		}
+		valid, verifyErr := cc.Verify(ctx, rid)
+		if verifyErr != nil || !valid {
+			log.Warn("display media request failed verification")
+			return
+		}
+		result, err := live.DeviceCall("display_media", details)
+		if err != nil {
+			result = map[string]any{"success": false, "error": "Home Assistant media integration unavailable"}
+		}
+		if err := cc.Do(ctx, "POST", "/device-control-results/"+rid, result, nil); err != nil {
+			log.Warn("display media result not delivered", "err", err)
+		}
+	}
 	addVerbs(r, verbs)
 	if r.Absolute == nil {
 		r.Absolute = map[string]func(context.Context, *node.CC, string, []byte){}

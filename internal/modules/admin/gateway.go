@@ -102,6 +102,12 @@ var passRoutes = []passRoute{
 	// Node liveness: the Nodes page and the chat node picker. cc lists a non-superuser only the
 	// nodes of their own households, and checks ?household_id= membership (G9: the picker
 	// passes the active household, which also scopes a superuser's list).
+	{pattern: "GET /api/cc/api/v0/display/config/{scope}", listener: pconfig.ListenerCC, strip: "/api/cc"},
+	{pattern: "PUT /api/cc/api/v0/display/config/{scope}", listener: pconfig.ListenerCC, strip: "/api/cc"},
+	{pattern: "GET /api/cc/api/v0/display/assets", listener: pconfig.ListenerCC, strip: "/api/cc"},
+	{pattern: "POST /api/cc/api/v0/display/assets", listener: pconfig.ListenerCC, strip: "/api/cc"},
+	{pattern: "GET /api/cc/api/v0/display/assets/{asset_id}", listener: pconfig.ListenerCC, strip: "/api/cc"},
+	{pattern: "DELETE /api/cc/api/v0/display/assets/{asset_id}", listener: pconfig.ListenerCC, strip: "/api/cc"},
 	ccUserRoute("GET /api/cc/api/v0/admin/nodes"),
 	// Chat (webapp 01 §3.1): cc's mobile chat, unchanged. A node of another household is 404.
 	ccUserRoute("POST /api/cc/api/v0/mobile/chat"),

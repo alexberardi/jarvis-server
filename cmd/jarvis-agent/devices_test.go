@@ -31,7 +31,7 @@ func TestWireDevicesSubscribesAndReports(t *testing.T) {
 	if !slices.Equal(topics, []string{"device-list", "device-scan", "device-state", "k2/provision"}) {
 		t.Fatalf("topics %v", topics)
 	}
-	if !slices.Equal(verbs, []string{"device_removed", "enroll_voice", "invalidate_device_cache"}) {
+	if !slices.Equal(verbs, []string{"device_removed", "display_media", "enroll_voice", "invalidate_device_cache"}) {
 		t.Fatalf("verbs %v", verbs)
 	}
 	if _, ok := r.Absolute[devices.AuthReadyTopic]; !ok || len(r.Absolute) != 1 {

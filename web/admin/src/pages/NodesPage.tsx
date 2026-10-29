@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Cpu, Laptop, RefreshCw } from 'lucide-react'
+import DisplaySettings from '@/components/display/DisplaySettings'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, toast } from '@/components/ui'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
@@ -115,6 +116,12 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
           </Detail>
         )}
         {ledMode && live && <LedModeField key={ledMode} nodeId={node.node_id} reported={ledMode} online={live.online} />}
+        {live?.capabilities?.display === true && <>
+          <Detail label="Display">{String(live.capabilities.display_status || (live.capabilities.display_enabled ? 'Ready' : 'Disabled'))}</Detail>
+          <Detail label="Playercast receiver">{String(live.capabilities.display_playercast || 'Disabled')}</Detail>
+          <Detail label="Experimental Cast V2">{String(live.capabilities.display_cast || 'Disabled')}</Detail>
+          <DisplaySettings scope={node.node_id} label="Display settings" />
+        </>}
         {node.services.length > 0 && <Detail label="Services">{node.services.join(', ')}</Detail>}
         <Detail label="ID">
           <code className="font-mono break-all text-text-muted">{node.node_id}</code>
