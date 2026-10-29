@@ -679,6 +679,9 @@ func (t *Tools) desktopStep(ctx context.Context, a actArgs, i int, action comput
 	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt); !ok {
 		return r
 	}
+	if why := t.pasteBlocked(ctx, a.RunID, action, el); why != "" {
+		return fail("paste_blocked", "%s", why)
+	}
 
 	var newApp string
 	if names != nil {
@@ -844,6 +847,7 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 			if err := d.Clipboard.Write(ctx, action.Text); err != nil {
 				return "", "failed", fmt.Errorf("couldn't write the clipboard: %w", err)
 			}
+			t.runs().With(run.ID, func(r *Run) { r.clip, r.clipSet = action.Text, true })
 			break
 		}
 		s, err := d.Clipboard.Read(ctx)
@@ -864,4 +868,49 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 		// the next computer_observe takes it
 	}
 	return "", "", nil
+}
+
+// pasteBlocked says why action would paste text the task didn't put there ("" when it wouldn't).
+// A paste inserts what the clipboard holds at that moment, which is the user's own copy unless
+// it still equals this run's last clipboard_write (C24: a T1 run pasted a command the user had
+// copied). The middle button pastes the user's selection, never the task's.
+func (t *Tools) pasteBlocked(ctx context.Context, runID string, action computeruse.Action, el *computeruse.Element) string {
+	if action.Button == "middle" {
+		return "the middle button pastes the user's own selection: click with the left button"
+	}
+	if !isPaste(action, el) {
+		return ""
+	}
+	const fix = ": put the text there with clipboard_write first, in the same batch as the paste, or type it"
+	var own string
+	var set bool
+	t.runs().With(runID, func(r *Run) { own, set = r.clip, r.clipSet })
+	if !set || t.Desktop.Clipboard == nil {
+		return "the clipboard holds the user's copy, not this task's" + fix
+	}
+	// shortcut: the user could copy between this read and the paste (milliseconds); a paste
+	// that re-checks from inside the input path would close it.
+	now, err := t.Desktop.Clipboard.Read(ctx)
+	if err != nil || now != own {
+		return "the clipboard no longer holds this task's text (the user copied something since)" + fix
+	}
+	return ""
+}
+
+// isPaste: the paste chords (ctrl/cmd+v, ctrl+shift+v, shift+insert), or a press or click on a
+// control named Paste ("Paste", "Paste Special…"). English names only.
+func isPaste(action computeruse.Action, el *computeruse.Element) bool {
+	if action.Kind == "keypress" {
+		keys := map[string]bool{}
+		for _, k := range action.Keys {
+			keys[strings.ToLower(k)] = true
+		}
+		mod := keys["ctrl"] || keys["cmd"] || keys["meta"] || keys["super"]
+		return (keys["v"] && mod) || (keys["insert"] && keys["shift"])
+	}
+	switch action.Kind {
+	case "press", "select", "click", "double_click", "triple_click":
+		return el != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(el.Name)), "paste")
+	}
+	return false
 }

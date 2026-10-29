@@ -32,6 +32,8 @@ type Run struct {
 	shots    map[string]computeruse.Geometry // desktop: the latest captures by id
 	order    []string                        // their ids, oldest first
 	apps     map[string]bool                 // desktop: the apps it has used, by appKeyOf
+	clip     string                          // desktop: its last clipboard_write, which a paste may insert
+	clipSet  bool
 }
 
 // keepCapture remembers capture id's geometry (the last maxCaptures).
