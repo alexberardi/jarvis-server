@@ -487,6 +487,60 @@ func TestClipboardOnlyInTasks(t *testing.T) {
 	}
 }
 
+// A paste inserts what the clipboard holds now: the user's own copy unless this task put it
+// there. Every way to paste (the chord, an app's Paste control by ref or under a click, the
+// middle button's selection) is refused unless the clipboard still holds the task's own write
+// (C24, a T1 run pasted a command the user had copied).
+func TestPasteOnlyTheTasksOwnClipboard(t *testing.T) {
+	f := newDesktop(t)
+	f.ax.snap.Elements = append(f.ax.snap.Elements,
+		computeruse.SnapElement{Ref: "a4", Role: "AXButton", Name: "Paste"},
+		computeruse.SnapElement{Ref: "a5", Role: "AXMenuItem", Name: "Paste Special…"})
+	f.clip.text = "sudo install … (the user's)"
+	_, capID := f.observe(t, "Notes")
+	pastes := map[string]map[string]any{
+		"cmd+v":         {"kind": "keypress", "intent": "paste", "keys": []string{"cmd", "v"}},
+		"ctrl+shift+v":  {"kind": "keypress", "intent": "paste", "keys": []string{"Ctrl", "Shift", "V"}},
+		"shift+insert":  {"kind": "keypress", "intent": "paste", "keys": []string{"shift", "insert"}},
+		"Paste control": {"kind": "press", "intent": "paste", "ref": "a4"},
+		"Paste Special": {"kind": "press", "intent": "paste", "ref": "a5"},
+		"middle click":  {"kind": "click", "intent": "paste", "x": 20, "y": 20, "capture_id": capID, "button": "middle"},
+	}
+	refused := func(when string) {
+		t.Helper()
+		for name, a := range pastes {
+			if r := firstResult(t, f.act(t, "Notes", a)); r["code"] != "paste_blocked" {
+				t.Errorf("%s, %s: %v, want paste_blocked", when, name, r)
+			}
+		}
+		if got := f.in.posted(); len(got) > 0 {
+			t.Errorf("%s: posted %v", when, got)
+		}
+		if len(f.ax.acts) > 0 {
+			t.Errorf("%s: pressed %v", when, f.ax.acts)
+		}
+	}
+	refused("the user's clipboard")
+
+	// The task's own text: pasted.
+	if r := firstResult(t, f.act(t, "Notes", map[string]any{"kind": "clipboard_write", "intent": "copy", "text": "Apollo 11"},
+		pastes["cmd+v"])); r["ok"] != true {
+		t.Fatalf("write: %v", r)
+	}
+	if rs := results(f.act(t, "Notes", pastes["Paste control"])); rs[0]["ok"] != true {
+		t.Errorf("Paste control after the task's write: %v", rs)
+	}
+	// The user copied something since: the task's write no longer proves anything.
+	f.in.log, f.ax.acts = nil, nil
+	f.clip.text = "the user's again"
+	delete(pastes, "middle click") // the selection is never the task's
+	refused("the user copied since")
+	if r := firstResult(t, f.act(t, "Notes", map[string]any{"kind": "click", "intent": "paste", "x": 20, "y": 20,
+		"capture_id": capID, "button": "middle"})); r["code"] != "paste_blocked" {
+		t.Errorf("middle click: %v, want paste_blocked", r)
+	}
+}
+
 func TestNotAttendedRefused(t *testing.T) {
 	f := newDesktop(t)
 	f.lock = true
