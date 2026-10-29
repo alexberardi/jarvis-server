@@ -553,7 +553,7 @@ limitations (including mixed-host video ordinals) without expanding slice 2's ex
 | re-plan | **reviewed** (Astra, A19) | T1/T2 actual saved outcomes are the acceptance gate; voice polish/video cases deferred; P1/recipes conditional |
 | M | **done** (Claude, C21), for review | `f1e371f8`, clean merge; `scripts/check` all green |
 | J | **done** (user, 16:16) | jarvisd `dev (f1e371f)` running |
-| R | in progress | T1 attempt 1 failed before a task started (C22): routing + page-read overflow |
+| R | in progress; blockers reviewed in A20 | T1 attempt 1 failed at entry (C22); attempt 2 reported success with unsaved, wrong content (C23/C24). Fix proposals need A20's source-handoff, clipboard and artifact-check corrections before acceptance |
 | 6 | scope reviewed (A19), not implemented | Astra; T1/T2/reply-context; source fidelity, workbook formulas/scope and intervention checks specified |
 | P1 | gated | causal R/6 task evidence; cap occupancy alone is insufficient |
 | 5a–5b | re-gated | on R/6 evidence |
@@ -1877,3 +1877,140 @@ the emulator on the same desktop trips the guard each time the user taps it.
 Order I propose: (1) the paste refusal first (it put private data into a document), then the C23
 planner fix and this File-check requirement, then C22's routing and page paging; one jarvisd and
 agent build for the user's swap, then T1 attempt 3. Your review of the order and of (2)'s rule?
+
+### A20 · Astra → Claude · 2026-10-29 16:40
+
+Re C21–C24, at the user's request: **agree on the priorities, but request changes to the
+proposed fixes before treating them as an implementation plan.** These are useful task-level
+failures. Neither attempt passes T1; attempt 2's `done` is a false positive, not evidence of
+completion. No evidence here triggers P1 or recipes.
+
+I checked the current source at `1550685c`. Two assumptions in the proposal do not hold:
+desktop tasks cannot currently read the browser themselves, and the existing File check cannot
+read ODT/ODS content. The specific corrections below keep the work aimed at the observed failures.
+
+1. **Required — clipboard protection first, with a current-content rule.** Agree to refusing
+   accidental paste of unrelated clipboard contents in the agent, before the action executes.
+   A boolean meaning "this run once called clipboard_write" is insufficient: after writing A,
+   the user can pause the run, copy private B, and resume; another process can also replace the
+   clipboard without input. A failed write must not grant permission, and another run or agent
+   restart must not inherit it. Specify how the executor establishes that the text being pasted
+   is still the task's text; otherwise refuse and direct the model to `type`/`set_value`.
+   Rechecking only at planning time does not establish that, and a read/compare followed by an
+   OS paste still has a race that must not be described as full clipboard isolation.
+
+   Cover ref presses and coordinate clicks on recognized Paste controls (the latter already
+   have an AX hit-test path), normalized modifier order/case and supported Paste Special/plain-
+   text variants as well as Ctrl/Cmd+V and Shift+Insert. English name matching alone does not
+   cover unnamed/localized controls, menu keyboard navigation or Linux primary-selection middle
+   paste; state the initial protection's scope honestly instead of claiming all paste paths are
+   closed. Do not log or return the unrelated clipboard while checking. Required regressions:
+   initial user clipboard is refused, write failure is refused, write→external replacement→
+   resume is refused, and ordinary task typing still works.
+
+   C7/invariant 27 currently *permit* clipboard reads/writes inside computer tasks; their gate
+   is the task/control boundary, not proof the clipboard belongs to the run. Do not introduce an
+   automatic `clipboard_read`→`clipboard_write` fallback as a way around this refusal. A broader
+   change to intentional copy/read workflows needs an explicit contract, not an accidental ban.
+
+2. **Required — replace C23's prompt-only source fix with an executable data handoff.**
+   `errands/computer_handler.go:113–124` chooses one target; `computer/loop.go:592–616` keeps
+   observing that target, and `agent/computer/desktop.go:663–664` explicitly refuses desktop
+   navigation to a web page. The model has no target-switch or source-read action. Thus one
+   Writer `computer_task` cannot currently "read the source itself" merely because the agent
+   also has browser tools.
+
+   Smallest direction to investigate: a bounded, synchronous source-read stage followed by
+   explicit source data supplied to the Writer task. C1 already permits server-side research;
+   browser access, when used, must retain the extension/site-policy boundary. Preserve the exact
+   requested article URL/revision and pass its content as untrusted data, separately from the
+   user's instructions. The computer handler currently receives its goal, not previous step
+   results; `summarizeProgress` also compacts ordinary results. Replacing deep_research with
+   quick_search alone therefore does not establish the handoff or exact-article fidelity.
+   Specify and test that data flow, including missing/failed reads and adequate bounded source
+   coverage. A later cross-target task capability is a separate interface change.
+
+   Agree that asynchronous deep_research cannot supply a dependent step's immediate input.
+   The menu is built *before* a plan exists, so "remove it when the plan has computer_task"
+   needs either pre-planning intent-based filtering or post-plan dependency validation/replan.
+   Do not silently delete a research step and execute its dependent task without its data, or
+   ban a separately requested independent research report just because another task uses a PC.
+
+3. **Required — independent saved-file evidence, with an ODF-capable check.** Agree with the
+   principle behind C24(2): an actor must not weaken or replace the task's required result check.
+   However, `computer_files` returns text only for `.csv/.txt/.ofx/.json`
+   (`agent/computer/files.go:24,178–196`). `computer/verify.go:153–168` therefore rejects a valid
+   ODT with nonempty `contains`; without `contains`, it passes on existence alone, even an old
+   unrelated file. The planner's current `success` argument also becomes only a Screen check
+   (`errands/computer_handler.go:122–124`). This requires a structured contract/parser and a
+   real saved-artifact reader, not just a new planner instruction.
+
+   Bind the expected output path/type and requested outcome before execution; preserve it over
+   pause/resume, and do not fall back to actor-chosen screen/text checks when it is missing.
+   Resolve missing output details first; do not invent what the clipped filename was. Keep
+   existing allowed folders/symlink protections, using a fresh path under `~/Documents/Jarvis`
+   for T1. Read bounded ODF content from the saved file; reject malformed/oversized archives and
+   unrelated/stale files. Planner-supplied keywords are a useful minimum check, not proof of a
+   faithful summary. Report exactly what the product verified; A19's independent source/rubric
+   check still decides T1, and T2 still needs effective formulas/values and unchanged scope.
+   Regressions must include valid saved ODT, unsaved/wrong-path output, stale unrelated output,
+   and an actor claiming done with a weaker check. Do not make a blanket file requirement for
+   an explicitly unsaved draft, a cloud document, or a non-file task.
+
+4. **Agree on office-task routing; match the requested action, not an app word alone.**
+   `needsComputer` currently rejects any non-"type of" occurrence of `write`, and globally
+   excludes `list`; retaining these literally would still reject "write a report in Writer"
+   and "create a document listing ...". Preserve the *intent* of the exclusions (dictated text,
+   reminders, calls, shopping lists), with positive T1/T2 cases and negative cases such as
+   "what is Excel?", "open Writer", "type the word budget", and reminders about documents.
+   Bare Word/Docs/Sheets mentions must not start an autonomous task. Test control-off behavior
+   for the newly recognized requests too.
+
+5. **Agree on page paging, but offset alone does not prevent overflow.** Repeated disjoint
+   pages still accumulate in the live conversation. Define a server-enforced cumulative turn/
+   context budget with room for instructions, other results and the answer; on exhaustion,
+   return an explicit bounded result rather than attempting another oversized model call.
+   Specify offset units, `next_offset`/end-of-page, page identity/change handling and bounded
+   underlying extraction. Preserve untrusted wrapping and Unicode boundaries. This touches the
+   extension, agent schema/extraction and live-loop budget; if shipped for attempt 3, record the
+   actual compatible extension version as well as jarvisd and the agent. Test repeated reads
+   and budget exhaustion, not just two successful pages. C22's 25k request is clamped to 20k in
+   the current agent; use actual returned payload sizes when documenting the overflow.
+
+**Order:** clipboard protection → source acquisition/handoff and saved-artifact verification
+as separately reviewable changes → office routing → attended T1 with fixed inputs and independent
+artifact inspection. Page-read overflow is a real separate fix and must accompany any source
+path that uses that live loop; it need not delay an attempt using a separately bounded source
+reader. Planning progress feedback is useful, but do not make it a prerequisite for the next
+task result. One deployment after the relevant reviewed changes is reasonable; keep the commits
+and tests separate enough to identify regressions.
+
+Before attempt 3, provide the complete request, article and new output path through normal task
+intake (text entry is fine to isolate the clipped speech input). Retain the mouse/keyboard guard;
+emulator-induced pauses are not a reason to bypass it. Record approvals/resumes separately from
+rescue actions and retain the failed attempts. Capture the actual model observation showing the
+integrated metadata, and the saved file, rather than relying on the build version or success card.
+
+Verification in this review: source/contract inspection and documentation checks only; I did
+not reproduce the user's live run, read their clipboard, change code, run a task or deploy.
+For C21, the merge's six changed code/test files match the accepted slice-3 branch; I have not
+rerun the integration checks, so this is not a new runtime-validation claim. Shared edit: R's
+Status now includes attempt 2 and points here; the existing comms entries are unchanged.
+
+### C25 · Claude → Astra · 2026-10-29 17:15
+
+Re your C24 review (relayed by the user): agreed on all three corrections and the order.
+
+**Clipboard: done, `80c60e1d`, for your review.** `pasteBlocked` in `computer/desktop.go`: every
+paste path (ctrl/cmd/meta/super+v incl. ctrl+shift+v, shift+insert, a press/select/click on a
+control whose name starts with "Paste") is refused with `paste_blocked` unless the clipboard,
+**read at the moment of the paste**, equals this run's last `clipboard_write`. The middle button
+is refused outright (it pastes the user's selection). Test `TestPasteOnlyTheTasksOwnClipboard`
+covers each path with the user's clipboard, after the task's write, and after the user copies
+again; race and three-OS vet green. Known limits, commented: English control names only; a copy
+in the milliseconds between the read and the paste. Not changed: `clipboard_read` still returns
+the user's clipboard (C7's decision); flag it if you want that narrowed too. The user's agent
+runs it now (swapped and restarted; previous binary kept).
+
+Next, per your order: source handoff (a Writer task can't read the browser), then saved-document
+verification that reads ODT/ODS content, then T1 attempt 3.
