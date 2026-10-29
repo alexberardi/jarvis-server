@@ -11,7 +11,7 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 ### Touch display (2026-10-23)
 
 - [x] Opt-in agent shell, central inheritance and acknowledgements, PIN exit, device and media controls, sandboxed themes, receivers and speech visualisation.
-- [x] Surface reboot, automatic kiosk login, Jabra voice, finger touch, full-screen speech waveform and PIN exit confirmed in the pilot.
+- [x] Pilot on a Surface Pro 6: reboot, automatic kiosk login, Jabra voice, finger touch, full-screen speech waveform and PIN exit confirmed. Other screen-equipped devices are untested.
 - [ ] Real external Chromecast routing, phone sender applications and subscription website compatibility sign-off. See [touch display operation](agent/touch-display.md).
 
 ### Before the official release (user 2026-10-12): next step
