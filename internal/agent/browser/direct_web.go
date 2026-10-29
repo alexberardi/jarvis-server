@@ -15,14 +15,18 @@ import (
 // opened sites through the system's handler, a new window each time.
 
 var (
-	// A place said before the request: "in a new tab, search …", "open a new tab and search …".
-	reWebLead = regexp.MustCompile(`(?i)^(?:(?:open|start)\s+(?:a\s+|another\s+)?new\s+tab\s+and\s+|in\s+(?:a\s+|another\s+)?new\s+tab,?\s+|in\s+(?:firefox|chrome|(?:the\s+|my\s+)?browser),?\s+|on\s+google,?\s+)`)
+	// A place said before the request: "in a new tab, search …", "open a new tab and search …",
+	// "open Google (in a new tab) and search …".
+	reWebLead = regexp.MustCompile(`(?i)^(?:(?:open|start)\s+(?:a\s+|another\s+)?new\s+tab\s+and\s+|(?:open|go\s+to|pull\s+up|bring\s+up)\s+google(?:\.com)?(?:\s+in\s+(?:a|another|the)\s+(?:new\s+)?(?:(?:firefox|chrome)\s+)?(?:tab|window|browser))?,?\s+and\s+|in\s+(?:a\s+|another\s+)?new\s+tab,?\s+|in\s+(?:firefox|chrome|(?:the\s+|my\s+)?browser),?\s+|on\s+google,?\s+)`)
 	// The browser named after it: "… on Google", "… in a new tab", "… in Firefox".
 	reWebTail = regexp.MustCompile(`(?i)[,]?\s+(?:on|in|with|using)\s+(?:(?:a|another|the|my)\s+)?(?:google(?:\s+(?:page|tab))?|the\s+web|the\s+internet|firefox|chrome|browser|new\s+tab)$`)
-	reSearch  = regexp.MustCompile(`(?i)^(?:search|look\s+up|google)(?:\s+(?:google|the\s+web|online))?(?:\s+for)?\s+(.+)$`)
-	reNewTab  = regexp.MustCompile(`(?i)^(?:open|start|give\s+me)\s+(?:a\s+|another\s+)?new\s+tab$|^new\s+tab$`)
-	reGoTo    = regexp.MustCompile(`(?i)^(?:go\s+to|open|navigate\s+to|pull\s+up|bring\s+up)\s+((?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?)$`)
-	rePolite  = regexp.MustCompile(`(?i)^(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+|can\s+you\s+|could\s+you\s+)?`)
+	reSearch  = regexp.MustCompile(`(?i)^(?:search|look\s+up|google)(\s+google|\s+the\s+web|\s+online)?(?:\s+for)?\s+(.+)$`)
+	// Google itself: "open Google", "go to google.com", "search Google" (an app named Google is
+	// never meant: the model opened Google Contacts).
+	reGoogle = regexp.MustCompile(`(?i)^(?:(?:open|go\s+to|pull\s+up|bring\s+up)\s+google(?:\.com)?|search\s+google)$`)
+	reNewTab = regexp.MustCompile(`(?i)^(?:open|start|give\s+me)\s+(?:a\s+|another\s+)?new\s+tab$|^new\s+tab$`)
+	reGoTo   = regexp.MustCompile(`(?i)^(?:go\s+to|open|navigate\s+to|pull\s+up|bring\s+up)\s+((?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?)$`)
+	rePolite = regexp.MustCompile(`(?i)^(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+|can\s+you\s+|could\s+you\s+)?`)
 )
 
 // webRequest is the page "search …", "new tab" or "go to …" means, or "" when it isn't one.
@@ -41,7 +45,7 @@ func webRequest(said string) string {
 		s, browserSaid = strings.TrimSpace(s[:loc[0]]), true
 	}
 	switch {
-	case reNewTab.MatchString(s):
+	case reNewTab.MatchString(s), reGoogle.MatchString(s):
 		return "https://www.google.com/"
 	case reGoTo.MatchString(s):
 		return "https://" + reGoTo.FindStringSubmatch(s)[1]
@@ -52,10 +56,10 @@ func webRequest(said string) string {
 	}
 	// A bare "search for X" may be a question for Jarvis ("search my notes"); "google X" or a
 	// browser named is the page.
-	if !browserSaid && !strings.HasPrefix(strings.ToLower(s), "google") {
+	if !browserSaid && !strings.HasPrefix(strings.ToLower(s), "google") && !strings.EqualFold(strings.TrimSpace(m[1]), "google") {
 		return ""
 	}
-	q := strings.TrimSpace(m[1])
+	q := strings.TrimSpace(m[2])
 	if q == "" {
 		return ""
 	}

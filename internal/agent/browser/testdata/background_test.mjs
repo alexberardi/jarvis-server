@@ -182,9 +182,8 @@ test("fill on a page that never shows the field fails with field_not_found", asy
   assert.deepEqual(filled, []);
 });
 
-// "show numbers": hints snapshots only what is on screen, draws its numbers, and returns the refs
-// act presses; show false takes the numbers down.
-test("hints numbers the elements on screen and removes them", async () => {
+// Voice selection reads an invisible snapshot and acts by the refs it returns.
+test("snapshot lists visible controls without drawing an overlay", async () => {
   const tab = { id: 4, url: "https://www.google.com/search?q=dogs", title: "dogs", active: true, windowId: 1 };
   const b = load({ tabs: [tab] });
   const calls = [];
@@ -196,13 +195,10 @@ test("hints numbers the elements on screen and removes them", async () => {
     }
     return [{ frameId: 0, result: { ok: true, count: 2 } }];
   };
-  const r = await b.call("hints", {});
+  const r = await b.call("snapshot", { viewport: true });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(Array.from(r.result.elements, (e) => e.ref), ["e1", "e2"]);
   assert.equal(calls.find(([n]) => n === "snapCollect")[1][2], true, "only elements on screen");
-  const draw = calls.find(([n]) => n === "hintsDraw");
-  assert.deepEqual(Array.from(draw[1]), [r.result.gen, true]);
-  calls.length = 0;
-  await b.call("hints", { show: false });
-  assert.deepEqual(calls.map(([n, a]) => [n, Array.from(a)]), [["hintsDraw", [0, false]]]);
+  assert.equal(calls.some(([n]) => n === "hintsDraw"), false, "snapshot stays invisible");
+  assert.ok(calls.some(([n]) => n === "snapCommit"), "snapshot refs are retained for act");
 });

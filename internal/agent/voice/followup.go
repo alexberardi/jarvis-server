@@ -92,7 +92,8 @@ func DefaultFollowUp() FollowUpConfig {
 const (
 	quietConsecutiveSecs = 0.16 // listen_quiet_consecutive_secs: quiet this long = the tail is over
 	quietFactor          = 1.5  // listen_quiet_rms_threshold = silence threshold × 1.5
-	onsetChunks          = 3    // chunks above the threshold in a row that make speech onset
+	onsetChunks          = 3    // chunks above the threshold among the last onsetSpan that make speech onset
+	onsetSpan            = 5    // a Bluetooth mic drops a chunk mid-word as silence: one gap is allowed
 	preOnsetKeepSecs     = 1.5  // audio kept from before onset
 	// validationQuietWaitSecs is listen()'s listen_quiet_max_wait_secs, which the Python
 	// validation handler uses before recording an answer.
@@ -361,13 +362,14 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		}
 	}
 
-	// Onset: enough loud chunks in a row. Everything heard is kept (a dip mid-word must not
-	// lose the start), trimmed to 1.5 s before onset.
+	// Onset: enough loud chunks among the last onsetSpan. Everything heard is kept (a dip
+	// mid-word must not lose the start), trimmed to 1.5 s before onset.
 	required, at := onsetChunks, s.threshold
 	var heard [][]int16
-	run, longest, peak := 0, 0, 0.0
+	var loud [onsetSpan]bool
+	inSpan, most, peak := 0, 0, 0.0
 	detected := false
-	for seen < budget {
+	for i := 0; seen < budget; i++ {
 		c, err := next()
 		if err != nil {
 			return nil, mapChunkTimeout(err)
@@ -375,21 +377,23 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		heard = append(heard, c)
 		r := RMS(c)
 		peak = max(peak, r)
-		if r >= at {
-			run++
-			longest = max(longest, run)
-			if run >= required {
-				detected = true
-				break
-			}
-		} else {
-			run = 0
+		if loud[i%onsetSpan] {
+			inSpan--
+		}
+		loud[i%onsetSpan] = r >= at
+		if loud[i%onsetSpan] {
+			inSpan++
+		}
+		most = max(most, inSpan)
+		if inSpan >= required {
+			detected = true
+			break
 		}
 	}
 	if !detected {
 		// What the window heard, so "it didn't hear me" can be told from a quiet mic.
 		s.log.Info("follow-up: no speech onset", "peak_rms", math.Round(peak), "threshold", at,
-			"longest_run", longest, "required", required, "wake_level_db", ptrVal(s.wakeLevel))
+			"most_loud", most, "span", onsetSpan, "required", required, "wake_level_db", ptrVal(s.wakeLevel))
 		return nil, nil
 	}
 	if keep := max(1, frames(preOnsetKeepSecs)); len(heard) > keep {

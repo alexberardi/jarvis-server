@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/url"
 	"sort"
@@ -65,16 +66,21 @@ type Tools struct {
 	// Origins is this agent's server: fill and click refuse its tabs (the Jarvis page, where
 	// the user may be chatting; jarvispage.go). Nil or empty: no check.
 	Origins *jarvispage.Origins
-	tools   []tool
+	// CC, when it returns a client, lets the model pick the element a "click …" or "type … into
+	// …" meant when no name on the page matched (pick.go). Nil: no pick.
+	CC func() *node.CC
+	// Log, when set, records each model pick (what was said, the answer, its confidence).
+	Log   *slog.Logger
+	tools []tool
 
 	now  func() time.Time // nil: time.Now (tests inject a clock)
 	mu   sync.Mutex
 	task string    // the task tab ("KEY:T"): the one browser_open opened or a tool last named
 	used time.Time // when the task tab was last used
 
-	hints       *hintState // the numbers on screen ("show numbers"), nil when none
-	hintConfirm string     // the risky numbered click waiting for its yes
-	listening   bool       // a voice turn is listening: numbers follow the page (TurnListening)
+	hints       *hintState // current visible page controls, nil when no voice snapshot is active
+	hintConfirm string     // the risky page action waiting for its yes
+	listening   bool       // a voice turn is listening (TurnListening)
 }
 
 // TaskTabIdle is how long the task tab stays the default target of a command without a tab_id
@@ -172,8 +178,7 @@ func NewTools(h *Hub) *Tools {
 			0, t.find, true},
 		{node.Spec{Name: ToolFill, Description: "Type into a field on the browser's current page ('search for X on this page', 'fill in username X'). For a desktop app use desktop_type_text.",
 			Params: []node.Param{
-				{Name: "field", Type: "string", Description: "The field's label as the user said it, e.g. username, search"},
-				{Name: "number", Type: "int", Description: "The number shown on the field (the page's yellow numbers) when the user names one, instead of field"},
+				{Name: "field", Type: "string", Description: "The field as the user described it, using its label or nearby text"},
 				{Name: "text", Type: "string", Required: true, Description: "The text to put in the field"},
 				{Name: "submit", Type: "bool", Description: "Submit the form after"},
 				optionalTab("the current tab"),
@@ -183,12 +188,11 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "fill in username abcde on browser", Params: map[string]any{"field": "username", "text": "abcde"}, Primary: true},
 				{VoiceCommand: "put hello@example.com in the email field", Params: map[string]any{"field": "email", "text": "hello@example.com"}},
 				{VoiceCommand: "type pizza near me in the search box and search", Params: map[string]any{"field": "search", "text": "pizza near me", "submit": true}},
-				{VoiceCommand: "fill out 33 with a short bio of me", Params: map[string]any{"number": 33, "text": "…"}},
+				{VoiceCommand: "type cats into the reply box under Bob's comment", Params: map[string]any{"field": "reply box under Bob's comment", "text": "cats"}},
 			}, Risky: true}, 0, t.fill, true},
 		{node.Spec{Name: ToolClick, Description: "Click a button or link on the browser's current page by its label ('click OK on the browser'). Desktop dialogs and the browser's own pop-ups: use desktop_press_key.",
 			Params: []node.Param{
-				{Name: "text", Type: "string", Description: "The label as shown, e.g. Sign in"},
-				{Name: "number", Type: "int", Description: "The number shown on it (the page's yellow numbers) when the user names one, instead of text"},
+				{Name: "text", Type: "string", Description: "The control as the user described it, using its label or nearby text"},
 				optionalTab("the current tab"),
 			},
 			Keywords: []string{"browser", "click", "button", "ok", "cancel", "press", "accept", "submit", "link", "dialog"},
@@ -196,7 +200,7 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "click OK on the browser", Params: map[string]any{"text": "OK"}, Primary: true},
 				{VoiceCommand: "hit cancel", Params: map[string]any{"text": "Cancel"}},
 				{VoiceCommand: "click sign in", Params: map[string]any{"text": "Sign in"}},
-				{VoiceCommand: "click 12", Params: map[string]any{"number": 12}},
+				{VoiceCommand: "click Reply under Bob's comment", Params: map[string]any{"text": "Reply under Bob's comment"}},
 			}, Risky: true}, 0, t.click, true},
 	}
 	return t
@@ -403,6 +407,11 @@ func tabArg(args map[string]any) (browser string, tab any, err error) {
 		return b, tn, nil
 	}
 	return "", nil, fmt.Errorf("%w: tab_id must be a tab_id from browser_list_tabs, e.g. \"firefox:42\"", errBadArgs)
+}
+
+func hasExplicitTab(args map[string]any) bool {
+	v, ok := args["tab_id"]
+	return ok && v != nil && v != ""
 }
 
 func validKey(k string) bool {
@@ -856,16 +865,18 @@ func (t *Tools) gate(ctx context.Context, g dictate.Gate, question string, act f
 
 func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, error) {
 	raw, _ := args["text"].(string)
-	if n, ok := intArg(args, "number"); ok && n > 0 {
-		return hintToolOut(t.fillHint(ctx, n, raw))
-	}
+	field, _ := args["field"].(string)
 	text, err := dictate.Sanitize(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errDictate, err)
 	}
-	field, _ := args["field"].(string)
 	field = strings.TrimSpace(field)
 	submit := dictate.BoolArg(args, "submit")
+	if field != "" && !hasExplicitTab(args) {
+		if ref, h, handled := t.namedRef(field); handled {
+			return hintToolOut(t.fillHint(ctx, h, ref, text, submit))
+		}
+	}
 	if _, _, err := tabArg(args); err != nil {
 		return nil, err
 	}
@@ -912,9 +923,6 @@ func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, 
 }
 
 func (t *Tools) click(ctx context.Context, args map[string]any) (map[string]any, error) {
-	if n, ok := intArg(args, "number"); ok && n > 0 {
-		return hintToolOut(t.clickHint(ctx, n, ""))
-	}
 	label, _ := args["text"].(string)
 	label = strings.TrimSpace(label)
 	if label == "" {
@@ -922,6 +930,11 @@ func (t *Tools) click(ctx context.Context, args map[string]any) (map[string]any,
 	}
 	if len([]rune(label)) > 100 {
 		return nil, fmt.Errorf("%w: a button label is at most 100 characters", errBadArgs)
+	}
+	if !hasExplicitTab(args) {
+		if ref, h, handled := t.namedRef(label); handled {
+			return hintToolOut(t.clickHint(ctx, h, ref))
+		}
 	}
 	if _, _, err := tabArg(args); err != nil {
 		return nil, err

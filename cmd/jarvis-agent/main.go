@@ -1096,7 +1096,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	// Tabs and sheets by name (VOICE-FLOWS.md Q26), and their names for speech-to-text.
 	opener.Views = views.Native(h)
 	dt.HearFirst = opener.ViewVocabulary
-	tools := node.Multi{opener, &screen.Tools{C: screen.Native(), Log: log}, dt}
+	// Stage 1 asks in this order (node.Multi): what's on the page first (a control's name is one
+	// of a few visible options, user 2026-10-28), then tabs, windows and apps by name, then dictation.
+	var tools node.Multi
 	closeAll := func() {}
 	var bt *browser.Tools
 	if !*f.noBrowser {
@@ -1110,10 +1112,12 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		bt.Confirm = dt.Confirm
 		opener.OpenLink = bt.OpenLink // links in a new tab, not the system's new window
 		bt.Origins = f.origins
+		bt.CC, bt.Log = f.cc, log // the model's pick when no name on the page matches (nil in `try`)
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
+	tools = append(tools, opener, &screen.Tools{C: screen.Native(), Log: log}, dt)
 	if f.computer != nil {
 		// A desktop task's app that isn't running opens from desktop_open's catalogue, by name
 		// only: never a link or a path, whatever --allow-open-any says.

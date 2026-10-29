@@ -32,10 +32,15 @@ func TestDirectScrollsWithNoModel(t *testing.T) {
 			t.Fatalf("%q scrolled %v, want %s", said, got, want)
 		}
 	}
-	for _, said := range []string{"scroll down to the reviews", "Scroll through my emails", "go to the top tab", "Click the first link"} {
+	for _, said := range []string{"scroll down to the reviews", "Scroll through my emails", "go to the top tab"} {
 		if _, ok := ts.Direct(context.Background(), said); ok {
 			t.Fatalf("%q handled on the node", said)
 		}
+	}
+	// A click with the browser in front stays on the node (2026-10-28 decision): the page has
+	// nothing to click here, so it's said back, never a free model turn.
+	if out, ok := ts.Direct(context.Background(), "Click the first link"); !ok || out["success"] != false || out["error_code"] != "target_not_found" {
+		t.Fatalf("click with nothing on the page: %v %v", out, ok)
 	}
 	off := node.WithEnabled(context.Background(), func(n string) bool { return n != ToolScroll })
 	if _, ok := ts.Direct(off, "scroll down"); ok {

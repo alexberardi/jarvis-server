@@ -655,6 +655,28 @@ func TestShortAnswerHeardLateInAChain(t *testing.T) {
 	}
 }
 
+// A Bluetooth headset's mic (HFP, mSBC) drops packets as silence mid-word: the log showed peaks
+// of 124–320 against a 60 threshold but never three loud chunks in a row (2026-10-27). A word
+// broken by dropouts is still heard.
+func TestAnswerBrokenByDropoutsIsHeard(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"what time is it", "seven"}
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	var choppy [][]int16
+	for range 4 {
+		choppy = append(choppy, speech, speech, noise)
+	}
+	l := answer(r, mic, choppy)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 1 {
+		t.Fatalf("%d follow-ups heard (%s), %d listens; want the choppy answer", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
+	}
+}
+
 // turnWatch records what the voice loop tells a toolset about the turn.
 type turnWatch struct {
 	node.Toolset
