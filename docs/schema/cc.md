@@ -137,3 +137,11 @@ General transforms:
 - **`auth_sessions` encryption.** Rows are not imported, so the legacy `JARVIS_TOKEN_ENCRYPTION_KEY` → dedicated-key re-encryption (D40 07.Q9) is avoided. If that changes, the importer needs the legacy key.
 - **The node-key cutover** depends on the auth module importing hashed node keys. `nodes.api_key` is intentionally discarded.
 - **Prod was not inspected** (off limits for this task). CHECK constraints were chosen from code and dev data. Run the importer's dry run against a prod snapshot to catch any out-of-set values (e.g. `node_tasks.state`, legacy errand states).
+
+## Touch display (00320)
+
+`cc_display_config` stores sparse JSON overrides and a protected bcrypt exit verifier per scope
+(`defaults` or a node ID). `cc_display_ack` records a node-bound revision, application error and
+acknowledgement time. `cc_display_assets` stores content-addressed theme ZIPs and photos.
+No PIN or verifier is included in administrative configuration reads. See
+[Use the touch display](../agent/touch-display.md).
