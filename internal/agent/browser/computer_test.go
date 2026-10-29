@@ -282,3 +282,35 @@ func TestDownloadTimeout(t *testing.T) {
 		t.Fatalf("download: %v", err)
 	}
 }
+
+// The element layer's fields (ELEMENT-LAYER-WORK.md §2) reach computer tasks: context clipped to
+// 200 code points, a position only when it is one of the nine labels, a link's target only when
+// it fits whole.
+func TestSnapshotCarriesElementLayerFields(t *testing.T) {
+	h, path := startHub(t)
+	ctxText := strings.Repeat("é", 250)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		return ok(map[string]any{"gen": 3, "url": "https://forum.test/", "elements": []any{
+			map[string]any{"ref": "e1", "role": "link", "name": "Reply", "context": "Bob · 2h · Great point", "position": "middle-left", "target": "https://forum.test/c/1#reply"},
+			map[string]any{"ref": "e2", "role": "link", "name": "Reply", "context": ctxText, "position": "below-the-fold", "target": "https://forum.test/" + strings.Repeat("a", 3000)},
+			map[string]any{"ref": "e3", "role": "button", "name": "Send"},
+		}})
+	})
+	s, err := NewTools(h).Snapshot(context.Background(), "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := s.Find("e1"); e.Context != "Bob · 2h · Great point" || e.Position != "middle-left" || e.Target != "https://forum.test/c/1#reply" {
+		t.Errorf("e1 %+v", e)
+	}
+	e := s.Find("e2")
+	if n := len([]rune(e.Context)); n != computeruse.ContextMax {
+		t.Errorf("e2 context %d code points, want %d", n, computeruse.ContextMax)
+	}
+	if e.Position != "" || e.Target != "" {
+		t.Errorf("e2 kept a bad position %q or a cut-off target (%d bytes)", e.Position, len(e.Target))
+	}
+	if e := s.Find("e3"); e.Context != "" || e.Position != "" || e.Target != "" {
+		t.Errorf("e3 gained fields: %+v", e)
+	}
+}

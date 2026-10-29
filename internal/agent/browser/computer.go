@@ -69,6 +69,13 @@ func (t *Tools) Snapshot(ctx context.Context, tab string, max int) (computeruse.
 		e := &s.Elements[i]
 		e.Name = clipRunes(e.Name, snapshotNameMax)
 		e.Value = clipRunes(e.Value, snapshotNameMax)
+		e.Context = clipRunes(e.Context, computeruse.ContextMax)
+		if !computeruse.ValidPosition(e.Position) {
+			e.Position = ""
+		}
+		if len(e.Target) > computeruse.TargetMax {
+			e.Target = "" // a cut URL would point somewhere else
+		}
 		if secretField(*e) {
 			e.Value = "" // never, even from an extension that sent it
 		}
