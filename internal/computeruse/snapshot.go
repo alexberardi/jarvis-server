@@ -41,6 +41,34 @@ const (
 	TargetMax  = 2048 // bytes of a Target kept whole; a longer one is dropped, never cut
 )
 
+// PositionIn is where an element's centre sits in its window, both given as screen bounds
+// (x, y, width, height): one of the nine labels, or "" when either has no size or the centre is
+// outside the window. For sources that know bounds (AT-SPI now; Windows UIA and macOS AX later).
+func PositionIn(el, win [4]int) string {
+	if el[2] <= 0 || el[3] <= 0 || win[2] <= 0 || win[3] <= 0 {
+		return ""
+	}
+	fx := (float64(el[0]-win[0]) + float64(el[2])/2) / float64(win[2])
+	fy := (float64(el[1]-win[1]) + float64(el[3])/2) / float64(win[3])
+	if fx < 0 || fx > 1 || fy < 0 || fy > 1 {
+		return ""
+	}
+	h, v := "center", "middle"
+	switch {
+	case fx < 1.0/3:
+		h = "left"
+	case fx > 2.0/3:
+		h = "right"
+	}
+	switch {
+	case fy < 1.0/3:
+		v = "top"
+	case fy > 2.0/3:
+		v = "bottom"
+	}
+	return v + "-" + h
+}
+
 // ValidPosition reports one of the nine position labels: top, middle or bottom, a hyphen, then
 // left, center or right.
 func ValidPosition(p string) bool {
