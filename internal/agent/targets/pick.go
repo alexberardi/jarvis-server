@@ -1,68 +1,86 @@
-package browser
+package targets
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-// The model's narrow job when no name on the page matched what was said (user, 2026-10-28):
-// the words and the page's elements go to jarvisd's node chat, and the answer is one element's
-// id or none. It never gets tools, so a miss can't become something else (it once read "click
-// line over" as a smart-home light). Names come from the page: they go in as untrusted text,
-// and an id that isn't on the page is never acted on.
+// The model's narrow job when no name matched what was said (user, 2026-10-28): the words and the
+// snapshot's elements go to jarvisd's node chat, and the answer is one element's ref or none. It
+// never gets tools, so a miss can't become something else (it once read "click line over" as a
+// smart-home light). Names and context are untrusted: they go in through Wrap, and a ref that
+// isn't in the snapshot is never returned.
 
 const (
 	pickTimeout    = 8 * time.Second
 	pickNameMax    = 80 // characters of each name in the list
 	pickContextMax = 160
 	pickThreshold  = 0.75
+
+	// FieldPrefix marks said as a description of a text field to type into ("the query
+	// field"), not a control to press.
+	FieldPrefix = "field description: "
 )
 
-type pickAnswer struct {
-	Ref        string  `json:"ref"`
-	Confidence float64 `json:"confidence"`
-}
-
-type pickResult uint8
+// Result is what a pick came to.
+type Result uint8
 
 const (
-	pickNone pickResult = iota
-	pickSelected
-	pickUncertain
+	None      Result = iota // no element: the model said none, or the pick couldn't run
+	Selected                // one element, sure enough to act on
+	Uncertain               // one element, below the confidence threshold: ask, never act
 )
 
-// pick asks the tool-less model to resolve a description against the current page snapshot.
-// Low-confidence choices are returned as uncertain and must be clarified, never acted on.
-func (t *Tools) pick(ctx context.Context, said string, h *hintState) (ref int, result pickResult) {
-	if t.CC == nil || h == nil || len(h.candidates) == 0 {
-		return 0, pickNone
+// Picker asks the live model for the element a description means. CC reaches jarvisd; Wrap marks
+// page or app text as untrusted for the model (the browser's Wrap): without either there is no
+// pick. Log, when set, records each pick and its candidates.
+type Picker struct {
+	CC   func() *node.CC
+	Wrap func(string) string
+	Log  *slog.Logger
+}
+
+type pickAnswer struct {
+	Ref        string
+	Confidence float64
+}
+
+// Pick is the element of s that said means, as the model judges it (Result), or None. The
+// projection it sends is ref, name, role, position and context: never a field's value.
+func (p Picker) Pick(ctx context.Context, s computeruse.Snapshot, said string) (ref string, result Result) {
+	if p.CC == nil || p.Wrap == nil || len(s.Elements) == 0 {
+		return "", None
 	}
-	cc := t.CC()
+	cc := p.CC()
 	if cc == nil {
-		return 0, pickNone
+		return "", None
 	}
 	var list strings.Builder
-	for _, b := range h.candidates {
-		role := h.roles[b.ref]
-		if videoTargetKey(h.targets[b.ref]) != "" {
+	for i := range s.Elements {
+		e := &s.Elements[i]
+		role := e.Role
+		if VideoKey(e.Target) != "" {
 			role += " video-result"
 		}
-		fmt.Fprintf(&list, "e%d | %s | %s | %s | %s\n", b.ref,
-			strings.Join(strings.Fields(clip(h.names[b.ref], pickNameMax)), " "),
-			clip(role, 32), clip(h.positions[b.ref], 24),
-			strings.Join(strings.Fields(clip(h.contexts[b.ref], pickContextMax)), " "))
+		fmt.Fprintf(&list, "%s | %s | %s | %s | %s\n", e.Ref,
+			strings.Join(strings.Fields(clip(e.Name, pickNameMax)), " "),
+			clip(role, 32), clip(e.Position, 24),
+			strings.Join(strings.Fields(clip(e.Context, pickContextMax)), " "))
 	}
 	request := strings.TrimSpace(said)
 	intent := "The user is asking to activate a control."
-	if strings.HasPrefix(request, "field description: ") {
-		request = strings.TrimPrefix(request, "field description: ")
+	if strings.HasPrefix(request, FieldPrefix) {
+		request = strings.TrimPrefix(request, FieldPrefix)
 		intent = "The user is describing the text-entry field to use. Choose a textbox, searchbox, or other editable field."
 	}
 	prompt := "/no_think\nResolve the user's spoken description to a visible interactive element on the current web page. " +
@@ -72,7 +90,7 @@ func (t *Tools) pick(ctx context.Context, said string, h *hintState) (ref int, r
 		"among the page's main content (results, posts, videos), not its navigation, menus or filters. " +
 		"Return exactly one JSON object: {\"ref\":\"e12\",\"confidence\":0.82}, or {\"ref\":\"none\",\"confidence\":0.95}. " +
 		"Confidence is your estimated chance that this is the intended element; do not inflate it.\n\n" +
-		"The user said: " + strconv.Quote(request) + "\n\n" + Wrap(list.String())
+		"The user said: " + strconv.Quote(request) + "\n\n" + p.Wrap(list.String())
 	var resp struct {
 		Content *string `json:"content"`
 	}
@@ -81,36 +99,35 @@ func (t *Tools) pick(ctx context.Context, said string, h *hintState) (ref int, r
 	defer cancel()
 	start := time.Now()
 	defer func() {
-		if t.Log != nil {
+		if p.Log != nil {
 			reply := ""
 			if resp.Content != nil {
 				reply = clip(*resp.Content, 120)
 			}
-			t.Log.Info("browser: model pick", "said", said, "reply", reply, "ref", ref, "result", [...]string{"none", "selected", "uncertain"}[result],
-				"page", pickPage(h.url), "candidates", len(h.candidates), "candidate_names", pickCandidateNames(h),
+			p.Log.Info("browser: model pick", "said", said, "reply", reply, "ref", ref, "result", [...]string{"none", "selected", "uncertain"}[result],
+				"page", pickPage(s.URL), "candidates", len(s.Elements), "candidate_names", candidateNames(s),
 				"took", time.Since(start).Round(time.Millisecond))
 		}
 	}()
 	if err := cc.WithTimeout(pickTimeout).Do(ctx, http.MethodPost, "/api/v0/node/llm/chat", body, &resp); err != nil || resp.Content == nil {
-		return 0, pickNone
+		return "", None
 	}
 	answer, ok := decodePickAnswer(*resp.Content)
 	if !ok || answer.Confidence < 0 || answer.Confidence > 1 {
-		return 0, pickNone
+		return "", None
 	}
 	if answer.Ref == "none" {
 		// A low-confidence "none" is still a miss. In particular, it must not turn
 		// "type hello into Slack" into a browser clarification.
-		return 0, pickNone
+		return "", None
 	}
-	n, err := strconv.Atoi(strings.TrimPrefix(answer.Ref, "e"))
-	if !strings.HasPrefix(answer.Ref, "e") || err != nil || n <= 0 || answer.Ref != fmt.Sprintf("e%d", n) || !slices.ContainsFunc(h.candidates, func(b targetCandidate) bool { return b.ref == n }) {
-		return 0, pickNone
+	if s.Find(answer.Ref) == nil {
+		return "", None
 	}
 	if answer.Confidence < pickThreshold {
-		return 0, pickUncertain
+		return "", Uncertain
 	}
-	return n, pickSelected
+	return answer.Ref, Selected
 }
 
 func pickPage(raw string) string {
@@ -121,20 +138,20 @@ func pickPage(raw string) string {
 	return u.Host + u.Path
 }
 
-func pickCandidateNames(h *hintState) string {
+func candidateNames(s computeruse.Snapshot) string {
 	const maxLogged = 32
 	var b strings.Builder
-	for i, candidate := range h.candidates {
+	for i := range s.Elements {
 		if i == maxLogged {
-			fmt.Fprintf(&b, " … (+%d more)", len(h.candidates)-maxLogged)
+			fmt.Fprintf(&b, " … (+%d more)", len(s.Elements)-maxLogged)
 			break
 		}
 		if i > 0 {
 			b.WriteString("; ")
 		}
-		name := strings.Join(strings.Fields(clip(h.names[candidate.ref], 64)), " ")
-		fmt.Fprintf(&b, "e%d %s %q", candidate.ref, h.roles[candidate.ref], name)
-		if videoTargetKey(h.targets[candidate.ref]) != "" {
+		e := &s.Elements[i]
+		fmt.Fprintf(&b, "%s %s %q", e.Ref, e.Role, strings.Join(strings.Fields(clip(e.Name, 64)), " "))
+		if VideoKey(e.Target) != "" {
 			b.WriteString(" [video]")
 		}
 	}

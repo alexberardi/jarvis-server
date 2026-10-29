@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/targets"
 )
 
 // Funnel stage 1 for what's playing in the browser: "click the video", "pause", "skip ahead 30
@@ -32,7 +33,7 @@ type mediaReq struct {
 func mediaRequest(said string) mediaReq {
 	s := rePolite.ReplaceAllString(strings.TrimSpace(strings.TrimRight(strings.TrimSpace(said), ".!?")), "")
 	secs := func(m []string) int {
-		if n, ok := spokenNumber(m[1]); ok {
+		if n, ok := targets.SpokenNumber(m[1]); ok {
 			return n
 		}
 		return 0
