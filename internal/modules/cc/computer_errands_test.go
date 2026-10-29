@@ -58,7 +58,9 @@ func TestComputerExecOverTheBus(t *testing.T) {
 			return `{"success": false, "error": "the task has no window yet: give the url to open it on", "error_code": "invalid_argument"}`
 		case name == computeruse.ToolObserve:
 			return `{"success": true, "target": "browser", "url": "https://shop.example/", "title": "Shop", "text": "Buy\n$4.99",
-				"snapshot": {"gen": 3, "elements": [{"ref": "e1", "role": "button", "name": "Buy"}, {"ref": "e2", "role": "textbox", "name": "Password", "type": "password"}]},
+				"snapshot": {"gen": 3, "elements": [{"ref": "e1", "role": "button", "name": "Buy",
+					"context": "Lavender soap · $4.99", "position": "middle-right", "target": "https://shop.example/product?sku=42#buy"},
+					{"ref": "e2", "role": "textbox", "name": "Password", "type": "password"}]},
 				"capture": {"capture_id": "cap_1", "width": 800, "height": 600},
 				"image_attachments": [{"mime": "image/png", "data": "` + shot + `", "label": "screenshot"}]}`
 		case name == computeruse.ToolAct:
@@ -92,6 +94,13 @@ func TestComputerExecOverTheBus(t *testing.T) {
 		t.Fatalf("observation = %+v", obs)
 	}
 	calls := agent.sent()
+	if el := obs.Elements[0]; el.Context != "Lavender soap · $4.99" || el.Position != "middle-right" ||
+		el.Target != "https://shop.example/product?sku=42#buy" {
+		t.Fatalf("element metadata lost over the bus: %+v", el)
+	}
+	if el := obs.Elements[1]; el.Context != "" || el.Position != "" || el.Target != "" {
+		t.Fatalf("old element gained metadata: %+v", el)
+	}
 	if len(calls) != 2 || calls[1]["arguments"].(map[string]any)["url"] != "https://shop.example" ||
 		calls[0]["arguments"].(map[string]any)["run_id"] != run.ID {
 		t.Fatalf("calls = %v", calls)

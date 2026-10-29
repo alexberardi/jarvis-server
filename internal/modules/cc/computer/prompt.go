@@ -2,7 +2,11 @@ package computer
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // Markers around page content in the prompt. Everything between them comes from the page (or app)
@@ -15,6 +19,9 @@ const (
 
 // historyInPrompt is how many of the run's last actions the model sees.
 const historyInPrompt = 8
+
+// Code points of rendered near: annotations per prompt, including spaces and quoting.
+const contextBudget = 6000
 
 // systemPrompt is the loop's pinned instructions (golden: testdata/prompt.golden). Changing it
 // changes how every model drives the computer: update the golden on purpose, and rerun the suite.
@@ -129,8 +136,9 @@ func renderPrompt(in promptInput) string {
 			b.WriteString("(no elements found)\n")
 		}
 	}
-	for _, e := range o.Elements {
-		b.WriteString(renderElement(e) + "\n")
+	contexts := elementContexts(o.Elements)
+	for i, e := range o.Elements {
+		b.WriteString(renderElement(e, contexts[i]) + "\n")
 	}
 	if t := renderText(o.Text); t != "" {
 		// What the elements don't say: prices, ratings, order numbers.
@@ -149,8 +157,9 @@ func renderPrompt(in promptInput) string {
 }
 
 // renderElement is one snapshot line: e12 button "Place order" value="2" [disabled]. A desktop
-// app's accessibility roles read like a page's ("AXButton" is a button).
-func renderElement(e Element) string {
+// app's accessibility roles read like a page's ("AXButton" is a button). near is the bounded,
+// quoted annotation allocated by elementContexts; position and host cost no context budget.
+func renderElement(e Element, near string) string {
 	s := fmt.Sprintf("%s %s %q", e.Ref, orDash(roleName(e.Role)), defang(e.Name))
 	if e.Value != "" {
 		s += fmt.Sprintf(" value=%q", defang(e.Value))
@@ -158,7 +167,48 @@ func renderElement(e Element) string {
 	if len(e.State) > 0 {
 		s += " [" + strings.Join(e.State, ",") + "]"
 	}
+	if computeruse.ValidPosition(e.Position) {
+		s += " [" + e.Position + "]"
+	}
+	s += near
+	if u, err := url.Parse(e.Target); err == nil && (u.Scheme == "http" || u.Scheme == "https") &&
+		u.Hostname() != "" {
+		s += " → " + defang(u.Hostname())
+	}
 	return s
+}
+
+// Prioritize context for blank or duplicate names, then unique names, without changing the
+// observation or its row/ref order. An annotation that doesn't fit is omitted, not truncated.
+func elementContexts(elements []Element) []string {
+	names := make([]string, len(elements))
+	counts := make(map[string]int, len(elements))
+	for i, e := range elements {
+		names[i] = strings.ToLower(oneLine(e.Name))
+		counts[names[i]]++
+	}
+	contexts := make([]string, len(elements))
+	left := contextBudget
+	for _, priority := range []bool{true, false} {
+		for i, e := range elements {
+			if (names[i] == "" || counts[names[i]] > 1) != priority {
+				continue
+			}
+			content := []rune(defang(e.Context))
+			if len(content) == 0 {
+				continue
+			}
+			if len(content) > computeruse.ContextMax {
+				content = content[:computeruse.ContextMax]
+			}
+			near := fmt.Sprintf(" near: %q", string(content))
+			if cost := utf8.RuneCountInString(near); cost <= left {
+				contexts[i] = near
+				left -= cost
+			}
+		}
+	}
+	return contexts
 }
 
 // renderText is the page's text, one non-empty line each, defanged.
