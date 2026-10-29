@@ -1246,10 +1246,20 @@ function snapCollect(gen, max, viewport) {
     }
     return "";
   };
+  // targetOf is a link's destination, or "" when it is over TARGET_MAX UTF-8 bytes (computeruse.TargetMax):
+  // dropped here, never cut (a cut URL points elsewhere), so one huge data: URL can't push the
+  // snapshot past the native message cap (A9). A string longer than the limit is over it in bytes.
+  const TARGET_MAX = 2048;
   const targetOf = (el, role) => {
     if (role !== "link") return "";
-    const anchor = el.localName === "a" ? el : el.closest("a[href]");
-    return anchor?.href || "";
+    const href = (el.localName === "a" ? el : el.closest("a[href]"))?.href || "";
+    if (href.length > TARGET_MAX) return "";
+    let bytes = 0;
+    for (const ch of href) {
+      const c = ch.codePointAt(0);
+      bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+    }
+    return bytes > TARGET_MAX ? "" : href;
   };
   // positionOf is where the element's centre sits in the viewport, one of nine labels; "" when the
   // centre is off screen, or in a subframe (its viewport isn't the page's: not mapped yet).
