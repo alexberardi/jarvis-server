@@ -87,7 +87,9 @@ jobs:
         env:
           CGO_ENABLED: "0"
           JARVIS_SHERPA_MODELS: ${{ github.workspace }}/.models
-        run: go test ./internal/voice/... -v -run 'Layout|Extract|Smoke|Kokoro'
+        # RealWakeWord: the desktop agent's whole listening path (onnxruntime + openWakeWord) on
+        # each OS, the agent's voice included.
+        run: go test ./internal/voice/... ./internal/agent/voice/ -v -run 'Layout|Extract|Smoke|Kokoro|RealWakeWord'
       # The platform layer touches OS specifics (process groups, file renames, sockets), so
       # its tests run on every OS too, not just linux.
       - name: Platform tests (CGO_ENABLED=0)

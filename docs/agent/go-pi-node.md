@@ -354,10 +354,10 @@ Trixie arm64, Seeed 2-mic HAT, `dsnoopmic` at 48 kHz, 1 GHz, no throttling (49�
 ### 3.7 Desktop voice landed (phase 3, 2026-10-10)
 
 `jarvis-agent run --voice` (and `jarvis-agent listen`, the pipeline alone) runs the §1.1 MVS turn
-on Linux and macOS. Code: `internal/audio/device` (ALSA over purego on Linux, AudioQueue over
-purego on macOS, `wav:FILE` on every OS) and `internal/agent/voice` (pipeline, endpointing,
-command-center client, wake-model fetch). Windows reports "not supported yet" and links no
-onnxruntime.
+on Linux, macOS and Windows. Code: `internal/audio/device` (ALSA over purego on Linux, AudioQueue
+over purego on macOS, winmm waveIn/waveOut on Windows, `wav:FILE` on every OS) and
+`internal/agent/voice` (pipeline, endpointing, command-center client, wake-model fetch). Windows
+uses the default devices only ([decision](../decisions/2026-10-30-windows-voice-winmm.md)).
 
 **What it does, in wire order** (rows refer to §1.1):
 
