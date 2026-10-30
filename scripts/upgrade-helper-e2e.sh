@@ -2,7 +2,7 @@
 # The admin Update button through the privileged upgrade helper (ID11) on macOS (the root
 # LaunchDaemon net.jarvisautomation.jarvisd-updater) and Windows (the LocalSystem service
 # jarvisd-updater), end to end, from fake signed releases. For the CI `upgrade` job on
-# macos-14 and windows-latest (Git Bash); runners have passwordless sudo / are administrators.
+# macos-15 and windows-latest (Git Bash); runners have passwordless sudo / are administrators.
 #
 #   scripts/upgrade-helper-e2e.sh
 #

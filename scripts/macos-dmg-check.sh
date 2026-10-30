@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI check of the macOS disk images (01-no-cli-plan items 2.2 and 2.5), on a macos-14 runner:
+# CI check of the macOS disk images (01-no-cli-plan items 2.2 and 2.5), on a macos-15 runner:
 #
 #   scripts/macos-dmg-check.sh <server.dmg> <agent.dmg> [notarized]
 #
