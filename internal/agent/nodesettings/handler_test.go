@@ -21,13 +21,13 @@ import (
 // fakeCC is command-center's node routes in memory: it records every call and answers from
 // its fields.
 type fakeCC struct {
-	mu       sync.Mutex
-	calls    []string
-	bodies   map[string]any
-	k2       map[string]any // GET k2/provision/{rid}; nil is a 404
-	requests []map[string]any
-	confirm  int // status of GET settings/requests/{rid}; 0 is 200
-	pending  []map[string]any
+	mu         sync.Mutex
+	calls      []string
+	bodies     map[string]any
+	k2         map[string]any // GET k2/provision/{rid}; nil is a 404
+	requests   []map[string]any
+	confirm    int // status of GET settings/requests/{rid}; 0 is 200
+	pending    []map[string]any
 	pkgSecrets map[string]string // GET package-secrets; nil is a 404 (an older jarvisd)
 }
 

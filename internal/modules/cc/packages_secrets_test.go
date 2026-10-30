@@ -29,8 +29,8 @@ func TestPackageSecretsSetPullAndDelete(t *testing.T) {
 	e.do("PUT", secretsBase+"/HA_URL", body, member).detail(403, "User has member role, requires admin or higher")
 	e.do("GET", secretsBase, nil, member).detail(403, "User has member role, requires admin or higher")
 	e.do("DELETE", secretsBase+"/HA_URL", nil, member).detail(403, "User has member role, requires admin or higher")
-	e.do("PUT", secretsBase+"/ha_url", body, admin).want(400)                                  // not a package secret name
-	e.do("PUT", secretsBase+"/HA_URL", map[string]any{"value": ""}, admin).want(400)           // delete to clear
+	e.do("PUT", secretsBase+"/ha_url", body, admin).want(400)                        // not a package secret name
+	e.do("PUT", secretsBase+"/HA_URL", map[string]any{"value": ""}, admin).want(400) // delete to clear
 	e.do("PUT", secretsBase+"/HA_URL", map[string]any{"value": strings.Repeat("x", 9<<10)}, admin).want(400)
 	e.do("PUT", secretsBase+"/HA_URL", map[string]any{"value": "v", "node_ids": []string{"n3"}}, admin).want(404) // another household's node
 
