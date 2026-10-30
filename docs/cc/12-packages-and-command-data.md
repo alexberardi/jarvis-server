@@ -112,6 +112,17 @@ There are no background loops in this subsystem. There is no row cleanup and no 
 
 ---
 
+### 2.4 Server-managed package secrets (jarvisd-only; [decision](../decisions/2026-10-30-server-managed-package-secrets.md))
+
+| Method + path | Auth | Does |
+|---|---|---|
+| `GET /api/v0/households/{household_id}/package-secrets` | household admin (or admin key) | The secrets' names and target nodes; never a value |
+| `PUT …/package-secrets/{KEY}` | household admin (or admin key) | Body `{value, node_ids?}`. `KEY` is `[A-Z][A-Z0-9_]*`, up to 64. Stores it encrypted, nudges the nodes |
+| `DELETE …/package-secrets/{KEY}` | household admin (or admin key) | Leaves a tombstone so nodes clear their copy; swept after 30 days |
+| `GET /api/v0/nodes/{node_id}/package-secrets` | node (bound to the path) | The secrets meant for this node, decrypted; `""` for a deleted one |
+
+MQTT: `jarvis/nodes/{id}/package-secrets` is a nudge with an empty body. The agent pulls on the nudge and on every connect.
+
 ## 3. Behaviour
 
 ### 3.1 Install / uninstall / revert sequence (the verify handshake)
@@ -296,6 +307,8 @@ The file handoff exists because of multiple uvicorn workers. It is not needed in
 | `created_at`, `expires_at`, `completed_at` | naive UTC | |
 
 Install, uninstall and revert rows are **indistinguishable**: there is no `action` column.
+
+**`cc_package_secrets`** (jarvisd-only, migration `00340`). One row per household and secret name: `value_enc` (AES-256-GCM with `cc-oauth.key`; NULL is a tombstone), `node_ids` (JSON array, NULL for every node) and `updated_at`.
 
 **`test_install_requests`** (`models.py:518-542`, migration `m3h4i5j6k7l8`). Same shape, but `share_code` varchar(6) and `package_name` replace the repo, URL and tag columns, and there is no `restarting` status.
 

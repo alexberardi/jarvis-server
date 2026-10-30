@@ -32,7 +32,7 @@ func TestWirePackages(t *testing.T) {
 		topics = append(topics, k)
 	}
 	sort.Strings(topics)
-	want := "config/push,k2/provision,package-install,package-revert,package-uninstall,settings/request"
+	want := "config/push,k2/provision,package-install,package-revert,package-secrets,package-uninstall,settings/request"
 	if strings.Join(topics, ",") != want {
 		t.Fatalf("topics = %v", topics)
 	}

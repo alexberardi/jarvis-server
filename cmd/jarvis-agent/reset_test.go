@@ -55,7 +55,7 @@ func TestWirePiTasks(t *testing.T) {
 	}
 	sort.Strings(topics)
 	sort.Strings(requests)
-	if want := "config/push,factory-reset,k2/provision,routines/sync,settings/request"; strings.Join(topics, ",") != want {
+	if want := "config/push,factory-reset,k2/provision,package-secrets,routines/sync,settings/request"; strings.Join(topics, ",") != want {
 		t.Fatalf("topics = %v, want %s", topics, want)
 	}
 	if want := "command-data/+,context/+"; strings.Join(requests, ",") != want {
