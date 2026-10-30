@@ -172,7 +172,7 @@ func TestPackageAssignmentAllNodesAndSweep(t *testing.T) {
 		t.Fatalf("retried within the hour: %d requests", a.requests())
 	}
 	reconcileLater(2 * time.Hour) // attempt 2
-	if a.requests() != 6 { // n1 failed; n2 and n3 never picked theirs up in the hours since
+	if a.requests() != 6 {        // n1 failed; n2 and n3 never picked theirs up in the hours since
 		t.Fatalf("no retry after the hour: %d requests", a.requests())
 	}
 	fail()
