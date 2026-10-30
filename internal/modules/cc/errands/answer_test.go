@@ -285,3 +285,25 @@ func TestPriorResults(t *testing.T) {
 		t.Fatalf("prior %q", got)
 	}
 }
+
+// A spreadsheet planned after a search is written from the search's results when it runs, not
+// from rows the planner made up (C27); after a file read the checkpoint handles it.
+func TestSheetFromResults(t *testing.T) {
+	sheet := Step{Command: cmdWriteSheet, Label: "Save", Args: servertools.Obj("name", "planets", "sheets", []any{
+		servertools.Obj("title", "Planets", "columns", []any{"Planet", "Moons"}, "rows", []any{[]any{"Saturn", 146}})})}
+	search := Step{Command: cmdSearch, Args: servertools.Obj("query", "moons per planet")}
+	got := sheetFromResults("Put the planets' moons in planets.xlsx.", []Step{search, sheet})
+	if len(got) != 2 || got[1].Command != cmdWriteDoc || truthyStr(got[1].Args, "path") != "~/Documents/planets.xlsx" {
+		t.Fatalf("converted: %+v", got)
+	}
+	if instr := truthyStr(got[1].Args, "instructions"); !strings.Contains(instr, `["Planet", "Moons"]`) || strings.Contains(instr, "146") {
+		t.Fatalf("instructions %q", instr)
+	}
+	if got := sheetFromResults("x", []Step{sheet}); got[0].Command != cmdWriteSheet {
+		t.Fatal("rows the user gave were converted")
+	}
+	read := Step{Command: cmdReadFile, Args: servertools.Obj("path", "a.csv")}
+	if got := sheetFromResults("x", []Step{read, search, sheet}); got[2].Command != cmdWriteSheet {
+		t.Fatal("the budget flow was converted")
+	}
+}
