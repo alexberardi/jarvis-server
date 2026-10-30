@@ -63,6 +63,16 @@ test('keeps the default bundle', async ({ page }) => {
   await expect.poll(async () => (await must('GET', settingsURL(), { token: tokenOf('superuser') })).settings['pantry.default_bundle']).toBe('e2e_hello')
 })
 
+test("opens a package's page from the list", async ({ page }) => {
+  await page.goto('/admin/store')
+  await page.getByTestId('package-e2e_hello').getByRole('link').click()
+  await expect(page).toHaveURL(/\/admin\/store\/e2e_hello$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Hello' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'About this package' })).toContainText('github.com/e2e/hello')
+  await page.getByRole('button', { name: 'Back to the Store' }).click()
+  await expect(page).toHaveURL(/\/admin\/store$/)
+})
+
 test('installs a package on a chosen node', async ({ page }) => {
   const nodeId = crypto.randomUUID()
   const nodeKey = await provisionNode(tokenOf('superuser'), hh, { id: nodeId, name: 'store pi', room: 'store_room' })

@@ -45,7 +45,7 @@ export default function InstallDialog({ names, label, householdId, onClose }: In
   const [starting, setStarting] = useState(false)
 
   const details = useQueries({
-    queries: names.map((n) => ({ queryKey: ['store-package', householdId, n], queryFn: () => getStorePackage(householdId, n) })),
+    queries: names.map((n) => ({ queryKey: ['store-install', householdId, n], queryFn: () => getStorePackage(householdId, n, true) })),
   })
   const pkgs = details.flatMap((d) => (d.data ? [d.data] : []))
   const detailsError = details.find((d) => d.isError)?.error

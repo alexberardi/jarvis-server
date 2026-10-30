@@ -1,19 +1,15 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { Download, Package, PackageOpen, Search } from 'lucide-react'
-import { toast } from 'sonner'
 import { Link } from 'react-router-dom'
-import { getHouseholdSettings, putHouseholdSetting } from '@/api/household'
-import { BUNDLE_KEY, browseStore } from '@/api/store'
+import { browseStore } from '@/api/store'
 import type { StorePackage } from '@/api/store'
 import InstallDialog from '@/components/store/InstallDialog'
 import { Badge, Banner, Button, Card, CardHeader, EmptyState, ErrorState, Input, List, PageHeader, SkeletonList, Switch } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
+import { useBundle } from '@/hooks/useBundle'
 import { errorMessage } from '@/lib/errors'
-import { parseBundle, withBundle } from '@/lib/store'
-
-const ADMIN_ROLES = new Set(['admin', 'owner'])
 
 /** pantryOff: cc's 403 for a household with the Pantry switched off. */
 function pantryOff(err: unknown): boolean {
@@ -27,7 +23,6 @@ function pantryOff(err: unknown): boolean {
  */
 export default function StorePage() {
   const { households, activeHouseholdId: hh } = useAuth()
-  const qc = useQueryClient()
   const [q, setQ] = useState('')
   const [term, setTerm] = useState('')
   // Ask Pantry once typing pauses, not on every key.
@@ -37,17 +32,9 @@ export default function StorePage() {
   }, [q])
   const [installing, setInstalling] = useState<{ names: string[]; label: string } | null>(null)
   const household = households.find((h) => h.id === hh)
-  const canEdit = !!household && ADMIN_ROLES.has(household.role)
 
   const list = useQuery({ queryKey: ['store', hh, term], queryFn: () => browseStore(hh, term), enabled: !!hh })
-  const settingsKey = ['household-settings', hh]
-  const settings = useQuery({ queryKey: settingsKey, queryFn: () => getHouseholdSettings(hh), enabled: !!hh })
-  const bundle = parseBundle(settings.data?.[BUNDLE_KEY])
-  const setBundle = useMutation({
-    mutationFn: (value: string) => putHouseholdSetting(hh, BUNDLE_KEY, value),
-    onSuccess: (_, value) => qc.setQueryData<Record<string, unknown>>(settingsKey, (old) => ({ ...old, [BUNDLE_KEY]: value })),
-    onError: (err) => toast.error(errorMessage(err, 'Could not change the bundle')),
-  })
+  const { bundle, canEdit, toggle } = useBundle()
   const items = list.data ?? []
   const nameOf = (n: string) => items.find((p) => p.command_name === n)?.display_name || n
 
@@ -139,7 +126,7 @@ export default function StorePage() {
                     pkg={p}
                     inBundle={bundle.includes(p.command_name)}
                     canEdit={canEdit}
-                    onBundle={(on) => setBundle.mutate(withBundle(bundle, p.command_name, on))}
+                    onBundle={(on) => toggle(p.command_name, on)}
                     onInstall={() => setInstalling({ names: [p.command_name], label: p.display_name || p.command_name })}
                   />
                 ))}
@@ -168,12 +155,15 @@ function PackageRow({ pkg, inBundle, canEdit, onBundle, onInstall }: PackageRowP
   const name = pkg.display_name || pkg.command_name
   return (
     <li className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center" data-testid={`package-${pkg.command_name}`}>
-      <div className="min-w-0 flex-1">
-        <p className="text-subheading text-text">
+      <Link
+        to={`/admin/store/${encodeURIComponent(pkg.command_name)}`}
+        className="group block min-w-0 flex-1 rounded-control"
+      >
+        <p className="text-subheading text-text group-hover:underline group-hover:underline-offset-2">
           {name} <span className="text-small font-normal text-text-muted">v{pkg.latest_version}</span>
         </p>
         <p className="mt-0.5 line-clamp-2 text-small text-text-muted">{pkg.description}</p>
-      </div>
+      </Link>
       <div className="flex shrink-0 items-center gap-4">
         {canEdit && (
           <Switch

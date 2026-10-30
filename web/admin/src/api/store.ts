@@ -17,12 +17,21 @@ export interface StorePackage {
   verified: boolean
 }
 
-/** StoreDetail is Pantry's detail for a package plus git_tag, the commit of its latest version. */
-export interface StoreDetail extends StorePackage {
+/** StoreDetail is Pantry's detail for a package; git_tag (its latest version's commit) only for an install. */
+export interface StoreDetail extends Omit<StorePackage, 'author'> {
+  author: { github: string; display_name: string } | null
   github_repo_url: string
-  git_tag: string | null
+  git_tag?: string | null
   targets?: string[] | null
   apt_packages?: string[] | null
+  package_type?: 'command' | 'bundle'
+  platforms?: string[]
+  license?: string | null
+  install_count?: number
+  danger_rating?: number
+  components?: { type: string; name: string }[]
+  security_report?: { summary: string; concerns: string[]; recommendation: string } | null
+  updated_at?: string
 }
 
 /** InstallStatus is a per-node install request's state (cc's poll). */
@@ -44,8 +53,14 @@ export async function browseStore(householdId: string, q: string): Promise<Store
   return data.commands ?? []
 }
 
-export async function getStorePackage(householdId: string, name: string): Promise<StoreDetail> {
-  const { data } = await apiClient.get<StoreDetail>(`${pantry(householdId)}/${encodeURIComponent(name)}`)
+/**
+ * getStorePackage is a package's detail. forInstall adds the commit to install, which costs a
+ * Pantry install count (cc asks Pantry's /download), so only the install dialog asks for it.
+ */
+export async function getStorePackage(householdId: string, name: string, forInstall = false): Promise<StoreDetail> {
+  const { data } = await apiClient.get<StoreDetail>(`${pantry(householdId)}/${encodeURIComponent(name)}`, {
+    params: forInstall ? { install: 1 } : undefined,
+  })
   return data
 }
 
@@ -56,7 +71,7 @@ export async function requestInstall(nodeId: string, pkg: StoreDetail): Promise<
   const { data } = await apiClient.post<{ id: string }>(install(nodeId), {
     command_name: pkg.command_name,
     github_repo_url: pkg.github_repo_url,
-    git_tag: pkg.git_tag,
+    git_tag: pkg.git_tag ?? null,
   })
   return data.id
 }

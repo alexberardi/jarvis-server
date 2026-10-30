@@ -63,10 +63,11 @@ func (m *Module) handlePantryBrowse(w http.ResponseWriter, r *http.Request, u au
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// handlePantryCommand is Pantry's detail for one package plus git_tag, the commit of its latest
-// version (what the Store installs), or null when Pantry has none. The commit comes from
-// /download, as the app's does: a version's git_tag in /versions need not exist in the
-// repository. /download counts an install, so the Store asks only when the admin opens Install.
+// handlePantryCommand is Pantry's detail for one package (the Store's package page). With
+// ?install=1 it adds git_tag, the commit of its latest version (what the Store installs), or null
+// when Pantry has none. The commit comes from /download, as the app's does: a version's git_tag
+// in /versions need not exist in the repository. /download counts an install, so only the
+// install dialog asks for it, not a look at the package.
 func (m *Module) handlePantryCommand(w http.ResponseWriter, r *http.Request, u authn.User) {
 	hh, ok := m.pantryStoreGate(w, r, u)
 	if !ok {
@@ -80,6 +81,10 @@ func (m *Module) handlePantryCommand(w http.ResponseWriter, r *http.Request, u a
 		return
 	case err != nil:
 		m.pantryStoreUnavailable(w, err)
+		return
+	}
+	if r.URL.Query().Get("install") != "1" {
+		httpx.WriteJSON(w, http.StatusOK, d)
 		return
 	}
 	var dl struct {

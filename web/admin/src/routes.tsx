@@ -22,6 +22,7 @@ import PhonePage from '@/pages/PhonePage'
 import RecordingsPage from '@/pages/RecordingsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import SetupWizard from '@/pages/SetupWizard'
+import StorePackagePage from '@/pages/StorePackagePage'
 import StorePage from '@/pages/StorePage'
 import TraceDetailPage from '@/pages/TraceDetailPage'
 import TracesPage from '@/pages/TracesPage'
@@ -45,6 +46,7 @@ const UiGalleryPage =
 const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'dashboard', element: <DashboardPage /> },
   { path: 'store', element: <StorePage /> },
+  { path: 'store/:name', element: <StorePackagePage /> },
   { path: 'models', element: <ModelsPage /> },
   { path: 'settings', element: <SettingsPage /> },
   { path: 'connections', element: <ConnectionsPage /> },

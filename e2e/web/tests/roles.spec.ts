@@ -50,7 +50,7 @@ test.describe('superuser', () => {
   }
 
   test('old top-level admin paths forward to /admin', async ({ page }) => {
-    for (const p of [...ADMIN_PAGES.map((a) => a.path.replace('/admin', '')), '/traces/abc']) {
+    for (const p of [...ADMIN_PAGES.map((a) => a.path.replace('/admin', '')), '/traces/abc', '/store/abc']) {
       await page.goto(p + '?q=1')
       await expect(page, p).toHaveURL(new RegExp(`/admin${p}\\?q=1$`))
     }

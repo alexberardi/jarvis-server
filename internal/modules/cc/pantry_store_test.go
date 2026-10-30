@@ -34,12 +34,23 @@ func TestPantryStoreReads(t *testing.T) {
 		t.Fatal(got)
 	}
 
-	// The detail carries the latest version's commit.
+	// The package page's detail doesn't touch /download (it counts an install).
+	pantry.set(func() { pantry.asked = nil })
 	d := e.do("GET", base+"/get_news", nil, bearer(member)).want(200).json()
-	if d["github_repo_url"] != "https://github.com/acme/news" || d["git_tag"] != newsCommit {
+	if _, has := d["git_tag"]; has || d["github_repo_url"] != "https://github.com/acme/news" {
 		t.Fatal(d)
 	}
-	if d = e.do("GET", base+"/untagged", nil, bearer(member)).want(200).json(); d["git_tag"] != nil {
+	pantry.set(func() {
+		if len(pantry.asked) != 1 || pantry.asked[0] != "get_news" {
+			t.Fatal(pantry.asked)
+		}
+	})
+	// For an install it carries the latest version's commit.
+	d = e.do("GET", base+"/get_news?install=1", nil, bearer(member)).want(200).json()
+	if d["git_tag"] != newsCommit {
+		t.Fatal(d)
+	}
+	if d = e.do("GET", base+"/untagged?install=1", nil, bearer(member)).want(200).json(); d["git_tag"] != nil {
 		t.Fatal(d)
 	}
 	if b = e.do("GET", base+"/nope", nil, bearer(member)).want(404).json(); b["code"] != packageNotFoundCode {

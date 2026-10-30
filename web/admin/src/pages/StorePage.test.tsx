@@ -21,7 +21,7 @@ const detail = (command_name: string, over: Partial<StoreDetail> = {}): StoreDet
   command_name,
   display_name: command_name === 'get_news' ? 'News' : 'Doorbell',
   description: 'Does a thing',
-  author: 'acme',
+  author: { github: 'acme', display_name: 'Acme' },
   latest_version: '1.0.0',
   categories: [],
   verified: false,
