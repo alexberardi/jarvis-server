@@ -364,7 +364,7 @@ func sheetFromResults(goal string, steps []Step) []Step {
 			}
 			out := append([]Step(nil), steps...)
 			out[i] = Step{Command: cmdWriteDoc, Label: st.Label, IsRisky: st.IsRisky,
-				Args: servertools.Obj("path", "~/Documents/"+name+".xlsx", "instructions", instr)}
+				Args: servertools.Obj("path", name+".xlsx", "instructions", instr)}
 			return out
 		}
 	}

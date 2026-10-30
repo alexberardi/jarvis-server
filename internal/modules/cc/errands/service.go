@@ -232,6 +232,11 @@ const (
 	SettingPlannerMaxTokens = "errands.planner_max_tokens"
 	// SettingPlannerThinkSeconds caps one thinking planning call's wall-clock time.
 	SettingPlannerThinkSeconds = "errands.planner_think_seconds"
+	// SettingDocumentsFolder is where write_document saves a file named without a folder.
+	SettingDocumentsFolder = "errands.documents_folder"
+	// DefaultDocumentsFolder is its default; the agent creates and edits documents only in it or
+	// below (computer_files doc_edit).
+	DefaultDocumentsFolder = "~/Documents"
 )
 
 // Definitions are the errand settings (D40 Q12, D9).
@@ -247,11 +252,30 @@ func Definitions() []settings.Definition {
 				"thinking to split multi-step and conditional goals; if the model thinks past this it retries " +
 				"once without thinking (a rougher plan). Must fit the background model's context with the " +
 				"prompt. Higher = better plans on chatty models, slower to arrive."},
+		{Key: SettingDocumentsFolder, Category: "errands", Type: settings.String, Default: DefaultDocumentsFolder,
+			Validate: validDocumentsFolder,
+			Description: "Where errands save a document or spreadsheet when the request names no folder, on the computer " +
+				"the errand uses: ~/Documents or a folder inside it (~/Documents/Jarvis)."},
 		{Key: SettingPlannerThinkSeconds, Category: "errands", Type: settings.Int, Default: int64(defaultPlannerThinkSeconds),
 			Description: "Most seconds one errand planning call may spend thinking before it is stopped and retried " +
 				"without thinking (a rougher plan). When the background model shares the live model's engine, " +
 				"voice and chat replies wait while a plan is thinking, so keep this short. -1 = no limit."},
 	}
+}
+
+// validDocumentsFolder accepts ~/Documents and folders inside it: the agent writes nowhere else.
+func validDocumentsFolder(v any) error {
+	s, _ := v.(string)
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	if s != DefaultDocumentsFolder && !strings.HasPrefix(s, DefaultDocumentsFolder+"/") {
+		return fmt.Errorf("the folder must be %s or a folder inside it", DefaultDocumentsFolder)
+	}
+	for _, part := range strings.Split(s, "/") {
+		if part == ".." {
+			return fmt.Errorf("the folder can't contain ..")
+		}
+	}
+	return nil
 }
 
 // Enabled reports errands.enabled for a household (default on).
