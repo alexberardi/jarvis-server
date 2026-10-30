@@ -39,8 +39,8 @@ type VerifyResult struct {
 	Confidence float64 `json:"confidence"`
 }
 
-// VoiceProfiles answers enroll_voice and verify_voice. A desktop agent doesn't: its speaker is
-// the signed-in user (#143).
+// VoiceProfiles answers enroll_voice and verify_voice on Pi and desktop agents.
+// Enrollment adds microphone samples to the member's shared household profile.
 type VoiceProfiles struct {
 	Mic Recorder
 	Log *slog.Logger

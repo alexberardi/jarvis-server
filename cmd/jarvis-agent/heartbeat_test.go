@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
 // The heartbeat's browser_extension capability: off with run --no-browser, else the hub's
@@ -127,5 +128,12 @@ func TestAccessOffIn(t *testing.T) {
 		if got := accessOffIn(c.in); got != c.want {
 			t.Errorf("%s: accessOffIn = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestHeartbeatReportsVoiceEnrollment(t *testing.T) {
+	caps, _ := heartbeatCaps(node.Multi{}, nil)
+	if got := caps()["voice_enrollment"]; got != voice.Supported {
+		t.Fatalf("voice_enrollment = %v, want %v", got, voice.Supported)
 	}
 }

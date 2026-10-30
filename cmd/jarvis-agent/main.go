@@ -94,7 +94,7 @@ func heartbeatCaps(tools node.Multi, sw *computer.Switch) (caps func() map[strin
 				state = extConnected
 			}
 		}
-		out := map[string]any{"browser_extension": state}
+		out := map[string]any{"browser_extension": state, "voice_enrollment": voice.Supported}
 		if hub != nil {
 			if a := hub.WebsiteAccess(); a != nil {
 				out["browser_website_access"] = map[bool]string{true: "on", false: "off"}[*a]
@@ -877,8 +877,8 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 		return vs, err
 	}
-	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
-	addVerbs(r, voiceProfileVerbs(p, mic, log))
+	// Voice-profile takes use the pipeline microphone on both Pi and desktop agents.
+	addVerbs(r, voiceProfileVerbs(mic, log))
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)

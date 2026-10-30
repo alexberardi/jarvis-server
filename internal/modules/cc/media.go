@@ -532,6 +532,16 @@ func (m *Module) handleStartNodeVoice(kind string, defaultSecs float64) userHand
 				return
 			}
 		}
+		// Older desktop agents silently ignore these verbs. Check their advertised
+		// support before creating a take the mobile app would otherwise poll forever.
+		if supported := row.caps()["voice_enrollment"]; row.desktop() && supported != true {
+			message := "Update the Jarvis agent to record voice samples on this computer"
+			if supported == false {
+				message = "Voice recording is not available on this computer"
+			}
+			detail(w, http.StatusConflict, message)
+			return
+		}
 		if !hasSecs || secs == 0 {
 			secs = defaultSecs
 		}

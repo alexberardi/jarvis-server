@@ -8,13 +8,9 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 )
 
-// voiceProfileVerbs are a Pi's enroll_voice and verify_voice: the app's "record on this node"
-// takes, recorded through the voice pipeline's microphone. A desktop has none: its speaker is
-// the signed-in user (#143), so those commands stay ignored.
-func voiceProfileVerbs(p profile, mic *voice.Mic, log *slog.Logger) map[string]func(context.Context, *node.CC, map[string]any) {
-	if p.desktop {
-		return nil
-	}
+// voiceProfileVerbs records enrollment and verification takes on any agent's
+// microphone. Samples belong to the member's household profile, not this device.
+func voiceProfileVerbs(mic *voice.Mic, log *slog.Logger) map[string]func(context.Context, *node.CC, map[string]any) {
 	vp := &voice.VoiceProfiles{Mic: mic, Log: log}
 	srv := func(cc *node.CC) *voice.HTTPServer { return voice.NewHTTPServer(cc.BaseURL, cc.Creds) }
 	return map[string]func(context.Context, *node.CC, map[string]any){
