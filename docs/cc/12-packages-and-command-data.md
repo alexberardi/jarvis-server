@@ -68,10 +68,12 @@ Pantry through cc, so the household's `pantry.base_url` and `pantry.enabled` app
 | Method + path | Auth | Answer |
 |---|---|---|
 | `GET /api/v0/households/{household_id}/pantry/commands` | JWT + household member, Pantry on | Pantry's `GET /v1/commands` (`q`, `category`, `sort`, `page`, `per_page` passed on) |
-| `GET /api/v0/households/{household_id}/pantry/commands/{command_name}` | same | Pantry's detail plus `git_tag`, its newest tagged version (null if none) |
+| `GET /api/v0/households/{household_id}/pantry/commands/{command_name}` | same | Pantry's detail plus `git_tag`: the latest version's commit from `/download` (null if none) |
 
-Pantry down is 503 `pantry_unavailable`; an unknown package 404 `package_not_found`. `/download` is
-never called (it counts an install).
+Pantry down is 503 `pantry_unavailable`; an unknown package 404 `package_not_found`. The commit comes
+from `/download`, as the app's install does, because a `git_tag` in `/versions` need not exist in the
+repository (2026-10-30: `v1.0.1` of `get_weather_meteo` 404s on GitHub). `/download` counts an
+install, so the Store calls it only when the admin opens Install.
 
 ### 2.2 Test install (`api/test_install.py`)
 

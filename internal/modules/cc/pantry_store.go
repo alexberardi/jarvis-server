@@ -11,9 +11,8 @@ import (
 
 // The admin Store page (decision 2026-10-30-admin-store-page) browses the household's Pantry
 // through jarvisd rather than from the browser: the household's own Pantry URL and its
-// pantry.enabled switch apply, and the browser needs no CORS or CSP exception. Only the
-// side-effect-free reads are passed through (not /download, which counts an install). The
-// install itself is the ordinary per-node package-install request.
+// pantry.enabled switch apply, and the browser needs no CORS or CSP exception. The install
+// itself is the ordinary per-node package-install request.
 
 func (m *Module) registerPantryStore(mux *http.ServeMux) {
 	const base = "/api/v0/households/{household_id}/pantry/commands"
@@ -64,8 +63,10 @@ func (m *Module) handlePantryBrowse(w http.ResponseWriter, r *http.Request, u au
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// handlePantryCommand is Pantry's detail for one package plus git_tag, its newest tagged
-// version (what the Store installs), or null when Pantry lists none.
+// handlePantryCommand is Pantry's detail for one package plus git_tag, the commit of its latest
+// version (what the Store installs), or null when Pantry has none. The commit comes from
+// /download, as the app's does: a version's git_tag in /versions need not exist in the
+// repository. /download counts an install, so the Store asks only when the admin opens Install.
 func (m *Module) handlePantryCommand(w http.ResponseWriter, r *http.Request, u authn.User) {
 	hh, ok := m.pantryStoreGate(w, r, u)
 	if !ok {
@@ -81,21 +82,16 @@ func (m *Module) handlePantryCommand(w http.ResponseWriter, r *http.Request, u a
 		m.pantryStoreUnavailable(w, err)
 		return
 	}
-	var vs struct {
-		Versions []struct {
-			GitTag *string `json:"git_tag"`
-		} `json:"versions"`
+	var dl struct {
+		Commit string `json:"git_commit_sha"`
 	}
-	if err := m.pantryGet(ctx, hh, "/v1/commands/"+name+"/versions", &vs); err != nil && !errors.Is(err, errPantryNoPackage) {
+	if err := m.pantryGet(ctx, hh, "/v1/commands/"+name+"/download", &dl); err != nil && !errors.Is(err, errPantryNoPackage) {
 		m.pantryStoreUnavailable(w, err)
 		return
 	}
 	d["git_tag"] = nil
-	for _, v := range vs.Versions { // newest first
-		if v.GitTag != nil && *v.GitTag != "" {
-			d["git_tag"] = *v.GitTag
-			break
-		}
+	if isCommitSHA(dl.Commit) {
+		d["git_tag"] = dl.Commit
 	}
 	httpx.WriteJSON(w, http.StatusOK, d)
 }

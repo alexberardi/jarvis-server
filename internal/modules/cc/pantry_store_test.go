@@ -6,6 +6,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 )
 
+const newsCommit = "29257531cfa7e0cf14d0e05021cdb480a4dd7e84"
+
 // The admin Store page's Pantry reads (decision 2026-10-30-admin-store-page).
 func TestPantryStoreReads(t *testing.T) {
 	e := newEnv(t, envOpts{noMQTT: true})
@@ -16,7 +18,9 @@ func TestPantryStoreReads(t *testing.T) {
 	pantry.set(func() {
 		pantry.commands[""] = `{"commands":[{"command_name":"get_news"}],"total":1,"page":1,"per_page":20}`
 		pantry.commands["get_news"] = `{"command_name":"get_news","github_repo_url":"https://github.com/acme/news","apt_packages":[]}`
-		pantry.commands["get_news/versions"] = `{"versions":[{"git_tag":null},{"git_tag":"v1.1.0"},{"git_tag":"v1.0.0"}]}`
+		// The git_tag in /versions need not exist in the repository; the commit in /download does.
+		pantry.commands["get_news/versions"] = `{"versions":[{"git_tag":"v1.1.0"}]}`
+		pantry.commands["get_news/download"] = `{"git_tag":"` + newsCommit + `","git_commit_sha":"` + newsCommit + `"}`
 		pantry.commands["untagged"] = `{"command_name":"untagged","github_repo_url":"https://github.com/acme/u"}`
 	})
 	const base = "/api/v0/households/hh1/pantry/commands"
@@ -30,9 +34,9 @@ func TestPantryStoreReads(t *testing.T) {
 		t.Fatal(got)
 	}
 
-	// The detail carries the newest tagged version.
+	// The detail carries the latest version's commit.
 	d := e.do("GET", base+"/get_news", nil, bearer(member)).want(200).json()
-	if d["github_repo_url"] != "https://github.com/acme/news" || d["git_tag"] != "v1.1.0" {
+	if d["github_repo_url"] != "https://github.com/acme/news" || d["git_tag"] != newsCommit {
 		t.Fatal(d)
 	}
 	if d = e.do("GET", base+"/untagged", nil, bearer(member)).want(200).json(); d["git_tag"] != nil {

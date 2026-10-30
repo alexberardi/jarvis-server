@@ -10,6 +10,7 @@ import { expect, test } from '../../helpers/fixtures'
 
 test.use({ storageState: stateFile('superuser') })
 
+const COMMIT = 'aab6498a5f6be699d39454d280625fa483c5ad42'
 const PANTRY: Record<string, unknown> = {
   '/v1/commands': {
     commands: [{ command_name: 'e2e_hello', display_name: 'Hello', description: 'Says hello', author: 'e2e', latest_version: '1.2.0', categories: [], verified: true }],
@@ -18,7 +19,7 @@ const PANTRY: Record<string, unknown> = {
     per_page: 100,
   },
   '/v1/commands/e2e_hello': { command_name: 'e2e_hello', display_name: 'Hello', description: 'Says hello', latest_version: '1.2.0', github_repo_url: 'https://github.com/e2e/hello', targets: [], apt_packages: [] },
-  '/v1/commands/e2e_hello/versions': { versions: [{ version: '1.2.0', git_tag: 'v1.2.0' }] },
+  '/v1/commands/e2e_hello/download': { git_tag: COMMIT, git_commit_sha: COMMIT },
 }
 
 let pantry: http.Server
@@ -77,7 +78,7 @@ test('installs a package on a chosen node', async ({ page }) => {
     dialog.getByRole('button', { name: 'Install on 1 node' }).click(),
   ])
   expect(created.status()).toBe(201)
-  expect(created.request().postDataJSON()).toEqual({ command_name: 'e2e_hello', github_repo_url: 'https://github.com/e2e/hello', git_tag: 'v1.2.0' })
+  expect(created.request().postDataJSON()).toEqual({ command_name: 'e2e_hello', github_repo_url: 'https://github.com/e2e/hello', git_tag: COMMIT })
   const { id } = await created.json()
   await expect(dialog.getByTestId('install-job')).toContainText('Installing')
 

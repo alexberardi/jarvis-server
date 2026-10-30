@@ -17,7 +17,7 @@ export interface StorePackage {
   verified: boolean
 }
 
-/** StoreDetail is Pantry's detail for a package plus git_tag, its newest tagged version. */
+/** StoreDetail is Pantry's detail for a package plus git_tag, the commit of its latest version. */
 export interface StoreDetail extends StorePackage {
   github_repo_url: string
   git_tag: string | null
