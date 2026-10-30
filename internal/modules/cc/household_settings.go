@@ -65,9 +65,10 @@ var householdControllable = []householdSetting{
 	{key: phone.SettingTwilioFromNumber, typ: "string", own: true},
 	// Privacy (2026-10-09): may the household use the Pantry package store (packages.go).
 	{key: settingPantryEnabled, typ: "bool"},
-	{key: settingWatchesEnabled, typ: "bool"},     // A8: watches (autonomy P2)
-	{key: errands.SettingAutonomous, typ: "bool"}, // A1: household rules may run background errands
-	{key: settingRecordingRetention, typ: "int"},  // plan P3 piece 27: the Recordings page
+	{key: settingPantryDefaultBundle, typ: "string"}, // the admin Store's default bundle
+	{key: settingWatchesEnabled, typ: "bool"},        // A8: watches (autonomy P2)
+	{key: errands.SettingAutonomous, typ: "bool"},    // A1: household rules may run background errands
+	{key: settingRecordingRetention, typ: "int"},     // plan P3 piece 27: the Recordings page
 }
 
 func householdSettingType(key string) (householdSetting, bool) {

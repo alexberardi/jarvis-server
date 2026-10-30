@@ -414,6 +414,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Forge test install (doc 12 §3.3, ported after D5 was reversed 2026-10-08).
 	m.pantryHTTP = &http.Client{Timeout: pantryDraftTimeout}
 	m.registerTestInstall(mux)
+	// The admin Store page's Pantry reads (decision 2026-10-30-admin-store-page).
+	m.registerPantryStore(mux)
 	// Memory and knowledge (doc 04).
 	m.registerMemory(mux)
 	// Routines and errand schedules (doc 08).

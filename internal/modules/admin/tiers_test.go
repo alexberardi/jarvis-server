@@ -77,6 +77,11 @@ var wantTiers = map[string]tier{
 	"DELETE /api/cc/api/v0/recordings/{id}":                   tierUser,
 	"GET /api/cc/api/v0/recordings/{id}/keyframes/{seq}":      tierUser,
 	"GET /api/cc/api/v0/recordings/{id}/keyframes/{seq}/crop": tierUser,
+	// The admin Store page: superuser here, household membership checked in cc.
+	"GET /api/cc/api/v0/households/{household_id}/pantry/commands":                tierSuperuser,
+	"GET /api/cc/api/v0/households/{household_id}/pantry/commands/{command_name}": tierSuperuser,
+	"POST /api/cc/api/v0/nodes/{node_id}/package-install":                         tierSuperuser,
+	"GET /api/cc/api/v0/nodes/{node_id}/package-install/{request_id}":             tierSuperuser,
 	// The desktop agent download (install plan 3.1): a public release asset, verified here.
 	"GET /api/addons/agent/{os}/{arch}": tierUser,
 
