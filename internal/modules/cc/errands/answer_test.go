@@ -293,7 +293,7 @@ func TestSheetFromResults(t *testing.T) {
 		servertools.Obj("title", "Planets", "columns", []any{"Planet", "Moons"}, "rows", []any{[]any{"Saturn", 146}})})}
 	search := Step{Command: cmdSearch, Args: servertools.Obj("query", "moons per planet")}
 	got := sheetFromResults("Put the planets' moons in planets.xlsx.", []Step{search, sheet})
-	if len(got) != 2 || got[1].Command != cmdWriteDoc || truthyStr(got[1].Args, "path") != "~/Documents/planets.xlsx" {
+	if len(got) != 2 || got[1].Command != cmdWriteDoc || truthyStr(got[1].Args, "path") != "planets.xlsx" {
 		t.Fatalf("converted: %+v", got)
 	}
 	if instr := truthyStr(got[1].Args, "instructions"); !strings.Contains(instr, `["Planet", "Moons"]`) || strings.Contains(instr, "146") {
@@ -305,5 +305,14 @@ func TestSheetFromResults(t *testing.T) {
 	read := Step{Command: cmdReadFile, Args: servertools.Obj("path", "a.csv")}
 	if got := sheetFromResults("x", []Step{read, search, sheet}); got[2].Command != cmdWriteSheet {
 		t.Fatal("the budget flow was converted")
+	}
+}
+
+func TestValidDocumentsFolder(t *testing.T) {
+	for v, ok := range map[string]bool{"~/Documents": true, "~/Documents/Jarvis/": true, "~/Documents/a b": true,
+		"~/Downloads": false, "/etc": false, "~/Documents/../.ssh": false, "~/Documentsx": false, "": false} {
+		if err := validDocumentsFolder(v); (err == nil) != ok {
+			t.Errorf("%q: %v", v, err)
+		}
 	}
 }
