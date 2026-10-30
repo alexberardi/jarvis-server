@@ -47,7 +47,7 @@ type Deps struct {
 	// WaitPairing sleeps between pairing polls (node.SleepCtx).
 	WaitPairing func(ctx context.Context, d time.Duration) error
 
-	// Voice is the "Listen for Hey Jarvis" switch; nil hides it (Windows, for now).
+	// Voice is the "Listen for Hey Jarvis" switch; nil hides it (voice not built for this OS).
 	Voice *Voice
 	// Mic opens the microphone for the level meter; nil hides the meter.
 	Mic MicOpener

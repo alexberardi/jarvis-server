@@ -113,7 +113,7 @@ way.
 The add-on already exists on AMO (`browser@jarvis.agent`, signed **unlisted**). Going public
 means submitting a **listed** version of the same add-on.
 
-1. **Submit the version the source is at** (`0.3.8` today; `version` in
+1. **Submit the version the source is at** (`0.3.9` today; `version` in
    `internal/agent/browser/extension/manifest.json`). AMO refuses any version it has already
    signed, on either channel: `0.1.0` was signed unlisted, and so is any version later signed
    with `scripts/browser-ext-sign.sh` (below). Submit the same version to both stores.
