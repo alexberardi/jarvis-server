@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // fakeDocAgent is the agent's computer_files doc ops: a file at most, its paragraphs, and an
@@ -153,3 +155,41 @@ func TestMissingEdits(t *testing.T) {
 		t.Fatal("column names")
 	}
 }
+
+// Words as the source read the top results; earlier steps' results are material too; Markdown
+// the model writes anyway is stripped.
+func TestWriteDocumentMaterial(t *testing.T) {
+	agent := &fakeDocAgent{}
+	fetch := &fakeWatchFetcher{status: 200, body: `<main><p>The landing was filmed live.</p></main>`}
+	search := &fakeWatchSearcher{results: []servertools.SearchResult{
+		{URL: "https://a.example/1"}, {URL: "https://b.example/2"}, {URL: "https://c.example/3"}, {URL: "https://d.example/4"}}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) {
+		m.recordingAgent, m.WatchFetcher, m.WebSearch = agent.call, fetch, search
+	})
+	ve.setComputerControl("on")
+	ve.set(settingWebSearch, true, settings.Scope{HouseholdID: voiceHH})
+	b, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"op": "append", "style": "Heading 1", "text": "## **Claims**\nThe **footage** was live."}}})
+	ve.eng.say(string(b))
+	turn := ve.recTurn(7)
+	turn.Utterance = "deep research the moon landing hoax claims into a document"
+	turn.Prior = `- Search prices: 3 results` + "\n  " + `{"answer": "Kodak film costs $9"}`
+	out := runTool(t, tool(ve), `{"path": "hoax.odt", "instructions": "a summary", "source": "moon landing hoax claims"}`, turn)
+	if out["status"] != "saved" {
+		t.Fatalf("saved: %v", out)
+	}
+	if srcs, _ := out["sources"].([]any); len(srcs) != 3 || len(fetch.urls) != 3 {
+		t.Fatalf("sources %v, fetched %v", out["sources"], fetch.urls)
+	}
+	p := lastUserText(t, ve.eng.last())
+	for _, want := range []string{"https://c.example/3", "filmed live", "Kodak film costs $9", "The user asked: deep research"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+	ops := agent.ops[1]["ops"].([]any)
+	if got := ops[0].(map[string]any)["text"]; got != "Claims\nThe footage was live." {
+		t.Fatalf("markdown kept: %q", got)
+	}
+}
+
+func tool(ve *voiceEnv) *writeDocumentTool { return &writeDocumentTool{m: ve.m} }
