@@ -122,13 +122,13 @@ func (phoneHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string,
 	return Result{Command: cmd, Label: label, Error: "couldn't set up the call"}, nil
 }
 
-// priorResultRunes bounds each earlier step's result in priorResults.
+// priorResultRunes bounds each earlier step's result in PriorResults.
 const priorResultRunes = 12000
 
-// priorResults are the errand's earlier successful steps with what each returned, for a server
+// PriorResults are the errand's earlier successful steps with what each returned, for a server
 // step that works from them (write_document writes up a search, a file read, a computer task's
 // findings). Its data as JSON: every step's result is usable, whatever its shape.
-func priorResults(results []Result) string {
+func PriorResults(results []Result) string {
 	var parts []string
 	for _, r := range results {
 		if !r.Success || r.Control {
@@ -277,7 +277,7 @@ func (serverHandler) Match(s *Service, cmd string) bool {
 func (serverHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string, args *pyjson.Object, label string, _ int) (Result, *Suspend) {
 	turn := servertools.Turn{
 		ConversationID: rc.convID, HouseholdID: rc.householdID, NodeID: rc.nodeID, Timezone: rc.timezone,
-		Utterance: rc.goal, Prior: priorResults(*rc.results),
+		Utterance: rc.goal, Prior: PriorResults(*rc.results),
 	}
 	if rc.userID != nil {
 		turn.Speaker.UserID = *rc.userID
