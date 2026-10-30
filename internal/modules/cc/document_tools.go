@@ -10,9 +10,11 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // write_document (ELEMENT-LAYER-WORK.md C27): an errand step that creates or edits a document
@@ -64,7 +66,8 @@ func (*writeDocumentTool) Definition() *pyjson.Object {
 			".ods or .xlsx for spreadsheets), in their Documents folder: write an article or summary, "+
 			"change wording, add rows or formulas. Works on the file directly, without opening the app. "+
 			"The file is created when it doesn't exist and edited when it does.",
-		servertools.Obj("path", strProp("The file, e.g. ~/Documents/Apollo 11 summary.odt (in Documents; .odt unless the user named another type)"),
+		servertools.Obj("path", strProp("The file name, e.g. Apollo 11 summary.odt (.odt unless the user named another type), saved in "+
+			"the household's documents folder; a path only when the user named a folder, e.g. ~/Documents/Taxes/2026.xlsx"),
 			"instructions", strProp("What to write or change, with every detail the user gave (length, tone, sections, values)"),
 			"source", strProp("Optional: the web address of the page to write from, or words to search for it"),
 			"computer", computerProp()), "path", "instructions")
@@ -80,7 +83,7 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 		return recordingRefusal("invalid_argument", "I need the document's name and what to write in it."), nil
 	}
 	if !strings.Contains(p, "/") {
-		p = "~/Documents/" + p
+		p = m.documentsFolder(ctx, turn.HouseholdID) + "/" + p
 	}
 	ext := strings.ToLower(path.Ext(p))
 	sheet := ext == ".ods" || ext == ".xlsx"
@@ -167,6 +170,15 @@ func stripMarkdown(s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// documentsFolder is the household's errands.documents_folder, where a bare file name is saved.
+func (m *Module) documentsFolder(ctx context.Context, hh string) string {
+	f := strings.TrimRight(strings.TrimSpace(m.settings.String(ctx, errands.SettingDocumentsFolder, settings.Scope{HouseholdID: hh})), "/")
+	if f == "" {
+		return errands.DefaultDocumentsFolder
+	}
+	return f
 }
 
 func backupNote(b string) string {

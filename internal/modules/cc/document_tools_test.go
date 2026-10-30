@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -193,3 +194,16 @@ func TestWriteDocumentMaterial(t *testing.T) {
 }
 
 func tool(ve *voiceEnv) *writeDocumentTool { return &writeDocumentTool{m: ve.m} }
+
+// A bare file name goes in the documents folder setting.
+func TestWriteDocumentFolderSetting(t *testing.T) {
+	agent := &fakeDocAgent{}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
+	ve.setComputerControl("on")
+	ve.set(errands.SettingDocumentsFolder, "~/Documents/Jarvis/", settings.Scope{})
+	ve.eng.say(`{"ops": [{"op": "append", "text": "hi"}]}`)
+	runTool(t, tool(ve), `{"path": "a.odt", "instructions": "hi"}`, ve.recTurn(7))
+	if p := agent.ops[0]["path"]; p != "~/Documents/Jarvis/a.odt" {
+		t.Fatalf("path %v", p)
+	}
+}
