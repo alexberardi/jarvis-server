@@ -873,8 +873,10 @@ jobs:
           test "$(jarvisd version)" = "$V"
           curl -fsS http://127.0.0.1:7700/health
           $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
-          # macOS may admit a new program by itself; take it out so doctor --fix has work.
-          sudo $fw --remove /usr/local/bin/jarvisd
+          # Block it so doctor --fix has work. Not --remove: macOS 15 re-admits a running
+          # program it has just removed, so doctor would rightly find it permitted.
+          sudo $fw --blockapp /usr/local/bin/jarvisd
+          $fw --getappblocked /usr/local/bin/jarvisd | grep -q blocked
           if sudo jarvisd doctor; then exit 1; fi
           sudo jarvisd doctor --fix
           $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
