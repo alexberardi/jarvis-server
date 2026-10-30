@@ -284,7 +284,9 @@ const websiteRule = "COMPUTER TASKS: everything the user wants done on one websi
 // written directly instead.
 const documentRule = "DOCUMENTS: to write, summarize into, or change a document or spreadsheet (Writer, Calc, " +
 	"Word, Excel), plan ONE write_document step with the file's path, everything the user asked for as its " +
-	"instructions and the web page to write from as its source; never a computer_task that types in the app.\n\n"
+	"instructions and the web page to write from as its source (or search words: it reads the top results " +
+	"itself, so research for a document needs no deep_research step); never a computer_task that types in the app. " +
+	"A write_document step after other steps (a search, a file read, a computer task) writes from their results.\n\n"
 
 // workflowRule is the computer rules' line for saved workflows (plan P3 piece 32): with the
 // websiteRule alone the house model planned "download my bank statement for August" as a
@@ -323,6 +325,35 @@ func computerRulesFor(menu []MenuEntry) string {
 		out += answerRule
 	}
 	return out
+}
+
+// foldResearchIntoDocument folds a deep_research step into the plan's first write_document step
+// when that one has no source: in an errand deep_research only starts a report that arrives after
+// the document is written (C27, 2026-10-29: the planner kept it for "deep research X into a
+// document" despite the menu note). Its query becomes the document's source, which reads the top
+// results itself. A document with a source of its own leaves deep_research alone.
+func foldResearchIntoDocument(steps []Step) []Step {
+	doc, research := -1, -1
+	for i, st := range steps {
+		switch {
+		case st.Command == cmdWriteDoc && doc < 0:
+			doc = i
+		case st.Command == "deep_research" && research < 0:
+			research = i
+		}
+	}
+	if doc < 0 || research < 0 || truthyStr(steps[doc].Args, "source") != "" {
+		return steps
+	}
+	query := truthyStr(steps[research].Args, "query")
+	if query == "" {
+		return steps
+	}
+	if steps[doc].Args == nil {
+		steps[doc].Args = pyjson.NewObject()
+	}
+	steps[doc].Args.Set("source", query)
+	return append(steps[:research:research], steps[research+1:]...)
 }
 
 // memoryAskRE is a goal that asks for something to be kept: a remember step is the user's.
@@ -785,7 +816,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(dropUnaskedRemember(goal, plan.Steps))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(dropUnaskedRemember(goal, plan.Steps)))))
 	return plan, err
 }
 
@@ -825,7 +856,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(dropUnaskedRemember(goal, plan.Steps))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(dropUnaskedRemember(goal, plan.Steps)))
 	return plan, err
 }
 

@@ -255,3 +255,33 @@ func TestComposePromptSaveIsNotUnsent(t *testing.T) {
 		t.Fatalf("compose prompt:\n%s", p)
 	}
 }
+
+// A deep_research step beside a write_document with no source becomes its source (C27): the
+// report would arrive after the document was written.
+func TestFoldResearchIntoDocument(t *testing.T) {
+	research := Step{Command: "deep_research", Args: servertools.Obj("query", "Apollo 11 conspiracy theories")}
+	doc := func(args ...any) Step { return Step{Command: cmdWriteDoc, Args: servertools.Obj(args...)} }
+	got := foldResearchIntoDocument([]Step{research, doc("path", "a.odt", "instructions", "x")})
+	if len(got) != 1 || got[0].Command != cmdWriteDoc || truthyStr(got[0].Args, "source") != "Apollo 11 conspiracy theories" {
+		t.Fatalf("folded: %+v", got)
+	}
+	kept := []Step{research, doc("path", "a.odt", "source", "https://example.com")}
+	if got := foldResearchIntoDocument(kept); len(got) != 2 {
+		t.Fatalf("a document with its own source: %+v", got)
+	}
+	if got := foldResearchIntoDocument([]Step{research}); len(got) != 1 {
+		t.Fatalf("no document: %+v", got)
+	}
+}
+
+// A server step sees the earlier successful steps and what they returned.
+func TestPriorResults(t *testing.T) {
+	got := priorResults([]Result{
+		{Command: "quick_search", Label: "Search", Success: true, Message: "3 results", Data: servertools.Obj("answer", "Kodak")},
+		{Command: "remember", Label: "Note", Error: "off"},
+		{Command: cmdReplan, Success: true, Control: true},
+	})
+	if got != "- Search: 3 results\n  {\"answer\": \"Kodak\"}" {
+		t.Fatalf("prior %q", got)
+	}
+}
