@@ -221,6 +221,10 @@ func elementContexts(elements []Element) []string {
 }
 
 // renderText is the page's text, one non-empty line each, defanged.
+// Untrusted is s between the page markers, defanged, for a prompt outside the task loop
+// (write_document's source and document).
+func Untrusted(s string) string { return PageBegin + "\n" + renderText(s) + "\n" + PageEnd }
+
 func renderText(s string) string {
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {
