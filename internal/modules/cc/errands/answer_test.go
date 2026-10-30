@@ -286,6 +286,30 @@ func TestPriorResults(t *testing.T) {
 	}
 }
 
+func TestPriorFiles(t *testing.T) {
+	got := PriorFiles([]Result{
+		{Command: "email", Success: true, Data: servertools.Obj("saved_files", []any{"/h/Documents/a.xlsx", "", 7, "/h/Documents/b.pdf"})},
+		{Command: "email", Error: "off", Data: servertools.Obj("saved_files", []any{"/h/failed.odt"})},
+		{Command: "quick_search", Success: true, Data: servertools.Obj("answer", "x")},
+		{Command: "note", Success: true},
+	})
+	if strings.Join(got, ",") != "/h/Documents/a.xlsx,/h/Documents/b.pdf" {
+		t.Fatalf("files %q", got)
+	}
+}
+
+// The email-attachments rule comes with write_document and the email package, never alone.
+func TestEmailFilesRule(t *testing.T) {
+	if got := computerRulesFor([]MenuEntry{{Command: cmdWriteDoc}, {Command: "email"}}); !strings.Contains(got, documentRule+emailFilesRule) {
+		t.Fatalf("rules lack the email rule:\n%s", got)
+	}
+	for _, menu := range [][]MenuEntry{{{Command: cmdWriteDoc}}, {{Command: "email"}}} {
+		if strings.Contains(computerRulesFor(menu), emailFilesRule) {
+			t.Fatalf("menu %v has the email rule", menu)
+		}
+	}
+}
+
 // A spreadsheet planned after a search is written from the search's results when it runs, not
 // from rows the planner made up (C27); after a file read the checkpoint handles it.
 func TestSheetFromResults(t *testing.T) {

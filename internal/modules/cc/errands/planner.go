@@ -288,6 +288,15 @@ const documentRule = "DOCUMENTS: to write, summarize into, or change a document 
 	"itself, so research for a document needs no deep_research step); never a computer_task that types in the app. " +
 	"A write_document step after other steps (a search, a file read, a computer task) writes from their results.\n\n"
 
+// emailFilesRule is the line for work on an email's attachments (ELEMENT-LAYER-WORK.md C28):
+// node step args are fixed when the errand is planned, so both email steps name the same email
+// and the reply attaches the very path write_document saves to (draft_reply takes ~/Documents only).
+const emailFilesRule = "EMAIL ATTACHMENTS: to work on files someone emailed and answer them, plan email " +
+	"save_attachments with a query for that email, then ONE write_document step (it reads the saved files " +
+	"itself) with a full path like ~/Documents/<name>, then email draft_reply with the SAME query, a short body " +
+	"and that same path as attachments. draft_reply only puts the reply in Drafts for the user to send; never " +
+	"plan send or reply for it.\n\n"
+
 // workflowRule is the computer rules' line for saved workflows (plan P3 piece 32): with the
 // websiteRule alone the house model planned "download my bank statement for August" as a
 // computer_task on a made-up site, though the menu listed the workflow that does it.
@@ -317,6 +326,9 @@ func computerRulesFor(menu []MenuEntry) string {
 	}
 	if menuHas(menu, cmdWriteDoc) {
 		out += documentRule
+		if menuHas(menu, "email") {
+			out += emailFilesRule
+		}
 	}
 	if menuHas(menu, cmdWriteSheet) {
 		out += budgetRule

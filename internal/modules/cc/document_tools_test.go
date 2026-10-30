@@ -22,12 +22,16 @@ type fakeDocAgent struct {
 	ops      []map[string]any
 	dropText bool
 	editErr  map[string]any
+	files    map[string]map[string]any // other files by path, read as they are
 }
 
 func (f *fakeDocAgent) call(_ context.Context, _, _ string, args map[string]any, _ int64) map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ops = append(f.ops, args)
+	if out, ok := f.files[args["path"].(string)]; ok {
+		return out
+	}
 	switch args["op"] {
 	case "doc_read":
 		if !f.exists {
@@ -190,6 +194,39 @@ func TestWriteDocumentMaterial(t *testing.T) {
 	ops := agent.ops[1]["ops"].([]any)
 	if got := ops[0].(map[string]any)["text"]; got != "Claims\nThe footage was live." {
 		t.Fatalf("markdown kept: %q", got)
+	}
+}
+
+// An errand's earlier step saved files (an email's attachments): write_document reads them as
+// material, office files through doc_read and text through read; others are only named.
+func TestWriteDocumentPriorFiles(t *testing.T) {
+	const dir = "/home/avery/Documents/Jarvis/Attachments/2026-10-30 Timesheet/"
+	agent := &fakeDocAgent{files: map[string]map[string]any{
+		dir + "hours.xlsx": {"success": true, "kind": "sheet", "sheets": []any{map[string]any{"name": "Hours",
+			"rows": []any{[]any{"Week", "Hours"}, []any{"44", 38.5}}}}},
+		dir + "notes.csv": {"success": true, "text": "day,hours\nMon,7.5\n"},
+		dir + "scan.pdf":  {"success": false, "error": "not reached"},
+	}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
+	ve.setComputerControl("on")
+	b, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"op": "append", "text": "Total: 38.5 hours"}}})
+	ve.eng.say(string(b))
+	turn := ve.recTurn(7)
+	turn.PriorFiles = []string{dir + "hours.xlsx", dir + "notes.csv", dir + "scan.pdf"}
+	out := runTool(t, tool(ve), `{"path": "totals.odt", "instructions": "total the hours"}`, turn)
+	if out["status"] != "saved" {
+		t.Fatalf("saved: %v", out)
+	}
+	p := lastUserText(t, ve.eng.last())
+	for _, want := range []string{"File hours.xlsx", "B2=38.5", "Mon,7.5", "File scan.pdf", "can't read .pdf files yet"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+	for _, op := range agent.ops {
+		if op["path"] == dir+"scan.pdf" {
+			t.Fatal("a PDF was sent to the agent")
+		}
 	}
 }
 
