@@ -22,6 +22,7 @@ import PhonePage from '@/pages/PhonePage'
 import RecordingsPage from '@/pages/RecordingsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import SetupWizard from '@/pages/SetupWizard'
+import StorePage from '@/pages/StorePage'
 import TraceDetailPage from '@/pages/TraceDetailPage'
 import TracesPage from '@/pages/TracesPage'
 import UpdatePage from '@/pages/UpdatePage'
@@ -50,6 +51,7 @@ const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'traces', element: <TracesPage /> },
   { path: 'traces/:id', element: <TraceDetailPage /> },
   { path: 'nodes', element: <NodesPage /> },
+  { path: 'store', element: <StorePage /> },
   { path: 'users', element: <UsersPage /> },
   { path: 'phone', element: <PhonePage /> },
   { path: 'update', element: <UpdatePage /> },

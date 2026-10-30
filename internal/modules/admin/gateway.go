@@ -47,6 +47,11 @@ func ccUserRoute(pattern string) passRoute {
 	return passRoute{pattern: pattern, listener: pconfig.ListenerCC, strip: "/api/cc", tier: tierUser}
 }
 
+// ccStoreRoute is a cc route of the admin Store page: superuser-only here, household checks in cc.
+func ccStoreRoute(pattern string) passRoute {
+	return passRoute{pattern: pattern, listener: pconfig.ListenerCC, strip: "/api/cc"}
+}
+
 // inboxRoute is a notifications inbox route (webapp 01 §2.2, Q2): the rows are the caller's own.
 func inboxRoute(pattern string) passRoute {
 	return passRoute{pattern: pattern, listener: pconfig.ListenerNotifications, strip: "/api/notifications", tier: tierUser}
@@ -147,6 +152,13 @@ var passRoutes = []passRoute{
 	ccUserRoute("DELETE /api/cc/api/v0/recordings/{id}"),
 	ccUserRoute("GET /api/cc/api/v0/recordings/{id}/keyframes/{seq}"),
 	ccUserRoute("GET /api/cc/api/v0/recordings/{id}/keyframes/{seq}/crop"),
+	// The admin Store page (decision 2026-10-30-admin-store-page): superuser in the gateway, and
+	// cc still requires membership of the node's or the Pantry's household (a computer: its
+	// owner or a household admin), so a superuser installs only in their own households.
+	ccStoreRoute("GET /api/cc/api/v0/households/{household_id}/pantry/commands"),
+	ccStoreRoute("GET /api/cc/api/v0/households/{household_id}/pantry/commands/{command_name}"),
+	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/package-install"),
+	ccStoreRoute("GET /api/cc/api/v0/nodes/{node_id}/package-install/{request_id}"),
 
 	// Inbox (webapp 01 P5): the caller's own rows. Creating and updating items is app-to-app
 	// only and not exposed.

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -42,7 +43,16 @@ const (
 	defaultPantryBaseURL = "https://pantry-api.jarvisautomation.io"
 	// settingPantryEnabled is the household's privacy switch for the Pantry (default off).
 	settingPantryEnabled = "pantry.enabled"
+	// settingPantryDefaultBundle is the household's default bundle: the packages the admin Store
+	// offers to install together on a node (decision 2026-10-30-admin-store-page).
+	settingPantryDefaultBundle = "pantry.default_bundle"
 )
+
+// pantryBundle is the default bundle's value: Pantry package names, comma-separated, or "";
+// at most pantryBundleMax bytes.
+var pantryBundle = regexp.MustCompile(`^([a-z0-9][a-z0-9_-]*(,[a-z0-9][a-z0-9_-]*)*)?$`)
+
+const pantryBundleMax = 4 << 10
 
 // pantryDisabledDetail is the 403 a household with the Pantry off gets from the routes that
 // would cause Pantry traffic (package install, Forge test install).
@@ -62,6 +72,15 @@ func packageDefinitions() []settings.Definition {
 				"contact the Pantry (pantry.base_url) to browse, download and verify packages. Default OFF: " +
 				"package installs and Forge test installs are refused (403, code pantry_disabled) until a " +
 				"household admin turns it on; uninstalling what's already installed keeps working."},
+		{Key: settingPantryDefaultBundle, Category: "pantry", Type: settings.String, Default: "",
+			Description: "The household's default bundle of Pantry packages, comma-separated package names. The " +
+				"admin Store offers them together for a node; nothing is installed automatically.",
+			Validate: func(v any) error {
+				if s, _ := v.(string); len(s) > pantryBundleMax || !pantryBundle.MatchString(s) {
+					return errors.New("use Pantry package names separated by commas, such as get_weather_meteo,get_news")
+				}
+				return nil
+			}},
 	}
 }
 

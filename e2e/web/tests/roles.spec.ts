@@ -12,8 +12,9 @@ const MEMBER_PAGES = [
   { label: 'Inbox', path: '/inbox' },
 ]
 
-// label in the sidebar, path, the page's heading, and an API call the page makes.
-const ADMIN_PAGES = [
+// label in the sidebar, path, the page's heading, and an API call the page makes (when one
+// answers without setup).
+const ADMIN_PAGES: { label: string; path: string; heading: string; api?: string }[] = [
   { label: 'Dashboard', path: '/admin/dashboard', heading: 'Dashboard', api: '/api/system/info' },
   { label: 'Models', path: '/admin/models', heading: 'Models', api: '/api/llm/v1/models/installed' },
   { label: 'Settings', path: '/admin/settings', heading: 'Settings', api: '/api/settings/' },
@@ -21,6 +22,8 @@ const ADMIN_PAGES = [
   { label: 'Logs', path: '/admin/logs', heading: 'Logs', api: '/api/logs?limit=1' },
   { label: 'Traces', path: '/admin/traces', heading: 'Traces', api: '/api/traces?limit=1' },
   { label: 'Nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
+  // Its Pantry calls need a household with the Pantry on: store.spec.ts checks a member is refused them.
+  { label: 'Store', path: '/admin/store', heading: 'Store' },
   { label: 'Users', path: '/admin/users', heading: 'Users', api: '/api/admin/users' },
   { label: 'Phone', path: '/admin/phone', heading: 'Phone', api: '/api/phone/sip' },
   { label: 'Updates', path: '/admin/update', heading: 'Updates', api: '/api/update' },
@@ -103,6 +106,7 @@ for (const role of ['admin', 'power', 'member'] as Role[]) {
     test('the server refuses the admin pages\' calls', async () => {
       const token = tokenOf(role)
       for (const p of ADMIN_PAGES) {
+        if (!p.api) continue
         const r = await fetch(env('SBX_ADMIN') + p.api, { headers: { Authorization: `Bearer ${token}` } })
         expect(r.status, `${p.api} as ${role}`).toBe(403)
       }
@@ -113,6 +117,7 @@ for (const role of ['admin', 'power', 'member'] as Role[]) {
 test('the superuser gets the same calls answered', async () => {
   const token = tokenOf('superuser')
   for (const p of ADMIN_PAGES) {
+    if (!p.api) continue
     const r = await fetch(env('SBX_ADMIN') + p.api, { headers: { Authorization: `Bearer ${token}` } })
     expect(r.status, p.api).toBe(200)
   }

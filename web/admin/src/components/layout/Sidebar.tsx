@@ -16,6 +16,7 @@ import {
   Workflow,
   Video,
   Phone,
+  Store,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useUnreadCount } from '@/hooks/useInbox'
@@ -50,6 +51,7 @@ const adminNav: NavItem[] = [
   { label: 'Logs', icon: ScrollText, path: '/admin/logs' },
   { label: 'Traces', icon: Activity, path: '/admin/traces' },
   { label: 'Nodes', icon: Cpu, path: '/admin/nodes' },
+  { label: 'Store', icon: Store, path: '/admin/store' },
   { label: 'Users', icon: Users, path: '/admin/users' },
   { label: 'Phone', icon: Phone, path: '/admin/phone' },
   // /update used to be reachable ONLY via the dashboard's UpdateBanner, which

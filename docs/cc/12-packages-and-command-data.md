@@ -59,6 +59,20 @@ All routes are in Appendix A's live set. The prefixes are mounted at `main.py:74
 
 There is no `/package-uninstall/{id}/verify` or `/package-revert/{id}/verify`. All three operations verify through the `package-install` verify route, because all three share the `package_install_requests` table (`package_install_handler.py:46-70`).
 
+### 2.1a Admin Store (jarvisd only)
+
+The admin Store page (`/admin/store`, decision `2026-10-30-admin-store-page`) installs through §2.1's
+per-node routes, reached from the admin gateway at the superuser tier. It reads the household's
+Pantry through cc, so the household's `pantry.base_url` and `pantry.enabled` apply:
+
+| Method + path | Auth | Answer |
+|---|---|---|
+| `GET /api/v0/households/{household_id}/pantry/commands` | JWT + household member, Pantry on | Pantry's `GET /v1/commands` (`q`, `category`, `sort`, `page`, `per_page` passed on) |
+| `GET /api/v0/households/{household_id}/pantry/commands/{command_name}` | same | Pantry's detail plus `git_tag`, its newest tagged version (null if none) |
+
+Pantry down is 503 `pantry_unavailable`; an unknown package 404 `package_not_found`. `/download` is
+never called (it counts an install).
+
 ### 2.2 Test install (`api/test_install.py`)
 
 > **Ported** (D5's drop reversed 2026-10-08): `internal/modules/cc/testinstall.go`. Go adds the household check to the poll (§8) and binds verify/results to the authenticated node (D4).
@@ -326,7 +340,9 @@ Both of the first two caches are per-process.
 
 ## 5. Settings
 
-None. No settings-DB keys are read. The hard-coded constants a port must reproduce:
+jarvisd: `pantry.base_url`, `pantry.enabled` and `pantry.default_bundle` (household-controllable, a
+comma-separated list of Pantry package names the admin Store offers together; nothing installs on
+its own). Legacy: none. No settings-DB keys are read. The hard-coded constants a port must reproduce:
 
 | Constant | Value | Where |
 |---|---|---|
