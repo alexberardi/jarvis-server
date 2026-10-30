@@ -11,12 +11,10 @@ import (
 // Voice-profile takes on the node's microphone: the enroll_voice and verify_voice verbs the
 // mobile app's "record on this node" publishes (V7/V8). Ported from the Python node
 // (N:scripts/mqtt_tts_listener.py handle_enroll_voice / handle_verify_voice): say the cue,
-// wait the preroll, record a fixed length, upload it (M4/M5) and post the outcome to V9.
+// record a fixed length, upload it (M4/M5) and post the outcome to V9.
 
 const (
 	takeCue = "Read the prompt on your screen, starting now."
-	// takePreroll is the Python node's preroll_secs: time to start reading after the cue.
-	takePreroll = 1500 * time.Millisecond
 	// maxTakeSecs bounds a duration_secs from the command (jarvisd sends 8 and 5).
 	maxTakeSecs = 30.0
 )
@@ -72,13 +70,18 @@ func parseTake(det map[string]any, defaultSecs float64) (profileTake, bool) {
 // record makes the take, or returns the V9 failure to post.
 func (v *VoiceProfiles) record(ctx context.Context, verb string, t profileTake) ([]int16, map[string]any) {
 	v.Log.Info(verb+": recording", "request_id", t.rid, "user_id", t.userID, "secs", t.secs)
-	pcm, err := v.Mic.Record(ctx, Take{Cue: takeCue, Preroll: takePreroll, Secs: t.secs})
+	// The cue tells the reader to start now. Skipping audio after it loses the
+	// beginning of the prompt and can turn a complete reading into too little speech.
+	pcm, err := v.Mic.Record(ctx, Take{Cue: takeCue, Secs: t.secs})
 	if errors.Is(err, ErrMicUnavailable) {
 		return nil, fail("audio_bus_unavailable")
 	}
 	if err != nil {
 		return nil, fail("record_failed: " + err.Error())
 	}
+	// Diagnose missing audio versus a quiet input without keeping the recording.
+	v.Log.Info(verb+": captured", "request_id", t.rid,
+		"duration_secs", float64(len(pcm))/CaptureRate, "rms", math.Round(RMS(pcm)*10)/10)
 	return pcm, nil
 }
 
