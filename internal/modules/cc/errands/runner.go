@@ -146,6 +146,25 @@ func PriorResults(results []Result) string {
 	return strings.Join(parts, "\n")
 }
 
+// PriorFiles are the files earlier successful steps saved on the computer (a package's
+// saved_files, e.g. an email's attachments), for a step that works from them (write_document).
+func PriorFiles(results []Result) []string {
+	var files []string
+	for _, r := range results {
+		if !r.Success || r.Data == nil {
+			continue
+		}
+		v, _ := r.Data.Get("saved_files")
+		list, _ := v.([]any)
+		for _, f := range list {
+			if s, ok := f.(string); ok && s != "" {
+				files = append(files, s)
+			}
+		}
+	}
+	return files
+}
+
 // priorStepsContext is _prior_steps_context: the earlier steps, for the next call's brief.
 func priorStepsContext(results []Result) string {
 	var lines []string
@@ -277,7 +296,7 @@ func (serverHandler) Match(s *Service, cmd string) bool {
 func (serverHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string, args *pyjson.Object, label string, _ int) (Result, *Suspend) {
 	turn := servertools.Turn{
 		ConversationID: rc.convID, HouseholdID: rc.householdID, NodeID: rc.nodeID, Timezone: rc.timezone,
-		Utterance: rc.goal, Prior: PriorResults(*rc.results),
+		Utterance: rc.goal, Prior: PriorResults(*rc.results), PriorFiles: PriorFiles(*rc.results),
 	}
 	if rc.userID != nil {
 		turn.Speaker.UserID = *rc.userID

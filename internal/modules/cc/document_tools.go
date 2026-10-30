@@ -122,7 +122,12 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	if turn.Prior != "" {
 		material = append(material, "Earlier steps of this errand:\n"+turn.Prior)
 	}
-	m.deps.Log.Info("cc: write_document", "path", p, "exists", exists, "sources", sources, "prior_steps", turn.Prior != "")
+	for _, f := range turn.PriorFiles {
+		material = append(material, "File "+path.Base(f)+" (saved by an earlier step):\n"+
+			truncateRunes(priorFileText(agent, f), docMaterialRunes/len(turn.PriorFiles)))
+	}
+	m.deps.Log.Info("cc: write_document", "path", p, "exists", exists, "sources", sources, "prior_steps", turn.Prior != "",
+		"prior_files", len(turn.PriorFiles))
 
 	ops, err := m.documentEdits(ctx, turn.Utterance, instr, sheet, current, exists, truncateRunes(strings.Join(material, "\n\n"), docMaterialRunes))
 	if err != nil {
@@ -156,6 +161,27 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	}
 	return servertools.Obj("status", "saved", "path", p, "created", !exists, "edits", len(ops), "backup", backup, "sources", sources,
 		"preview", truncateRunes(renderDoc(saved), 600), "message", msg), nil
+}
+
+// priorFileText is a file an earlier step saved (an email's attachment), as text for the model:
+// office files through doc_read, text files through read, and a note for what neither reads.
+// shortcut: PDFs and images are only named; reading them needs a raw-bytes agent op + OCR (C28 item 2).
+func priorFileText(agent func(map[string]any) map[string]any, f string) string {
+	switch strings.ToLower(path.Ext(f)) {
+	case ".odt", ".docx", ".ods", ".xlsx":
+		out := agent(map[string]any{"op": "doc_read", "path": f})
+		if !dispatchOK(out) {
+			return "(couldn't read it: " + agentError(out) + ")"
+		}
+		return renderDoc(out)
+	case ".csv", ".txt", ".json", ".ofx":
+		out := agent(map[string]any{"op": "read", "path": f})
+		if text, ok := out["text"].(string); ok && dispatchOK(out) {
+			return text
+		}
+		return "(couldn't read it: " + agentError(out) + ")"
+	}
+	return "(not read: I can't read " + path.Ext(f) + " files yet)"
 }
 
 // markdownMarks are the Markdown a model writes despite being told not to: bold and code marks,
