@@ -276,7 +276,7 @@ func TestFoldResearchIntoDocument(t *testing.T) {
 
 // A server step sees the earlier successful steps and what they returned.
 func TestPriorResults(t *testing.T) {
-	got := priorResults([]Result{
+	got := PriorResults([]Result{
 		{Command: "quick_search", Label: "Search", Success: true, Message: "3 results", Data: servertools.Obj("answer", "Kodak")},
 		{Command: "remember", Label: "Note", Error: "off"},
 		{Command: cmdReplan, Success: true, Control: true},
