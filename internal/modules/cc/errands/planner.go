@@ -71,8 +71,8 @@ var menuDeny = map[string]bool{
 var menuNotes = map[string]string{
 	"deep_research": "In an errand this only STARTS a long report that arrives later on its own; " +
 		"the errand cannot report what it finds. To look something up that the errand should " +
-		"report back (answer, list, comparison, summary), use quick_search. A computer_task that writes " +
-		"from a web page (summarize an article into a document) gets the page through its own source arg, never from this.",
+		"report back (answer, list, comparison, summary), use quick_search. To write a document from a web page " +
+		"(summarize an article into a document), use write_document with the page as its source, never this.",
 }
 
 // controlCommands are control-flow commands the planner may emit that are not capabilities;
@@ -89,6 +89,7 @@ const (
 	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
 	cmdReadFile   = "read_computer_file"
 	cmdWriteSheet = "write_spreadsheet"
+	cmdWriteDoc   = "write_document"
 	// browserPrefix and desktopPrefix name the agent's own browser and desktop commands
 	// (browser_open, browser_fill, desktop_open, …).
 	browserPrefix = "browser_"
@@ -157,7 +158,7 @@ func (s *Service) enabledServerTools(ctx context.Context, hh string, speaker *in
 		}
 	}
 	if s.computerOffered(ctx, hh) {
-		names = append(names, cmdReadFile, cmdWriteSheet)
+		names = append(names, cmdReadFile, cmdWriteSheet, cmdWriteDoc)
 	}
 	out := names[:0]
 	for _, n := range names {
@@ -278,6 +279,13 @@ const websiteRule = "COMPUTER TASKS: everything the user wants done on one websi
 	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
 	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
 
+// documentRule is the computer rules' line for documents (ELEMENT-LAYER-WORK.md C27): typing a
+// document through Writer's window took 15+ rounds and failed at the Save dialog; the file is
+// written directly instead.
+const documentRule = "DOCUMENTS: to write, summarize into, or change a document or spreadsheet (Writer, Calc, " +
+	"Word, Excel), plan ONE write_document step with the file's path, everything the user asked for as its " +
+	"instructions and the web page to write from as its source; never a computer_task that types in the app.\n\n"
+
 // workflowRule is the computer rules' line for saved workflows (plan P3 piece 32): with the
 // websiteRule alone the house model planned "download my bank statement for August" as a
 // computer_task on a made-up site, though the menu listed the workflow that does it.
@@ -304,6 +312,9 @@ func computerRulesFor(menu []MenuEntry) string {
 	}
 	if menuHas(menu, cmdRunWorkflow) {
 		out += workflowRule
+	}
+	if menuHas(menu, cmdWriteDoc) {
+		out += documentRule
 	}
 	if menuHas(menu, cmdWriteSheet) {
 		out += budgetRule
