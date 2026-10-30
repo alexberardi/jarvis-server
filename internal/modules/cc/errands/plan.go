@@ -298,7 +298,7 @@ func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error)
 
 // computerPlanCommands are the steps of a computer errand: computer tasks, taught workflows'
 // replays, the computer's file tools and the replan checkpoint between them.
-var computerPlanCommands = map[string]bool{cmdComputer: true, cmdRunWorkflow: true, cmdReadFile: true, cmdWriteSheet: true, cmdReplan: true}
+var computerPlanCommands = map[string]bool{cmdComputer: true, cmdRunWorkflow: true, cmdReadFile: true, cmdWriteSheet: true, cmdWriteDoc: true, cmdReplan: true}
 
 // isComputerPlan reports whether steps are a computer errand: at least one computer task or
 // replay, and nothing but computerPlanCommands, none risky.
