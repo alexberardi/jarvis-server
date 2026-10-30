@@ -557,6 +557,7 @@ limitations (including mixed-host video ordinals) without expanding slice 2's ex
 | 6 | scope reviewed (A19), not implemented | Astra; T1/T2/reply-context; source fidelity, workbook formulas/scope and intervention checks specified |
 | P1 | gated | causal R/6 task evidence; cap occupancy alone is insufficient |
 | 5a–5b | re-gated | on R/6 evidence |
+| email flow | parts built (C29), not run live | package PR #4 held for the user; PDFs/images need OCR |
 | 7 | not started | owner and Windows verification environment open |
 
 ## Comms log
@@ -2195,3 +2196,30 @@ Design (agreed in direction, not reviewed):
 - Planner thinking hitting its 30 s budget.
 - Voice polish.
 - Your reviews of C25 to C27.
+
+### C29 · Claude → Astra (and the next session) · 2026-10-30
+
+**Picked up C28.** The email attachment flow now has all its parts, end to end except a live run.
+
+**jarvis-cmd-email** [PR #4](https://github.com/alexberardi/jarvis-cmd-email/pull/4): CI green, **held for the user's review** because it touches `email_shared/**`.
+- Test collection fixed. Nine test files stubbed `email_shared` without the `attachments` module. Two of them failed collection, and seven more failed when run alone.
+- Added `tests/test_email_attachments.py`:
+  - Safe names, no overwrite, the size cap, and the Documents-only rule for draft files (symlinks and `..` are refused).
+  - Threading, and the Drafts folder choice.
+  - Both actions: draft_reply answers the email whose files were saved, and it never calls send or reply.
+- An opt-in live IMAP round trip (`JARVIS_IMAP_LIVE=host:port`) passed against GreenMail 2.1.3 in Docker on loopback. It covered fetch, save, APPEND to Drafts with the `\Draft` flag, and nothing landing in INBOX. The user's mailbox was never touched. 518 passed.
+- The tests found two bugs, both fixed:
+  - A subject containing a slash lost everything before it in the attachments folder name.
+  - On a server with no Drafts folder, the draft was APPENDed to a mailbox that didn't exist. It now creates the folder.
+- Not covered: Gmail `fetch_raw`/`create_draft` have no tests at all.
+
+**jarvis-server, on `feat/element-layer`:**
+- `errands.PriorFiles` collects the `saved_files` of earlier successful steps into `servertools.Turn.PriorFiles`. write_document reads each one into its material, which is already wrapped in `computer.Untrusted`. Office files go through `doc_read`, and CSV/TXT/JSON/OFX through `read`. PDFs and images are only named for now, because they need the raw-bytes agent op plus OCR (C28 item 2, still to build). Tests: `TestPriorFiles` and `TestWriteDocumentPriorFiles`.
+- office.py loads every file with `MacroExecutionMode=NEVER_EXECUTE`. `TestLiveOffice` is green on LibreOffice, but no test proves that a macro in a file stays blocked.
+- New planner rule `emailFilesRule`. It applies only when the menu has both write_document and email. The plan is save_attachments(query), then write_document (full `~/Documents/...` path), then draft_reply (the same query, the same path as attachments, never send). The full path matters because node args are fixed at plan time and draft_reply resolves only `~/Documents` paths. Test: `TestEmailFilesRule`.
+
+**Next:**
+1. The user reviews PR #4.
+2. The user decides whether to install the package on the dev agent and point it at a mailbox. Use a throwaway mailbox first, not Proton.
+3. Build the raw-bytes op plus OCR for PDF and image attachments.
+4. Make a live run of the whole flow.

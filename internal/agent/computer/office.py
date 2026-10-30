@@ -16,6 +16,7 @@ import time
 import uno
 from com.sun.star.beans import PropertyValue
 from com.sun.star.text.ControlCharacter import PARAGRAPH_BREAK
+from com.sun.star.document.MacroExecMode import NEVER_EXECUTE
 
 MAX_ROWS, MAX_COLS = 500, 60
 
@@ -173,7 +174,8 @@ def main():
     proc, desktop = connect(req)
     doc = None
     try:
-        hidden = (prop("Hidden", True),)
+        # Files come from strangers (email attachments): never run their macros.
+        hidden = (prop("Hidden", True), prop("MacroExecutionMode", NEVER_EXECUTE))
         if req["src"]:
             doc = desktop.loadComponentFromURL(uno.systemPathToFileUrl(req["src"]), "_blank", 0, hidden)
         else:
