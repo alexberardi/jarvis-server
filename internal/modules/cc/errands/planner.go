@@ -327,6 +327,50 @@ func computerRulesFor(menu []MenuEntry) string {
 	return out
 }
 
+// sheetFromResults turns a write_spreadsheet that follows a step finding its rows (a search, a
+// computer task, research) into a write_document of an .xlsx, which writes from those steps'
+// results when it runs: the planner fills write_spreadsheet's rows before anything has run, from
+// memory (C27, 21:25 2026-10-29: Saturn's 146 moons, the 2023 count, beside the search). After a
+// read_computer_file checkpointSpreadsheet replans it instead (budgetRule).
+func sheetFromResults(goal string, steps []Step) []Step {
+	found := false
+	for i, st := range steps {
+		switch st.Command {
+		case cmdReadFile:
+			return steps
+		case cmdSearch, cmdComputer, "deep_research":
+			found = true
+		case cmdWriteSheet:
+			if !found {
+				continue
+			}
+			name := truthyStr(st.Args, "name")
+			if name == "" {
+				name = "Spreadsheet"
+			}
+			var cols []string
+			if v, ok := st.Args.Get("sheets"); ok {
+				l, _ := v.([]any)
+				for _, s := range l {
+					o, _ := s.(*pyjson.Object)
+					if c, ok := o.Get("columns"); ok {
+						cols = append(cols, pyjson.Dumps(c, false))
+					}
+				}
+			}
+			instr := goal + " Put the values from the earlier steps' results in the spreadsheet, one row per item."
+			if len(cols) > 0 {
+				instr += " Columns: " + strings.Join(cols, "; ") + "."
+			}
+			out := append([]Step(nil), steps...)
+			out[i] = Step{Command: cmdWriteDoc, Label: st.Label, IsRisky: st.IsRisky,
+				Args: servertools.Obj("path", "~/Documents/"+name+".xlsx", "instructions", instr)}
+			return out
+		}
+	}
+	return steps
+}
+
 // foldResearchIntoDocument folds a deep_research step into the plan's first write_document step
 // when that one has no source: in an errand deep_research only starts a report that arrives after
 // the document is written (C27, 2026-10-29: the planner kept it for "deep research X into a
@@ -816,7 +860,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(dropUnaskedRemember(goal, plan.Steps)))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, dropUnaskedRemember(goal, plan.Steps))))))
 	return plan, err
 }
 
@@ -856,7 +900,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(dropUnaskedRemember(goal, plan.Steps)))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, dropUnaskedRemember(goal, plan.Steps))))
 	return plan, err
 }
 
