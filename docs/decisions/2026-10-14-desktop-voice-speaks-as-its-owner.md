@@ -2,6 +2,10 @@
 
 - **Date:** 2026-10-14 (user)
 
+The enrollment exclusion below is superseded by
+[household voice enrollment](2026-10-29-household-voice-enrollment.md). The signed-in
+identity policy for ordinary desktop voice commands is retained.
+
 A voice turn from a desktop agent (`node_kind: desktop`) is treated as coming from the member
 signed in to it (`cc_nodes.owner_user_id`: who approved its pairing code or signed in on its
 first-run page, [device sign-out](2026-10-14-device-sign-out.md)), the way mobile and web chat

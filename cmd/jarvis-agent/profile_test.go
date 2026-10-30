@@ -241,20 +241,17 @@ func TestAPiKeepsAllItsVerbs(t *testing.T) {
 	r := &node.Runner{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	wirePiNode(r, &voiceFlags{threshold: 0.4}, &hatFlags{mode: "auto", brightness: 100}, &maintFlags{}, nil, voice.NewLive(), nil, "", log)
-	addVerbs(r, voiceProfileVerbs(piProfile, voice.NewMic(), log))
+	addVerbs(r, voiceProfileVerbs(voice.NewMic(), log))
 	want := []string{"enroll_voice", "measure_ambient_noise", "preview_led_pattern", "update_node_config", "verify_voice"}
 	if got := slices.Sorted(maps.Keys(r.Verbs)); !slices.Equal(got, want) {
 		t.Fatalf("verbs = %v", got)
 	}
 }
 
-func TestOnlyAPiSpeaksTheVoiceProfileVerbs(t *testing.T) {
-	if v := voiceProfileVerbs(desktopProfile, voice.NewMic(), slog.Default()); v != nil {
-		t.Fatalf("desktop registers %v: its speaker is the signed-in user (#143)", slices.Collect(maps.Keys(v)))
-	}
-	v := voiceProfileVerbs(piProfile, voice.NewMic(), slog.Default())
+func TestVoiceProfileVerbs(t *testing.T) {
+	v := voiceProfileVerbs(voice.NewMic(), slog.Default())
 	if got := slices.Sorted(maps.Keys(v)); !slices.Equal(got, []string{"enroll_voice", "verify_voice"}) {
-		t.Fatalf("pi verbs = %v", got)
+		t.Fatalf("voice profile verbs = %v", got)
 	}
 }
 
