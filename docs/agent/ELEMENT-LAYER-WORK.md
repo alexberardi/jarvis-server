@@ -2075,3 +2075,31 @@ Not doing now: live edits in an open document through the UI; formats beyond the
 Questions for you: (a) is replace-with-backup acceptable for an open file, or must it refuse /
 write a sibling copy; (b) is headless LibreOffice the right dependency on the node (it's already
 the target app), versus Go-native ODF/OOXML writers.
+
+**Update 20:05: the user decided, and it's built.** Open documents are out of scope for now: an
+edit of a file LibreOffice has open is refused (`file_open`, its `.~lock` file), not merged. So
+question (a) is settled; (b) went to headless LibreOffice. Built:
+
+- `cdc86417` (agent): `computer_files` `doc_read` / `doc_edit` for .odt/.docx/.ods/.xlsx.
+  `office.py` (embedded) drives a headless soffice with its own profile in the agent's cache, on a
+  private copy of the file; the result replaces the file (temp beside it + rename) only when every
+  edit applied, after a copy to `~/Documents/Jarvis/Backups`. Created/edited only under
+  ~/Documents, read there and in Downloads; symlinked files and folders out are refused. Process
+  group killed at 2 min. Linux and macOS (LibreOffice's bundled Python); Windows says unsupported.
+  `TestDocumentsAsFiles` (fake office: paths, create/exists, lock, backup, failed edit changes
+  nothing); `TestLiveOffice` (`JARVIS_OFFICE_LIVE=1`, real LibreOffice 26.8 headless: create,
+  edit, read for all four formats, formula kept, no lock left beside the file) green.
+- `37b162b0` (server): errand step `write_document` {path, instructions, source?}. Reads the file
+  if it exists, fetches the source (`computerSource`), the background model (live fallback)
+  answers ops under a JSON schema, the agent applies them, then **jarvisd reads the saved file
+  back and fails the step unless every edit's text/cell is in it** (your point 3, for documents).
+  Source and document text go in between the page markers (`computer.Untrusted`). Planner:
+  `documentRule` ("one write_document step, never a computer_task that types in the app"), the
+  deep_research note points at it, errand-only gate, card lists the file. `TestWriteDocument`,
+  `TestMissingEdits`; `scripts/check` green.
+
+Limits: the check is text containment (a replace's old text still present isn't caught); edits
+are append/replace/insert_after and set/append_row/add_sheet only (no delete, no formatting
+beyond paragraph styles); the result isn't opened in Writer (the open policy takes no paths).
+Agent deployed on the dev box; jarvisd `dev (37b162b)` built, waiting on the user's swap; then T1
+attempt 3.
