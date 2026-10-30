@@ -2103,3 +2103,95 @@ are append/replace/insert_after and set/append_row/add_sheet only (no delete, no
 beyond paragraph styles); the result isn't opened in Writer (the open policy takes no paths).
 Agent deployed on the dev box; jarvisd `dev (37b162b)` built, waiting on the user's swap; then T1
 attempt 3.
+
+### C28 · Claude → Astra (and the next session) · 2026-10-30
+
+**Handoff.** The user is moving this work to another session. This entry is the state of play;
+read C27 first.
+
+**Since C27, on `feat/element-layer` (all pushed, not merged; no merging to main):**
+
+- `6c3d1adf` write_document reads several pages (a source of words reads the top 3 search
+  results) and the errand's earlier step results (`servertools.Turn.Prior` from
+  `errands.PriorResults`, each step's data as JSON, capped at 12000 runes). The planner folds a
+  deep_research step into the source of the write_document step after it.
+- `05ed45d7` `TestDocumentWorkflowsLive` (`document_workflows_eval_test.go`) runs six errand
+  shapes end to end on a real model, the real web and headless LibreOffice in a scratch home.
+  **Not run yet:** it needs a valid app client in `~/.config/jarvis-harness/installed.env`
+  (the current one is rejected). The user has to create it; never read the llama-server key from
+  the running process (the permission check refused that, rightly).
+- `cf1a1b22` `needsComputer` routes document and spreadsheet words and extensions to an errand
+  (not "type"/"dictate"). Before this, mobile chat called deep_research directly.
+- `4424d41a` a write_spreadsheet planned after a search, computer task or research becomes a
+  write_document of `<name>.xlsx` (it had written rows from memory: Saturn with 146 moons).
+- `17279413` setting `errands.documents_folder` (default `~/Documents`; must be it or inside it),
+  install-wide. Per-household would need the household settings allowlist, which is an access
+  change held for the user's review.
+
+**Deployed on the dev box:**
+- The agent is `cdc86417`. The previous binary is at `~/.local/lib/jarvis-agent/jarvis-agent.prev-dev-80c60e1d`.
+- jarvisd is `dev (1727941)`, built with the admin UI. The user swapped it in and confirmed the
+  setting works in the admin.
+- The 20:09 T1 run wrote `~/Documents/Apollo 11 conspiracy theories.odt` (14 paragraphs, checked
+  by the server).
+- Build jarvisd with the admin UI or it serves the placeholder page:
+  `npm --prefix web/admin ci && npm --prefix web/admin run build`, then `go build`, then verify with
+  `go test ./web/admin -run TestEmbeddedUI -tags release_ui`.
+- /tmp is nearly full, mostly other people's files. Run checks with
+  `TMPDIR=$(mktemp -d /var/tmp/jc.XXXX) scripts/check`. Don't point TMPDIR at a long path, because
+  Unix socket tests break.
+
+**Next feature, the user's "wow" flow (in progress):** download an email attachment, do the work on
+it, and stage a reply with the finished file in the mailbox's Drafts. The user's mailbox is Proton
+(Proton Bridge, IMAP), but they want every provider supported: Gmail OAuth and IMAP.
+
+Design (agreed in direction, not reviewed):
+1. **Find and save the attachment.** The email package (`alexberardi/jarvis-cmd-email`) gets an
+   action `save_attachments` {query | email_index}: the newest match that has files. Files go to
+   `~/Documents/Jarvis/Attachments/<date> <subject>/`, private, never overwriting, 25 MB cap, with
+   safe basenames. It returns `saved_files` plus the email's sender, subject and body. The
+   package runs in the desktop agent's sidecar, so the files land on the computer the document
+   tools work on.
+2. **Read it.** Office files go through `doc_read`, CSV through `read_computer_file`, PDFs and
+   images through jarvisd's OCR module (`internal/modules/ocr`). PDFs and images need a new
+   agent op that returns raw bytes. **To build:** write_document reads the files listed in earlier
+   steps' `saved_files` as material, wrapped with `computer.Untrusted`.
+3. **Do the work.** write_document writes the result, as it does today.
+4. **Stage the reply.** The package's `draft_reply` {query | email_index, body, attachments}
+   attaches only files under `~/Documents` (a planted path can't attach keys). It builds a reply
+   threaded to the original (In-Reply-To/References). IMAP: APPEND to the folder flagged `\Drafts`
+   (RFC 6154), else one named Drafts, flags `\Draft \Seen`. Gmail: `drafts.create` with threadId;
+   the existing `gmail.modify` scope covers it. **It never sends.** If the same query is used,
+   draft_reply answers the email save_attachments picked, since node step args are fixed when the
+   errand is planned.
+5. **Planner:** a rule for "email → document → draft_reply". The draft's attachment path is the
+   write_document path, which is known when the errand is planned.
+6. **Hardening, regardless of this flow:** office.py should load files with macros off
+   (`MacroExecutionMode` = NEVER_EXECUTE in loadComponentFromURL's properties), because
+   attachments come from strangers.
+
+**Package state:** branch `feat/attachments-and-drafts` in jarvis-cmd-email, pushed, WIP commit
+`2582796`, no PR.
+- **Done:**
+  - `email_shared/attachments.py` (parse, save, text_body, draft_file, build_reply_draft).
+  - `fetch_raw` and `create_draft` on both services.
+  - The two command actions, an `attachments` parameter, and rules.
+- **Broken:** test collection fails because `test_email_unsubscribe_callback.py` and
+  `test_email_unsubscribe_scan.py` stub `email_shared` as a bare module and don't load the new
+  `attachments` module. Fix it the way `test_email_services_verbs.py` loads real modules
+  (`_load_real`).
+- **To do:**
+  - Tests for the new actions and services, including a real IMAP round trip against a
+    throwaway local server (e.g. GreenMail in Docker), never the user's mailbox.
+  - The package isn't installed on the dev agent (only get_weather_meteo is). Installing it and
+    pointing it at Proton Bridge are the user's call.
+- **Its PR waits for the user's review:** it touches `email_shared/**` (the package's CLAUDE.md
+  holds those PRs). Releases and Pantry submission are the user's.
+
+**Still parked:**
+- Per-household documents folder (access review).
+- The budget flow using write_document after its checkpoint.
+- Editing a document that is open in LibreOffice.
+- Planner thinking hitting its 30 s budget.
+- Voice polish.
+- Your reviews of C25 to C27.
