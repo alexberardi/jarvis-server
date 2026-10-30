@@ -45,13 +45,13 @@ const memberNav: NavItem[] = [
 /** The Admin group: superusers only, and the server refuses these routes to anyone else (G1). */
 const adminNav: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/admin/dashboard' },
+  { label: 'Store', icon: Store, path: '/admin/store' },
   { label: 'Models', icon: Box, path: '/admin/models' },
   { label: 'Settings', icon: Settings, path: '/admin/settings' },
   { label: 'Connections', icon: Link2, path: '/admin/connections' },
   { label: 'Logs', icon: ScrollText, path: '/admin/logs' },
   { label: 'Traces', icon: Activity, path: '/admin/traces' },
   { label: 'Nodes', icon: Cpu, path: '/admin/nodes' },
-  { label: 'Store', icon: Store, path: '/admin/store' },
   { label: 'Users', icon: Users, path: '/admin/users' },
   { label: 'Phone', icon: Phone, path: '/admin/phone' },
   // /update used to be reachable ONLY via the dashboard's UpdateBanner, which

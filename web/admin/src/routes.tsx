@@ -44,6 +44,7 @@ const UiGalleryPage =
  */
 const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'dashboard', element: <DashboardPage /> },
+  { path: 'store', element: <StorePage /> },
   { path: 'models', element: <ModelsPage /> },
   { path: 'settings', element: <SettingsPage /> },
   { path: 'connections', element: <ConnectionsPage /> },
@@ -51,7 +52,6 @@ const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'traces', element: <TracesPage /> },
   { path: 'traces/:id', element: <TraceDetailPage /> },
   { path: 'nodes', element: <NodesPage /> },
-  { path: 'store', element: <StorePage /> },
   { path: 'users', element: <UsersPage /> },
   { path: 'phone', element: <PhonePage /> },
   { path: 'update', element: <UpdatePage /> },

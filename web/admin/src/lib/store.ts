@@ -29,13 +29,24 @@ export function aptPackages(pkgs: StoreDetail[]): string[] {
   return [...new Set(pkgs.flatMap((p) => p.apt_packages ?? []))]
 }
 
-/** nodeNames labels each node as the app does, adding its short id where two would read the same. */
+/** nodeName is what the Store calls a node: its registered name, else the app's label (room or short id). */
+export function nodeName(n: NodeLiveness): string {
+  return n.name?.trim() || nodeLabel(n)
+}
+
+/** nodeRoom is a node's room as a second line, or null when it adds nothing (no room, or it is the name). */
+export function nodeRoom(n: NodeLiveness): string | null {
+  const room = n.room?.trim().replace(/_/g, ' ')
+  return room && room !== 'default' && room !== 'desktop' && room !== nodeName(n) ? room : null
+}
+
+/** nodeNames names each node (nodeName), adding its short id where two would read the same. */
 export function nodeNames(nodes: NodeLiveness[]): Map<string, string> {
   const count = new Map<string, number>()
-  for (const n of nodes) count.set(nodeLabel(n), (count.get(nodeLabel(n)) ?? 0) + 1)
+  for (const n of nodes) count.set(nodeName(n), (count.get(nodeName(n)) ?? 0) + 1)
   return new Map(
     nodes.map((n) => {
-      const l = nodeLabel(n)
+      const l = nodeName(n)
       return [n.node_id, (count.get(l) ?? 0) > 1 ? `${l} (${n.node_id.slice(0, 8)})` : l]
     }),
   )

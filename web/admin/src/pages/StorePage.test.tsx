@@ -70,7 +70,7 @@ beforeEach(() => {
   settings.putHouseholdSetting.mockResolvedValue(undefined)
   nodes.getNodeLiveness.mockResolvedValue([
     node('kitchen'),
-    node('laptop', { node_kind: 'desktop', name: 'Laptop' }),
+    node('laptop', { node_kind: 'desktop', name: 'Laptop', room: 'desktop' }),
     node('garage', { online: false }),
     node('elsewhere', { household_id: 'h2' }),
   ])

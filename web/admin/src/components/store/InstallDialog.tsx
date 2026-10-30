@@ -9,7 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useNodeLiveness } from '@/hooks/useNodes'
 import { nodeLabel } from '@/lib/chatNode'
 import { errorMessage } from '@/lib/errors'
-import { aptPackages, nodeNames, notForComputer } from '@/lib/store'
+import { aptPackages, nodeNames, nodeRoom, notForComputer } from '@/lib/store'
 
 interface InstallDialogProps {
   /** The packages to install: one, or the default bundle. */
@@ -206,7 +206,9 @@ export default function InstallDialog({ names, label, householdId, onClose }: In
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{labels.get(n.node_id)}</span>
-                      {why && <span className="block text-small text-text-muted">{why}</span>}
+                      {(nodeRoom(n) || why) && (
+                        <span className="block text-small text-text-muted">{[nodeRoom(n), why].filter(Boolean).join(' · ')}</span>
+                      )}
                     </span>
                     <Badge>{n.node_kind === 'desktop' ? 'Computer' : 'Pi'}</Badge>
                   </label>

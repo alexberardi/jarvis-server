@@ -71,7 +71,7 @@ test('installs a package on a chosen node', async ({ page }) => {
   const dialog = page.getByRole('dialog')
   // The superuser may be in more than one household: keep its own, then pick the node.
   if (await dialog.getByRole('button', { name: 'Next' }).isVisible()) await dialog.getByRole('button', { name: 'Next' }).click()
-  await dialog.getByRole('checkbox', { name: /store room/ }).check()
+  await dialog.getByRole('checkbox', { name: /store pi/ }).check()
   const [created] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith(`/nodes/${nodeId}/package-install`) && r.request().method() === 'POST'),
     dialog.getByRole('button', { name: 'Install on 1 node' }).click(),

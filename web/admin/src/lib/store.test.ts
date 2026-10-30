@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StoreDetail } from '@/api/store'
 import type { NodeLiveness } from '@/api/nodes'
-import { aptPackages, nodeNames, notForComputer, parseBundle, withBundle } from './store'
+import { aptPackages, nodeNames, nodeRoom, notForComputer, parseBundle, withBundle } from './store'
 
 const pkg = (over: Partial<StoreDetail>): StoreDetail => ({
   command_name: 'doorbell',
@@ -40,6 +40,18 @@ describe('store', () => {
       'ffmpeg',
       'sox',
     ])
+  })
+
+  it('names a node by its registered name, with its room as a second line', () => {
+    const pi = { node_id: 'aaaa1111', room: 'living_room', name: 'dev-living-room', node_kind: null } as NodeLiveness
+    expect(nodeNames([pi]).get('aaaa1111')).toBe('dev-living-room')
+    expect(nodeRoom(pi)).toBe('living room')
+    // No name: the room is the name, and isn't repeated.
+    const unnamed = { ...pi, name: null }
+    expect(nodeNames([unnamed]).get('aaaa1111')).toBe('living room')
+    expect(nodeRoom(unnamed)).toBeNull()
+    // A computer's room is always "desktop": not worth a line.
+    expect(nodeRoom({ ...pi, room: 'desktop', node_kind: 'desktop' })).toBeNull()
   })
 
   it('tells apart two nodes that would read the same', () => {

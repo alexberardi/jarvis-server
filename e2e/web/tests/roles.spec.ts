@@ -16,14 +16,14 @@ const MEMBER_PAGES = [
 // answers without setup).
 const ADMIN_PAGES: { label: string; path: string; heading: string; api?: string }[] = [
   { label: 'Dashboard', path: '/admin/dashboard', heading: 'Dashboard', api: '/api/system/info' },
+  // Its Pantry calls need a household with the Pantry on: store.spec.ts checks a member is refused them.
+  { label: 'Store', path: '/admin/store', heading: 'Store' },
   { label: 'Models', path: '/admin/models', heading: 'Models', api: '/api/llm/v1/models/installed' },
   { label: 'Settings', path: '/admin/settings', heading: 'Settings', api: '/api/settings/' },
   { label: 'Connections', path: '/admin/connections', heading: 'Connections', api: '/api/connections' },
   { label: 'Logs', path: '/admin/logs', heading: 'Logs', api: '/api/logs?limit=1' },
   { label: 'Traces', path: '/admin/traces', heading: 'Traces', api: '/api/traces?limit=1' },
   { label: 'Nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
-  // Its Pantry calls need a household with the Pantry on: store.spec.ts checks a member is refused them.
-  { label: 'Store', path: '/admin/store', heading: 'Store' },
   { label: 'Users', path: '/admin/users', heading: 'Users', api: '/api/admin/users' },
   { label: 'Phone', path: '/admin/phone', heading: 'Phone', api: '/api/phone/sip' },
   { label: 'Updates', path: '/admin/update', heading: 'Updates', api: '/api/update' },
