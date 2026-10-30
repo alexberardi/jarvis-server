@@ -157,6 +157,12 @@ func TestNeedsComputer(t *testing.T) {
 		"Use my laptop to look up the train times": true,
 		"how do I use the remote":                  false,
 		"open wikipedia.org":                       false,
+		// C27: documents and spreadsheets are errands (write_document), "write" included.
+		"Deep research the Apollo 11 moon landing conspiracy theories and put a summary of them in a Word document called hoax-2.docx in my Documents.": true,
+		"Write a 2 page article about Apollo 11 and save it as apollo.odt":                                                                              true,
+		"add a row for internet to my budget spreadsheet":                                                                                               true,
+		"type hello world into the document":                                                                                                            false,
+		"remind me to update the spreadsheet":                                                                                                           false,
 	} {
 		if got := needsComputer(s); got != want {
 			t.Errorf("needsComputer(%q) = %v, want %v", s, got, want)
