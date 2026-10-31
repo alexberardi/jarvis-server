@@ -350,6 +350,39 @@ func TestSheetFromAttachments(t *testing.T) {
 	}
 }
 
+// A plan that saves an email's attachments and replies with a file, but writes nothing, gets the
+// write_document step it left out (C29: save_attachments then draft_reply of a made-up path).
+func TestAttachmentWork(t *testing.T) {
+	menu := []MenuEntry{{Command: "email"}, {Command: cmdWriteDoc}}
+	save := Step{Command: "email", Args: servertools.Obj("action", "save_attachments", "query", "q3 hours")}
+	reply := Step{Command: "email", Args: servertools.Obj("action", "draft_reply", "query", "q3 hours", "attachments", "~/Documents/q3 hours spreadsheet")}
+	goal := "Take the spreadsheet from the q3 hours email, total the moons in it, then draft a reply with it attached"
+	got := attachmentWork(goal, []Step{save, reply}, menu)
+	if stepNames(got) != "email:save_attachments, write_document, email:draft_reply" {
+		t.Fatalf("plan %q", stepNames(got))
+	}
+	if p, in := truthyStr(got[1].Args, "path"), truthyStr(got[1].Args, "instructions"); p != "q3 hours spreadsheet.xlsx" || !strings.HasPrefix(in, goal) {
+		t.Fatalf("doc step %q / %q", p, in)
+	}
+	// Left alone: a write step already there, a reply without a file, no write_document on the menu.
+	doc := Step{Command: cmdWriteDoc, Args: servertools.Obj("path", "t.odt")}
+	if len(attachmentWork(goal, []Step{save, doc, reply}, menu)) != 3 {
+		t.Fatal("a second write step was added")
+	}
+	bare := Step{Command: "email", Args: servertools.Obj("action", "draft_reply", "query", "q3 hours")}
+	if len(attachmentWork(goal, []Step{save, bare}, menu)) != 2 || len(attachmentWork(goal, []Step{save, reply}, menu[:1])) != 2 {
+		t.Fatal("a step was added without a file to attach or without write_document")
+	}
+	// A named office file keeps its name; anything else is a text document unless a sheet was asked for.
+	named := Step{Command: "email", Args: servertools.Obj("action", "draft_reply", "attachments", "~/Documents/Totals.ods")}
+	if p := truthyStr(attachmentWork("x", []Step{save, named}, menu)[1].Args, "path"); p != "Totals.ods" {
+		t.Fatalf("named path %q", p)
+	}
+	if p := truthyStr(attachmentWork("summarize the report", []Step{save, reply}, menu)[1].Args, "path"); p != "q3 hours spreadsheet.odt" {
+		t.Fatalf("text path %q", p)
+	}
+}
+
 // The email-attachments rule comes with write_document and the email package, never alone.
 func TestEmailFilesRule(t *testing.T) {
 	if got := computerRulesFor([]MenuEntry{{Command: cmdWriteDoc}, {Command: "email"}}); !strings.Contains(got, documentRule+emailFilesRule) {

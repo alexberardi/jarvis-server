@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -413,6 +414,43 @@ func dropAttachmentReads(steps []Step) []Step {
 		out = append(out, st)
 	}
 	return out
+}
+
+// attachmentWork inserts the write_document step a plan left out between saving an email's
+// attachments and a reply that attaches a file: the planner went straight from save_attachments
+// to draft_reply with a made-up attachment path (C29), so nothing did the work the user asked
+// for. The step writes from the saved files with the user's words as its instructions; its name
+// is the one the reply meant to attach, and attachWrittenFiles attaches what it actually wrote.
+func attachmentWork(goal string, steps []Step, menu []MenuEntry) []Step {
+	if !menuHas(menu, cmdWriteDoc) {
+		return steps
+	}
+	saved := false
+	for i, st := range steps {
+		switch {
+		case st.Command == cmdWriteDoc || st.Command == cmdWriteSheet:
+			return steps
+		case st.Command == "email" && truthyStr(st.Args, "action") == "save_attachments":
+			saved = true
+		case saved && st.Command == "email" && truthyStr(st.Args, "action") == "draft_reply" && truthyStr(st.Args, "attachments") != "":
+			name := path.Base(strings.TrimSpace(strings.Split(truthyStr(st.Args, "attachments"), ",")[0]))
+			ext := strings.ToLower(path.Ext(name))
+			if ext != ".odt" && ext != ".docx" && ext != ".ods" && ext != ".xlsx" {
+				ext = ".odt"
+				if g := strings.ToLower(goal); strings.Contains(g, "spreadsheet") || strings.Contains(g, "sheet") || strings.Contains(g, "xlsx") || strings.Contains(g, "excel") {
+					ext = ".xlsx"
+				}
+				name = strings.TrimSuffix(name, path.Ext(name)) + ext
+			}
+			if strings.TrimSuffix(name, ext) == "" || strings.HasPrefix(name, ".") {
+				name = "Reply attachment" + ext
+			}
+			doc := Step{Command: cmdWriteDoc, Label: "Do the work on the attachment",
+				Args: servertools.Obj("path", name, "instructions", goal+" Work from the email's saved attachments.")}
+			return append(append(append([]Step(nil), steps[:i]...), doc), steps[i:]...)
+		}
+	}
+	return steps
 }
 
 // stepNames is a plan's steps for the log: command, and the action where there is one.
@@ -916,7 +954,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)))))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))))
 	return plan, err
 }
 
@@ -956,7 +994,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)))))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))
 	return plan, err
 }
 
