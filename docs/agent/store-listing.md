@@ -194,15 +194,47 @@ Once a listed version is approved:
 - **First-run window:** the "Add to Firefox" button of the planned window (§13) can link to the
   AMO listing instead of opening the embedded file.
 
+## Publishing from CI
+
+Every release tag (`v*`) runs `.github/workflows/browser-ext-publish.yml`, which runs
+`scripts/browser-ext-publish.sh` for each store
+([decision](../decisions/2026-10-30-browser-ext-publish-on-tag.md)):
+
+- **Chrome:** if neither the published nor the in-review revision is at the source version, it
+  uploads `browser-ext-store-zip.sh chrome`'s zip through the Chrome Web Store API v2, waits for
+  the upload to be processed and submits it for review. Google publishes it once approved.
+- **Firefox:** it submits the version to AMO's **listed** channel and doesn't wait for review.
+  When AMO already has the version ("already exists"), it skips. That includes a version
+  signed unlisted with `browser-ext-sign.sh`, so **while the release gate requires the
+  signed `.xpi` before the tag, a version signed unlisted never goes listed through CI.** To
+  list a version, submit it to the listed channel first (by hand, or the workflow's manual
+  run), and commit the approved `.xpi` before tagging.
+
+Both jobs run in the `browser-stores` environment. Before the first tag, once:
+
+1. **Environment:** repo Settings → Environments → **New environment** `browser-stores` →
+   Required reviewers: you. Each tag then waits for your approval before anything is published.
+2. **Chrome service account:** Google Cloud console → a project → enable the **Chrome Web Store
+   API** → IAM → Service accounts → **Create** (no roles) → Keys → **Add key** → JSON. In the
+   Chrome Web Store Developer Dashboard → **Account**, add the service account's email (one
+   per publisher). The dashboard's Account page also shows the **publisher id**.
+3. **Secrets** on the `browser-stores` environment: `CWS_SERVICE_ACCOUNT_KEY` (the whole JSON
+   key file), `CWS_PUBLISHER_ID`, `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` (the same pair as
+   `browser-ext-sign.sh`). Then delete the downloaded key file.
+
+Locally, the same script works with the same variables (`CWS_ACCESS_TOKEN` instead of the key,
+if you have one). `scripts/browser-ext-publish-check.sh` (CI) runs it against a fake store.
+
 ## Publishing updates
 
 1. Bump `version` in `internal/agent/browser/extension/manifest.json`. Both stores refuse a
    version they've seen.
 2. Run `scripts/browser-ext-lint.sh` and the Go tests. `TestManifestStoreLimits` keeps the
    description within Chrome's 132 characters.
-3. **Chrome:** `scripts/browser-ext-store-zip.sh chrome` → dashboard → the item → Package →
-   **Upload new package** → Submit for review. Update the Privacy tab first if the permissions
-   or the data the extension reads changed.
+3. **Chrome:** the release tag publishes it (above). By hand: `scripts/browser-ext-store-zip.sh
+   chrome` → dashboard → the item → Package → **Upload new package** → Submit for review.
+   Update the Privacy tab first if the permissions or the data the extension reads changed: CI
+   uploads the package only.
 4. **Firefox:** `scripts/browser-ext-store-zip.sh firefox` → Developer Hub → **Upload New
    Version** → "On this site" → source: No → reviewer notes → submit. After approval, commit the
    signed `.xpi` as above (or, before the listing exists, re-sign unlisted as above). The release
