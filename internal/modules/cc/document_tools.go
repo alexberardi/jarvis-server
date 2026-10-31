@@ -118,6 +118,17 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	case agentCode(out, "") != "not_found":
 		return recordingRefusal(agentCode(out, "read_failed"), "I couldn't open "+path.Base(p)+": "+agentError(out)), nil
 	}
+	// A new spreadsheet worked out from one the errand just saved starts as a copy of it: the
+	// model edits the attachment's own cells ("total the moons" adds a Total row) instead of
+	// rewriting them, which it skipped (C29: =SUM(B2:B9) over an empty new sheet).
+	var from string
+	for _, f := range turn.PriorFiles {
+		if e := strings.ToLower(path.Ext(f)); !exists && sheet && from == "" && (e == ".xlsx" || e == ".ods") {
+			if o := agent(map[string]any{"op": "doc_read", "path": f}); dispatchOK(o) {
+				from, current = f, truncateRunes(renderDoc(o), docTextRunes)
+			}
+		}
+	}
 	var material []string
 	var sources []any
 	if ref := argText(call, "source"); ref != "" {
@@ -134,17 +145,24 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 		material = append(material, "Earlier steps of this errand:\n"+turn.Prior)
 	}
 	for _, f := range turn.PriorFiles {
+		if f == from {
+			continue // it is the spreadsheet as it is now
+		}
 		material = append(material, "File "+path.Base(f)+" (saved by an earlier step):\n"+
 			truncateRunes(priorFileText(agent, f), docMaterialRunes/len(turn.PriorFiles)))
 	}
 	m.deps.Log.Info("cc: write_document", "path", p, "exists", exists, "sources", sources, "prior_steps", turn.Prior != "",
-		"prior_files", len(turn.PriorFiles))
+		"prior_files", len(turn.PriorFiles), "from", from)
 
-	ops, err := m.documentEdits(ctx, turn.Utterance, instr, sheet, current, exists, truncateRunes(strings.Join(material, "\n\n"), docMaterialRunes))
+	ops, err := m.documentEdits(ctx, turn.Utterance, instr, sheet, current, exists || from != "", truncateRunes(strings.Join(material, "\n\n"), docMaterialRunes))
 	if err != nil {
 		return recordingRefusal("model_failed", "I couldn't write "+path.Base(p)+": "+err.Error()), nil
 	}
-	out = agent(map[string]any{"op": "doc_edit", "path": p, "create": !exists, "ops": ops})
+	edit := map[string]any{"op": "doc_edit", "path": p, "create": !exists, "ops": ops}
+	if from != "" {
+		edit["from"] = from
+	}
+	out = agent(edit)
 	if !dispatchOK(out) {
 		return recordingRefusal(agentCode(out, "write_failed"), "I couldn't save "+path.Base(p)+": "+agentError(out)), nil
 	}

@@ -117,6 +117,7 @@ var (
 			{Name: "path", Type: "string", Required: true},
 			{Name: "content_b64", Type: "string", Description: "write: the file's bytes"},
 			{Name: "create", Type: "bool", Description: "doc_edit: make the document (it must not exist yet)"},
+			{Name: "from", Type: "string", Description: "doc_edit with create: start the new document as a copy of this one (same kind)"},
 			{Name: "ops", Type: "array", Description: "doc_edit: the edits, in order (office.py)"}}}
 	stopSpec = node.Spec{Name: computeruse.ToolStop, Description: "Stop a computer task.",
 		Params: []node.Param{runParam}}
@@ -156,7 +157,7 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		case "doc_edit":
 			create, _ := args["create"].(bool)
 			ops, _ := args["ops"].([]any)
-			return t.docEdit(ctx, stringArg(args, "path"), create, ops), true
+			return t.docEdit(ctx, stringArg(args, "path"), create, stringArg(args, "from"), ops), true
 		}
 		return t.files(args), true
 	}
