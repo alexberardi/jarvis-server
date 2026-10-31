@@ -50,6 +50,17 @@ func TestNodeMenuDenyListAndArgs(t *testing.T) {
 	}
 }
 
+// A parameter's allowed values reach the planner: email's save_attachments/draft_reply are named
+// nowhere else, and without them the planner planned "read" (C29).
+func TestNodeMenuListsAllowedValues(t *testing.T) {
+	menu := NodeMenu([]*pyjson.Object{mustObj(t, `{"command_name": "email", "parameters": [`+
+		`{"name": "action", "description": "Action to perform", "enum_values": ["list", "save_attachments", "draft_reply"]},`+
+		`{"name": "mode", "type": "string", "enum_values": []}]}`)})
+	if got := pyjson.Dumps(menu[0].Args, true); got != `{"action": "Action to perform (one of: list, save_attachments, draft_reply)", "mode": "string"}` {
+		t.Fatalf("args = %s", got)
+	}
+}
+
 func TestFullMenuGatesAndServerWins(t *testing.T) {
 	e := newTenv(t, false)
 	e.tools.Register(&fakeTool{name: "make_phone_call", def: toolDef("make_phone_call", "Call a business",
