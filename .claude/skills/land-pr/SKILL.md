@@ -75,3 +75,12 @@ PRs are squash-merged, so main's subjects end in `(#N)` on their own: nothing to
   `gh pr merge --auto` or merge another author's PR.
 - Prod (`<prod-host>`) is read-only. Merging does not deploy. Releases follow the `cut-rc`
   skill, and the user applies them.
+
+## 7. Cleanup before handoff
+
+Follow [temporary files and cleanup](../../../AGENTS.md#temporary-files-and-cleanup),
+including after failed checks: stop your task's processes, purge its sandbox and
+remove disposable scratch/build output. Reuse shared disk-backed caches instead of
+leaving per-task caches in `/tmp`. Inspect untracked and ignored files before removing
+a finished worktree with `git worktree remove`; keep anything still needed for review.
+Report any retained artifacts or processes, their paths/names and why they remain.

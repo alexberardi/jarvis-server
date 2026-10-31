@@ -167,6 +167,53 @@ invocation and scheduling rules. Real-Pi audio is overnight only and must leave
 the Pi as found. FreePBX L2 runs by hand on Thursdays on the dev box, never a timer.
 Use fake/local providers and a test PBX, never paid speech providers or a real carrier.
 
+## Temporary files and cleanup
+
+Cleanup is part of task completion, including failed or interrupted runs.
+Keep track of the exact scratch directories, processes and sandbox names you
+create; after an interruption, check for leftovers before starting another run.
+
+- Reuse the normal disk-backed Go build/module caches across worktrees. Check
+  `go env GOCACHE GOTMPDIR GOMODCACHE` before a large build; do not assign a new
+  `GOCACHE` under `/tmp` for each task. An isolated cache is disposable and must
+  be removed when its run finishes. Do not routinely run `go clean -cache` or
+  `go clean -modcache` against shared caches.
+- Use `mktemp -d` and an exit trap for disposable files. When `/tmp` is constrained,
+  use a short, disk-backed `TMPDIR`/`GOTMPDIR`, scoped to the command or subshell.
+  Keep paths short for Unix-socket tests. Scratch under `~/.cache` still needs
+  removal; do not accumulate a new fallback directory on every retry.
+- Stop your sandbox with `scripts/sandbox down --name <task> --purge` after
+  saving needed evidence. Without `--purge`, its data and binaries remain.
+  Stop other processes you launched before removing their files. Remove your
+  scratch builds, downloads and redundant `.e2e/<run>/` reports; retain only
+  evidence needed for review/debugging and report its path and reason.
+- Remove your finished worktree with `git worktree remove` from another checkout
+  once commits are pushed and no work or review needs it. Check untracked and
+  ignored files first; remove only disposable generated files you own, preserving
+  credentials and unfinished work. Do not force removal to bypass that check.
+- On a space/quota error, inspect `df -h`, `df -i` and relevant directory sizes
+  before retrying. Delete only artifacts you know belong to your finished task.
+  Never sweep `/tmp`, purge shared model/package caches or clean another task's
+  sandbox/worktree. Age or a familiar filename alone does not establish ownership.
+
+For a foreground check needing disk-backed scratch (Bash):
+
+```bash
+(
+  set -e
+  task_tmp_base="${XDG_CACHE_HOME:-$HOME/.cache}"
+  mkdir -p -- "$task_tmp_base"
+  task_tmp=$(mktemp -d "$task_tmp_base/jtmp.XXXXXX")
+  trap 'rm -rf -- "$task_tmp"' EXIT
+  export TMPDIR="$task_tmp" GOTMPDIR="$task_tmp"
+  scripts/check --all
+)
+```
+
+The existing `GOCACHE` is reused. Keep any needed failure evidence outside the
+disposable directory before it is removed. A killed shell cannot always run its
+trap, so verify cleanup after cancellation as well as normal completion.
+
 ## Graphify and documentation
 
 If an existing `graphify-out/graph.json` is available, use Graphify to find
