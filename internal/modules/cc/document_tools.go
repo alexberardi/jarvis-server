@@ -280,6 +280,13 @@ func (m *Module) documentEdits(ctx context.Context, goal, instr string, sheet bo
 		}
 		if err := json.Unmarshal([]byte(resp.Content), &out); err != nil || len(out.Ops) == 0 {
 			lastErr = errors.New("the model's answer had no edits")
+			// Shape only: a parse error shows the answer's start (malformed JSON, not the document).
+			attrs := []any{"label", label, "finish", resp.FinishReason, "chars", len(resp.Content),
+				"completion_tokens", resp.Usage.CompletionTokens, "sheet", sheet}
+			if err != nil {
+				attrs = append(attrs, "parse_error", err.Error(), "start", truncateRunes(resp.Content, 80))
+			}
+			m.deps.Log.Warn("cc: write_document: no edits", attrs...)
 			continue
 		}
 		for _, o := range out.Ops {
