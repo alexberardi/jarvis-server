@@ -2,7 +2,7 @@
 
 from typing import List
 
-from jarvis_command_sdk import CommandResponse, IJarvisCommand, JarvisParameter, callback, get_current_user_id
+from jarvis_command_sdk import CommandResponse, IJarvisButton, IJarvisCommand, JarvisParameter, callback, get_current_user_id
 from jarvis_command_sdk.command import CommandExample
 
 
@@ -35,6 +35,10 @@ class ShoutCommand(IJarvisCommand):
 
     def run(self, request_info, **kwargs) -> CommandResponse:
         print("this print must not corrupt the protocol")
+        if kwargs["text"] == "confirm":
+            resp = CommandResponse.follow_up_response(context_data={"message": "Shout it?"})
+            resp.actions = [IJarvisButton("Shout", "shout_click", "primary", "send", "Shouted!")]
+            return resp
         return CommandResponse.success_response(context_data={"message": kwargs["text"].upper(), "user_id": request_info.user_id})
 
     def handle_action(self, action_name, context):

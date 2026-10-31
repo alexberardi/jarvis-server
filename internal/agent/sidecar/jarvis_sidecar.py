@@ -1184,6 +1184,10 @@ def call(commands: dict, params: dict) -> dict:
     if not resp.success:
         output["error"] = resp.error_details or "Command failed"
     output["success"] = resp.success
+    # Tap-to-confirm buttons (email's Send/Cancel), as N:mqtt_tts_listener.py adds them: the
+    # server builds the app's confirm card from them.
+    if getattr(resp, "actions", None):
+        output["actions"] = [a.to_dict() for a in resp.actions]
     signals = {"wait_for_input": bool(resp.wait_for_input), "clear_history": bool(resp.clear_history)}
     callback = getattr(resp, "on_response_complete", None)
     if callback is not None:

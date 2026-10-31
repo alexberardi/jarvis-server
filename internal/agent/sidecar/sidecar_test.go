@@ -52,6 +52,12 @@ func TestSidecarLoadsACommandAndAnswersACall(t *testing.T) {
 	if !ok || out["success"] != true || out["message"] != "HELLO" || out["user_id"] != 7.0 || len(out) != 3 {
 		t.Fatalf("call = %v, %v", out, ok)
 	}
+	// Tap-to-confirm buttons reach the server, which builds the app's confirm card from them.
+	out, _ = sc.Call(ctx, "shout", map[string]any{"text": "confirm"}, node.Request{})
+	node.TakeSignals(out)
+	if acts, _ := out["actions"].([]any); len(acts) != 1 || acts[0].(map[string]any)["button_action"] != "shout_click" {
+		t.Fatalf("actions = %v", out["actions"])
+	}
 	// A second call on the same warm process.
 	out, _ = sc.Call(ctx, "shout", map[string]any{"text": "again"}, node.Request{})
 	if out["message"] != "AGAIN" {
