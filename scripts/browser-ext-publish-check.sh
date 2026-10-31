@@ -121,6 +121,10 @@ if chrome; then fail "chrome, failed upload: succeeded"; fi
 has "$T/out" "ended as 'FAILED'"
 lacks "$T/requests" ":publish"
 
+# A refused request shows the store's reason.
+if CWS_API=$API CWS_ACCESS_TOKEN=wrong CWS_PUBLISHER_ID=pub1 "$SCRIPT" chrome >"$T/out" 2>&1; then fail "chrome, refused token: succeeded"; fi
+has "$T/out" '"error":"unauthenticated"'
+
 # 4. AMO.
 export FAKE_LOG=$T/sign.log
 firefox() { PATH=$T/bin:$PATH AMO_JWT_ISSUER=user:1:2 AMO_JWT_SECRET=s FAKE_SIGN=$1 "$SCRIPT" firefox >"$T/out" 2>&1; }

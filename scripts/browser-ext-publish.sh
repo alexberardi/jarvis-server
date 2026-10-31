@@ -26,6 +26,8 @@ npx_() {
   if command -v npx >/dev/null 2>&1; then npx "$@"; else mise exec node@lts -- npx "$@"; fi
 }
 log() { echo "browser-ext-publish: $*" >&2; }
+# api: curl that fails on an HTTP error and prints the response body (the store's reason) to stderr.
+api() { local out; out=$(curl -sS --fail-with-body "$@") || { echo "$out" >&2; return 1; }; printf '%s' "$out"; }
 
 VERSION=$(node_ -p 'require(process.argv[1]).version' "$ROOT/internal/agent/browser/extension/manifest.json")
 
@@ -45,7 +47,7 @@ cws_token() {
       iat: now, exp: now + 3600 });
     process.stdout.write(body + "." + crypto.sign("RSA-SHA256", Buffer.from(body), k.private_key).toString("base64url"));
   ')
-  curl -fsS "${CWS_TOKEN_URL:-https://oauth2.googleapis.com/token}" -d grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer \
+  api "${CWS_TOKEN_URL:-https://oauth2.googleapis.com/token}" -d grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer \
     --data-urlencode "assertion=$assertion" | node_ -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0)).access_token)'
 }
 
@@ -56,7 +58,7 @@ chrome() {
     CWS_ACCESS_TOKEN=$(cws_token)
   fi
   local item="publishers/$CWS_PUBLISHER_ID/items/$CHROME_ITEM" auth="Authorization: Bearer $CWS_ACCESS_TOKEN"
-  status() { curl -fsS -H "$auth" "$CWS/v2/$item:fetchStatus"; }
+  status() { api -H "$auth" "$CWS/v2/$item:fetchStatus"; }
 
   local st have
   st=$(status)
@@ -77,7 +79,7 @@ chrome() {
   local zip="$ROOT/dist/jarvis-browser-chrome-$VERSION.zip"
   "$ROOT/scripts/browser-ext-store-zip.sh" chrome "$zip" >/dev/null
   local up state
-  up=$(curl -fsS -X POST -H "$auth" -H "Content-Type: application/zip" --data-binary "@$zip" \
+  up=$(api -X POST -H "$auth" -H "Content-Type: application/zip" --data-binary "@$zip" \
     "$CWS/upload/v2/$item:upload?uploadType=media")
   state=$(node_ -p 'JSON.parse(process.argv[1]).uploadState ?? ""' "$up")
   # The docs name the pending state both IN_PROGRESS and UPLOAD_IN_PROGRESS.
@@ -91,7 +93,7 @@ chrome() {
     return 1
   fi
   local pub
-  pub=$(curl -fsS -X POST -H "$auth" -H "Content-Type: application/json" -d '{}' "$CWS/v2/$item:publish")
+  pub=$(api -X POST -H "$auth" -H "Content-Type: application/json" -d '{}' "$CWS/v2/$item:publish")
   log "Chrome Web Store: $VERSION submitted ($(node_ -p 'JSON.parse(process.argv[1]).state' "$pub"))"
   # shellcheck disable=SC2016 # a JavaScript template literal
   node_ -e '
