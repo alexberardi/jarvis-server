@@ -8,6 +8,12 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 
 ## Current phase: 6 (packaging) — pre-releases through `v0.1.0-rc18.10`, no full release yet; from rc18 (user 2026-10-21) jarvisd is the install for new users and the legacy stack is retired for new installs; prod cut over to jarvisd (rc12, 2026-10-09). Phases 0–5 done. In parallel: the Go node, `jarvis-agent` (desktop voice, browser control, island, read the screen, dictation; Pi phase 4.1 HAT done, 4.3 `install-pi.sh` built, 3a and 3b (not yet run on a Pi), shipped with each release (#162), 4.4 provisioning HTTP API done, NetworkManager D-Bus Wi-Fi backend + recovery cycle built (not yet run on a Pi), 4.5 the built-in commands in the sidecar built, with reminders, alerts and the button (#175) (not yet on a Pi), parity 5.7 factory reset + routines sync + context requests built (not yet on a Pi; a reset Pi boots into setup mode, #292, not yet on a Pi), 4.2 next; the 24 h soak script `scripts/pi-soak.sh`, the parity checklist and the Python node's retirement path are written ([go-pi-node §3.19](agent/go-pi-node.md), #181): the soak is the user's to run on the lab Zero 2 W, and the retirement is **blocked** on five open gaps: #180 17b–17e (17b built, not yet on a Pi), voice device control/routines/send_link (Go built-ins, not yet on a Pi), K2 + settings snapshot on the Pi, setup mode at boot (built, #292; the lab Pi check left), the on-device rollback repro)
 
+### Touch display (2026-10-23)
+
+- [x] Opt-in agent shell, central inheritance and acknowledgements, PIN exit, device and media controls, sandboxed themes, receivers and speech visualisation.
+- [x] Pilot on a Surface Pro 6: reboot, automatic kiosk login, Jabra voice, finger touch, full-screen speech waveform and PIN exit confirmed. Other screen-equipped devices are untested.
+- [ ] Real external Chromecast routing, phone sender applications and subscription website compatibility sign-off. See [touch display operation](agent/touch-display.md).
+
 ### Before the official release (user 2026-10-12): next step
 
 **Installer plan:** [install/01-no-cli-plan.md](install/01-no-cli-plan.md) ties the three "without a terminal" items below into one build order (artifacts per OS, CI jobs, sign-off matrix, open questions Q1–Q8).

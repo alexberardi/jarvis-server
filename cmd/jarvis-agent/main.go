@@ -43,6 +43,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
+	displaynode "github.com/alexberardi/jarvis-server/internal/agent/display"
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
@@ -61,6 +62,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
+	adminui "github.com/alexberardi/jarvis-server/web/admin"
 )
 
 var version = "dev"
@@ -165,6 +167,8 @@ func main() {
 	switch os.Args[1] {
 	case "enroll":
 		err = enroll(ctx, os.Args[2:])
+	case "display-player":
+		err = displaynode.RunReceiverPlayer(ctx, os.Args[2:])
 	case "run":
 		redirectLaunchdOutput()
 		err = run(ctx, os.Args[2:])
@@ -564,6 +568,7 @@ type runFlags struct {
 	voiceOn, noOverlay *bool
 	computerOn         *bool
 	noTray             *bool
+	displayOn          *bool
 	noAutoUpdate       *bool
 	profile            *string
 	vf                 *voiceFlags
@@ -579,10 +584,11 @@ const voiceByDefault = true
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
-		cp:      fs.String("creds", "", "credentials file"),
-		config:  fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
-		tf:      addToolFlags(fs),
-		voiceOn: fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		displayOn: fs.Bool("display", false, "offer the local touch display, configured by the server; needs a Linux graphical session with a screen"),
+		cp:        fs.String("creds", "", "credentials file"),
+		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
+		tf:        addToolFlags(fs),
+		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
 		computerOn: fs.Bool("computer-control", false, `let Jarvis use this computer (computer tasks, recording); `+
 			`off by default, the menu's "Computer control" sets it`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
@@ -785,7 +791,24 @@ func runAgent(ctx context.Context, args []string) error {
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
-	served := nodesettings.Gate{Tools: tools, Store: st}
+	var displayEngine *displaynode.Engine
+	if *f.displayOn {
+		if runtime.GOOS != "linux" {
+			return errors.New("touch display requires Linux")
+		}
+		ui, _ := adminui.UI()
+		displayEngine, err = displaynode.StartDisplay(ctx, filepath.Dir(path), ui)
+		if err != nil {
+			return err
+		}
+		displayEngine.Host = h
+		defer displayEngine.Close()
+	}
+	var servedTools node.Toolset = tools
+	if displayEngine != nil {
+		servedTools = node.Multi{displayEngine, tools}
+	}
+	served := nodesettings.Gate{Tools: servedTools, Store: st}
 	tf.routine.Tools = served // a step the household turned off doesn't run
 	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: p.installMode, NodeKind: p.nodeKind, DeviceID: deviceid.Get(), Log: log}
 	runner.Store(r)
@@ -905,6 +928,40 @@ func runAgent(ctx context.Context, args []string) error {
 				<-ctx.Done()
 			}
 		}
+	}
+	if displayEngine != nil {
+		sw.addIndicator(displayEngine)
+		previousCaps := r.Capabilities
+		r.Capabilities = func() map[string]any {
+			caps := map[string]any{}
+			if previousCaps != nil {
+				caps = previousCaps()
+			}
+			for k, v := range displayEngine.Capabilities() {
+				caps[k] = v
+			}
+			return caps
+		}
+		previousConnect := r.OnConnected
+		r.OnConnected = func(ctx context.Context, cc *node.CC) {
+			go displayEngine.Watch(ctx, cc)
+			if previousConnect != nil {
+				previousConnect(ctx, cc)
+			} else {
+				<-ctx.Done()
+			}
+		}
+		previousMQTT := r.OnMQTTConnect
+		r.OnMQTTConnect = func(ctx context.Context, cc *node.CC) {
+			if previousMQTT != nil {
+				previousMQTT(ctx, cc)
+			}
+			_ = displayEngine.Synchronise(ctx, cc)
+		}
+		if r.Topics == nil {
+			r.Topics = map[string]func(context.Context, *node.CC, []byte){}
+		}
+		r.Topics["display/config"] = func(ctx context.Context, cc *node.CC, _ []byte) { _ = displayEngine.Synchronise(ctx, cc); r.BeatNow() }
 	}
 	connectCC(r, &liveCC)
 	connectHost(r, tf.host)

@@ -1,3 +1,4 @@
+import DisplaySettings from '@/components/display/DisplaySettings'
 import { useState, useMemo } from 'react'
 import { Power, RefreshCw, Search, SearchX, SlidersHorizontal } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -144,6 +145,7 @@ export default function SettingsPage() {
         )}
       </div>
 
+      <DisplaySettings scope="defaults" label="Display defaults" />
       {body}
     </div>
   )

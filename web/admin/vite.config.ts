@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
     // dist/placeholder.html alone.
     build: {
       outDir: 'dist/ui',
+      rollupOptions: { input: { main: path.resolve(__dirname, 'index.html'), display: path.resolve(__dirname, 'display.html') } },
       emptyOutDir: true,
     },
     // Component tests, matching jarvis-installer's setup. This repo had no
