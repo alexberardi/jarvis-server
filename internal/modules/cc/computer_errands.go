@@ -46,7 +46,7 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	if m.autonomy != nil {
 		loop.Audit = m.autonomy
 	}
-	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}}
+	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}, Source: m.computerSource}
 }
 
 // computerTargets are the computers a computer task may run on (computer control on), or why
@@ -206,7 +206,8 @@ func (e computerExec) Observe(ctx context.Context, o computer.Observe) (computer
 		obs.Gen = parsed.Snapshot.Gen
 		for _, el := range parsed.Snapshot.Elements {
 			obs.Elements = append(obs.Elements, computer.Element{Ref: el.Ref, Role: el.Role, Name: el.Name, Value: el.Value,
-				Type: el.Type, Autocomplete: el.Autocomplete, State: el.State, Secure: el.Element().Secure})
+				Type: el.Type, Autocomplete: el.Autocomplete, State: el.State, Secure: el.Element().Secure,
+				Context: el.Context, Position: el.Position, Target: el.Target})
 		}
 	}
 	if len(imgs) > 0 && parsed.Capture != nil {

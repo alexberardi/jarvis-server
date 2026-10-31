@@ -214,11 +214,11 @@ func (s *Service) postCompletionCard(ctx context.Context, hh, title string, agg 
 	})
 }
 
-// stepFiles are the files the run's steps saved on the computer (write_spreadsheet): their
+// stepFiles are the files the run's steps saved on the computer (write_spreadsheet, write_document): their
 // attachments' ids and, for the card's metadata, their names and paths there.
 func stepFiles(results []Result) (ids []string, files []any) {
 	for _, r := range results {
-		if !r.Success || r.Command != cmdWriteSheet || r.Data == nil {
+		if !r.Success || (r.Command != cmdWriteSheet && r.Command != cmdWriteDoc) || r.Data == nil {
 			continue
 		}
 		if p := truthyStr(r.Data, "path"); p != "" {

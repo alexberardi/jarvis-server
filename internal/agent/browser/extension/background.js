@@ -419,36 +419,18 @@ const COMMANDS = {
     const res = r?.result;
     if (!res) throw fail("failed", "the page returned nothing");
     if (res.error) throw fail(res.code ?? "failed", res.error);
-    return { tab: describe(t), ...res };
+    // What the click changed, as act says it (VOICE-FLOWS.md Q32).
+    const after = await settled(t.id);
+    return { tab: describe(t), ...res, url_after: clip(after.url, URL_MAX), title_after: clip(after.title, TITLE_MAX) };
   },
 
   // snapshot lists the tab's visible interactive elements, every frame's, each stamped with a
   // ref act can name. A ref is good for one snapshot (gen) of one document.
   async snapshot(args) {
     const t = await tabFor(args);
-    const max = clampInt(args.max, 1, SNAPSHOT_MAX, 300);
-    const gen = ++genSeq;
-    const probes = (await inject(t, { func: snapCollect, args: [gen, max], allFrames: true }))
-      .filter((p) => p?.result?.token)
-      .sort((a, b) => a.frameId - b.frameId);
-    const top = probes.find((p) => p.frameId === 0)?.result;
-    const elements = [];
-    const commit = {};
-    const frameOf = new Map();
-    for (const p of probes) {
-      const offset = elements.length;
-      const keep = Math.max(0, Math.min(p.result.elements.length, max - offset));
-      commit[p.result.token] = [offset, keep];
-      for (const e of p.result.elements.slice(0, keep)) {
-        const n = offset + e.k;
-        frameOf.set(n, p.frameId);
-        const { k, ...rest } = e;
-        elements.push({ ref: "e" + n, ...rest, frame: p.frameId });
-      }
-    }
-    await inject(t, { func: snapCommit, args: [gen, commit], allFrames: true });
-    snaps.set(t.id, { gen, frameOf });
-    return { gen, url: clip(top?.url ?? t.url, URL_MAX), title: clip(top?.title ?? t.title, TITLE_MAX), elements };
+    if (args.wait === true) await settled(t.id);
+    const snap = await snapTake(t, clampInt(args.max, 1, SNAPSHOT_MAX, 300), args.viewport === true);
+    return { tab: describe(t), ...snap };
   },
 
   // act does one op on the element a snapshot ref names. It refuses a ref from another snapshot
@@ -464,7 +446,9 @@ const COMMANDS = {
     if (op === "keys" && (!keys.length || keys.some((k) => !ACT_KEYS.has(k)))) {
       throw fail("invalid_argument", `keys must be some of ${[...ACT_KEYS].join(", ")}`);
     }
-    await actOn(t, gen, args.ref, op, value, keys);
+    const submit = args.submit === true;
+    if (submit && op !== "set_value") throw fail("invalid_argument", "submit is only valid when setting a field value");
+    await actOn(t, gen, args.ref, op, value, keys, submit);
     const after = await settled(t.id);
     return { ok: true, url_after: clip(after.url, URL_MAX), title_after: clip(after.title, TITLE_MAX) };
   },
@@ -594,7 +578,34 @@ async function settled(tabId) {
 
 // actOn does op on the element ref ("e12") of snapshot gen in tab t. It refuses a ref from
 // another snapshot or document (stale_ref), and typing into a password field (password_field).
-async function actOn(t, gen, ref, op, value, keys) {
+// snapTake snapshots tab t's interactive elements, every frame's (with viewport, only those on
+// screen), and stamps each with a ref act can name. A ref is good for one snapshot (gen).
+async function snapTake(t, max, viewport) {
+  const gen = ++genSeq;
+  const probes = (await inject(t, { func: snapCollect, args: [gen, max, viewport], allFrames: true }))
+    .filter((p) => p?.result?.token)
+    .sort((a, b) => a.frameId - b.frameId);
+  const top = probes.find((p) => p.frameId === 0)?.result;
+  const elements = [];
+  const commit = {};
+  const frameOf = new Map();
+  for (const p of probes) {
+    const offset = elements.length;
+    const keep = Math.max(0, Math.min(p.result.elements.length, max - offset));
+    commit[p.result.token] = [offset, keep];
+    for (const e of p.result.elements.slice(0, keep)) {
+      const n = offset + e.k;
+      frameOf.set(n, p.frameId);
+      const { k, ...rest } = e;
+      elements.push({ ref: "e" + n, ...rest, frame: p.frameId });
+    }
+  }
+  await inject(t, { func: snapCommit, args: [gen, commit], allFrames: true });
+  snaps.set(t.id, { gen, frameOf });
+  return { gen, url: clip(top?.url ?? t.url, URL_MAX), title: clip(top?.title ?? t.title, TITLE_MAX), elements };
+}
+
+async function actOn(t, gen, ref, op, value, keys, submit = false) {
   const m = /^e([1-9][0-9]{0,5})$/.exec(String(ref ?? ""));
   if (!Number.isInteger(gen) || gen <= 0 || !m) throw fail("invalid_argument", "gen and ref (e.g. e12) from a snapshot are required");
   const n = Number(m[1]);
@@ -610,7 +621,7 @@ async function actOn(t, gen, ref, op, value, keys) {
   if (holders.length > 1 || (was != null && was !== frame)) {
     throw fail("stale_ref", `${ref} moved to another frame; take a new snapshot`);
   }
-  const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys], frameIds: [frame] });
+  const [r] = await inject(t, { func: actDo, args: [gen, n, op, value, keys, submit], frameIds: [frame] });
   const res = r?.result;
   if (!res) throw fail("failed", "the page returned nothing");
   if (res.error) throw fail(res.code ?? "failed", res.error);
@@ -927,10 +938,12 @@ function scrollPage(direction) {
     if (best) el = best;
   }
   const page = el.clientHeight * 0.85;
+  const before = el.scrollTop;
   const top = { up: el.scrollTop - page, down: el.scrollTop + page, top: 0, bottom: el.scrollHeight }[direction];
   el.scrollTo({ top, behavior: "instant" });
   const max = Math.max(el.scrollHeight - el.clientHeight, 1);
-  return { direction, position_percent: Math.round((Math.min(Math.max(top, 0), max) / max) * 100) };
+  // moved is what happened, not what was asked (VOICE-FLOWS.md Q32): false at the end of the page.
+  return { direction, moved: Math.abs(el.scrollTop - before) >= 1, position_percent: Math.round((Math.min(Math.max(el.scrollTop, 0), max) / max) * 100) };
 }
 
 function findText(text) {
@@ -1145,7 +1158,7 @@ function buttonAct(query, act) {
 // <label>, placeholder, title, then the text. Values are left out for password, card and
 // one-time-code fields. The elements stay in this extension's isolated world (__jarvisSnap), out
 // of the page's reach, so act finds the very element even if the page copies a ref attribute.
-function snapCollect(gen, max) {
+function snapCollect(gen, max, viewport) {
   const NAME_MAX = 120;
   const SEL = "button, input, select, textarea, [contenteditable], a[href], summary, [role]";
   const ROLES = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemcheckbox",
@@ -1158,6 +1171,10 @@ function snapCollect(gen, max) {
     return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + "…" : s;
   };
   const visible = (el) => (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : true) && el.getClientRects().length > 0;
+  const onScreen = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+  };
   const typeOf = (el) => (el.localName === "input" ? (el.getAttribute("type") || "text").toLowerCase() : el.localName);
   const isField = (el) => ["input", "select", "textarea"].includes(el.localName) || el.isContentEditable;
   const textOf = (id) => {
@@ -1195,6 +1212,67 @@ function snapCollect(gen, max) {
     if (el.localName === "input" && INPUT_ROLE[typeOf(el)] === "button") out.push(el.value, el.getAttribute("alt"));
     return short(out.map(clean).find(Boolean) || "");
   };
+  // Small nearby context helps distinguish repeated controls. Read text nodes from only the
+  // nearest semantic container; avoid innerText (layout) and skip editable subtrees so drafts
+  // never leak into selection context. Cache by container because many controls share a row.
+  const contextCache = new WeakMap();
+  const contextLimit = 200;
+  const contextOf = (el) => {
+    let parent = el.parentElement;
+    for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+      if (!parent.matches("article, li, fieldset, blockquote, [role=article], [role=group], [role=listitem], [role=comment], [role=row]")) continue;
+      let text = contextCache.get(parent);
+      if (text === undefined) {
+        const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
+        const chunks = [];
+        let size = 0;
+        let visited = 0;
+        for (let node = walker.nextNode(); node && visited < 40 && size < contextLimit; node = walker.nextNode()) {
+          visited++;
+          const owner = node.parentElement;
+          if (!owner || owner.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [aria-hidden=true], [hidden], [inert], script, style, noscript")) continue;
+          if (!visible(owner)) continue; // display:none or visibility:hidden (A8)
+          const chunk = clean(node.nodeValue);
+          if (!chunk) continue;
+          const part = chunk.slice(0, contextLimit - size);
+          chunks.push(part);
+          size += part.length + 1;
+        }
+        text = clean(chunks.join(" ")).slice(0, contextLimit);
+        contextCache.set(parent, text);
+      }
+      if (text && text !== nameOf(el)) return short(text);
+      break;
+    }
+    return "";
+  };
+  // targetOf is a link's destination, or "" when it is over TARGET_MAX UTF-8 bytes (computeruse.TargetMax):
+  // dropped here, never cut (a cut URL points elsewhere), so one huge data: URL can't push the
+  // snapshot past the native message cap (A9). A string longer than the limit is over it in bytes.
+  const TARGET_MAX = 2048;
+  const targetOf = (el, role) => {
+    if (role !== "link") return "";
+    const href = (el.localName === "a" ? el : el.closest("a[href]"))?.href || "";
+    if (href.length > TARGET_MAX) return "";
+    let bytes = 0;
+    for (const ch of href) {
+      const c = ch.codePointAt(0);
+      bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+    }
+    return bytes > TARGET_MAX ? "" : href;
+  };
+  // positionOf is where the element's centre sits in the viewport, one of nine labels; "" when the
+  // centre is off screen, or in a subframe (its viewport isn't the page's: not mapped yet).
+  const positionOf = (el) => {
+    if (window.top !== window) return "";
+    const r = el.getBoundingClientRect();
+    const x = (r.left + r.width / 2) / Math.max(innerWidth, 1);
+    const y = (r.top + r.height / 2) / Math.max(innerHeight, 1);
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return "";
+    const horizontal = x < 1 / 3 ? "left" : x > 2 / 3 ? "right" : "center";
+    const vertical = y < 1 / 3 ? "top" : y > 2 / 3 ? "bottom" : "middle";
+    return `${vertical}-${horizontal}`;
+  };
   const secret = (el) => {
     const t = typeOf(el);
     const auto = (el.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
@@ -1228,11 +1306,21 @@ function snapCollect(gen, max) {
   for (const el of document.querySelectorAll(SEL)) {
     if (pending.length >= max) break;
     const role = roleOf(el);
-    if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]")) continue;
+    if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]") || (viewport && !onScreen(el))) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
-    const v = valueOf(el);
-    if (v) e.value = v;
+    // Both snapshot kinds: voice targeting and computer tasks (ELEMENT-LAYER-WORK.md §2).
+    const context = contextOf(el);
+    const position = positionOf(el);
+    const target = targetOf(el, role);
+    if (context) e.context = context;
+    if (position) e.position = position;
+    if (target) e.target = target;
+    // Voice target snapshots only need names and context; don't read drafts from visible fields.
+    if (!viewport) {
+      const v = valueOf(el);
+      if (v) e.value = v;
+    }
     elements.push(e);
   }
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -1270,7 +1358,7 @@ function actFind(gen, n) {
 
 // actDo does op on ref n of snapshot gen in this frame. Typing goes through execCommand so
 // frameworks see input events, with the native value setter as the fallback (fieldAct's writer).
-function actDo(gen, n, op, value, keys) {
+function actDo(gen, n, op, value, keys, submit) {
   const s = globalThis.__jarvisSnap;
   const el = s?.refs && s.gen === gen ? s.refs.get(n) : null;
   if (!el || !el.isConnected || el.ownerDocument !== document) return { error: "the element is no longer on the page; take a new snapshot", code: "stale_ref" };
@@ -1378,7 +1466,20 @@ function actDo(gen, n, op, value, keys) {
     default:
       return { error: "unknown op", code: "invalid_argument" };
   }
-  return { done: op };
+  let submitted = false;
+  if (op === "set_value" && submit) {
+    const form = el.form || el.closest("form");
+    if (form && typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+      submitted = "form";
+    } else {
+      for (const type of ["keydown", "keypress", "keyup"]) {
+        el.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      }
+      submitted = "enter_key";
+    }
+  }
+  return { done: op, submitted };
 }
 
 // recInstall starts recording this frame's user actions for recording rid; installing it again

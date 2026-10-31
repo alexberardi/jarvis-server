@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -91,8 +92,8 @@ func DefaultFollowUp() FollowUpConfig {
 const (
 	quietConsecutiveSecs = 0.16 // listen_quiet_consecutive_secs: quiet this long = the tail is over
 	quietFactor          = 1.5  // listen_quiet_rms_threshold = silence threshold × 1.5
-	onsetBase            = 3    // chunks above the threshold that make speech onset...
-	onsetMax             = 8    // ...one more per iteration, up to this
+	onsetChunks          = 3    // chunks above the threshold among the last onsetSpan that make speech onset
+	onsetSpan            = 5    // a Bluetooth mic drops a chunk mid-word as silence: one gap is allowed
 	preOnsetKeepSecs     = 1.5  // audio kept from before onset
 	// validationQuietWaitSecs is listen()'s listen_quiet_max_wait_secs, which the Python
 	// validation handler uses before recording an answer.
@@ -166,11 +167,16 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 				timeout = cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs)
 			}
 		}
+		if afterReply && AsksQuestion(lastSaid) {
+			// A question waits for its answer (VOICE-FLOWS.md Q14): 3 s after "what are you
+			// looking for?" closed before the user had started answering.
+			timeout = max(timeout, cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs))
+		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
 		p.duck(ctx)
 		p.cue(CueFollowUp, time.Duration(timeout*float64(time.Second)))
-		pcm, err := p.listenFollowUp(ctx, s, timeout, it, afterReply, &used)
+		pcm, err := p.listenFollowUp(ctx, s, timeout, afterReply, &used)
 		if err != nil {
 			t.FollowUpEnd = EndError
 			if ctx.Err() == nil {
@@ -337,7 +343,7 @@ func ptrVal(v *float64) any {
 // afterReply: we just spoke, so what was captured meanwhile is dropped and the reply's tail
 // drained first; after an ignored answer nothing was said, and nothing is dropped. used (may
 // be nil) is advanced by every chunk heard, waiting and recording.
-func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs float64, iteration int, afterReply bool, used *int) ([]int16, error) {
+func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs float64, afterReply bool, used *int) ([]int16, error) {
 	cfg := p.Cfg.FollowUp
 	seen, recorded := 0, 0
 	if used != nil {
@@ -362,29 +368,38 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		}
 	}
 
-	// Onset: enough loud chunks in a row. Everything heard is kept (a dip mid-word must not
-	// lose the start), trimmed to 1.5 s before onset.
-	required := min(onsetMax, onsetBase+(iteration-1))
+	// Onset: enough loud chunks among the last onsetSpan. Everything heard is kept (a dip
+	// mid-word must not lose the start), trimmed to 1.5 s before onset.
+	required, at := onsetChunks, s.threshold
 	var heard [][]int16
-	run := 0
+	var loud [onsetSpan]bool
+	inSpan, most, peak := 0, 0, 0.0
 	detected := false
-	for seen < budget {
+	for i := 0; seen < budget; i++ {
 		c, err := next()
 		if err != nil {
 			return nil, mapChunkTimeout(err)
 		}
 		heard = append(heard, c)
-		if RMS(c) >= s.threshold {
-			run++
-			if run >= required {
-				detected = true
-				break
-			}
-		} else {
-			run = 0
+		r := RMS(c)
+		peak = max(peak, r)
+		if loud[i%onsetSpan] {
+			inSpan--
+		}
+		loud[i%onsetSpan] = r >= at
+		if loud[i%onsetSpan] {
+			inSpan++
+		}
+		most = max(most, inSpan)
+		if inSpan >= required {
+			detected = true
+			break
 		}
 	}
 	if !detected {
+		// What the window heard, so "it didn't hear me" can be told from a quiet mic.
+		s.log.Info("follow-up: no speech onset", "peak_rms", math.Round(peak), "threshold", at,
+			"most_loud", most, "span", onsetSpan, "required", required, "wake_level_db", ptrVal(s.wakeLevel))
 		return nil, nil
 	}
 	if keep := max(1, frames(preOnsetKeepSecs)); len(heard) > keep {
@@ -414,7 +429,7 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		heard = append(heard, c)
 		recorded++
 		p.level(c)
-		if RMS(c) < s.threshold {
+		if RMS(c) < at {
 			silent++
 		} else {
 			silent = 0
@@ -522,6 +537,11 @@ const (
 	echoOfTranscript = 0.9 // this much of the transcript is the reply's words, in order...
 	echoOfReply      = 0.5 // ...and it covers at least this much of the reply
 )
+
+// AsksQuestion reports a reply that ends by asking the user something.
+func AsksQuestion(reply string) bool {
+	return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(reply), `"'”’)`), "?")
+}
 
 // LooksLikeSelfEcho reports whether the transcript is the mic hearing what we last said rather
 // than the user: nearly all of it (90 % of its words, stopwords included) must be the reply's

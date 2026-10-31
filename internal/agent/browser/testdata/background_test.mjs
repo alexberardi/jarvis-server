@@ -181,3 +181,130 @@ test("fill on a page that never shows the field fails with field_not_found", asy
   assert.equal(r.code, "field_not_found");
   assert.deepEqual(filled, []);
 });
+
+// Voice selection reads an invisible snapshot and acts by the refs it returns.
+test("snapshot lists visible controls without drawing an overlay", async () => {
+  const tab = { id: 4, url: "https://www.google.com/search?q=dogs", title: "dogs", active: true, windowId: 1 };
+  const b = load({ tabs: [tab] });
+  const calls = [];
+  b.api.tabs.get = async () => ({ ...tab, status: "complete" });
+  b.api.scripting.executeScript = async ({ func, args }) => {
+    calls.push([func.name, args]);
+    if (func.name === "snapCollect") {
+      return [{ frameId: 0, result: { token: "t", url: tab.url, title: tab.title, elements: [{ k: 1, role: "link", name: "Wikipedia" }, { k: 2, role: "button", name: "Search" }] } }];
+    }
+    return [{ frameId: 0, result: { ok: true, count: 2 } }];
+  };
+  const r = await b.call("snapshot", { viewport: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(Array.from(r.result.elements, (e) => e.ref), ["e1", "e2"]);
+  assert.equal(calls.find(([n]) => n === "snapCollect")[1][2], true, "only elements on screen");
+  assert.equal(calls.some(([n]) => n === "hintsDraw"), false, "snapshot stays invisible");
+  assert.ok(calls.some(([n]) => n === "snapCommit"), "snapshot refs are retained for act");
+});
+
+// fakePage is the document snapCollect reads: Bob's comment (a list item with a Reply link), a
+// link far below the fold, and a draft in a text box. top is the frame's top window.
+function fakePage(ctx, { subframe = false, hiddenText = false, href = "https://forum.test/c/1" } = {}) {
+  const node = (props) => {
+    const e = { localName: "a", attrs: {}, parentElement: null, labels: null, isContentEditable: false,
+      innerText: "", textContent: "", rect: { left: 10, top: 10, width: 100, height: 20 }, ...props };
+    e.getAttribute = (k) => e.attrs[k] ?? null;
+    e.hasAttribute = (k) => k in e.attrs;
+    e.removeAttribute = () => {};
+    e.closest = () => null;
+    e.matches = () => e.container === true;
+    e.querySelector = () => null;
+    e.getClientRects = () => [e.rect];
+    e.getBoundingClientRect = () => ({ ...e.rect, right: e.rect.left + e.rect.width, bottom: e.rect.top + e.rect.height });
+    e.checkVisibility = () => true;
+    return e;
+  };
+  const texts = ["Bob", "· 2h ·", "Great point"];
+  if (hiddenText) texts.unshift({ text: "CSS-HIDDEN-DRAFT", hidden: true });
+  const comment = node({ localName: "li", container: true, texts });
+  const reply = node({ attrs: { href: "/c/1" }, href, innerText: "Reply", parentElement: comment });
+  const far = node({ attrs: { href: "/old" }, href: "https://forum.test/old", innerText: "Older posts", rect: { left: 10, top: 5000, width: 100, height: 20 } });
+  const draft = node({ localName: "input", attrs: { type: "text" }, value: "my draft" });
+  ctx.innerWidth = 1200;
+  ctx.innerHeight = 800;
+  ctx.location = { href: "https://forum.test/" };
+  ctx.NodeFilter = { SHOW_TEXT: 4 };
+  ctx.document = {
+    title: "Forum",
+    getElementById: () => null,
+    querySelectorAll: (sel) => (sel === "[data-jarvis-ref]" ? [] : [reply, far, draft]),
+    createTreeWalker: (root) => {
+      const nodes = (root.texts ?? []).map((t) => {
+        const owner = node({ localName: "span" });
+        if (typeof t === "object" && t.hidden) {
+          owner.checkVisibility = () => false; // display:none or visibility:hidden
+          owner.getClientRects = () => [];
+        }
+        return { nodeValue: typeof t === "object" ? t.text : t, parentElement: owner };
+      });
+      let i = 0;
+      return { nextNode: () => nodes[i++] ?? null };
+    },
+  };
+  ctx.window = ctx;
+  ctx.top = subframe ? {} : ctx;
+}
+
+test("both snapshot kinds carry context, position and target; no position offscreen or in a subframe", () => {
+  const { ctx } = load();
+  fakePage(ctx);
+  const task = ctx.snapCollect(1, 300, false).elements; // a computer task's snapshot: the whole page
+  assert.deepEqual(Array.from(task, (e) => e.name), ["Reply", "Older posts", ""]);
+  assert.equal(task[0].context, "Bob · 2h · Great point");
+  assert.equal(task[0].position, "top-left");
+  assert.equal(task[0].target, "https://forum.test/c/1");
+  assert.equal(task[1].position, undefined, "a link below the fold has no position");
+  assert.equal(task[1].target, "https://forum.test/old");
+  assert.equal(task[2].value, "my draft", "computer snapshots keep field values");
+  assert.equal(task[2].context, undefined);
+
+  const voice = ctx.snapCollect(2, 150, true).elements; // a voice snapshot: what's on screen
+  assert.deepEqual(Array.from(voice, (e) => e.name), ["Reply", ""]);
+  assert.equal(voice[0].context, "Bob · 2h · Great point");
+  assert.equal(voice[1].value, undefined, "voice snapshots never carry a field's value");
+
+  fakePage(ctx, { subframe: true });
+  const framed = ctx.snapCollect(3, 300, false).elements;
+  assert.equal(framed[0].position, undefined, "positions inside a subframe aren't mapped to the page yet");
+  assert.equal(framed[0].context, "Bob · 2h · Great point");
+  assert.equal(framed[0].target, "https://forum.test/c/1");
+});
+
+// A8: text hidden with CSS (display:none, visibility:hidden) never reaches an element's context.
+test("context leaves out text hidden with CSS", () => {
+  const { ctx } = load();
+  fakePage(ctx, { hiddenText: true });
+  for (const viewport of [false, true]) {
+    const [reply] = ctx.snapCollect(1, 300, viewport).elements;
+    assert.equal(reply.context, "Bob · 2h · Great point", viewport ? "voice snapshot" : "computer snapshot");
+  }
+});
+
+// A9: a link's destination longer than 2048 UTF-8 bytes is dropped in the page, before the native
+// message (8 MiB cap) is built; the element and the rest of the snapshot stay. Never truncated.
+test("a target over 2048 bytes is dropped in the extension, the element kept", () => {
+  const { ctx } = load();
+  const at = (n) => "https://forum.test/" + "a".repeat(n - "https://forum.test/".length);
+  const cases = [
+    [at(2048), true],
+    [at(2049), false],
+    ["https://forum.test/" + "é".repeat(1015), false], // 2049 bytes in UTF-8, 1034 characters
+    ["data:text/plain," + "a".repeat(9 * 1024 * 1024), false],
+  ];
+  for (const [href, kept] of cases) {
+    fakePage(ctx, { href });
+    for (const viewport of [false, true]) {
+      const [reply] = ctx.snapCollect(1, 300, viewport).elements;
+      assert.equal(reply.name, "Reply");
+      assert.equal(reply.context, "Bob · 2h · Great point");
+      assert.equal(reply.target, kept ? href : undefined, `${href.length} chars, viewport ${viewport}`);
+    }
+  }
+});
+

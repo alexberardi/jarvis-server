@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,6 +70,28 @@ var roleNames = map[uint32]string{
 	rolePageTab: "tab",
 }
 
+// containerRoles name a group of controls (a toolbar, a dialog, a menu): the nearest named one
+// above an element is its Context (ELEMENT-LAYER-WORK.md §2). The window (frame) itself isn't
+// one: its title would be every element's context. Numbers are AtspiRole's (atspi-constants.h).
+var containerRoles = map[uint32]bool{
+	16:  true, // dialog
+	20:  true, // filler
+	31:  true, // list
+	33:  true, // menu
+	34:  true, // menu bar
+	38:  true, // page tab list
+	39:  true, // panel
+	54:  true, // status bar
+	55:  true, // table
+	63:  true, // tool bar
+	71:  true, // header
+	72:  true, // footer
+	85:  true, // section
+	87:  true, // form
+	99:  true, // grouping
+	110: true, // landmark
+}
+
 // textRoles hold what the user typed in their Text: it's their value, never their name.
 var textRoles = map[string]bool{"textbox": true, "combobox": true}
 
@@ -86,6 +110,8 @@ const (
 	stateFocused   = 12
 	stateSelected  = 23
 	stateSensitive = 24
+	stateShowing   = 25
+	stateEditable  = 7
 	stateRequired  = 33
 )
 
@@ -120,6 +146,8 @@ func (o obj) role(ctx context.Context) (uint32, error) {
 }
 
 // children are GetChildren's, else ChildCount × GetChildAtIndex for a toolkit without it.
+// children are o's children, at most maxChildren of them, or maxVirtualChildren when o lists none
+// and only reports a count (a spreadsheet's sheet: millions of virtual cells; A15 F1).
 func (o obj) children(ctx context.Context) ([]obj, error) {
 	var refs []objRef
 	if err := o.call(ctx, ifAccessible+".GetChildren").Store(&refs); err != nil {
@@ -129,12 +157,18 @@ func (o obj) children(ctx context.Context) ([]obj, error) {
 		} else if n, _ = v.(int32); n <= 0 {
 			return nil, nil
 		}
-		for i := range n {
+		for i := range min(n, maxVirtualChildren) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			var r objRef
 			if err := o.call(ctx, ifAccessible+".GetChildAtIndex", i).Store(&r); err == nil {
 				refs = append(refs, r)
 			}
 		}
+	}
+	if len(refs) > maxChildren {
+		refs = refs[:maxChildren]
 	}
 	out := make([]obj, 0, len(refs))
 	for _, r := range refs {
@@ -181,6 +215,9 @@ func (o obj) bounds(ctx context.Context) *[4]int {
 	var e struct{ X, Y, W, H int32 }
 	if o.call(ctx, ifComponent+".GetExtents", coordScreen).Store(&e) != nil || e.W <= 0 || e.H <= 0 {
 		return nil
+	}
+	if e.X == math.MinInt32 || e.Y == math.MinInt32 {
+		return nil // the toolkit's "nowhere": not on screen (LibreOffice's closed menu items)
 	}
 	return &[4]int{int(e.X), int(e.Y), int(e.W), int(e.H)}
 }
@@ -321,7 +358,8 @@ type refTable struct {
 // refs is the process's table: one window is observed at a time.
 var refs refTable
 
-func snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
+// snapshotOf walks the pid's active window; showing skips subtrees not on screen.
+func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computeruse.Snapshot, error) {
 	win, err := activeWindow(ctx, pid)
 	if err != nil {
 		return computeruse.Snapshot{}, err
@@ -329,8 +367,8 @@ func snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, erro
 	if max <= 0 {
 		max = DefaultMax
 	}
-	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}}
-	w.visit(win, 0)
+	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
+	w.visit(win, 0, "", true)
 	if w.err != nil {
 		return computeruse.Snapshot{}, w.err
 	}
@@ -347,11 +385,17 @@ type walker struct {
 	out   []computeruse.SnapElement
 	nodes map[string]entry
 	err   error
+	win   *[4]int // the window's screen bounds, for Position; nil when unknown
+	// showing: only what is on screen (SnapshotShowing); a subtree that isn't is skipped whole.
+	showing bool
 }
 
 func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
 
-func (w *walker) visit(o obj, depth int) {
+// visit keeps o when it is a control and walks its children; near is the name of the nearest
+// named container above o, and context whether o's ancestry may give one at all: nothing hidden,
+// editable or secret above it (§2, A17 R3).
+func (w *walker) visit(o obj, depth int, near string, context bool) {
 	if err := w.ctx.Err(); err != nil {
 		w.err = err
 		return
@@ -360,8 +404,26 @@ func (w *walker) visit(o obj, depth int) {
 	if err != nil {
 		return // gone mid-walk, or not an accessible
 	}
+	st := o.state(w.ctx)
+	if w.showing && !st.has(stateShowing) {
+		return // a closed menu, a hidden panel: nothing in it is on screen
+	}
+	if !st.has(stateShowing) {
+		context = false // hidden: it and everything in it lose context (A15 F7, A17 R3)
+	}
+	if !context {
+		near = ""
+	}
 	if role, ok := roleNames[r]; ok {
-		w.keep(o, role, r == rolePasswordText)
+		w.keep(o, role, r == rolePasswordText, near)
+	} else if containerRoles[r] && context {
+		// Only a container on screen names its elements (A15 F7).
+		if n := strings.TrimSpace(o.name(w.ctx)); n != "" {
+			near = n
+		}
+	}
+	if st.has(stateEditable) || r == rolePasswordText {
+		context, near = false, "" // what's inside a text or a password never names anything
 	}
 	if depth >= maxDepth || w.full() {
 		return
@@ -371,13 +433,22 @@ func (w *walker) visit(o obj, depth int) {
 		if w.full() {
 			return
 		}
-		w.visit(k, depth+1)
+		w.visit(k, depth+1, near, context)
 	}
 }
 
-func (w *walker) keep(o obj, role string, secure bool) {
+func (w *walker) keep(o obj, role string, secure bool, near string) {
 	ctx := w.ctx
 	el := computeruse.SnapElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: o.name(ctx), Bounds: o.bounds(ctx)}
+	if el.Bounds != nil && w.win != nil {
+		el.Position = computeruse.PositionIn(*el.Bounds, *w.win)
+	}
+	if near != el.Name {
+		if r := []rune(near); len(r) > computeruse.ContextMax {
+			near = string(r[:computeruse.ContextMax])
+		}
+		el.Context = near // a container's name, never a value
+	}
 	st := o.state(ctx)
 	switch {
 	case secure: // a password's text is never read
@@ -385,7 +456,7 @@ func (w *walker) keep(o obj, role string, secure bool) {
 		if st.has(stateChecked) {
 			el.State = append(el.State, "checked")
 		}
-	case textRoles[role]:
+	case textRoles[role] && !w.showing: // a voice snapshot never reads what was typed (§2, A15 F6)
 		el.Value = clip(o.text(ctx))
 	}
 	if st != nil && (!st.has(stateEnabled) || !st.has(stateSensitive)) {

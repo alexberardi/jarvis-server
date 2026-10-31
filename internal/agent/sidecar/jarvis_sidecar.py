@@ -13,6 +13,7 @@ JSON-lines requests on stdin:
                                                           "on_response_complete"?}}}
     -> {"id": 3, "method": "complete", "params": {"token": "1"}}
     <- {"id": 3, "result": {"ran": true}}
+    -> {"method": "secrets", "params": {"user_id"}}  <- {"secrets": {command: [secret, ...]}}
     -> {"id": 4, "method": "data_summaries", "params": {"command_name", "records": [{...}, ...]}}
     <- {"id": 4, "result": {"summaries": [{"title", "subtitle", "icon"} | null, ...]}}
     -> {"id": 5, "method": "data_create", "params": {"command_name", "fields", "requesting_user_id"}}
@@ -602,6 +603,17 @@ _SECRET_FIELDS = ("key", "scope", "description", "value_type", "required", "is_s
 def _secrets(cmd) -> list:
     """The command's required_secrets for the settings snapshot; a bad one is skipped alone."""
     return _secrets_of(cmd, cmd.command_name)
+
+
+def secrets_for(commands: dict, params: dict) -> dict:
+    """Every command's required_secrets as the requesting user sees them: a command may choose its
+    secrets from a user-scoped one (email shows IMAP fields once EMAIL_PROVIDER isn't gmail), so the
+    settings snapshot asks per request, as N:settings_snapshot_service.py build_snapshot does."""
+    set_current_user_id(params.get("user_id"))
+    try:
+        return {"secrets": {name: _secrets(cmd) for name, cmd in commands.items()}}
+    finally:
+        set_current_user_id(None)
 
 
 def _browser(cmd):
@@ -1212,6 +1224,10 @@ def call(commands: dict, params: dict) -> dict:
     if not resp.success:
         output["error"] = resp.error_details or "Command failed"
     output["success"] = resp.success
+    # Tap-to-confirm buttons (email's Send/Cancel), as N:mqtt_tts_listener.py adds them: the
+    # server builds the app's confirm card from them.
+    if getattr(resp, "actions", None):
+        output["actions"] = [a.to_dict() for a in resp.actions]
     signals = {"wait_for_input": bool(resp.wait_for_input), "clear_history": bool(resp.clear_history)}
     callback = getattr(resp, "on_response_complete", None)
     if callback is not None:
@@ -1379,6 +1395,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": callback(commands, msg.get("params") or {})}
             elif method == "complete":
                 reply = {"id": msg_id, "result": complete(msg.get("params") or {})}
+            elif method == "secrets":
+                reply = {"id": msg_id, "result": secrets_for(commands, msg.get("params") or {})}
             elif method == "data_summaries":
                 reply = {"id": msg_id, "result": data_summaries(commands, msg.get("params") or {})}
             elif method == "data_create":

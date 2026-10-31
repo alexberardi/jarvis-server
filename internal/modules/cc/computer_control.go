@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"path"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -171,6 +172,18 @@ func needsComputer(s string) bool {
 	if has("call") || has("ring") || has("dial") || has("remind") || has("reminder") || has("list") {
 		return false // a phone call, a reminder or a list item about buying something
 	}
+	// A document or spreadsheet to write, change or read (write_document, C27): before "write",
+	// which otherwise means dictation. 21:16, 2026-10-29: "deep research … and put a summary in a
+	// Word document called hoax-2.docx" went to deep_research alone.
+	for _, w := range strings.Fields(strings.ToLower(s)) {
+		if has("type") || has("dictate") {
+			break // typing into the open window: dictation's
+		}
+		w = strings.TrimRight(w, ".,!?;:'\")\"")
+		if documentWords[compactName(w)] || documentExts[path.Ext(w)] {
+			return true
+		}
+	}
 	for i, w := range ws {
 		next := ""
 		if i+1 < len(ws) {
@@ -209,6 +222,13 @@ func needsComputer(s string) bool {
 	}
 	return false
 }
+
+// documentWords and documentExts mark a request about a document or spreadsheet file.
+var (
+	documentWords = map[string]bool{"document": true, "spreadsheet": true, "spreadsheets": true, "workbook": true,
+		"libreoffice": true, "docx": true, "xlsx": true, "odt": true, "ods": true}
+	documentExts = map[string]bool{".odt": true, ".docx": true, ".ods": true, ".xlsx": true, ".doc": true, ".xls": true}
+)
 
 // computerWords name the computer after "use (the|my|your)".
 var computerWords = map[string]bool{"computer": true, "pc": true, "laptop": true, "desktop": true, "mac": true}

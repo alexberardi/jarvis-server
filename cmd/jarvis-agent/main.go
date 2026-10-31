@@ -58,6 +58,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/targets"
 	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
@@ -742,6 +743,7 @@ func runAgent(ctx context.Context, args []string) error {
 	if p.desktop {
 		// Computer tasks in the browser and on the desktop (plan P3 pieces 8 and 22): build
 		// adds the executor's tools after the browser's.
+		tf.computerOn = computerSw.On
 		tf.computer = func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset {
 			var b computer.Browser
 			if bt != nil {
@@ -1047,6 +1049,9 @@ type toolFlags struct {
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
 	computer func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset
+	// computerOn, when the caller sets it, is the computer-control switch: voice clicks in
+	// desktop apps (appclick) need it on.
+	computerOn func() bool
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -1098,7 +1103,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	// Tabs and sheets by name (VOICE-FLOWS.md Q26), and their names for speech-to-text.
 	opener.Views = views.Native(h)
 	dt.HearFirst = opener.ViewVocabulary
-	tools := node.Multi{opener, &screen.Tools{C: screen.Native(), Log: log}, dt}
+	// Stage 1 asks in this order (node.Multi): what's on the page first (a control's name is one
+	// of a few visible options, user 2026-10-28), then tabs, windows and apps by name, then dictation.
+	var tools node.Multi
 	closeAll := func() {}
 	var bt *browser.Tools
 	if !*f.noBrowser {
@@ -1110,11 +1117,21 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		hub, stopBrowser := startBrowser(ctx, log)
 		bt = browser.NewTools(hub)
 		bt.Confirm = dt.Confirm
+		opener.OpenLink = bt.OpenLink // links in a new tab, not the system's new window
 		bt.Origins = f.origins
+		bt.CC, bt.Log = f.cc, log // the model's pick when no name on the page matches (nil in `try`)
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
 		closeAll = stopBrowser
 	}
+	// Then the focused app window's controls ("click Bold" in LibreOffice), before tabs,
+	// windows and apps by name: what's on screen first (ELEMENT-LAYER-WORK.md slice 4b).
+	if f.computerOn != nil {
+		if ac := newAppClick(f.computerOn, targets.Picker{CC: f.cc, Wrap: browser.Wrap, Log: log}, dt.Confirm); ac != nil {
+			tools = append(tools, ac)
+		}
+	}
+	tools = append(tools, opener, &screen.Tools{C: screen.Native(), Log: log}, dt)
 	if f.computer != nil {
 		// A desktop task's app that isn't running opens from desktop_open's catalogue, by name
 		// only: never a link or a path, whatever --allow-open-any says.

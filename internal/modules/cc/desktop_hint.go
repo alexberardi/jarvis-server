@@ -109,6 +109,16 @@ func (c *conversation) hasTool(name string) bool {
 	return false
 }
 
+// hasScreenTools reports a desktop agent's tools (desktop_* or browser_*) on offer.
+func (c *conversation) hasScreenTools() bool {
+	for _, t := range c.tools {
+		if n := toolName(t); strings.HasPrefix(n, "desktop_") || strings.HasPrefix(n, "browser_") {
+			return true
+		}
+	}
+	return false
+}
+
 // The same-device hint (web app plan §3.6, DESIGN.md §14 "The Jarvis page in front"): someone
 // chatting in the Jarvis web page on the computer whose agent they are talking to. The window
 // in front is that page, so the turn says to name the app for typing and keys; the agent

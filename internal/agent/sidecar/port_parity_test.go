@@ -883,7 +883,7 @@ func TestExportShoppingMatchesPython(t *testing.T) {
 		t.Errorf("summaries:\n python %s\n go     %s", a, b)
 	}
 	var pySecrets []nodesettings.SecretSpec
-	for _, c := range sc.Commands() {
+	for _, c := range sc.Commands(nil) {
 		if c.Name == "export_shopping_list" {
 			pySecrets = c.Secrets
 		}
@@ -1066,7 +1066,7 @@ func TestReminderMatchesPython(t *testing.T) {
 		}
 	}
 	var pySecrets []nodesettings.SecretSpec
-	for _, c := range sc.Commands() {
+	for _, c := range sc.Commands(nil) {
 		if c.Name == "reminder" {
 			pySecrets = c.Secrets
 		}

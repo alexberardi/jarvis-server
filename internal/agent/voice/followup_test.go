@@ -622,3 +622,91 @@ func TestSilentStepsChainPastFiveIterations(t *testing.T) {
 		t.Fatalf("window %s after %d follow-ups, %d listens", tr.FollowUpEnd, len(tr.FollowUps), len(l.list()))
 	}
 }
+
+// listChooser is a toolset whose stage 1 puts a list on the island for every request and
+// takes any answer as a pick.
+type listChooser struct{ node.Toolset }
+
+func (listChooser) Direct(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, node.ChoiceKey: true, node.IslandOnlyKey: true}, true
+}
+
+func (listChooser) AnswerChoice(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, node.ChoiceKey: true, node.IslandOnlyKey: true}, true
+}
+
+// "Show numbers… scroll down… show numbers… 7": "7" is four chunks long and, as the third
+// window of the turn, needed five loud chunks in a row; it was never heard (2026-10-27). Onset
+// is three chunks in every window.
+func TestShortAnswerHeardLateInAChain(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"show numbers", "scroll down", "show numbers", "seven"}
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = listChooser{node.Multi{}}
+	short := rep(speech, 4)
+	l := answer(r, mic, short, short, short, short)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 4 {
+		t.Fatalf("%d follow-ups heard (%s), %d listens; want all four short words", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
+	}
+}
+
+// A Bluetooth headset's mic (HFP, mSBC) drops packets as silence mid-word: the log showed peaks
+// of 124–320 against a 60 threshold but never three loud chunks in a row (2026-10-27). A word
+// broken by dropouts is still heard.
+func TestAnswerBrokenByDropoutsIsHeard(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"what time is it", "seven"}
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	var choppy [][]int16
+	for range 4 {
+		choppy = append(choppy, speech, speech, noise)
+	}
+	l := answer(r, mic, choppy)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 1 {
+		t.Fatalf("%d follow-ups heard (%s), %d listens; want the choppy answer", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
+	}
+}
+
+// turnWatch records what the voice loop tells a toolset about the turn.
+type turnWatch struct {
+	node.Toolset
+	mu  sync.Mutex
+	got []bool
+}
+
+func (w *turnWatch) TurnListening(_ context.Context, on bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.got = append(w.got, on)
+}
+
+func (w *turnWatch) calls() []bool { w.mu.Lock(); defer w.mu.Unlock(); return slices.Clone(w.got) }
+
+// The browser's numbers show while a turn listens: the toolset hears the turn start and end.
+func TestTurnStartAndEndReachTheTools(t *testing.T) {
+	srv := newServer()
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	w := &turnWatch{Toolset: node.Multi{}}
+	r.p.Tools = node.Multi{w}
+	stop := r.run(t)
+	r.turn(t)
+	_ = stop()
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Equal(w.calls(), []bool{true, false}) {
+		if time.Now().After(deadline) {
+			t.Fatalf("turn calls %v, want start then end", w.calls())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

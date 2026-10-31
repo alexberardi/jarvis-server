@@ -122,6 +122,49 @@ func (phoneHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string,
 	return Result{Command: cmd, Label: label, Error: "couldn't set up the call"}, nil
 }
 
+// priorResultRunes bounds each earlier step's result in PriorResults.
+const priorResultRunes = 12000
+
+// PriorResults are the errand's earlier successful steps with what each returned, for a server
+// step that works from them (write_document writes up a search, a file read, a computer task's
+// findings). Its data as JSON: every step's result is usable, whatever its shape.
+func PriorResults(results []Result) string {
+	var parts []string
+	for _, r := range results {
+		if !r.Success || r.Control {
+			continue
+		}
+		p := "- " + firstNonEmpty(r.Label, r.Command) + ": " + firstNonEmpty(r.Summary, r.Message)
+		if r.Data != nil {
+			p += "\n  " + pyjson.Dumps(r.Data, false)
+		}
+		if rs := []rune(p); len(rs) > priorResultRunes {
+			p = string(rs[:priorResultRunes]) + "…"
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// PriorFiles are the files earlier successful steps saved on the computer (a package's
+// saved_files, e.g. an email's attachments), for a step that works from them (write_document).
+func PriorFiles(results []Result) []string {
+	var files []string
+	for _, r := range results {
+		if !r.Success || r.Data == nil {
+			continue
+		}
+		v, _ := r.Data.Get("saved_files")
+		list, _ := v.([]any)
+		for _, f := range list {
+			if s, ok := f.(string); ok && s != "" {
+				files = append(files, s)
+			}
+		}
+	}
+	return files
+}
+
 // priorStepsContext is _prior_steps_context: the earlier steps, for the next call's brief.
 func priorStepsContext(results []Result) string {
 	var lines []string
@@ -253,7 +296,7 @@ func (serverHandler) Match(s *Service, cmd string) bool {
 func (serverHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string, args *pyjson.Object, label string, _ int) (Result, *Suspend) {
 	turn := servertools.Turn{
 		ConversationID: rc.convID, HouseholdID: rc.householdID, NodeID: rc.nodeID, Timezone: rc.timezone,
-		Utterance: rc.goal,
+		Utterance: rc.goal, Prior: PriorResults(*rc.results), PriorFiles: PriorFiles(*rc.results),
 	}
 	if rc.userID != nil {
 		turn.Speaker.UserID = *rc.userID
@@ -319,7 +362,7 @@ func (nodeHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd string, 
 	if s.Nodes == nil || rc.nodeID == "" {
 		out = servertools.Obj("success", false, "error", "could not dispatch to node: no node")
 	} else {
-		out = s.Nodes.RunTool(ctx, rc.nodeID, cmd, s.resolveNodeArgs(rc, args), rc.userID, rc.goal, s.NodeTimeout)
+		out = s.Nodes.RunTool(ctx, rc.nodeID, cmd, attachWrittenFiles(cmd, s.resolveNodeArgs(rc, args), *rc.results), rc.userID, rc.goal, s.NodeTimeout)
 	}
 	r := nodeOutcome(cmd, out)
 	r.Label = label
@@ -366,6 +409,30 @@ func (s *Service) resolveNodeArgs(rc *runCtx, args *pyjson.Object) *pyjson.Objec
 }
 
 // nodeOutcome is _node_step_outcome.
+// attachWrittenFiles makes an email draft_reply attach the files this errand's earlier steps
+// wrote: the planner names the path before the file exists and guessed it wrong
+// (~/Documents/Q3 Hours Totals.xlsx for ~/Documents/Jarvis/Q3 Hours Totals.xlsx, C29).
+func attachWrittenFiles(cmd string, args *pyjson.Object, results []Result) *pyjson.Object {
+	if cmd != "email" || truthyStr(args, "action") != "draft_reply" {
+		return args
+	}
+	_, files := stepFiles(results)
+	if len(files) == 0 {
+		return args
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.(map[string]any)["path"].(string)
+	}
+	out := pyjson.NewObject()
+	for _, k := range args.Keys() {
+		v, _ := args.Get(k)
+		out.Set(k, v)
+	}
+	out.Set("attachments", strings.Join(paths, ","))
+	return out
+}
+
 func nodeOutcome(cmd string, out *pyjson.Object) Result {
 	if out == nil {
 		return Result{Command: cmd, Success: true}

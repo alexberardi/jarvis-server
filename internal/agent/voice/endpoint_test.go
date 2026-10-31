@@ -24,6 +24,7 @@ func constChunk(v int16) []int16 {
 
 func TestThresholdMatchesPython(t *testing.T) {
 	e := DefaultEndpointing()
+	e.AutoMultiplier, e.AutoFloor = 2, 200 // the Python node's (the formula is the same)
 	cases := []struct {
 		name string
 		rms  []float64
@@ -42,6 +43,15 @@ func TestThresholdMatchesPython(t *testing.T) {
 		if got := e.Threshold(c.rms); got != c.want {
 			t.Errorf("%s: Threshold(%v) = %v, want %v", c.name, c.rms, got, c.want)
 		}
+	}
+	// Ours: a quiet headset's room (noise ~45) is 112.5, under the Python node's 200 floor
+	// (2026-10-27: its speech peaked at 154–240); a silent room never goes under 60.
+	d := DefaultEndpointing()
+	if got := d.Threshold([]float64{40, 45, 50}); got != 112 {
+		t.Errorf("quiet headset: %v, want 112", got)
+	}
+	if got := d.Threshold([]float64{10, 12, 15}); got != 60 {
+		t.Errorf("silent room: %v, want 60", got)
 	}
 	e.AutoMultiplier = 0
 	if got := e.Threshold([]float64{400, 400}); got != 300 {

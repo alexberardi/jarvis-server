@@ -16,7 +16,7 @@ func TestSettingsCommandsCarryParameters(t *testing.T) {
 		{Name: "action", Type: "string", Enum: []string{"turn_on"}},
 	}}
 	tools := node.Multi{staticTools{spec.Render()}}
-	cmds := settingsCommands(tools)(context.Background())
+	cmds := settingsCommands(tools)(context.Background(), nil)
 	if len(cmds) != 1 || len(cmds[0].Parameters) != 2 {
 		t.Fatalf("commands = %+v", cmds)
 	}
@@ -39,7 +39,7 @@ func (s staticTools) Call(context.Context, string, map[string]any, node.Request)
 // A toolset's fast-path patterns (the routine built-in's) go on its command in the snapshot.
 func TestSettingsCommandsCarryFastPaths(t *testing.T) {
 	tools := node.Multi{fastPaths{staticTools{node.Spec{Name: "routine"}.Render(), node.Spec{Name: "tell_joke"}.Render()}}}
-	cmds := settingsCommands(tools)(context.Background())
+	cmds := settingsCommands(tools)(context.Background(), nil)
 	if len(cmds) != 2 || len(cmds[0].FastPaths) != 1 || cmds[0].FastPaths[0].ID != "routine.good_night" || len(cmds[1].FastPaths) != 0 {
 		t.Fatalf("commands = %+v", cmds)
 	}

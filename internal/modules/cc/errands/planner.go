@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -71,7 +72,8 @@ var menuDeny = map[string]bool{
 var menuNotes = map[string]string{
 	"deep_research": "In an errand this only STARTS a long report that arrives later on its own; " +
 		"the errand cannot report what it finds. To look something up that the errand should " +
-		"report back (answer, list, comparison, summary), use quick_search.",
+		"report back (answer, list, comparison, summary), use quick_search. To write a document from a web page " +
+		"(summarize an article into a document), use write_document with the page as its source, never this.",
 }
 
 // controlCommands are control-flow commands the planner may emit that are not capabilities;
@@ -88,6 +90,7 @@ const (
 	// The cc module's file tools (spreadsheet_tools.go), offered with computer_task.
 	cmdReadFile   = "read_computer_file"
 	cmdWriteSheet = "write_spreadsheet"
+	cmdWriteDoc   = "write_document"
 	// browserPrefix and desktopPrefix name the agent's own browser and desktop commands
 	// (browser_open, browser_fill, desktop_open, …).
 	browserPrefix = "browser_"
@@ -119,7 +122,19 @@ func NodeMenu(available []*pyjson.Object) []MenuEntry {
 				if pname == "" {
 					continue
 				}
-				args.Set(pname, orStr(po, "description", "type"))
+				desc := orStr(po, "description", "type")
+				// The allowed values, or the planner never learns an action the description doesn't
+				// name (email's save_attachments/draft_reply: it planned "read" instead, C29).
+				if ev, ok := po.Get("enum_values"); ok {
+					if list, _ := ev.([]any); len(list) > 0 {
+						vals := make([]string, 0, len(list))
+						for _, v := range list {
+							vals = append(vals, pyjson.Str(v))
+						}
+						desc = pyjson.Str(desc) + " (one of: " + strings.Join(vals, ", ") + ")"
+					}
+				}
+				args.Set(pname, desc)
 			}
 		}
 		menu = append(menu, MenuEntry{
@@ -156,7 +171,7 @@ func (s *Service) enabledServerTools(ctx context.Context, hh string, speaker *in
 		}
 	}
 	if s.computerOffered(ctx, hh) {
-		names = append(names, cmdReadFile, cmdWriteSheet)
+		names = append(names, cmdReadFile, cmdWriteSheet, cmdWriteDoc)
 	}
 	out := names[:0]
 	for _, n := range names {
@@ -277,6 +292,24 @@ const websiteRule = "COMPUTER TASKS: everything the user wants done on one websi
 	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
 	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
 
+// documentRule is the computer rules' line for documents (ELEMENT-LAYER-WORK.md C27): typing a
+// document through Writer's window took 15+ rounds and failed at the Save dialog; the file is
+// written directly instead.
+const documentRule = "DOCUMENTS: to write, summarize into, or change a document or spreadsheet (Writer, Calc, " +
+	"Word, Excel), plan ONE write_document step with the file's path, everything the user asked for as its " +
+	"instructions and the web page to write from as its source (or search words: it reads the top results " +
+	"itself, so research for a document needs no deep_research step); never a computer_task that types in the app. " +
+	"A write_document step after other steps (a search, a file read, a computer task) writes from their results.\n\n"
+
+// emailFilesRule is the line for work on an email's attachments (ELEMENT-LAYER-WORK.md C28):
+// node step args are fixed when the errand is planned, so both email steps name the same email
+// and the reply attaches the very path write_document saves to (draft_reply takes ~/Documents only).
+const emailFilesRule = "EMAIL ATTACHMENTS: to work on files someone emailed and answer them, plan email " +
+	"save_attachments with a query for that email, then ONE write_document step (it reads the saved files " +
+	"itself) with a full path like ~/Documents/<name>, then email draft_reply with the SAME query, a short body " +
+	"and that same path as attachments. draft_reply only puts the reply in Drafts for the user to send; never " +
+	"plan send or reply for it.\n\n"
+
 // workflowRule is the computer rules' line for saved workflows (plan P3 piece 32): with the
 // websiteRule alone the house model planned "download my bank statement for August" as a
 // computer_task on a made-up site, though the menu listed the workflow that does it.
@@ -304,6 +337,12 @@ func computerRulesFor(menu []MenuEntry) string {
 	if menuHas(menu, cmdRunWorkflow) {
 		out += workflowRule
 	}
+	if menuHas(menu, cmdWriteDoc) {
+		out += documentRule
+		if menuHas(menu, "email") {
+			out += emailFilesRule
+		}
+	}
 	if menuHas(menu, cmdWriteSheet) {
 		out += budgetRule
 	}
@@ -311,6 +350,148 @@ func computerRulesFor(menu []MenuEntry) string {
 		out += answerRule
 	}
 	return out
+}
+
+// sheetFromResults turns a write_spreadsheet that follows a step finding its rows (a search, a
+// computer task, research) into a write_document of an .xlsx, which writes from those steps'
+// results when it runs: the planner fills write_spreadsheet's rows before anything has run, from
+// memory (C27, 21:25 2026-10-29: Saturn's 146 moons, the 2023 count, beside the search). After a
+// read_computer_file checkpointSpreadsheet replans it instead (budgetRule).
+func sheetFromResults(goal string, steps []Step) []Step {
+	found := false
+	for i, st := range steps {
+		switch st.Command {
+		case cmdReadFile:
+			return steps
+		case cmdSearch, cmdComputer, "deep_research":
+			found = true
+		case "email": // an email's saved attachments are the rows' source (C29)
+			found = found || truthyStr(st.Args, "action") == "save_attachments"
+		case cmdWriteSheet:
+			if !found {
+				continue
+			}
+			name := truthyStr(st.Args, "name")
+			if name == "" {
+				name = "Spreadsheet"
+			}
+			var cols []string
+			if v, ok := st.Args.Get("sheets"); ok {
+				l, _ := v.([]any)
+				for _, s := range l {
+					o, _ := s.(*pyjson.Object)
+					if c, ok := o.Get("columns"); ok {
+						cols = append(cols, pyjson.Dumps(c, false))
+					}
+				}
+			}
+			instr := goal + " Put the values from the earlier steps' results in the spreadsheet, one row per item."
+			if len(cols) > 0 {
+				instr += " Columns: " + strings.Join(cols, "; ") + "."
+			}
+			out := append([]Step(nil), steps...)
+			out[i] = Step{Command: cmdWriteDoc, Label: st.Label, IsRisky: st.IsRisky,
+				Args: servertools.Obj("path", name+".xlsx", "instructions", instr)}
+			return out
+		}
+	}
+	return steps
+}
+
+// dropAttachmentReads drops a read_computer_file planned after an email save_attachments step:
+// the planner can't know the saved file's name, so it guessed one (~/Documents/q3-hours.xlsx for
+// planets.xlsx, C29) and the errand failed there. write_document reads the saved files itself.
+func dropAttachmentReads(steps []Step) []Step {
+	saved := false
+	out := steps[:0:0]
+	for _, st := range steps {
+		if saved && st.Command == cmdReadFile {
+			continue
+		}
+		if st.Command == "email" && truthyStr(st.Args, "action") == "save_attachments" {
+			saved = true
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// attachmentWork inserts the write_document step a plan left out between saving an email's
+// attachments and a reply that attaches a file: the planner went straight from save_attachments
+// to draft_reply with a made-up attachment path (C29), so nothing did the work the user asked
+// for. The step writes from the saved files with the user's words as its instructions; its name
+// is the one the reply meant to attach, and attachWrittenFiles attaches what it actually wrote.
+func attachmentWork(goal string, steps []Step, menu []MenuEntry) []Step {
+	if !menuHas(menu, cmdWriteDoc) {
+		return steps
+	}
+	saved := false
+	for i, st := range steps {
+		switch {
+		case st.Command == cmdWriteDoc || st.Command == cmdWriteSheet:
+			return steps
+		case st.Command == "email" && truthyStr(st.Args, "action") == "save_attachments":
+			saved = true
+		case saved && st.Command == "email" && truthyStr(st.Args, "action") == "draft_reply" && truthyStr(st.Args, "attachments") != "":
+			name := path.Base(strings.TrimSpace(strings.Split(truthyStr(st.Args, "attachments"), ",")[0]))
+			ext := strings.ToLower(path.Ext(name))
+			if ext != ".odt" && ext != ".docx" && ext != ".ods" && ext != ".xlsx" {
+				ext = ".odt"
+				if g := strings.ToLower(goal); strings.Contains(g, "spreadsheet") || strings.Contains(g, "sheet") || strings.Contains(g, "xlsx") || strings.Contains(g, "excel") {
+					ext = ".xlsx"
+				}
+				name = strings.TrimSuffix(name, path.Ext(name)) + ext
+			}
+			if strings.TrimSuffix(name, ext) == "" || strings.HasPrefix(name, ".") {
+				name = "Reply attachment" + ext
+			}
+			doc := Step{Command: cmdWriteDoc, Label: "Do the work on the attachment",
+				Args: servertools.Obj("path", name, "instructions", goal+" Work from the email's saved attachments.")}
+			return append(append(append([]Step(nil), steps[:i]...), doc), steps[i:]...)
+		}
+	}
+	return steps
+}
+
+// stepNames is a plan's steps for the log: command, and the action where there is one.
+func stepNames(steps []Step) string {
+	names := make([]string, len(steps))
+	for i, st := range steps {
+		names[i] = st.Command
+		if a := truthyStr(st.Args, "action"); a != "" {
+			names[i] += ":" + a
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+// foldResearchIntoDocument folds a deep_research step into the plan's first write_document step
+// when that one has no source: in an errand deep_research only starts a report that arrives after
+// the document is written (C27, 2026-10-29: the planner kept it for "deep research X into a
+// document" despite the menu note). Its query becomes the document's source, which reads the top
+// results itself. A document with a source of its own leaves deep_research alone.
+func foldResearchIntoDocument(steps []Step) []Step {
+	doc, research := -1, -1
+	for i, st := range steps {
+		switch {
+		case st.Command == cmdWriteDoc && doc < 0:
+			doc = i
+		case st.Command == "deep_research" && research < 0:
+			research = i
+		}
+	}
+	if doc < 0 || research < 0 || truthyStr(steps[doc].Args, "source") != "" {
+		return steps
+	}
+	query := truthyStr(steps[research].Args, "query")
+	if query == "" {
+		return steps
+	}
+	if steps[doc].Args == nil {
+		steps[doc].Args = pyjson.NewObject()
+	}
+	steps[doc].Args.Set("source", query)
+	return append(steps[:research:research], steps[research+1:]...)
 }
 
 // memoryAskRE is a goal that asks for something to be kept: a remember step is the user's.
@@ -773,7 +954,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(dropUnaskedRemember(goal, plan.Steps))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))))
 	return plan, err
 }
 
@@ -813,7 +994,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(dropUnaskedRemember(goal, plan.Steps))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))
 	return plan, err
 }
 

@@ -51,9 +51,18 @@ func (g Gate) AnswerChoice(ctx context.Context, said string) (map[string]any, bo
 	return a.AnswerChoice(ctx, said)
 }
 
+// TurnListening passes the turn's start and end through (node.TurnWatcher), with which
+// commands are on.
+func (g Gate) TurnListening(ctx context.Context, on bool) {
+	if w, ok := g.Tools.(node.TurnWatcher); ok {
+		w.TurnListening(node.WithEnabled(ctx, g.Store.Enabled), on)
+	}
+}
+
 // The voice loop finds these by type assertion on the toolset it is given: a Gate that dropped
 // them silently sent every "switch to X" and "the second one" to the model.
 var (
 	_ node.Director       = Gate{}
 	_ node.ChoiceAnswerer = Gate{}
+	_ node.TurnWatcher    = Gate{}
 )

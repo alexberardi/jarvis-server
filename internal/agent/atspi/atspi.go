@@ -24,8 +24,14 @@ import (
 const DefaultMax = 300
 
 const (
-	maxDepth = 64  // a broken app can report a cycle; the walk stops here
-	maxText  = 200 // runes kept of a name or value (a text view's text can be a whole document)
+	maxDepth = 64 // a broken app can report a cycle; the walk stops here
+	// maxChildren is how many children one object contributes; maxVirtualChildren, when it lists
+	// none and only reports a count, as a spreadsheet's sheet does for its millions of virtual
+	// cells: reading each one hung the walk (A15 F1), and even 512 cells filled a snapshot before
+	// the toolbars after the sheet.
+	maxChildren        = 512
+	maxVirtualChildren = 32
+	maxText            = 200 // runes kept of a name or value (a text view's text can be a whole document)
 )
 
 // RolePassword is the snapshot role of an AT-SPI password text (ROLE_PASSWORD_TEXT).
@@ -53,10 +59,17 @@ var ErrUnsupported = &Error{Code: CodeUnsupported, Msg: "AT-SPI snapshots are on
 // Snapshot walks the active window (else the first window) of the app with this pid, depth-first,
 // and returns at most max interactive elements (DefaultMax when max <= 0) under a new generation.
 func Snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
-	return snapshot(ctx, pid, max)
+	return snapshotOf(ctx, pid, max, false)
 }
 
 // Press performs ref's first action (Action.DoAction(0)) from snapshot generation gen.
+// SnapshotShowing is Snapshot of only what is on screen: a subtree whose root isn't SHOWING
+// (a closed menu, a hidden panel) is skipped whole. Voice reads this one: live, LibreOffice's
+// closed menus filled a full snapshot's cap before its toolbars (ELEMENT-LAYER-WORK.md 4b).
+func SnapshotShowing(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
+	return snapshotOf(ctx, pid, max, true)
+}
+
 func Press(gen int, ref string) error { return press(gen, ref) }
 
 // SetValue replaces ref's text (EditableText.SetTextContents). A password text is refused
