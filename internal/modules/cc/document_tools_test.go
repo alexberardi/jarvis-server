@@ -244,3 +244,65 @@ func TestWriteDocumentFolderSetting(t *testing.T) {
 		t.Fatalf("path %v", p)
 	}
 }
+
+// A formula over empty cells is caught before saving (C29: the moons were in B, the total
+// summed C2:C11), and only real cell refs count.
+func TestEmptyFormulaRef(t *testing.T) {
+	rows := func(total string) []any {
+		ops := []any{map[string]any{"op": "add_sheet", "name": "Planets"},
+			map[string]any{"op": "append_row", "sheet": "Planets", "values": []any{"Category", "Total"}}}
+		for _, r := range []any{[]any{"Mercury", 0.0}, []any{"Earth", 1.0}, []any{"Saturn", 146.0}} {
+			ops = append(ops, map[string]any{"op": "append_row", "sheet": "Planets", "values": r})
+		}
+		return append(ops, map[string]any{"op": "set", "sheet": "Planets", "cell": "B10", "value": total})
+	}
+	if got := emptyFormulaRef(rows("=SUM(C2:C11)"), "", false); got != "=SUM(C2:C11) in Planets!B10 refers to C2:C11, which is empty" {
+		t.Fatalf("bad column: %q", got)
+	}
+	for _, ok := range []string{"=SUM(B2:B9)", "=SUM($B$2:$B$4)", "=B2+B3", "=LOG10(B4)", "=Other!C2", "Total", ""} {
+		if got := emptyFormulaRef(rows(ok), "", false); got != "" {
+			t.Errorf("%q flagged: %s", ok, got)
+		}
+	}
+	// No sheet named: the first. A formula in an appended row is checked too; its own cell doesn't count.
+	ops := []any{map[string]any{"op": "append_row", "values": []any{"x", 5.0}},
+		map[string]any{"op": "append_row", "values": []any{"total", "=SUM(C1:C1)"}}}
+	if got := emptyFormulaRef(ops, "", false); !strings.Contains(got, "Sheet1!B2") {
+		t.Fatalf("appended formula: %q", got)
+	}
+	self := []any{map[string]any{"op": "set", "cell": "A1", "value": "=SUM(A1:A1)"}}
+	if emptyFormulaRef(self, "", false) == "" {
+		t.Fatal("a formula over only itself passed")
+	}
+	// An existing workbook's cells count, as renderDoc shows them.
+	current := "Sheet Budget\nA1=Item\tB1=Cost\nA2=Rent\tB2=1200"
+	set := []any{map[string]any{"op": "set", "cell": "B3", "value": "=SUM(B2:B2)"}}
+	if got := emptyFormulaRef(set, current, true); got != "" {
+		t.Fatalf("existing cells: %q", got)
+	}
+	set[0].(map[string]any)["value"] = "=SUM(D2:D2)"
+	if emptyFormulaRef(set, current, true) == "" {
+		t.Fatal("an empty column in an existing workbook passed")
+	}
+}
+
+// A bad formula gets one more try with what was wrong; an answer wrapped in a JSON string is read.
+func TestDocumentEditsRetriesAFormula(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	bad, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "set", "cell": "B2", "value": "=SUM(C1:C1)"}}})
+	good, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "set", "cell": "B2", "value": "=SUM(B1:B1)"}}})
+	wrapped, _ := json.Marshal(string(good))
+	ve.eng.say(string(bad))
+	ve.eng.say(string(wrapped))
+	ops, err := ve.m.documentEdits(context.Background(), "total the moons", "total the moons", true, "", false, "")
+	if err != nil || len(ops) != 2 || ops[1].(map[string]any)["value"] != "=SUM(B1:B1)" {
+		t.Fatalf("ops %v, %v", ops, err)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "=SUM(C1:C1) in Sheet1!B2 refers to C1:C1, which is empty") {
+		t.Fatalf("retry prompt lacks the problem:\n%s", p)
+	}
+}
