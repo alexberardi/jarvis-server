@@ -133,8 +133,10 @@ func (t *Tools) docRead(ctx context.Context, path string) map[string]any {
 	return res
 }
 
-// docEdit applies ops to the document at path, or makes it (create: it must not exist yet).
-func (t *Tools) docEdit(ctx context.Context, path string, create bool, ops []any) map[string]any {
+// docEdit applies ops to the document at path, or makes it (create: it must not exist yet),
+// starting from a copy of from when given: a readable document of the same kind (a spreadsheet
+// someone emailed, totalled into a new file), left untouched.
+func (t *Tools) docEdit(ctx context.Context, path string, create bool, from string, ops []any) map[string]any {
 	if len(ops) == 0 {
 		return failCode("invalid_argument", "ops: no edits")
 	}
@@ -147,6 +149,22 @@ func (t *Tools) docEdit(ctx context.Context, path string, create bool, ops []any
 		return failCode("exists", "%s already exists: edit it, or pick another name", filepath.Base(p))
 	case !create && !exists:
 		return failCode("not_found", "no file %s", path)
+	case from != "" && !create:
+		return failCode("invalid_argument", "from: only when creating a document")
+	}
+	src := p
+	if from != "" {
+		ff, fp, fexists, err := t.docPath(from, false)
+		if err != nil {
+			return docFail(err)
+		}
+		if !fexists {
+			return failCode("not_found", "no file %s", from)
+		}
+		if ff.kind != f.kind {
+			return failCode("invalid_argument", "from: %s isn't a %s", filepath.Base(fp), map[string]string{"sheet": "spreadsheet", "text": "text document"}[f.kind])
+		}
+		src = fp
 	}
 	// shortcut: a file open in LibreOffice is refused, not merged; handle it when editing open documents is in scope.
 	if _, err := os.Lstat(filepath.Join(filepath.Dir(p), ".~lock."+filepath.Base(p)+"#")); err == nil {
@@ -158,7 +176,7 @@ func (t *Tools) docEdit(ctx context.Context, path string, create bool, ops []any
 	}
 	defer os.RemoveAll(tmp)
 	dst := filepath.Join(tmp, "out"+filepath.Ext(p))
-	out, err := t.runOffice(ctx, p, dst, f, ops)
+	out, err := t.runOffice(ctx, src, dst, f, ops)
 	if err != nil {
 		return failCode("edit_failed", "nothing was changed: %v", err)
 	}
