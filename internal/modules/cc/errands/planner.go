@@ -395,6 +395,36 @@ func sheetFromResults(goal string, steps []Step) []Step {
 	return steps
 }
 
+// dropAttachmentReads drops a read_computer_file planned after an email save_attachments step:
+// the planner can't know the saved file's name, so it guessed one (~/Documents/q3-hours.xlsx for
+// planets.xlsx, C29) and the errand failed there. write_document reads the saved files itself.
+func dropAttachmentReads(steps []Step) []Step {
+	saved := false
+	out := steps[:0:0]
+	for _, st := range steps {
+		if saved && st.Command == cmdReadFile {
+			continue
+		}
+		if st.Command == "email" && truthyStr(st.Args, "action") == "save_attachments" {
+			saved = true
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// stepNames is a plan's steps for the log: command, and the action where there is one.
+func stepNames(steps []Step) string {
+	names := make([]string, len(steps))
+	for i, st := range steps {
+		names[i] = st.Command
+		if a := truthyStr(st.Args, "action"); a != "" {
+			names[i] += ":" + a
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
 // foldResearchIntoDocument folds a deep_research step into the plan's first write_document step
 // when that one has no source: in an errand deep_research only starts a report that arrives after
 // the document is written (C27, 2026-10-29: the planner kept it for "deep research X into a
@@ -884,7 +914,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, dropUnaskedRemember(goal, plan.Steps))))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)))))))
 	return plan, err
 }
 
@@ -924,7 +954,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, dropUnaskedRemember(goal, plan.Steps))))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)))))
 	return plan, err
 }
 
