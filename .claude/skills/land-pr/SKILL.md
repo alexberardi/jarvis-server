@@ -69,6 +69,18 @@ PRs are squash-merged, so main's subjects end in `(#N)` on their own: nothing to
 - `gh pr checks --watch`. The CI jobs are build (vet + cross-compile for 4 targets + race),
   admin, native-voice (4 targets), agent (3 OS), service, upgrade and install. A failure in an
   unrelated test is likely a flake: use the `deflake-test` skill, and don't just re-run it.
-- Merge only when the user says so.
+- Follow the [server merge policy](../../../AGENTS.md#merge-policy): an agent may
+  squash-merge its own PR after explicitly verifying CI on the current head,
+  except for the listed review holds. Check main's CI after merging. Do not use
+  `gh pr merge --auto` or merge another author's PR.
 - Prod (`<prod-host>`) is read-only. Merging does not deploy. Releases follow the `cut-rc`
   skill, and the user applies them.
+
+## 7. Cleanup before handoff
+
+Follow [temporary files and cleanup](../../../AGENTS.md#temporary-files-and-cleanup),
+including after failed checks: stop your task's processes, purge its sandbox and
+remove disposable scratch/build output. Reuse shared disk-backed caches instead of
+leaving per-task caches in `/tmp`. Inspect untracked and ignored files before removing
+a finished worktree with `git worktree remove`; keep anything still needed for review.
+Report any retained artifacts or processes, their paths/names and why they remain.
