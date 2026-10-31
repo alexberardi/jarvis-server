@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/audio"
 )
 
 type fakeRecorder struct {
@@ -87,9 +90,12 @@ func details(rid string) map[string]any {
 func TestEnrollRecordsUploadsAndPostsTheResult(t *testing.T) {
 	rec := &fakeRecorder{pcm: make([]int16, 2*CaptureRate)}
 	p, srv := newProfileCC(t, 0, `{"status":"enrolled","user_id":7,"household_id":"hh-1","sample_index":1,"total_samples":1}`)
-	profiles(rec).Enroll(context.Background(), srv, details("r1"))
+	var log bytes.Buffer
+	vp := profiles(rec)
+	vp.Log = slog.New(slog.NewJSONHandler(&log, nil))
+	vp.Enroll(context.Background(), srv, details("r1"))
 
-	if len(rec.takes) != 1 || rec.takes[0].Secs != 8 || rec.takes[0].Preroll != 1500*time.Millisecond ||
+	if len(rec.takes) != 1 || rec.takes[0].Secs != 8 || rec.takes[0].Preroll != 0 ||
 		rec.takes[0].Cue != "Read the prompt on your screen, starting now." {
 		t.Fatalf("takes = %+v", rec.takes)
 	}
@@ -107,6 +113,67 @@ func TestEnrollRecordsUploadsAndPostsTheResult(t *testing.T) {
 	want := `{"duration_secs":2,"response":{"household_id":"hh-1","sample_index":1,"status":"enrolled","total_samples":1,"user_id":7},"success":true,"user_id":7}`
 	if string(got) != want {
 		t.Fatalf("result:\n%s\nwant\n%s", got, want)
+	}
+	found := false
+	for _, line := range strings.Split(strings.TrimSpace(log.String()), "\n") {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["msg"] == "enroll_voice: captured" {
+			found = true
+			if event["request_id"] != "r1" || event["duration_secs"] != 2.0 || event["rms"] != 0.0 {
+				t.Fatalf("capture diagnostics: %v", event)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no capture duration and level diagnostics")
+	}
+}
+
+// The cue says "starting now": speech immediately after it must reach the
+// upload, rather than being discarded by a post-cue preroll.
+func TestVoiceProfileKeepsSpeechAfterCue(t *testing.T) {
+	for _, verify := range []bool{false, true} {
+		t.Run(map[bool]string{false: "enroll", true: "verify"}[verify], func(t *testing.T) {
+			mic := script()
+			cueServer := newServer()
+			r := newRig(t, mic, cueServer)
+			r.p.Mic = NewMic()
+			cueServer.onSpeak = func(string) {
+				mic.push(rep(speech, 19), rep(make([]int16, ChunkSamples), 110))
+			}
+			stop := r.run(t)
+			defer stop()
+			waitAttached(t, r.p.Mic)
+			p, srv := newProfileCC(t, 0, `{}`)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			vp := profiles(r.p.Mic)
+			if verify {
+				vp.Verify(ctx, srv, details("cue"))
+			} else {
+				vp.Enroll(ctx, srv, details("cue"))
+			}
+			if len(p.uploads) != 1 {
+				t.Fatalf("uploads = %d", len(p.uploads))
+			}
+			samples, rate, err := audio.ReadWAV(bytes.NewReader(p.uploads[0].wav))
+			if err != nil || rate != CaptureRate || len(samples) != 8*CaptureRate {
+				t.Fatalf("recording: samples=%d rate=%d err=%v", len(samples), rate, err)
+			}
+			var level float32
+			for _, sample := range samples[:CaptureRate] {
+				if sample < 0 {
+					sample = -sample
+				}
+				level += sample / CaptureRate
+			}
+			if level < 0.04 {
+				t.Fatalf("speech at the cue was lost: first-second mean absolute level %.4f", level)
+			}
+		})
 	}
 }
 

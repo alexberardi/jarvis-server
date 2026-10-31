@@ -81,3 +81,59 @@ func TestMobileVoiceProfileStatusAndDelete(t *testing.T) {
 	// Nothing left to delete: 404 (D8).
 	ve.do("DELETE", "/api/v0/mobile/voice-profile?household_id="+voiceHH, nil, alex).detail(404, "Voice profile not found")
 }
+
+// An old desktop agent ignores enrollment verbs. Fail promptly instead of leaving
+// the app polling a command that cannot run; a current agent can add to the same
+// household profile as a Pi.
+func TestDesktopEnrollmentRequiresSupport(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.makeDesktop(7)
+	ve.do("POST", "/api/v0/admin/nodes/heartbeat", nil, ve.node.h()).want(200)
+	for _, kind := range []string{"enrollment", "verification"} {
+		ve.do("POST", "/api/v0/mobile/voice-profile/start-node-"+kind,
+			map[string]any{"node_id": ve.node.id}, bearer("tok-7")).detail(409, "Update the Jarvis agent to record voice samples on this computer")
+	}
+	ve.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"capabilities": map[string]any{"voice_enrollment": false},
+	}, ve.node.h()).want(200)
+	ve.do("POST", "/api/v0/mobile/voice-profile/start-node-enrollment",
+		map[string]any{"node_id": ve.node.id}, bearer("tok-7")).detail(409, "Voice recording is not available on this computer")
+	ve.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"capabilities": map[string]any{"voice_enrollment": true},
+	}, ve.node.h()).want(200)
+	ve.do("POST", "/api/v0/mobile/voice-profile/start-node-enrollment",
+		map[string]any{"node_id": ve.node.id}, bearer("tok-7")).want(200)
+	ve.enrollUpload(7, 200)
+	ve.do("POST", "/api/v0/mobile/voice-profile/start-node-verification",
+		map[string]any{"node_id": ve.node.id}, bearer("tok-7")).want(200)
+	ve.auth.addUser(9, "hh-other", "member")
+	ve.do("POST", "/api/v0/mobile/voice-profile/start-node-enrollment",
+		map[string]any{"node_id": ve.node.id}, bearer("tok-9")).want(403)
+}
+
+func TestHouseholdEnrollmentFromMultipleDevices(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	firstPi := ve.node
+	secondPi := ve.createNode("node-v2", voiceHH)
+	ve.node = ve.createNode("desktop-v3", voiceHH)
+	ve.makeDesktop(8) // Enrollment belongs to the mobile caller, not the desktop owner.
+	ve.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{
+		"capabilities": map[string]any{"voice_enrollment": true},
+	}, ve.node.h()).want(200)
+	desktop := ve.node
+	ve.stt.enrolled = []string{voiceHH + ":8", "hh-other:7"}
+	for i, device := range []testNode{firstPi, secondPi, desktop, firstPi} {
+		ve.node = device
+		ve.do("POST", "/api/v0/admin/nodes/heartbeat", nil, device.h()).want(200)
+		ve.do("POST", "/api/v0/mobile/voice-profile/start-node-enrollment",
+			map[string]any{"node_id": device.id}, bearer("tok-7")).want(200)
+		ve.enrollUpload(7, 200)
+		res := ve.do("GET", "/api/v0/mobile/voice-profile/status?household_id="+voiceHH, nil, bearer("tok-7")).want(200).json()
+		if res["sample_count"] != float64(i+1) {
+			t.Fatalf("after recording on %s: %v", device.id, res)
+		}
+	}
+	if got := fmt.Sprint(ve.stt.enrolled); got != "[hh-voice:8 hh-other:7 hh-voice:7 hh-voice:7 hh-voice:7 hh-voice:7]" {
+		t.Fatalf("enrollment changed another member or household: %s", got)
+	}
+}
