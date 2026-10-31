@@ -21,13 +21,14 @@ import (
 // fakeCC is command-center's node routes in memory: it records every call and answers from
 // its fields.
 type fakeCC struct {
-	mu       sync.Mutex
-	calls    []string
-	bodies   map[string]any
-	k2       map[string]any // GET k2/provision/{rid}; nil is a 404
-	requests []map[string]any
-	confirm  int // status of GET settings/requests/{rid}; 0 is 200
-	pending  []map[string]any
+	mu         sync.Mutex
+	calls      []string
+	bodies     map[string]any
+	k2         map[string]any // GET k2/provision/{rid}; nil is a 404
+	requests   []map[string]any
+	confirm    int // status of GET settings/requests/{rid}; 0 is 200
+	pending    []map[string]any
+	pkgSecrets map[string]string // GET package-secrets; nil is a 404 (an older jarvisd)
 }
 
 func (f *fakeCC) Do(_ context.Context, method, path string, body, out any) error {
@@ -61,6 +62,11 @@ func (f *fakeCC) Do(_ context.Context, method, path string, body, out any) error
 		return answer(map[string]any{"status": "pending"})
 	case method == http.MethodGet && strings.HasSuffix(path, "/config/pending"):
 		return answer(f.pending)
+	case method == http.MethodGet && strings.HasSuffix(path, "/package-secrets"):
+		if f.pkgSecrets == nil {
+			return &node.HTTPError{Method: method, Path: path, Status: 404}
+		}
+		return answer(map[string]any{"secrets": f.pkgSecrets})
 	}
 	return nil
 }

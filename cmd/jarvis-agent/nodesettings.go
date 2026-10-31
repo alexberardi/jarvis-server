@@ -149,7 +149,7 @@ func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, 
 		return h
 	}
 	r.Topics = map[string]func(context.Context, *node.CC, []byte){}
-	for _, sub := range []string{nodesettings.TopicK2Provision, nodesettings.TopicSettingsRequest, nodesettings.TopicConfigPush} {
+	for _, sub := range []string{nodesettings.TopicK2Provision, nodesettings.TopicSettingsRequest, nodesettings.TopicConfigPush, nodesettings.TopicPackageSecrets} {
 		r.Topics[sub] = func(ctx context.Context, cc *node.CC, payload []byte) { bind(cc).Handle(ctx, sub, payload) }
 	}
 	r.OnMQTTConnect = func(ctx context.Context, cc *node.CC) { bind(cc).Backstop(ctx) }

@@ -74,6 +74,8 @@ func (h *Handler) Handle(ctx context.Context, sub string, payload []byte) bool {
 		h.SettingsRequest(ctx, payload)
 	case TopicConfigPush:
 		h.ConfigPush(ctx)
+	case TopicPackageSecrets:
+		h.PackageSecrets(ctx)
 	default:
 		return false
 	}
@@ -373,4 +375,5 @@ func (h *Handler) Backstop(ctx context.Context) {
 		}
 	}
 	h.ConfigPush(ctx)
+	h.PackageSecrets(ctx) // server-managed secrets changed while the node was away
 }
