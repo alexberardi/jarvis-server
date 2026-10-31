@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -362,5 +363,37 @@ func TestWriteDocumentPriorFilesGetANewFile(t *testing.T) {
 	runTool(t, tool(ve2), `{"path": "~/Documents/totals.odt", "instructions": "add a line"}`, ve2.recTurn(7))
 	if p := agent2.ops[1]["path"]; agent2.ops[1]["op"] != "doc_edit" || p != "~/Documents/totals.odt" {
 		t.Fatalf("plain edit %v", agent2.ops[1])
+	}
+}
+
+// An edit of a sheet nobody added gets its add_sheet first (C29: rows into "Planets" in a new
+// workbook were refused); sheets the workbook has, or that an edit adds, are left alone.
+func TestAddMissingSheets(t *testing.T) {
+	row := func(sh string) map[string]any {
+		return map[string]any{"op": "append_row", "sheet": sh, "values": []any{"x"}}
+	}
+	names := func(ops []any) string {
+		var out []string
+		for _, o := range ops {
+			om := o.(map[string]any)
+			out = append(out, fmt.Sprintf("%v:%v%v", om["op"], om["sheet"], om["name"]))
+		}
+		return strings.Join(out, " ")
+	}
+	got := addMissingSheets([]any{row("Planets"), row("Planets"), map[string]any{"op": "set", "cell": "B2", "value": 1}}, "", false)
+	if names(got) != "add_sheet:<nil>Planets append_row:Planets<nil> append_row:Planets<nil> set:<nil><nil>" {
+		t.Fatalf("new workbook: %s", names(got))
+	}
+	added := []any{map[string]any{"op": "add_sheet", "name": "Planets"}, row("Planets")}
+	if len(addMissingSheets(added, "", false)) != 2 {
+		t.Fatal("an added sheet was added twice")
+	}
+	if len(addMissingSheets([]any{row("Budget")}, "Sheet Budget\nA1=x", true)) != 1 {
+		t.Fatal("an existing sheet was added")
+	}
+	// The added sheet counts for the formula check.
+	ops := addMissingSheets([]any{row("Planets"), map[string]any{"op": "set", "sheet": "Planets", "cell": "B2", "value": "=SUM(A1:A1)"}}, "", false)
+	if got := emptyFormulaRef(ops, "", false); got != "" {
+		t.Fatalf("formula on the added sheet: %q", got)
 	}
 }

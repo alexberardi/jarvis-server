@@ -310,6 +310,7 @@ func (m *Module) documentEdits(ctx context.Context, goal, instr string, sheet bo
 				break tries
 			}
 			if sheet {
+				out.Ops = addMissingSheets(out.Ops, current, exists)
 				// A formula over empty cells saves and reads back fine, as a wrong 0 (C29: =SUM(C2:C11)
 				// beside the numbers in B). Ask once more, saying what was wrong.
 				bad := emptyFormulaRef(out.Ops, current, exists)
@@ -457,6 +458,34 @@ func emptyFormulaRef(ops []any, current string, exists bool) string {
 		}
 	}
 	return ""
+}
+
+// addMissingSheets puts an add_sheet before the first edit of a sheet the workbook doesn't have
+// and no edit adds: the model wrote rows into "Planets", the attachment's sheet name, in a new
+// workbook, and office.py refused them (C29). In a new file the first one takes the empty
+// default sheet, as an explicit add_sheet does.
+func addMissingSheets(ops []any, current string, exists bool) []any {
+	have := map[string]bool{}
+	if exists {
+		for _, line := range strings.Split(current, "\n") {
+			if n, ok := strings.CutPrefix(line, "Sheet "); ok {
+				have[n] = true
+			}
+		}
+	}
+	out := make([]any, 0, len(ops))
+	for _, o := range ops {
+		om, _ := o.(map[string]any)
+		if om["op"] == "add_sheet" {
+			n, _ := om["name"].(string)
+			have[n] = true
+		} else if n, _ := om["sheet"].(string); n != "" && !have[n] {
+			out = append(out, map[string]any{"op": "add_sheet", "name": n})
+			have[n] = true
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 // totalWords are the words of a task that wants a computed cell.
