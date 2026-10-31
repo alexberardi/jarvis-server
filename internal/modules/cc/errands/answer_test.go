@@ -312,6 +312,44 @@ func TestDropAttachmentReads(t *testing.T) {
 	}
 }
 
+// A draft_reply attaches the files the errand wrote, not the path the planner guessed (C29).
+func TestAttachWrittenFiles(t *testing.T) {
+	args := servertools.Obj("action", "draft_reply", "query", "q3 hours", "attachments", "~/Documents/Q3 Hours Totals.xlsx")
+	written := []Result{
+		{Command: "email", Success: true, Data: servertools.Obj("saved_files", []any{"/h/Documents/Jarvis/Attachments/x/planets.xlsx"})},
+		{Command: cmdWriteDoc, Success: true, Data: servertools.Obj("path", "/h/Documents/Jarvis/Q3 Hours Totals.xlsx")},
+		{Command: cmdWriteDoc, Error: "failed", Data: servertools.Obj("path", "/h/Documents/failed.odt")},
+	}
+	got := attachWrittenFiles("email", args, written)
+	if truthyStr(got, "attachments") != "/h/Documents/Jarvis/Q3 Hours Totals.xlsx" || truthyStr(got, "query") != "q3 hours" {
+		t.Fatalf("args %s", pyjson.Dumps(got, false))
+	}
+	if truthyStr(args, "attachments") != "~/Documents/Q3 Hours Totals.xlsx" {
+		t.Fatal("the plan's own args were changed")
+	}
+	if attachWrittenFiles("email", args, written[:1]) != args {
+		t.Fatal("changed without a written file")
+	}
+	if got := attachWrittenFiles("email", servertools.Obj("action", "send"), written); truthyStr(got, "attachments") != "" {
+		t.Fatal("another action got attachments")
+	}
+}
+
+// A spreadsheet planned after saving an email's attachments is written from them, not from rows
+// the planner made up.
+func TestSheetFromAttachments(t *testing.T) {
+	save := Step{Command: "email", Args: servertools.Obj("action", "save_attachments", "query", "q3 hours")}
+	sheet := Step{Command: cmdWriteSheet, Args: servertools.Obj("name", "Q3 Hours Totals", "sheets", []any{})}
+	got := sheetFromResults("total the moons", []Step{save, sheet})
+	if got[1].Command != cmdWriteDoc || truthyStr(got[1].Args, "path") != "Q3 Hours Totals.xlsx" {
+		t.Fatalf("converted: %+v", got[1])
+	}
+	list := Step{Command: "email", Args: servertools.Obj("action", "list")}
+	if got := sheetFromResults("x", []Step{list, sheet}); got[1].Command != cmdWriteSheet {
+		t.Fatal("converted after an email list")
+	}
+}
+
 // The email-attachments rule comes with write_document and the email package, never alone.
 func TestEmailFilesRule(t *testing.T) {
 	if got := computerRulesFor([]MenuEntry{{Command: cmdWriteDoc}, {Command: "email"}}); !strings.Contains(got, documentRule+emailFilesRule) {
