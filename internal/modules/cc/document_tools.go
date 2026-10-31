@@ -56,7 +56,8 @@ const docSheetGuide = `Edits for a spreadsheet, applied in order:
 - {"op": "add_sheet", "name": "..."}: a new sheet (in a new file it names the first one).
 - {"op": "append_row", "sheet": "...", "values": [...]}: a row after the last used one; numbers as numbers.
 - {"op": "set", "sheet": "...", "cell": "B4", "value": 12.5 | "text" | "=SUM(B2:B3)"}: one cell; a formula starts with "=".
-Formulas are recalculated before saving.`
+Formulas are recalculated before saving.
+Every total, sum, average or count is a formula over the cells (=SUM(B2:B9)), never a number you worked out.`
 
 type writeDocumentTool struct{ m *Module }
 
@@ -103,6 +104,14 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	var current string
 	out := agent(map[string]any{"op": "doc_read", "path": p})
 	exists := dispatchOK(out)
+	// Work on files this errand just saved (an email's attachment) gets a file of its own: the
+	// planner reuses a name, and editing the last run's result left two Total rows (C29).
+	base, dot := strings.TrimSuffix(p, path.Ext(p)), path.Ext(p)
+	for n := 2; exists && len(turn.PriorFiles) > 0 && n <= 20; n++ {
+		p = fmt.Sprintf("%s (%d)%s", base, n, dot)
+		out = agent(map[string]any{"op": "doc_read", "path": p})
+		exists = dispatchOK(out)
+	}
 	switch {
 	case exists:
 		current = truncateRunes(renderDoc(out), docTextRunes)
@@ -303,7 +312,12 @@ func (m *Module) documentEdits(ctx context.Context, goal, instr string, sheet bo
 			if sheet {
 				// A formula over empty cells saves and reads back fine, as a wrong 0 (C29: =SUM(C2:C11)
 				// beside the numbers in B). Ask once more, saying what was wrong.
-				if bad := emptyFormulaRef(out.Ops, current, exists); bad != "" {
+				bad := emptyFormulaRef(out.Ops, current, exists)
+				if bad == "" && asksForTotal(goal+" "+instr) && !hasFormula(out.Ops) {
+					// C29: the model typed 385 for moons that add up to 285.
+					bad = "the task asks for a total but no cell has a formula; write =SUM(...) over the numbers, not a number you worked out"
+				}
+				if bad != "" {
 					lastErr = errors.New("a formula refers to empty cells: " + bad)
 					m.deps.Log.Warn("cc: write_document: formula over empty cells", "label", label, "try", try, "formula", bad)
 					prompt = b.String() + "\n\nYour previous edits were wrong: " + bad +
@@ -443,6 +457,25 @@ func emptyFormulaRef(ops []any, current string, exists bool) string {
 		}
 	}
 	return ""
+}
+
+// totalWords are the words of a task that wants a computed cell.
+var totalWords = regexp.MustCompile(`(?i)\b(total|totals|totaled|totalled|sum|sums|average|averages|count)\b`)
+
+func asksForTotal(task string) bool { return totalWords.MatchString(task) }
+
+// hasFormula reports whether any edit writes a formula.
+func hasFormula(ops []any) bool {
+	for _, o := range ops {
+		om, _ := o.(map[string]any)
+		vals, _ := om["values"].([]any)
+		for _, v := range append(vals, om["value"]) {
+			if s, ok := v.(string); ok && strings.HasPrefix(s, "=") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isWordByte(b byte) bool {
