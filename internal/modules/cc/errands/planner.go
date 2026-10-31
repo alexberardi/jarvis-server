@@ -364,6 +364,8 @@ func sheetFromResults(goal string, steps []Step) []Step {
 			return steps
 		case cmdSearch, cmdComputer, "deep_research":
 			found = true
+		case "email": // an email's saved attachments are the rows' source (C29)
+			found = found || truthyStr(st.Args, "action") == "save_attachments"
 		case cmdWriteSheet:
 			if !found {
 				continue
