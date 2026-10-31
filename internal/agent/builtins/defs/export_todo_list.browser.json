@@ -1,0 +1,7 @@
+{
+  "command_name": "export_todo_list",
+  "mode": "disabled",
+  "storage_name": "export_todo_list",
+  "supports_create": false,
+  "fields": []
+}

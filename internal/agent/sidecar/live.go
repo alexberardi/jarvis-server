@@ -117,13 +117,6 @@ func (l *Live) ContextQuery(ctx context.Context, command, operation string, para
 	return nodesettings.Object{}, ErrNoPackages
 }
 
-func (l *Live) RemindersDue(ctx context.Context) ([]DueReminder, int, error) {
-	if sc := l.Current(); sc != nil {
-		return sc.RemindersDue(ctx)
-	}
-	return nil, 0, ErrNoPackages
-}
-
 // Agents are the background agents of the sidecar in service; none without one.
 func (l *Live) Agents() []AgentDef {
 	if sc := l.Current(); sc != nil {

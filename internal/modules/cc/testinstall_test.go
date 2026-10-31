@@ -14,8 +14,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
-// fakePantry serves GET /v1/forge/drafts/{code} (jarvis-pantry forge_drafts.py) and
-// GET /v1/commands/{name} (command_detail.py), and records the codes and names asked for.
+// fakePantry serves GET /v1/forge/drafts/{code} (jarvis-pantry forge_drafts.py),
+// GET /v1/commands/{name} (command_detail.py) and the GET /v1/commands list, and records the codes and names asked for.
 type fakePantry struct {
 	*httptest.Server
 	mu       sync.Mutex
@@ -37,6 +37,9 @@ func newFakePantry(t *testing.T) *fakePantry {
 		if code, ok := strings.CutPrefix(r.URL.Path, "/v1/forge/drafts/"); ok {
 			key = code
 			body, found = p.drafts[code]
+		} else if r.URL.Path == "/v1/commands" { // the list, keyed "" and recorded as "?query"
+			key = "?" + r.URL.RawQuery
+			body, found = p.commands[""]
 		} else if name, ok := strings.CutPrefix(r.URL.Path, "/v1/commands/"); ok {
 			key = name
 			body, found = p.commands[name]

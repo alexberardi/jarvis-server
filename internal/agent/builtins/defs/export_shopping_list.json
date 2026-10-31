@@ -1,0 +1,93 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "shopping_list",
+        "description": "Adding/reading/checking off items is the shopping_list command — this one only sends the list to the store."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {},
+        "is_primary": true,
+        "voice_command": "Send my shopping list to Walmart"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Export the shopping list"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Send the grocery list to the store"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Send my shopping list to my notes"
+      }
+    ],
+    "function": {
+      "description": "Send the shopping list to the store as a cart link, only when asked to send or export it.",
+      "name": "export_shopping_list",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "export",
+      "send",
+      "walmart",
+      "cart",
+      "shopping list"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "shopping_list",
+        "description": "Adding/reading/checking off items is the shopping_list command — this one only sends the list to the store."
+      }
+    ],
+    "command_name": "export_shopping_list",
+    "description": "Send the shopping list to the store as a cart link, only when asked to send or export it.",
+    "examples": [
+      {
+        "expected_parameters": {},
+        "is_primary": true,
+        "voice_command": "Send my shopping list to Walmart"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Export the shopping list"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Send the grocery list to the store"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Send my shopping list to my notes"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "export",
+      "send",
+      "walmart",
+      "cart",
+      "shopping list"
+    ],
+    "parameters": []
+  }
+}

@@ -98,6 +98,37 @@ type params struct {
 
 // rejection is the inbox tag for jarvisd refusing an attachment or an item that references
 // them (N:services/inbox_backend.py): 413 too large, 415 a type it won't show, 422 bad ids.
+// PostInbox is JarvisInbox.post for a Go command: one inbox item (title, summary, body,
+// category, metadata, user_id, create_push_notification, target_type) to jarvisd, and N:'s
+// result tag: "ok", "no_cc_url", "invalid" or "http_error".
+func PostInbox(ctx context.Context, cc *node.CC, item map[string]any, command string, log *slog.Logger) string {
+	if t, _ := item["title"].(string); strings.TrimSpace(t) == "" {
+		return "invalid"
+	}
+	if cc == nil {
+		return "no_cc_url"
+	}
+	return postInbox(ctx, cc, item, false, command, log)
+}
+
+func postInbox(ctx context.Context, cc *node.CC, body map[string]any, attachments bool, command string, log *slog.Logger) string {
+	var resp struct {
+		Sent bool `json:"sent"`
+	}
+	if err := cc.Do(ctx, http.MethodPost, "/api/v0/node/inbox-item", body, &resp); err != nil {
+		log.Warn("sdkhost: inbox post failed", "command", command, "err", err)
+		if attachments {
+			return rejection(err)
+		}
+		return "http_error"
+	}
+	if !resp.Sent {
+		log.Warn("sdkhost: inbox post accepted but not delivered", "command", command)
+		return "http_error"
+	}
+	return "ok"
+}
+
 func rejection(err error) string {
 	var he *node.HTTPError
 	if errors.As(err, &he) {
@@ -309,21 +340,7 @@ func (h *Host) commandCenter(ctx context.Context, method string, p params) (any,
 			}
 			body["attachment_ids"] = ids
 		}
-		var resp struct {
-			Sent bool `json:"sent"`
-		}
-		if err := cc.Do(ctx, http.MethodPost, "/api/v0/node/inbox-item", body, &resp); err != nil {
-			h.log().Warn("sdkhost: inbox post failed", "command", p.CommandName, "err", err)
-			if len(p.Attachments) > 0 {
-				return rejection(err), nil
-			}
-			return "http_error", nil
-		}
-		if !resp.Sent {
-			h.log().Warn("sdkhost: inbox post accepted but not delivered", "command", p.CommandName)
-			return "http_error", nil
-		}
-		return "ok", nil
+		return postInbox(ctx, cc, body, len(p.Attachments) > 0, p.CommandName, h.log()), nil
 	case "signals.emit":
 		if cc == nil {
 			return "no_cc_url", nil

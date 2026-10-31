@@ -1,0 +1,318 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "reminder",
+        "description": "Time-based 'remind me to buy milk tomorrow' / 'remind me to pick up eggs at 5' — those are reminders, not list edits."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "milk",
+            "eggs"
+          ]
+        },
+        "is_primary": true,
+        "voice_command": "Add milk and eggs to the shopping list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "almond butter"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Put almond butter on the grocery list"
+      },
+      {
+        "expected_parameters": {
+          "action": "read"
+        },
+        "is_primary": false,
+        "voice_command": "What's on my shopping list?"
+      },
+      {
+        "expected_parameters": {
+          "action": "check_off",
+          "items": [
+            "milk"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Check off the milk"
+      },
+      {
+        "expected_parameters": {
+          "action": "remove",
+          "items": [
+            "eggs"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Remove eggs from the grocery list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "diapers",
+            "wipes",
+            "bananas"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Add diapers, wipes, and bananas to the list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "milk"
+          ],
+          "regular": true
+        },
+        "is_primary": false,
+        "voice_command": "Add milk to the shopping list as a regular"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear"
+        },
+        "is_primary": false,
+        "voice_command": "Clear the shopping list"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear",
+          "scope": "everything"
+        },
+        "is_primary": false,
+        "voice_command": "Clear the shopping list including the regulars"
+      }
+    ],
+    "function": {
+      "description": "Add to, read, check off or clear the shopping list.",
+      "name": "shopping_list",
+      "parameters": {
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "read",
+              "check_off",
+              "remove",
+              "clear"
+            ],
+            "type": "string"
+          },
+          "items": {
+            "description": "Item names",
+            "type": "array"
+          },
+          "regular": {
+            "description": "Only when the user says regular or staple",
+            "type": "boolean"
+          },
+          "scope": {
+            "description": "For clear: trip (default) or everything",
+            "enum": [
+              "trip",
+              "everything"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "shopping list",
+      "grocery list",
+      "groceries",
+      "shopping",
+      "add to list",
+      "grocery",
+      "check off",
+      "need from the store"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "reminder",
+        "description": "Time-based 'remind me to buy milk tomorrow' / 'remind me to pick up eggs at 5' — those are reminders, not list edits."
+      }
+    ],
+    "command_name": "shopping_list",
+    "critical_rules": [
+      "items is required for add, check_off, and remove — if unclear, ask which items",
+      "This manages a shopping list, NOT time-based reminders — 'remind me to buy milk' belongs to the reminder command"
+    ],
+    "description": "Add to, read, check off or clear the shopping list.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "milk",
+            "eggs"
+          ]
+        },
+        "is_primary": true,
+        "voice_command": "Add milk and eggs to the shopping list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "almond butter"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Put almond butter on the grocery list"
+      },
+      {
+        "expected_parameters": {
+          "action": "read"
+        },
+        "is_primary": false,
+        "voice_command": "What's on my shopping list?"
+      },
+      {
+        "expected_parameters": {
+          "action": "check_off",
+          "items": [
+            "milk"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Check off the milk"
+      },
+      {
+        "expected_parameters": {
+          "action": "remove",
+          "items": [
+            "eggs"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Remove eggs from the grocery list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "diapers",
+            "wipes",
+            "bananas"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "Add diapers, wipes, and bananas to the list"
+      },
+      {
+        "expected_parameters": {
+          "action": "add",
+          "items": [
+            "milk"
+          ],
+          "regular": true
+        },
+        "is_primary": false,
+        "voice_command": "Add milk to the shopping list as a regular"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear"
+        },
+        "is_primary": false,
+        "voice_command": "Clear the shopping list"
+      },
+      {
+        "expected_parameters": {
+          "action": "clear",
+          "scope": "everything"
+        },
+        "is_primary": false,
+        "voice_command": "Clear the shopping list including the regulars"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "shopping list",
+      "grocery list",
+      "groceries",
+      "shopping",
+      "add to list",
+      "grocery",
+      "check off",
+      "need from the store"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "add",
+          "read",
+          "check_off",
+          "remove",
+          "clear"
+        ],
+        "name": "action",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Item names",
+        "enum_values": null,
+        "name": "items",
+        "options_source": null,
+        "required": false,
+        "type": "array\u003cstring\u003e"
+      },
+      {
+        "default_value": null,
+        "description": "Only when the user says regular or staple",
+        "enum_values": null,
+        "name": "regular",
+        "options_source": null,
+        "required": false,
+        "type": "bool"
+      },
+      {
+        "default_value": null,
+        "description": "For clear: trip (default) or everything",
+        "enum_values": [
+          "trip",
+          "everything"
+        ],
+        "name": "scope",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "rules": [
+      "items is ALWAYS an array of strings, even for a single item",
+      "Split compound requests: 'add milk, eggs, and butter' -\u003e items=['milk', 'eggs', 'butter']",
+      "Default action is 'add' when items are mentioned, 'read' when just asking about the list",
+      "Strip quantities and filler into the item name itself ('2 gallons of milk' -\u003e 'milk' unless the quantity matters)",
+      "Regulars are items the household buys every trip — set regular=true only when the user calls them regulars/staples",
+      "'clear the shopping list' = scope 'trip' (regulars come back); only use scope='everything' when the user explicitly includes regulars"
+    ]
+  }
+}

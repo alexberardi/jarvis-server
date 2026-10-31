@@ -708,7 +708,11 @@ func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text st
 	ex.Tools = append(ex.Tools, ToolRun{Name: "direct", Args: map[string]any{"said": text}, Success: success})
 	s.log.Info("direct: done on the node", "transcript", text, "success", success, "choice", choice)
 	if msg, _ := out["message"].(string); sig.Speak && msg != "" {
-		return p.say(ctx, s, ex, msg, ""), true
+		end := FollowUpEnd("")
+		if sig.ClearHistory {
+			end = EndClearHistory
+		}
+		return p.say(ctx, s, ex, msg, end), true
 	}
 	if choice {
 		s.choice = true
@@ -756,6 +760,17 @@ func (p *Pipeline) record(ctx context.Context, s *session) (pcm []int16, hitMax 
 			break
 		}
 	}
+	ended := "silence"
+	switch {
+	case rec.hitMax:
+		ended = "max"
+	case !rec.done:
+		ended = "no_audio"
+	case rec.n == rec.minFrames+1:
+		ended = "silence_at_min" // stopped the first moment it could: speech under the threshold?
+	}
+	s.log.Info("voice: recorded", append([]any{"secs", fmt.Sprintf("%.2f", float64(len(rec.pcm))/CaptureRate), "ended", ended},
+		levelSummary(rec.pcm, s.threshold)...)...)
 	return rec.pcm, rec.hitMax, nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
-	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -33,9 +32,6 @@ var routineSpec = node.Spec{
 
 // RoutineTimeout bounds a whole routine: jarvisd waits about a minute for a run's result.
 const RoutineTimeout = 55 * time.Second
-
-// composeTimeout bounds the model's composition of the reply.
-const composeTimeout = 30 * time.Second
 
 var lengthInstructions = map[string]string{
 	"short":  "Respond in 2-4 spoken sentences, conversational tone.",
@@ -197,20 +193,10 @@ func (t *Routine) compose(ctx context.Context, results map[string]any, errs map[
 		e, _ := json.Marshal(errs)
 		prompt += "\n\nThese steps had errors (do not mention them): " + string(e)
 	}
-	if cc := t.CC(); cc != nil {
-		var resp struct {
-			Content *string `json:"content"`
-		}
-		body := map[string]any{"messages": []map[string]string{{"role": "system", "content": prompt}}, "model": "live", "temperature": 0}
-		err := cc.WithTimeout(composeTimeout).Do(ctx, http.MethodPost, "/api/v0/node/llm/chat", body, &resp)
-		if err == nil && resp.Content != nil {
-			if s := strings.TrimSpace(thinkRe.ReplaceAllString(*resp.Content, "")); s != "" {
-				return s
-			}
-		}
-		if err != nil {
-			t.log().Warn("routine: composition failed; using the steps' messages", "err", err)
-		}
+	if s, err := chatText(ctx, t.CC(), prompt); err != nil {
+		t.log().Warn("routine: composition failed; using the steps' messages", "err", err)
+	} else if s = strings.TrimSpace(thinkRe.ReplaceAllString(s, "")); s != "" {
+		return s
 	}
 	var parts []string
 	for _, label := range slices.Sorted(maps.Keys(results)) {
@@ -236,6 +222,9 @@ func (t *Routine) Direct(ctx context.Context, said string) (map[string]any, bool
 		return nil, false
 	}
 	for _, slug := range t.slugs() {
+		if t.Store != nil && !t.Store.FastPathEnabled(routineSpec.Name, patternID(slug)) {
+			continue // the household turned this routine's phrases off
+		}
 		phrases, _ := t.definition(slug)["trigger_phrases"].([]any)
 		if !matchesTrigger(text, phrases) {
 			continue
@@ -247,6 +236,29 @@ func (t *Routine) Direct(ctx context.Context, said string) (map[string]any, bool
 		return out, true
 	}
 	return nil, false
+}
+
+// patternID is a routine's fast-path pattern id, as N:'s RoutineCommand names it.
+func patternID(slug string) string { return "routine." + slug }
+
+// FastPaths are the routine command's fast-path patterns, one per routine with trigger phrases
+// (fast_path_patterns), so the app can turn one routine's phrases off when they collide with
+// another command's.
+func (t *Routine) FastPaths(command string) []nodesettings.FastPath {
+	if command != routineSpec.Name {
+		return nil
+	}
+	var out []nodesettings.FastPath
+	for _, slug := range t.slugs() {
+		phrases, _ := t.definition(slug)["trigger_phrases"].([]any)
+		if len(phrases) == 0 {
+			continue
+		}
+		first, _ := phrases[0].(string)
+		out = append(out, nodesettings.FastPath{ID: patternID(slug),
+			Description: "Run the '" + slug + "' routine without the LLM", Example: first})
+	}
+	return out
 }
 
 // slugs are the routines this node knows: the defaults first, then the packages', then the

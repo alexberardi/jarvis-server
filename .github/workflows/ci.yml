@@ -64,7 +64,7 @@ jobs:
         include:
           - { os: ubuntu-latest,    target: linux-amd64 }
           - { os: ubuntu-24.04-arm, target: linux-arm64 }
-          - { os: macos-14,         target: darwin-arm64 }
+          - { os: macos-15,         target: darwin-arm64 }
           - { os: windows-latest,   target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -87,7 +87,9 @@ jobs:
         env:
           CGO_ENABLED: "0"
           JARVIS_SHERPA_MODELS: ${{ github.workspace }}/.models
-        run: go test ./internal/voice/... -v -run 'Layout|Extract|Smoke|Kokoro'
+        # RealWakeWord: the desktop agent's whole listening path (onnxruntime + openWakeWord) on
+        # each OS, the agent's voice included.
+        run: go test ./internal/voice/... ./internal/agent/voice/ -v -run 'Layout|Extract|Smoke|Kokoro|RealWakeWord'
       # The platform layer touches OS specifics (process groups, file renames, sockets), so
       # its tests run on every OS too, not just linux.
       - name: Platform tests (CGO_ENABLED=0)
@@ -104,7 +106,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: linux-amd64 }
-          - { os: macos-14,       target: darwin-arm64 }
+          - { os: macos-15,       target: darwin-arm64 }
           - { os: windows-latest, target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -229,7 +231,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: linux-amd64 }
-          - { os: macos-14,       target: darwin-arm64 }
+          - { os: macos-15,       target: darwin-arm64 }
           - { os: windows-latest, target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -364,7 +366,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: linux-amd64 }
-          - { os: macos-14,       target: darwin-arm64 }
+          - { os: macos-15,       target: darwin-arm64 }
           - { os: windows-latest, target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -414,7 +416,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: linux-amd64 }
-          - { os: macos-14,       target: darwin-arm64 }
+          - { os: macos-15,       target: darwin-arm64 }
           - { os: windows-latest, target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -450,7 +452,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: linux-amd64 }
-          - { os: macos-14,       target: darwin-arm64 }
+          - { os: macos-15,       target: darwin-arm64 }
           - { os: windows-latest, target: windows-amd64 }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -495,6 +497,7 @@ jobs:
           shellcheck -s sh scripts/install-pi.sh && shellcheck scripts/install-pi-check.sh
           shellcheck scripts/pi-soak.sh scripts/pi-soak-check.sh
           shellcheck scripts/freepbx-lane scripts/freepbx-lane-check.sh scripts/freepbx-lane.d/provision.sh scripts/freepbx-lane.d/calls.sh
+          shellcheck scripts/browser-ext-publish.sh scripts/browser-ext-publish-check.sh
       # The Pi node's installer against a scratch root and its golden file (go-pi-node.md §7 4.3).
       - name: install-pi.sh golden
         run: scripts/install-pi-check.sh
@@ -504,6 +507,9 @@ jobs:
       # The L2 SIP lane's guards and dry-run plans, without a hypervisor (docs/cc/phone-sip.md §5).
       - name: freepbx-lane check
         run: scripts/freepbx-lane-check.sh
+      # The store publisher against a fake Chrome Web Store and a stand-in web-ext.
+      - name: browser-ext-publish check
+        run: scripts/browser-ext-publish-check.sh
       # v0.0.1 and v0.0.2 packages (an upgrade), and a v0.0.3 jarvisd standing in for one the
       # self-updater installed.
       - name: Build the packages
@@ -583,7 +589,7 @@ jobs:
   # in a scratch HOME and through SMAppService. Developer ID signing, notarization and stapling
   # are release.yml's sign-macos.
   macos-dmg:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -618,7 +624,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: linux-amd64,   ext: tar.gz }
-          - { os: macos-14,       target: darwin-arm64,  ext: tar.gz }
+          - { os: macos-15,       target: darwin-arm64,  ext: tar.gz }
           - { os: windows-latest, target: windows-amd64, ext: zip }
     runs-on: ${{ matrix.os }}
     defaults:
@@ -871,9 +877,17 @@ jobs:
           test "$(jarvisd version)" = "$V"
           curl -fsS http://127.0.0.1:7700/health
           $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
-          # macOS may admit a new program by itself; take it out so doctor --fix has work.
-          sudo $fw --remove /usr/local/bin/jarvisd
-          if sudo jarvisd doctor; then exit 1; fi
+          # Block it so doctor --fix has work. macOS 15 may ignore the change (it re-admits a
+          # running program after --remove); doctor reads the real state, so then it rightly
+          # passes, and only --fix's result below is checked.
+          sudo $fw --blockapp /usr/local/bin/jarvisd
+          state=$($fw --getappblocked /usr/local/bin/jarvisd)
+          echo "after --blockapp: $state"
+          if echo "$state" | grep -q blocked; then
+            if sudo jarvisd doctor; then exit 1; fi
+          else
+            echo "::warning::macOS $(sw_vers -productVersion) kept jarvisd permitted after --blockapp; doctor's failing case not exercised"
+          fi
           sudo jarvisd doctor --fix
           $fw --getappblocked /usr/local/bin/jarvisd | grep -q permitted
           test "$(stat -f %Lp ~/.jarvisd)" = 700

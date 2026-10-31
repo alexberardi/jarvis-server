@@ -571,3 +571,46 @@ func TestGatePassesDirectAndChoiceAnswers(t *testing.T) {
 		t.Fatal("stage 1 didn't see the command turned off")
 	}
 }
+
+// The app's Inspect fast-paths screen switches one pattern: the push is kept (sparse, on by
+// default), survives a reopen, and the snapshot reports each pattern's state.
+func TestFastPathSwitches(t *testing.T) {
+	h, f, dir := newHandler(t, "n1")
+	if err := h.apply("fast_path_registry", map[string]any{"command_name": "routine", "pattern_id": "routine.good_night", "enabled": "false"}); err != nil {
+		t.Fatal(err)
+	}
+	if h.Store.FastPathEnabled("routine", "routine.good_night") || !h.Store.FastPathEnabled("routine", "routine.good_morning") {
+		t.Fatal("switch not applied to just that pattern")
+	}
+	again, err := OpenStore(dir, "n1")
+	if err != nil || again.FastPathEnabled("routine", "routine.good_night") {
+		t.Fatalf("switch not kept: %v", err)
+	}
+	// A push without a pattern changes nothing.
+	if err := h.apply("fast_path_registry", map[string]any{"command_name": "routine"}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.Commands = func(context.Context, *int64) []Command {
+		return []Command{{Name: "routine", FastPaths: []FastPath{
+			{ID: "routine.good_morning", Description: "m", Example: "good morning"},
+			{ID: "routine.good_night", Description: "n", Example: "good night"},
+		}}}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1"}`))
+	fps := decryptUpload(t, f, h, "r1")["commands"].([]any)[0].(map[string]any)["fast_paths"].([]any)
+	if len(fps) != 2 || fps[0].(map[string]any)["enabled"] != true || fps[1].(map[string]any)["enabled"] != false ||
+		fps[1].(map[string]any)["example"] != "good night" {
+		t.Fatalf("fast_paths = %v", fps)
+	}
+
+	if err := h.apply("fast_path_registry", map[string]any{"command_name": "routine", "pattern_id": "routine.good_night", "enabled": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if !h.Store.FastPathEnabled("routine", "routine.good_night") {
+		t.Fatal("switched back on: still off")
+	}
+}

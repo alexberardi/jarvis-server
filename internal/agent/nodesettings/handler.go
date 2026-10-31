@@ -295,10 +295,23 @@ func (h *Handler) apply(configType string, data map[string]any) error {
 			on = truthy(text(v))
 		}
 		return h.Store.SetEnabled(name, on)
-	case configType == "node_config", configType == "agent_registry", configType == "fast_path_registry",
+	case configType == "fast_path_registry":
+		// One pattern of a command's fast paths on or off (the app's Inspect fast-paths screen).
+		name, id := text(data["command_name"]), text(data["pattern_id"])
+		if data["command_name"] == nil || name == "" || data["pattern_id"] == nil || id == "" {
+			h.Log.Warn("config: fast_path_registry push without command_name or pattern_id")
+			return nil
+		}
+		on := true
+		if v, ok := data["enabled"]; ok {
+			on = truthy(text(v))
+		}
+		h.Log.Info("config: fast path switched", "command", name, "pattern", id, "enabled", on)
+		return h.Store.SetFastPathEnabled(name, id, on)
+	case configType == "node_config", configType == "agent_registry",
 		strings.HasPrefix(configType, "auth:"):
 		// node_config is the Pi's update/egress consent (the agent updates itself differently);
-		// the agent runs no background agents or fast paths; auth:* is a package's OAuth
+		// the agent runs no background agents; auth:* is a package's OAuth
 		// store_auth_values, which the sidecar doesn't host yet.
 		h.Log.Info("config: push type not used on a desktop agent; acknowledged", "config_type", configType)
 		return nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
+	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 )
 
 // fakeCC is jarvisd's node API: the device registry, send-link and the LLM passthrough.
@@ -355,5 +359,136 @@ func TestTriggeredRoutineRunsForTheSpeaker(t *testing.T) {
 	tool.Direct(node.WithSpeaker(context.Background(), uid(9)), "good morning")
 	if st.got == nil || *st.got != 9 {
 		t.Fatalf("steps ran for %v", st.got)
+	}
+}
+
+// A routine whose phrases the household switched off isn't run by them; the others still are.
+func TestRoutineFastPathSwitches(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := &stepTools{calls: map[string]map[string]any{}, outs: map[string]map[string]any{
+		"control_device": {"success": true, "message": "ok"}, "get_calendar_events": {"success": true, "message": "ok"},
+		"get_weather": {"success": true, "message": "ok"}}}
+	tool := &Routine{Store: st, Tools: steps, CC: func() *node.CC { return nil }}
+
+	fps := tool.FastPaths("routine")
+	if len(fps) != 4 || fps[1].ID != "routine.good_night" || fps[1].Example != "good night" {
+		t.Fatalf("fast paths = %+v", fps)
+	}
+	if tool.FastPaths("get_weather") != nil {
+		t.Fatal("fast paths for another command")
+	}
+	if err := st.SetFastPathEnabled("routine", "routine.good_night", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tool.Direct(context.Background(), "good night"); ok {
+		t.Fatal("ran a routine whose phrases are off")
+	}
+	if _, ok := tool.Direct(context.Background(), "good morning"); !ok {
+		t.Fatal("another routine's phrases stopped working")
+	}
+}
+
+// "Set a timer for 5 minutes." runs with no model and is spoken; the period speech-to-text adds
+// isn't a label (N: answered "Timer set for 5 minutes for ."). A switched-off pattern falls
+// through to the model, and a fast path whose command fails does too.
+func TestTimerFastPaths(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &timers.Service{Path: filepath.Join(t.TempDir(), "timers.json")}
+	tm := &Timers{Service: svc, Store: st}
+	ctx := context.Background()
+
+	out, ok := tm.Direct(ctx, "Set a timer for 5 minutes.")
+	if !ok || out["message"] != "Timer set for 5 minutes" || !node.TakeSignals(out).Speak || len(svc.Active()) != 1 {
+		t.Fatalf("set = %v, %v, timers %v", out, ok, svc.Active())
+	}
+	if out, ok := tm.Direct(ctx, "How much time is left?"); !ok || !strings.HasPrefix(out["message"].(string), "Your timer has ") {
+		t.Fatalf("check = %v, %v", out, ok)
+	}
+	if err := st.SetFastPathEnabled("set_timer", "timer.set", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tm.Direct(ctx, "set a timer for 10 minutes"); ok {
+		t.Fatal("a switched-off pattern ran")
+	}
+	if _, ok := tm.Direct(ctx, "wake me in 20 minutes"); !ok {
+		t.Fatal("another pattern of the command stopped working")
+	}
+	if fps := tm.FastPaths("set_timer"); len(fps) != 3 || fps[0].ID != "timer.set" {
+		t.Fatalf("fast paths = %+v", fps)
+	}
+	off := node.WithEnabled(ctx, func(name string) bool { return name != "cancel_timer" })
+	if _, ok := tm.Direct(off, "cancel all timers"); ok {
+		t.Fatal("ran a command the household turned off")
+	}
+	if out, ok := tm.Direct(ctx, "cancel all timers"); !ok || out["message"] != "Cancelled all 2 timers" {
+		t.Fatalf("cancel = %v, %v", out, ok)
+	}
+	// Nothing to cancel is still a success with words, as on N:; nothing to say falls through.
+	if out, ok := tm.Direct(ctx, "cancel my timer"); !ok || out["message"] != "No active timers to cancel" {
+		t.Fatalf("cancel none = %v, %v", out, ok)
+	}
+}
+
+// Spoken numbers carry no trailing zeros: "5 miles", "2.5", "212°F".
+func TestSpokenNumbersDropTrailingZeros(t *testing.T) {
+	c := &Convert{}
+	out, _ := c.Call(context.Background(), "convert_measurement", map[string]any{"value": 5.0, "from_unit": "miles", "to_unit": "kilometers"}, node.Request{})
+	if out["message"] != "5 miles equals 8.05 kilometers." {
+		t.Errorf("miles = %q", out["message"])
+	}
+	out, _ = c.Call(context.Background(), "convert_measurement", map[string]any{"value": 100.0, "from_unit": "celsius", "to_unit": "fahrenheit"}, node.Request{})
+	if out["message"] != "100 celsius equals 212°F." || out["result_text"] != "212°F" {
+		t.Errorf("temperature = %q / %q", out["message"], out["result_text"])
+	}
+	out, _ = (&Calculate{}).Call(context.Background(), "calculate", map[string]any{"num1": 5.0, "num2": 2.0, "operation": "divide"}, node.Request{})
+	if out["message"] != "5 divided by 2 equals 2.5." {
+		t.Errorf("divide = %q", out["message"])
+	}
+}
+
+// A volume change ends the exchange; a failed one doesn't.
+func TestControlNodeEndsTheExchange(t *testing.T) {
+	a := &sdkhost.Audio{Path: filepath.Join(t.TempDir(), "v.json"), Run: func(context.Context, string, ...string) (string, error) {
+		return "Volume: front-left: 1 / 50% / 0 dB", nil
+	}}
+	c := &ControlNode{Audio: a}
+	out, _ := c.Call(context.Background(), "control_node", map[string]any{"action": "volume_up"}, node.Request{})
+	if !node.TakeSignals(out).ClearHistory || out["message"] != "Volume 60 percent." {
+		t.Fatalf("volume_up = %v", out)
+	}
+	out, _ = c.Call(context.Background(), "control_node", map[string]any{"action": "explode"}, node.Request{})
+	if node.TakeSignals(out).ClearHistory {
+		t.Fatalf("a failure ended the exchange: %v", out)
+	}
+}
+
+// "Add soda as a regular to my shopping list" adds a regular called soda, which a trip clear
+// keeps (N:'s fast path added an item named "soda as a regular" and the clear removed it).
+func TestShoppingAddAsARegular(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Shopping{Store: st}
+	ctx := context.Background()
+	for _, said := range []string{"Add soda as a regular on my shopping list.", "add chips and salsa as regulars to the grocery list"} {
+		if out, ok := s.Direct(ctx, said); !ok || !strings.Contains(out["message"].(string), "as a regular") && !strings.Contains(out["message"].(string), "as regulars") {
+			t.Fatalf("%q = %v, %v", said, out, ok)
+		}
+	}
+	s.Direct(ctx, "add bread to the shopping list")
+	out, _ := s.Direct(ctx, "clear the shopping list")
+	if out["regulars_reset"] != 3 || out["removed_count"] != 1 {
+		t.Fatalf("clear = %v", out)
+	}
+	out, _ = s.Direct(ctx, "what's on my shopping list")
+	if out["message"] != "You have 3 items on your shopping list: chips, salsa, and soda." {
+		t.Fatalf("read = %v", out["message"])
 	}
 }

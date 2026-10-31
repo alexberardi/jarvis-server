@@ -1,0 +1,65 @@
+# Publish Jarvis Browser Control to the Chrome Web Store and AMO (listed) on every release tag,
+# when the extension's version is new to that store (scripts/browser-ext-publish.sh skips
+# otherwise). Both stores review before users get it.
+#
+# Each job runs in the `browser-stores` environment: give it required reviewers in the repo
+# settings so a tag can't publish without an approval. Its secrets (docs/agent/store-listing.md,
+# "Publishing from CI"):
+#   CWS_SERVICE_ACCOUNT_KEY  JSON key of the service account linked in the Chrome Web Store
+#                            Developer Dashboard (Account)
+#   CWS_PUBLISHER_ID         the publisher id the dashboard shows
+#   AMO_JWT_ISSUER, AMO_JWT_SECRET  addons.mozilla.org API key pair
+name: browser-ext-publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-ext-publish
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.27"
+  # pack needs no voice libraries.
+  GOFLAGS: -tags=nosherpa
+  CGO_ENABLED: "0"
+
+jobs:
+  chrome:
+    runs-on: ubuntu-latest
+    environment: browser-stores
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Publish to the Chrome Web Store
+        env:
+          CWS_SERVICE_ACCOUNT_KEY: ${{ secrets.CWS_SERVICE_ACCOUNT_KEY }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+        run: scripts/browser-ext-publish.sh chrome
+
+  firefox:
+    runs-on: ubuntu-latest
+    environment: browser-stores
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Submit to addons.mozilla.org (listed)
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: scripts/browser-ext-publish.sh firefox

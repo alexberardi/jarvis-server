@@ -37,6 +37,14 @@ type Command struct {
 	// type, required, enum_values, options_source, ...): the app's routine editor builds a
 	// step's fields, and its device pickers, from them.
 	Parameters []any
+	// FastPaths are the command's patterns the node runs without the model (a routine's trigger
+	// phrases), each switchable in the app's Inspect fast-paths screen.
+	FastPaths []FastPath
+}
+
+// FastPath is one fast-path pattern (jarvis_command_sdk's FastPathPattern).
+type FastPath struct {
+	ID, Description, Example string
 }
 
 // DeviceComponent is a device family or manager in the snapshot: N:'s entry as the sidecar
@@ -126,6 +134,14 @@ func (st *Store) Snapshot(cmds []Command, dev Devices, nodeConfig map[string]any
 		}
 		if len(c.Parameters) > 0 {
 			e["parameters"] = c.Parameters
+		}
+		if len(c.FastPaths) > 0 {
+			fps := make([]map[string]any, 0, len(c.FastPaths))
+			for _, f := range c.FastPaths {
+				fps = append(fps, map[string]any{"id": f.ID, "description": f.Description, "example": f.Example,
+					"enabled": st.FastPathEnabled(c.Name, f.ID)})
+			}
+			e["fast_paths"] = fps
 		}
 		entries = append(entries, e)
 	}

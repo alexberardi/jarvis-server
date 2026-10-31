@@ -67,6 +67,7 @@ agent forwards to its log. The Go agent owns the node's identity, key and MQTT; 
 never sees them.
 """
 
+import ast
 import importlib
 import importlib.machinery
 import importlib.util
@@ -375,6 +376,7 @@ def load_packages(listing: str) -> dict:
         doc = json.load(f)
     packages = doc.get("packages") or []
     found = load_builtins(doc["builtins"]) if doc.get("builtins") else {}
+    _share_top_level([pkg["root"] for pkg in packages])
     for pkg in packages:
         name, root = pkg["name"], pkg["root"]
         top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
@@ -413,6 +415,37 @@ def load_packages(listing: str) -> dict:
         for rel in pkg.get("agents") or []:
             _load_agent(name, top, rel)
     return found
+
+
+def _share_top_level(roots: list) -> None:
+    """A top-level package that several package roots have (each its own device_families/) is
+    one package over all their directories, as the Python node's single device_families tree
+    was: otherwise the first root on sys.path takes the name and the others' absolute imports
+    (from device_families.zwave import …) fail. Only when every __init__.py is empty or a
+    docstring and comments: one with code is left to the normal import (first root wins)."""
+    dirs = {}
+    for root in roots:
+        try:
+            entries = sorted(pathlib.Path(root).iterdir())
+        except OSError:
+            continue
+        for d in entries:
+            if d.name.isidentifier() and (d / "__init__.py").is_file():
+                dirs.setdefault(d.name, []).append(d)
+    for name, found in dirs.items():
+        if len(found) < 2 or name in sys.modules or not all(_empty_init(d / "__init__.py") for d in found):
+            continue
+        spec = importlib.machinery.ModuleSpec(name, None, is_package=True)
+        spec.submodule_search_locations = [str(d) for d in found]
+        sys.modules[name] = importlib.util.module_from_spec(spec)
+
+
+def _empty_init(path: pathlib.Path) -> bool:
+    try:
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+    except (OSError, SyntaxError, ValueError):
+        return False
+    return all(isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) for n in body)
 
 
 def _load_agent(package: str, top: str, rel: str) -> None:
@@ -1172,10 +1205,17 @@ def call(commands: dict, params: dict) -> dict:
         conversation_id=req.get("tool_call_id") or "desktop",
         user_id=req.get("user_id"),
     )
+    arguments = dict(params.get("arguments") or {})
+    # The model's arguments fixed up first, as N:'s command execution does for every tool call
+    # (a string where the command takes a list, "true" for a boolean, a missing query).
+    try:
+        arguments = cmd.post_process_tool_call(arguments, req.get("voice_command") or "") or arguments
+    except Exception as exc:
+        print(f"sidecar: {name}: post_process_tool_call failed: {exc}", file=sys.stderr)
     # User-scoped secrets resolve to the requesting user, as on a Pi.
     set_current_user_id(req.get("user_id"))
     try:
-        resp = cmd.execute(ri, **(params.get("arguments") or {}))
+        resp = cmd.execute(ri, **arguments)
     except Exception as exc:
         return {"output": {"success": False, "error": str(exc)}}
     finally:

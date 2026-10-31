@@ -56,7 +56,20 @@ func PiBuiltins(requirement string) *Builtins {
 		requirement = NodeCommandsRequirement
 	}
 	return &Builtins{Requirement: requirement, Package: "commands",
-		Skip: []string{"control_device_command", "routine_command", "send_link_command"}}
+		Skip: append([]string{"control_device_command", "routine_command", "send_link_command"}, PortedToGo...)}
+}
+
+// PortedToGo are the built-in modules the Go agent now serves itself (internal/agent/builtins
+// and the clock), so the sidecar doesn't load the Python copy, which would shadow the Go one.
+var PortedToGo = []string{
+	"timer_command", "check_timers_command", "cancel_timer_command", // builtins.Timers
+	"timezone_command",                                                            // the clock (get_current_time)
+	"calculator_command", "measurement_conversion_command", "tell_a_joke_command", // Calculate, Convert, Joke
+	"answer_question_command", "chat_command", // Talk
+	"control_node_command", "whats_up_command", "act_on_items_command", // ControlNode, CheckAlerts, ActOnItems
+	"shopping_list_command", "todo_list_command", // Shopping, Todo
+	"export_shopping_list_command", "export_todo_list_command", // ExportShopping, ExportTodo
+	"reminder_command", // Reminder (and the poller's check: reminder_service in Go)
 }
 
 // pythonVersion is the interpreter uv installs for the venv: its own standalone build, so the

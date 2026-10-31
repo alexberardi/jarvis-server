@@ -229,7 +229,7 @@ jobs:
   # entitlements) and the dmgs unsigned; a publishing run fails. A pull request never uses them.
   sign-macos:
     needs: build
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       signed: ${{ steps.keychain.outputs.signed }}
     steps:
@@ -600,7 +600,7 @@ jobs:
         include:
           - { os: ubuntu-latest, target: linux-amd64, ext: tar.gz }
           - { os: ubuntu-24.04-arm, target: linux-arm64, ext: tar.gz }
-          - { os: macos-14, target: darwin-arm64, ext: tar.gz }
+          - { os: macos-15, target: darwin-arm64, ext: tar.gz }
           - { os: windows-latest, target: windows-amd64, ext: zip }
     runs-on: ${{ matrix.os }}
     defaults:

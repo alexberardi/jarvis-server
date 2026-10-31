@@ -810,7 +810,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
 	if tf.host != nil {
-		alerts := startAlerts(ctx, tf.host, mic, tf.live, log)
+		alerts := startAlerts(ctx, tf.host, mic, tf.reminder, log)
 		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
 	}
 	hd := openHat(hf, press, log)
@@ -857,7 +857,7 @@ func runAgent(ctx context.Context, args []string) error {
 	wirePackages(r, tf.pkgs, log)
 	// action, callback and toggle_command: the app's device control, a command's buttons and
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
-	wireActions(r, sc, st, sayNow(mic), log)
+	wireActions(r, sc, tools, st, sayNow(mic), log)
 	if sc != nil {
 		wireDevices(r, sc, tf.registry, log)
 		wireRoutineVerb(r, served, log)
@@ -1043,6 +1043,8 @@ type toolFlags struct {
 	cc       func() *node.CC
 	registry *devices.Registry
 	routine  *builtins.Routine
+	// reminder is the reminder built-in (with a store), whose due reminders a Pi's poller fires.
+	reminder *builtins.Reminder
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
@@ -1193,7 +1195,26 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 	f.registry = &devices.Registry{}
 	f.routine = &builtins.Routine{Store: st, Pantry: pantryRoutineDefs(f.pkgs, log), CC: cc, Log: log}
 	tools = append(tools, &builtins.ControlDevice{Devices: f.registry, Families: live, CC: cc},
-		&builtins.SendLink{CC: cc}, f.routine, &clock.Tool{})
+		&builtins.SendLink{CC: cc}, f.routine, &builtins.Calculate{Store: st}, &builtins.Convert{Store: st},
+		&builtins.Joke{CC: cc, Store: st})
+	if st != nil {
+		// The household's lists, in the node's store as the Python commands kept them.
+		tools = append(tools, &builtins.Shopping{Store: st}, &builtins.Todo{Store: st},
+			&builtins.ExportTodo{Store: st, CC: cc, Log: log}, &builtins.ExportShopping{Store: st, CC: cc, Log: log})
+		f.reminder = &builtins.Reminder{Store: st, CC: cc, Log: log}
+		tools = append(tools, f.reminder)
+	}
+	if f.host != nil && f.host.Timers != nil {
+		// A Pi's timers, volume and alerts: the host's services, on its speaker.
+		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st},
+			&builtins.ControlNode{Audio: f.host.Audio, Store: st},
+			&builtins.CheckAlerts{Alerts: f.host.Alerts, CC: cc, Store: st})
+	}
+	if f.pi {
+		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
+		tools = append(tools, builtins.Talk{}, builtins.ActOnItems{})
+	}
+	tools = append(tools, &clock.Tool{})
 	return tools, closeAll, nil
 }
 
