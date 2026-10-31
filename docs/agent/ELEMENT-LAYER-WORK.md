@@ -2223,3 +2223,45 @@ Design (agreed in direction, not reviewed):
 2. The user decides whether to install the package on the dev agent and point it at a mailbox. Use a throwaway mailbox first, not Proton.
 3. Build the raw-bytes op plus OCR for PDF and image attachments.
 4. Make a live run of the whole flow.
+
+### C30 · Claude → Astra (and the next session) · 2026-10-30 22:50
+
+**The email attachment flow passes on the user's real setup.** "Take the spreadsheet from the
+q3 hours email, total the moons in it, and draft a reply with it attached" ran to the end
+(22:44, `status=success`). It saved the attachment, then wrote a new xlsx as a copy of it with a
+`=SUM(B2:B9)` total row (285, checked in Calc). Then it put a reply in Proton's Drafts with that
+file attached. The mailbox is Proton Bridge on the prod box, reached through a relay on
+11143/11025; nothing was written to prod. Email package 1.2.0 (PR cmd-email#4) was merged and
+released by the user.
+
+It took ten rounds of fixes. Each run broke somewhere new, and the 9B planner never followed a
+prompt rule reliably, so the flow's shape is now enforced in code. All on `feat/element-layer`,
+pushed:
+
+| Commit | What broke | Fix |
+|---|---|---|
+| `3cc1a956` | The app showed only gmail's email settings | The sidecar evaluates `required_secrets` per requesting user (new `secrets` method), as the Python node did |
+| `fc289978` | Confirm cards (email reply/send Send/Cancel) never reached the app | The sidecar passes `CommandResponse.actions` through |
+| `182cbccd` | The planner never saw `save_attachments`/`draft_reply` | NodeMenu lists a parameter's enum values |
+| `6e594ac8` | A guessed `read_computer_file` path after save_attachments | That read is dropped; plan steps are logged with their actions |
+| `29a68a94` | The draft attached a guessed path; `write_spreadsheet` had made-up rows | draft_reply attaches the files the errand wrote; a sheet step after save_attachments becomes write_document |
+| `62e7b1b5` | The plan skipped the work step | `attachmentWork` inserts write_document between save_attachments and draft_reply |
+| `4cfbe592` | (diagnostic) | Logs why an answer had no edits |
+| `196ba082` | `=SUM(C2:C11)` over an empty column; background model's JSON wrapped in a string | Edits are simulated before saving and a formula over empty cells gets one retry; the wrapped answer is unwrapped |
+| `a248eaf4` | A typed-in total (385); a rerun edited the last run's file | A total must be a formula (one retry); attachment work writes `<name> (n)` |
+| `e708d1ea` | Rows went into a sheet that was never created | `addMissingSheets` |
+| `89dca2a1` | Only a Total row was written into an empty new file | Agent `doc_edit` takes `from`; write_document starts a new sheet as a copy of the saved one |
+
+**Deployed on the dev box:**
+- jarvisd `dev (89dca2a)`.
+- The agent is a local, unpushed merge of `feat/element-layer` with `fix/household-voice-agent-update` (`fda9f96f`, local in `wt-agent-voice-update`). It is `dev (4b3e1d0)`, built in `/var/tmp/el-agent`; earlier binaries are kept as `jarvis-agent.prev-dev-*`.
+- The agent was re-paired to the installed jarvisd as node `994727cc`, room "agent". It had been pointed at the `voice` sandbox.
+
+**Open:**
+1. PDFs and images are still only named, not read (raw-bytes op + OCR).
+2. Text documents built from attachments don't start from a copy. Only spreadsheets do.
+3. The formula check catches empty ranges, not a sum over the wrong filled column.
+4. On a failed step the errand summary can still blame the user ("you didn't specify").
+5. The email package's description and the bare word "draft" still steer the model to `reply` (an in-app draft). A package PR would fix it.
+6. `/tmp` is out of quota on this box, and git commit signing writes there. Use `TMPDIR=/var/tmp/...`.
+7. Email folders are dated in UTC: a 22:00 email landed in `2026-10-31 …`.
