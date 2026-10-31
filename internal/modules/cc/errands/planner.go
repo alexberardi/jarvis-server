@@ -121,7 +121,19 @@ func NodeMenu(available []*pyjson.Object) []MenuEntry {
 				if pname == "" {
 					continue
 				}
-				args.Set(pname, orStr(po, "description", "type"))
+				desc := orStr(po, "description", "type")
+				// The allowed values, or the planner never learns an action the description doesn't
+				// name (email's save_attachments/draft_reply: it planned "read" instead, C29).
+				if ev, ok := po.Get("enum_values"); ok {
+					if list, _ := ev.([]any); len(list) > 0 {
+						vals := make([]string, 0, len(list))
+						for _, v := range list {
+							vals = append(vals, pyjson.Str(v))
+						}
+						desc = pyjson.Str(desc) + " (one of: " + strings.Join(vals, ", ") + ")"
+					}
+				}
+				args.Set(pname, desc)
 			}
 		}
 		menu = append(menu, MenuEntry{
