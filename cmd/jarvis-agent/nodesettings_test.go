@@ -15,7 +15,7 @@ func TestSettingsCommandsCarryParameters(t *testing.T) {
 		{Name: "action", Type: "string", Enum: []string{"turn_on"}},
 	}}
 	tools := node.Multi{staticTools{spec.Render()}}
-	cmds := settingsCommands(tools)(context.Background())
+	cmds := settingsCommands(tools)(context.Background(), nil)
 	if len(cmds) != 1 || len(cmds[0].Parameters) != 2 {
 		t.Fatalf("commands = %+v", cmds)
 	}

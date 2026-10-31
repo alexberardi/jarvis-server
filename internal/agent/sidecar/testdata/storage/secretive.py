@@ -21,11 +21,16 @@ class SecretiveCommand(IJarvisCommand):
 
     @property
     def required_secrets(self) -> list:
-        return [
+        secrets = [
             JarvisSecret("TEST_API_KEY", "The service's API key", "integration", "string"),
             JarvisSecret("NICKNAME", "What to call you", "user", "string", required=False, is_sensitive=False,
                          friendly_name="Nickname"),
         ]
+        # Chosen by a user's own setting, as email's IMAP fields follow EMAIL_PROVIDER.
+        if JarvisStorage("secretive").get_secret("NICKNAME", scope="user"):
+            secrets.append(JarvisSecret("NICKNAME_STYLE", "How to say it", "user", "string", required=False,
+                                        is_sensitive=False))
+        return secrets
 
     @property
     def keywords(self) -> List[str]:

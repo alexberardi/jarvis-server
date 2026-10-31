@@ -75,9 +75,9 @@ func (l *Live) Call(ctx context.Context, name string, args map[string]any, req n
 }
 
 // Commands are the packages' commands with their secrets, for the settings snapshot.
-func (l *Live) Commands() []nodesettings.Command {
+func (l *Live) Commands(uid *int64) []nodesettings.Command {
 	if sc := l.Current(); sc != nil {
-		return sc.Commands()
+		return sc.Commands(uid)
 	}
 	return nil
 }

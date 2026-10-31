@@ -188,7 +188,13 @@ var weatherCmds = []Command{
 
 func TestSettingsRequestUploadsAnEncryptedSnapshot(t *testing.T) {
 	h, f, _ := newHandler(t, "n1")
-	h.Commands = func(context.Context) []Command { return weatherCmds }
+	var asked []int64 // the users Commands was asked for: a command's secrets can follow them
+	h.Commands = func(_ context.Context, uid *int64) []Command {
+		if uid != nil {
+			asked = append(asked, *uid)
+		}
+		return weatherCmds
+	}
 	ctx := context.Background()
 	// No K2: nothing is uploaded (the app offers "Generate Encryption Key").
 	h.Handle(ctx, TopicSettingsRequest, []byte(`{"request_id":"r0","node_id":"n1"}`))
@@ -205,6 +211,9 @@ func TestSettingsRequestUploadsAnEncryptedSnapshot(t *testing.T) {
 	_ = h.Store.SetEnabled("desktop_open", false)
 
 	h.Handle(ctx, TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1","user_id":7}`))
+	if len(asked) != 1 || asked[0] != 7 {
+		t.Fatalf("Commands asked for users %v, want [7]", asked)
+	}
 	if !f.called("GET /api/v0/nodes/n1/settings/requests/r1") {
 		t.Fatal("request not confirmed")
 	}
@@ -295,7 +304,7 @@ func TestConfigPushAppliesGoldenPushesAndAcks(t *testing.T) {
 
 func TestBackstopKeepsIncludeValuesAndUser(t *testing.T) {
 	h, f, _ := newHandler(t, "n1")
-	h.Commands = func(context.Context) []Command { return weatherCmds }
+	h.Commands = func(context.Context, *int64) []Command { return weatherCmds }
 	_ = h.Store.SaveK2(testKey, "kid", "")
 	seven := int64(7)
 	_ = h.Store.SetSecret("WEATHER_API_KEY", "s3cret", "integration", "", nil)
@@ -427,7 +436,7 @@ func TestGateHidesDisabledCommands(t *testing.T) {
 // A Pi's node_config (Handler.NodeConfig) goes in the snapshot as given.
 func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
 	h, f, _ := newHandler(t, "n1")
-	h.Commands = func(context.Context) []Command { return nil }
+	h.Commands = func(context.Context, *int64) []Command { return nil }
 	h.NodeConfig = func() map[string]any {
 		return map[string]any{"wake_word_threshold": 0.5, "hardware": map[string]any{"hat_detected": true}}
 	}
@@ -446,7 +455,7 @@ func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
 func TestSnapshotCarriesCommandParameters(t *testing.T) {
 	h, f, _ := newHandler(t, "n1")
 	params := []any{map[string]any{"name": "device_name", "type": "string", "required": true, "options_source": "devices"}}
-	h.Commands = func(context.Context) []Command {
+	h.Commands = func(context.Context, *int64) []Command {
 		return []Command{{Name: "control_device", Parameters: params}, {Name: "tell_joke"}}
 	}
 	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
@@ -469,7 +478,7 @@ func TestSnapshotCarriesCommandParameters(t *testing.T) {
 // manager's never (N:'s honor_include_values=False).
 func TestSnapshotCarriesDeviceFamiliesAndManagers(t *testing.T) {
 	h, f, _ := newHandler(t, "n1")
-	h.Commands = func(context.Context) []Command { return nil }
+	h.Commands = func(context.Context, *int64) []Command { return nil }
 	secret := []SecretSpec{{Key: "GOVEE_KEY", Scope: "integration", ValueType: "string", Required: true, IsSensitive: true}}
 	h.Devices = func(context.Context) Devices {
 		return Devices{

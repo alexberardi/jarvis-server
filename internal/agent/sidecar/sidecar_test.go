@@ -122,12 +122,19 @@ func TestSidecarStorageReachesTheAgentsSettings(t *testing.T) {
 	}
 	defer sc.Close()
 
-	cmds := sc.Commands()
+	cmds := sc.Commands(nil)
 	if len(cmds) != 1 || cmds[0].Name != "secretive" || len(cmds[0].Secrets) != 2 {
 		t.Fatalf("commands = %+v", cmds)
 	}
 	if s := cmds[0].Secrets[1]; s.Key != "NICKNAME" || s.Scope != "user" || s.IsSensitive || s.FriendlyName != "Nickname" {
 		t.Fatalf("secret spec = %+v", s)
+	}
+	// The secrets a command shows can follow the asking user's own settings (email's provider).
+	if got := sc.Commands(&seven)[0].Secrets; len(got) != 3 || got[2].Key != "NICKNAME_STYLE" {
+		t.Fatalf("user 7's secrets = %+v", got)
+	}
+	if got := sc.Commands(&eight)[0].Secrets; len(got) != 2 {
+		t.Fatalf("user 8's secrets = %+v", got)
 	}
 	out, ok := sc.Call(ctx, "secretive", map[string]any{"note": "hello"}, node.Request{UserID: &seven})
 	node.TakeSignals(out)

@@ -121,7 +121,7 @@ func TestSidecarLoadsTheBuiltins(t *testing.T) {
 func TestLiveSwapsSidecars(t *testing.T) {
 	ctx := context.Background()
 	var l Live
-	if l.Available(ctx) != nil || l.Commands() != nil || l.DataCommands() != nil || l.Failed() != nil {
+	if l.Available(ctx) != nil || l.Commands(nil) != nil || l.DataCommands() != nil || l.Failed() != nil {
 		t.Fatal("an empty Live offers something")
 	}
 	if _, ok := l.Call(ctx, "alpha_greet", nil, node.Request{}); ok {

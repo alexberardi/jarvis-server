@@ -31,8 +31,8 @@ type Handler struct {
 	NodeID string
 	API    API
 	Store  *Store
-	// Commands lists what the snapshot shows, enabled or not.
-	Commands func(ctx context.Context) []Command
+	// Commands lists what the snapshot shows, enabled or not, as uid sees them (nil: no user asked).
+	Commands func(ctx context.Context, uid *int64) []Command
 	// Devices, if set, are the snapshot's device families and managers (a Pi's sidecar).
 	Devices func(ctx context.Context) Devices
 	// NodeConfig, if set, is the snapshot's node_config (a Pi's hardware and voice settings);
@@ -168,7 +168,7 @@ func (h *Handler) snapshot(ctx context.Context, rid string, include bool, uid *i
 	}
 	var cmds []Command
 	if h.Commands != nil {
-		cmds = h.Commands(ctx)
+		cmds = h.Commands(ctx, uid)
 	}
 	var dev Devices
 	if h.Devices != nil {

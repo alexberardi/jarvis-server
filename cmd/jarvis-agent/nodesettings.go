@@ -12,12 +12,12 @@ import (
 
 // settingsCommands is what the settings snapshot lists: every tool this node has right now,
 // enabled or not, with the sidecar's declared secrets (built-in tools declare none).
-func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings.Command {
-	return func(ctx context.Context) []nodesettings.Command {
+func settingsCommands(tools node.Multi) func(ctx context.Context, uid *int64) []nodesettings.Command {
+	return func(ctx context.Context, uid *int64) []nodesettings.Command {
 		pkgs := map[string]nodesettings.Command{}
 		for _, t := range tools {
 			if sc, ok := t.(*sidecar.Live); ok {
-				for _, c := range sc.Commands() {
+				for _, c := range sc.Commands(uid) {
 					pkgs[c.Name] = c
 				}
 			}

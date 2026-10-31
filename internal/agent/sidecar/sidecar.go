@@ -235,13 +235,25 @@ func (s *Sidecar) Failed() map[string]string { return s.failed }
 // Package is the installed package a command came from ("" for none).
 func (s *Sidecar) Package(command string) string { return s.pkgOf[command] }
 
-// Commands are the sidecar's commands with their declared secrets, for the settings snapshot.
-func (s *Sidecar) Commands() []nodesettings.Command {
+// Commands are the sidecar's commands with their declared secrets, for the settings snapshot,
+// as the user asking sees them (nil: nobody): a command may pick its secrets from a user-scoped
+// one (email's IMAP fields). If that call fails, the secrets read at start stand in.
+func (s *Sidecar) Commands(uid *int64) []nodesettings.Command {
+	var res struct {
+		Secrets map[string][]nodesettings.SecretSpec `json:"secrets"`
+	}
+	if err := s.roundTrip("secrets", map[string]any{"user_id": uid}, &res); err != nil {
+		res.Secrets = s.secrets
+	}
 	out := make([]nodesettings.Command, 0, len(s.tools))
 	for _, t := range s.tools {
 		desc, _ := t.Command["description"].(string)
 		x := s.extras[t.Name]
-		out = append(out, nodesettings.Command{Name: t.Name, Description: desc, Secrets: s.secrets[t.Name],
+		secrets, ok := res.Secrets[t.Name]
+		if !ok {
+			secrets = s.secrets[t.Name]
+		}
+		out = append(out, nodesettings.Command{Name: t.Name, Description: desc, Secrets: secrets,
 			AssociatedService: x.AssociatedService, SetupGuide: x.SetupGuide})
 	}
 	return out
