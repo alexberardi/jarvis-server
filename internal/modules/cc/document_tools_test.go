@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -242,5 +243,189 @@ func TestWriteDocumentFolderSetting(t *testing.T) {
 	runTool(t, tool(ve), `{"path": "a.odt", "instructions": "hi"}`, ve.recTurn(7))
 	if p := agent.ops[0]["path"]; p != "~/Documents/Jarvis/a.odt" {
 		t.Fatalf("path %v", p)
+	}
+}
+
+// A formula over empty cells is caught before saving (C29: the moons were in B, the total
+// summed C2:C11), and only real cell refs count.
+func TestEmptyFormulaRef(t *testing.T) {
+	rows := func(total string) []any {
+		ops := []any{map[string]any{"op": "add_sheet", "name": "Planets"},
+			map[string]any{"op": "append_row", "sheet": "Planets", "values": []any{"Category", "Total"}}}
+		for _, r := range []any{[]any{"Mercury", 0.0}, []any{"Earth", 1.0}, []any{"Saturn", 146.0}} {
+			ops = append(ops, map[string]any{"op": "append_row", "sheet": "Planets", "values": r})
+		}
+		return append(ops, map[string]any{"op": "set", "sheet": "Planets", "cell": "B10", "value": total})
+	}
+	if got := emptyFormulaRef(rows("=SUM(C2:C11)"), "", false); got != "=SUM(C2:C11) in Planets!B10 refers to C2:C11, which is empty" {
+		t.Fatalf("bad column: %q", got)
+	}
+	for _, ok := range []string{"=SUM(B2:B9)", "=SUM($B$2:$B$4)", "=B2+B3", "=LOG10(B4)", "=Other!C2", "Total", ""} {
+		if got := emptyFormulaRef(rows(ok), "", false); got != "" {
+			t.Errorf("%q flagged: %s", ok, got)
+		}
+	}
+	// No sheet named: the first. A formula in an appended row is checked too; its own cell doesn't count.
+	ops := []any{map[string]any{"op": "append_row", "values": []any{"x", 5.0}},
+		map[string]any{"op": "append_row", "values": []any{"total", "=SUM(C1:C1)"}}}
+	if got := emptyFormulaRef(ops, "", false); !strings.Contains(got, "Sheet1!B2") {
+		t.Fatalf("appended formula: %q", got)
+	}
+	self := []any{map[string]any{"op": "set", "cell": "A1", "value": "=SUM(A1:A1)"}}
+	if emptyFormulaRef(self, "", false) == "" {
+		t.Fatal("a formula over only itself passed")
+	}
+	// An existing workbook's cells count, as renderDoc shows them.
+	current := "Sheet Budget\nA1=Item\tB1=Cost\nA2=Rent\tB2=1200"
+	set := []any{map[string]any{"op": "set", "cell": "B3", "value": "=SUM(B2:B2)"}}
+	if got := emptyFormulaRef(set, current, true); got != "" {
+		t.Fatalf("existing cells: %q", got)
+	}
+	set[0].(map[string]any)["value"] = "=SUM(D2:D2)"
+	if emptyFormulaRef(set, current, true) == "" {
+		t.Fatal("an empty column in an existing workbook passed")
+	}
+}
+
+// A bad formula gets one more try with what was wrong; an answer wrapped in a JSON string is read.
+func TestDocumentEditsRetriesAFormula(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	bad, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "set", "cell": "B2", "value": "=SUM(C1:C1)"}}})
+	good, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "set", "cell": "B2", "value": "=SUM(B1:B1)"}}})
+	wrapped, _ := json.Marshal(string(good))
+	ve.eng.say(string(bad))
+	ve.eng.say(string(wrapped))
+	ops, err := ve.m.documentEdits(context.Background(), "total the moons", "total the moons", true, "", false, "")
+	if err != nil || len(ops) != 2 || ops[1].(map[string]any)["value"] != "=SUM(B1:B1)" {
+		t.Fatalf("ops %v, %v", ops, err)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "=SUM(C1:C1) in Sheet1!B2 refers to C1:C1, which is empty") {
+		t.Fatalf("retry prompt lacks the problem:\n%s", p)
+	}
+}
+
+// A total the model typed in is sent back once for a formula (C29: 385 for moons adding to 285).
+func TestDocumentEditsWantsAFormulaForATotal(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	typed, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "append_row", "values": []any{"Total", 385}}}})
+	formula, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "append_row", "values": []any{"Total", "=SUM(B1:B1)"}}}})
+	ve.eng.say(string(typed))
+	ve.eng.say(string(formula))
+	ops, err := ve.m.documentEdits(context.Background(), "total the moons in it", "a spreadsheet of the moons", true, "", false, "")
+	if err != nil || !hasFormula(ops) {
+		t.Fatalf("ops %v, %v", ops, err)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "no cell has a formula") {
+		t.Fatalf("retry prompt:\n%s", p)
+	}
+	// No total asked for: numbers alone are fine, first try.
+	ve.eng.say(string(typed))
+	if _, err := ve.m.documentEdits(context.Background(), "list the moons", "a spreadsheet of the moons", true, "", false, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Work on files the errand just saved never edits an earlier result with the same name (C29: a
+// second run edited the first's totals sheet and left two Total rows).
+func TestWriteDocumentPriorFilesGetANewFile(t *testing.T) {
+	agent := &fakeDocAgent{exists: true, paras: []any{map[string]any{"text": "old totals"}},
+		files: map[string]map[string]any{"~/Documents/totals (2).odt": {"success": false, "error_code": "not_found", "error": "no file"},
+			"/home/avery/Documents/Jarvis/Attachments/x/planets.odt": {"success": true, "kind": "text", "text": []any{map[string]any{"text": "Saturn 146"}}}}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
+	ve.setComputerControl("on")
+	b, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"op": "append", "text": "Saturn has 146"}}})
+	ve.eng.say(string(b))
+	turn := ve.recTurn(7)
+	turn.PriorFiles = []string{"/home/avery/Documents/Jarvis/Attachments/x/planets.odt"}
+	runTool(t, tool(ve), `{"path": "~/Documents/totals.odt", "instructions": "summarize"}`, turn)
+	var edit map[string]any
+	for _, op := range agent.ops {
+		if op["op"] == "doc_edit" {
+			edit = op
+		}
+	}
+	if edit == nil || edit["path"] != "~/Documents/totals (2).odt" || edit["create"] != true {
+		t.Fatalf("edit %v", edit)
+	}
+	// Without saved files, the named file is edited as before.
+	agent2 := &fakeDocAgent{exists: true, paras: []any{map[string]any{"text": "old"}}}
+	ve2 := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent2.call })
+	ve2.setComputerControl("on")
+	ve2.eng.say(string(b))
+	runTool(t, tool(ve2), `{"path": "~/Documents/totals.odt", "instructions": "add a line"}`, ve2.recTurn(7))
+	if p := agent2.ops[1]["path"]; agent2.ops[1]["op"] != "doc_edit" || p != "~/Documents/totals.odt" {
+		t.Fatalf("plain edit %v", agent2.ops[1])
+	}
+}
+
+// An edit of a sheet nobody added gets its add_sheet first (C29: rows into "Planets" in a new
+// workbook were refused); sheets the workbook has, or that an edit adds, are left alone.
+func TestAddMissingSheets(t *testing.T) {
+	row := func(sh string) map[string]any {
+		return map[string]any{"op": "append_row", "sheet": sh, "values": []any{"x"}}
+	}
+	names := func(ops []any) string {
+		var out []string
+		for _, o := range ops {
+			om := o.(map[string]any)
+			out = append(out, fmt.Sprintf("%v:%v%v", om["op"], om["sheet"], om["name"]))
+		}
+		return strings.Join(out, " ")
+	}
+	got := addMissingSheets([]any{row("Planets"), row("Planets"), map[string]any{"op": "set", "cell": "B2", "value": 1}}, "", false)
+	if names(got) != "add_sheet:<nil>Planets append_row:Planets<nil> append_row:Planets<nil> set:<nil><nil>" {
+		t.Fatalf("new workbook: %s", names(got))
+	}
+	added := []any{map[string]any{"op": "add_sheet", "name": "Planets"}, row("Planets")}
+	if len(addMissingSheets(added, "", false)) != 2 {
+		t.Fatal("an added sheet was added twice")
+	}
+	if len(addMissingSheets([]any{row("Budget")}, "Sheet Budget\nA1=x", true)) != 1 {
+		t.Fatal("an existing sheet was added")
+	}
+	// The added sheet counts for the formula check.
+	ops := addMissingSheets([]any{row("Planets"), map[string]any{"op": "set", "sheet": "Planets", "cell": "B2", "value": "=SUM(A1:A1)"}}, "", false)
+	if got := emptyFormulaRef(ops, "", false); got != "" {
+		t.Fatalf("formula on the added sheet: %q", got)
+	}
+}
+
+// A new spreadsheet worked out from one the errand saved starts as a copy of it: the model sees
+// its cells as the sheet as it is, and the edit names it as from (C29).
+func TestWriteDocumentStartsFromTheSavedSheet(t *testing.T) {
+	const att = "/home/avery/Documents/Jarvis/Attachments/x/planets.xlsx"
+	agent := &fakeDocAgent{files: map[string]map[string]any{att: {"success": true, "kind": "sheet",
+		"sheets": []any{map[string]any{"name": "Planets", "rows": []any{[]any{"Planet", "Moons"}, []any{"Saturn", 146.0}}}}}}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
+	ve.setComputerControl("on")
+	b, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "sheet": "Planets", "values": []any{"Total", "=SUM(B2:B2)"}}}})
+	ve.eng.say(string(b))
+	turn := ve.recTurn(7)
+	turn.PriorFiles = []string{att}
+	runTool(t, tool(ve), `{"path": "~/Documents/totals.xlsx", "instructions": "total the moons"}`, turn)
+	var edit map[string]any
+	for _, op := range agent.ops {
+		if op["op"] == "doc_edit" {
+			edit = op
+		}
+	}
+	if edit == nil || edit["from"] != att || edit["create"] != true || edit["path"] != "~/Documents/totals.xlsx" {
+		t.Fatalf("edit %v", edit)
+	}
+	// No add_sheet was put in: Planets is the copy's own sheet.
+	if ops := edit["ops"].([]any); len(ops) != 1 {
+		t.Fatalf("ops %v", ops)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "spreadsheet as it is now") || !strings.Contains(p, "B2=146") {
+		t.Fatalf("prompt:\n%s", p)
 	}
 }

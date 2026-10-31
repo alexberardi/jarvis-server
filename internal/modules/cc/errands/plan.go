@@ -201,7 +201,7 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 		s.setPlanInbox(ctx, row.ID, id)
 	}
 	s.enqueueExpire(ctx, row)
-	s.log().Info("errands: plan drafted", "plan", row.ID, "household", r.HouseholdID, "node", r.NodeID, "steps", len(row.Steps))
+	s.log().Info("errands: plan drafted", "plan", row.ID, "household", r.HouseholdID, "node", r.NodeID, "steps", len(row.Steps), "plan_steps", stepNames(row.Steps))
 	return row, nil
 }
 

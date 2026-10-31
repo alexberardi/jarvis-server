@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -121,7 +122,19 @@ func NodeMenu(available []*pyjson.Object) []MenuEntry {
 				if pname == "" {
 					continue
 				}
-				args.Set(pname, orStr(po, "description", "type"))
+				desc := orStr(po, "description", "type")
+				// The allowed values, or the planner never learns an action the description doesn't
+				// name (email's save_attachments/draft_reply: it planned "read" instead, C29).
+				if ev, ok := po.Get("enum_values"); ok {
+					if list, _ := ev.([]any); len(list) > 0 {
+						vals := make([]string, 0, len(list))
+						for _, v := range list {
+							vals = append(vals, pyjson.Str(v))
+						}
+						desc = pyjson.Str(desc) + " (one of: " + strings.Join(vals, ", ") + ")"
+					}
+				}
+				args.Set(pname, desc)
 			}
 		}
 		menu = append(menu, MenuEntry{
@@ -352,6 +365,8 @@ func sheetFromResults(goal string, steps []Step) []Step {
 			return steps
 		case cmdSearch, cmdComputer, "deep_research":
 			found = true
+		case "email": // an email's saved attachments are the rows' source (C29)
+			found = found || truthyStr(st.Args, "action") == "save_attachments"
 		case cmdWriteSheet:
 			if !found {
 				continue
@@ -381,6 +396,73 @@ func sheetFromResults(goal string, steps []Step) []Step {
 		}
 	}
 	return steps
+}
+
+// dropAttachmentReads drops a read_computer_file planned after an email save_attachments step:
+// the planner can't know the saved file's name, so it guessed one (~/Documents/q3-hours.xlsx for
+// planets.xlsx, C29) and the errand failed there. write_document reads the saved files itself.
+func dropAttachmentReads(steps []Step) []Step {
+	saved := false
+	out := steps[:0:0]
+	for _, st := range steps {
+		if saved && st.Command == cmdReadFile {
+			continue
+		}
+		if st.Command == "email" && truthyStr(st.Args, "action") == "save_attachments" {
+			saved = true
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// attachmentWork inserts the write_document step a plan left out between saving an email's
+// attachments and a reply that attaches a file: the planner went straight from save_attachments
+// to draft_reply with a made-up attachment path (C29), so nothing did the work the user asked
+// for. The step writes from the saved files with the user's words as its instructions; its name
+// is the one the reply meant to attach, and attachWrittenFiles attaches what it actually wrote.
+func attachmentWork(goal string, steps []Step, menu []MenuEntry) []Step {
+	if !menuHas(menu, cmdWriteDoc) {
+		return steps
+	}
+	saved := false
+	for i, st := range steps {
+		switch {
+		case st.Command == cmdWriteDoc || st.Command == cmdWriteSheet:
+			return steps
+		case st.Command == "email" && truthyStr(st.Args, "action") == "save_attachments":
+			saved = true
+		case saved && st.Command == "email" && truthyStr(st.Args, "action") == "draft_reply" && truthyStr(st.Args, "attachments") != "":
+			name := path.Base(strings.TrimSpace(strings.Split(truthyStr(st.Args, "attachments"), ",")[0]))
+			ext := strings.ToLower(path.Ext(name))
+			if ext != ".odt" && ext != ".docx" && ext != ".ods" && ext != ".xlsx" {
+				ext = ".odt"
+				if g := strings.ToLower(goal); strings.Contains(g, "spreadsheet") || strings.Contains(g, "sheet") || strings.Contains(g, "xlsx") || strings.Contains(g, "excel") {
+					ext = ".xlsx"
+				}
+				name = strings.TrimSuffix(name, path.Ext(name)) + ext
+			}
+			if strings.TrimSuffix(name, ext) == "" || strings.HasPrefix(name, ".") {
+				name = "Reply attachment" + ext
+			}
+			doc := Step{Command: cmdWriteDoc, Label: "Do the work on the attachment",
+				Args: servertools.Obj("path", name, "instructions", goal+" Work from the email's saved attachments.")}
+			return append(append(append([]Step(nil), steps[:i]...), doc), steps[i:]...)
+		}
+	}
+	return steps
+}
+
+// stepNames is a plan's steps for the log: command, and the action where there is one.
+func stepNames(steps []Step) string {
+	names := make([]string, len(steps))
+	for i, st := range steps {
+		names[i] = st.Command
+		if a := truthyStr(st.Args, "action"); a != "" {
+			names[i] += ":" + a
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // foldResearchIntoDocument folds a deep_research step into the plan's first write_document step
@@ -872,7 +954,7 @@ func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry)
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, dropUnaskedRemember(goal, plan.Steps))))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))))
 	return plan, err
 }
 
@@ -912,7 +994,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, dropUnaskedRemember(goal, plan.Steps))))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))
 	return plan, err
 }
 
