@@ -298,6 +298,20 @@ func TestPriorFiles(t *testing.T) {
 	}
 }
 
+// A file read planned after save_attachments is dropped: its path is a guess (C29); other reads stay.
+func TestDropAttachmentReads(t *testing.T) {
+	save := Step{Command: "email", Args: servertools.Obj("action", "save_attachments", "query", "q3 hours")}
+	read := Step{Command: cmdReadFile, Args: servertools.Obj("path", "~/Documents/q3-hours.xlsx")}
+	doc := Step{Command: cmdWriteDoc, Args: servertools.Obj("path", "~/Documents/totals.odt")}
+	reply := Step{Command: "email", Args: servertools.Obj("action", "draft_reply", "query", "q3 hours")}
+	if got := stepNames(dropAttachmentReads([]Step{save, read, doc, reply})); got != "email:save_attachments, write_document, email:draft_reply" {
+		t.Fatalf("plan %q", got)
+	}
+	if got := stepNames(dropAttachmentReads([]Step{read, save, doc})); got != "read_computer_file, email:save_attachments, write_document" {
+		t.Fatalf("a read before the save was dropped: %q", got)
+	}
+}
+
 // The email-attachments rule comes with write_document and the email package, never alone.
 func TestEmailFilesRule(t *testing.T) {
 	if got := computerRulesFor([]MenuEntry{{Command: cmdWriteDoc}, {Command: "email"}}); !strings.Contains(got, documentRule+emailFilesRule) {
