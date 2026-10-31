@@ -397,3 +397,35 @@ func TestAddMissingSheets(t *testing.T) {
 		t.Fatalf("formula on the added sheet: %q", got)
 	}
 }
+
+// A new spreadsheet worked out from one the errand saved starts as a copy of it: the model sees
+// its cells as the sheet as it is, and the edit names it as from (C29).
+func TestWriteDocumentStartsFromTheSavedSheet(t *testing.T) {
+	const att = "/home/avery/Documents/Jarvis/Attachments/x/planets.xlsx"
+	agent := &fakeDocAgent{files: map[string]map[string]any{att: {"success": true, "kind": "sheet",
+		"sheets": []any{map[string]any{"name": "Planets", "rows": []any{[]any{"Planet", "Moons"}, []any{"Saturn", 146.0}}}}}}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
+	ve.setComputerControl("on")
+	b, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "sheet": "Planets", "values": []any{"Total", "=SUM(B2:B2)"}}}})
+	ve.eng.say(string(b))
+	turn := ve.recTurn(7)
+	turn.PriorFiles = []string{att}
+	runTool(t, tool(ve), `{"path": "~/Documents/totals.xlsx", "instructions": "total the moons"}`, turn)
+	var edit map[string]any
+	for _, op := range agent.ops {
+		if op["op"] == "doc_edit" {
+			edit = op
+		}
+	}
+	if edit == nil || edit["from"] != att || edit["create"] != true || edit["path"] != "~/Documents/totals.xlsx" {
+		t.Fatalf("edit %v", edit)
+	}
+	// No add_sheet was put in: Planets is the copy's own sheet.
+	if ops := edit["ops"].([]any); len(ops) != 1 {
+		t.Fatalf("ops %v", ops)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "spreadsheet as it is now") || !strings.Contains(p, "B2=146") {
+		t.Fatalf("prompt:\n%s", p)
+	}
+}

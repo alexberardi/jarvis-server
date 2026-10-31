@@ -102,6 +102,23 @@ func TestDocumentsAsFiles(t *testing.T) {
 	}
 	fo.fail = ""
 
+	// Create from another document: it starts as a copy of that one, which is left as it was;
+	// Downloads may be the source. Only with create, only the same kind, and only a readable file.
+	if err := os.WriteFile(filepath.Join(tl.Home, "Downloads", "sent.odt"), []byte("theirs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out = files(map[string]any{"op": "doc_edit", "path": "~/Documents/copy.odt", "create": true, "from": "~/Downloads/sent.odt", "ops": ops})
+	if b, _ := os.ReadFile(filepath.Join(docs, "copy.odt")); out["success"] != true || string(b) != "edited:theirs" {
+		t.Fatalf("from: %v %q", out, b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(tl.Home, "Downloads", "sent.odt")); string(b) != "theirs" {
+		t.Fatalf("the source changed: %q", b)
+	}
+	code(files(map[string]any{"op": "doc_edit", "path": "~/Documents/Budget/apollo.odt", "from": "~/Downloads/sent.odt", "ops": ops}), "invalid_argument")
+	code(files(map[string]any{"op": "doc_edit", "path": "~/Documents/t.ods", "create": true, "from": "~/Downloads/sent.odt", "ops": ops}), "invalid_argument")
+	code(files(map[string]any{"op": "doc_edit", "path": "~/Documents/u.odt", "create": true, "from": "~/Downloads/none.odt", "ops": ops}), "not_found")
+	code(files(map[string]any{"op": "doc_edit", "path": "~/Documents/v.odt", "create": true, "from": filepath.Join(t.TempDir(), "x.odt"), "ops": ops}), "path_refused")
+
 	// Open in LibreOffice: refused.
 	lock := filepath.Join(docs, "Budget", ".~lock.apollo.odt#")
 	if err := os.WriteFile(lock, nil, 0o600); err != nil {
@@ -159,14 +176,14 @@ func TestLiveOffice(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"apollo.odt", "apollo.docx"} {
-		out := tl.docEdit(ctx, "~/Documents/"+name, true, []any{
+		out := tl.docEdit(ctx, "~/Documents/"+name, true, "", []any{
 			map[string]any{"op": "append", "style": "Heading 1", "text": "Apollo 11"},
 			map[string]any{"op": "append", "text": "Launched July 16, 1969.\nLanded July 20."},
 		})
 		if out["success"] != true {
 			t.Fatalf("%s create: %v", name, out)
 		}
-		out = tl.docEdit(ctx, "~/Documents/"+name, false, []any{
+		out = tl.docEdit(ctx, "~/Documents/"+name, false, "", []any{
 			map[string]any{"op": "insert_after", "find": "Launched", "text": "Crew: Armstrong, Aldrin, Collins."},
 			map[string]any{"op": "replace", "find": "Landed", "text": "Touched down"},
 		})
@@ -185,7 +202,7 @@ func TestLiveOffice(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"budget.xlsx", "budget.ods"} {
-		out := tl.docEdit(ctx, "~/Documents/"+name, true, []any{
+		out := tl.docEdit(ctx, "~/Documents/"+name, true, "", []any{
 			map[string]any{"op": "add_sheet", "name": "Budget"},
 			map[string]any{"op": "append_row", "sheet": "Budget", "values": []any{"Item", "Cost"}},
 			map[string]any{"op": "append_row", "sheet": "Budget", "values": []any{"Rent", 1200}},
@@ -195,7 +212,7 @@ func TestLiveOffice(t *testing.T) {
 		if out["success"] != true {
 			t.Fatalf("%s create: %v", name, out)
 		}
-		out = tl.docEdit(ctx, "~/Documents/"+name, false, []any{map[string]any{"op": "set", "sheet": "Budget", "cell": "B3", "value": 500}})
+		out = tl.docEdit(ctx, "~/Documents/"+name, false, "", []any{map[string]any{"op": "set", "sheet": "Budget", "cell": "B3", "value": 500}})
 		if out["success"] != true {
 			t.Fatalf("%s edit: %v", name, out)
 		}
@@ -207,9 +224,20 @@ func TestLiveOffice(t *testing.T) {
 			t.Fatalf("%s read: %v", name, sheets)
 		}
 	}
+	// A spreadsheet totalled into a new file of another format: the source's rows, plus the total.
+	out := tl.docEdit(ctx, "~/Documents/totals.ods", true, "~/Documents/budget.xlsx",
+		[]any{map[string]any{"op": "set", "sheet": "Budget", "cell": "B5", "value": "=SUM(B2:B3)"}})
+	if out["success"] != true {
+		t.Fatalf("from: %v", out)
+	}
+	sheets := tl.docRead(ctx, "~/Documents/totals.ods")["sheets"].([]any)
+	if rows := sheets[0].(map[string]any)["rows"].([]any); len(rows) != 5 || rows[1].([]any)[0] != "Rent" || rows[4].([]any)[1] != "=SUM(B2:B3)" {
+		t.Fatalf("from read: %v", sheets)
+	}
+
 	// A failed edit leaves the file as it was.
 	before, _ := os.ReadFile(filepath.Join(home, "Documents", "apollo.odt"))
-	out := tl.docEdit(ctx, "~/Documents/apollo.odt", false, []any{map[string]any{"op": "replace", "find": "Saturn", "text": "x"}})
+	out = tl.docEdit(ctx, "~/Documents/apollo.odt", false, "", []any{map[string]any{"op": "replace", "find": "Saturn", "text": "x"}})
 	if out["success"] != false || !strings.Contains(out["error"].(string), "Saturn") {
 		t.Fatalf("bad edit: %v", out)
 	}
