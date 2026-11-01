@@ -94,6 +94,7 @@ const (
 	SvcCommandCenter = "jarvis-command-center"
 	SvcAuth          = "jarvis-auth"
 	SvcMQTT          = "jarvis-mqtt-broker"
+	SvcLogs          = "jarvis-logs"
 )
 
 // Discover reads GET {configURL}/services?style=remote&remote_host={host}: the LAN-side URLs,
@@ -141,9 +142,10 @@ func (s Services) Need(name string) (string, error) {
 
 // CC is command-center as a node sees it: every call carries X-API-Key node_id:node_key.
 type CC struct {
-	BaseURL string
-	Creds   Creds
-	HTTP    *http.Client
+	BaseURL  string
+	Creds    Creds
+	HTTP     *http.Client
+	Services Services // what discovery listed, when Runner.Run made it
 }
 
 func NewCC(baseURL string, c Creds) *CC {

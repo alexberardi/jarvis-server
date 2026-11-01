@@ -217,6 +217,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	ccURL, _ := svcs.Need(SvcCommandCenter)
 	mqURL, _ := svcs.Need(SvcMQTT)
 	cc := NewCC(ccURL, r.Creds)
+	cc.Services = svcs
 
 	// The channel is taken before each beat is built, so a change during a beat wakes the next.
 	watch := func() <-chan struct{} {

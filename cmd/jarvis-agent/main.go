@@ -61,6 +61,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
+	"github.com/alexberardi/jarvis-server/internal/platform/logging"
 )
 
 var version = "dev"
@@ -319,13 +320,20 @@ func credsPath(p string) (string, error) {
 	return node.DefaultCredsPath()
 }
 
+// agentLogs, set by runAgent, also ships what logger()s log to jarvisd's Logs page
+// (logSink, once connected); nil: stderr only.
+var (
+	agentLogs *logging.Shipper
+	logSink   node.LogSink
+)
+
 // logger logs at info, or at debug with JARVIS_AGENT_LOG=debug.
 func logger() *slog.Logger {
 	lvl := slog.LevelInfo
 	if strings.EqualFold(os.Getenv("JARVIS_AGENT_LOG"), "debug") {
 		lvl = slog.LevelDebug
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
+	return logging.New(os.Stderr, lvl, agentLogs)
 }
 
 // appCatalogue is the installed-apps lister: platform defaults plus apps.json, re-read on every
@@ -613,6 +621,7 @@ func runAgent(ctx context.Context, args []string) error {
 	if err := noStrayArgs(fs); err != nil {
 		return err
 	}
+	agentLogs = logging.NewShipper(&logSink, 1000, 100, 2*time.Second)
 	log := logger()
 	if crashForTest != "" {
 		return errors.New("crashForTest: this build fails on purpose (the agent-upgrade e2e's broken release)")
@@ -907,6 +916,15 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 	}
 	connectCC(r, &liveCC)
+	inner := r.OnConnected
+	r.OnConnected = func(ctx context.Context, cc *node.CC) {
+		logSink.Connect(cc)
+		if inner != nil {
+			inner(ctx, cc)
+		} else {
+			<-ctx.Done()
+		}
+	}
 	connectHost(r, tf.host)
 	var setup func()
 	if p.desktop {
