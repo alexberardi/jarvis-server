@@ -141,6 +141,7 @@ const superState: authApi.SetupState = {
     options: [],
     tool_calling: { value: 'auto', detected: '', effective: 'text', source: 'default' },
     thinking_switch: { value: 'auto', detected: '', effective: 'none', source: 'default' },
+    prompt_examples: { value: 'auto', detected: 'off', effective: 'off', source: 'default' },
   },
   doctor: { status: 'ok', failing: [], ran_at: '' },
   jobs: jobs(),

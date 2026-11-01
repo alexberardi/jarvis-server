@@ -561,7 +561,7 @@ export async function putLabels(body: Partial<Record<Label, LabelUpdate>>): Prom
 
 // --- prompt provider (AD4) ---
 
-/** One LLM mode setting (llm.tool_calling, llm.thinking_switch) as the server resolves it. */
+/** One LLM mode setting (llm.tool_calling, llm.thinking_switch, llm.prompt_examples) as the server resolves it. */
 export interface ModeSetting {
   /** The setting as set: "auto" unless the superuser chose one. */
   value: string
@@ -570,7 +570,7 @@ export interface ModeSetting {
   /** What a turn uses. */
   effective: string
   /** Where effective comes from. */
-  source: 'setting' | 'prompt' | 'template' | 'remote' | 'default'
+  source: 'setting' | 'prompt' | 'template' | 'remote' | 'model' | 'default'
 }
 
 export interface PromptProvider {
@@ -585,6 +585,8 @@ export interface PromptProvider {
   options: string[] | null
   tool_calling: ModeSetting
   thinking_switch: ModeSetting
+  /** Tool examples in the prompt: on by default for the catalog's small models. */
+  prompt_examples: ModeSetting
 }
 
 export async function getPromptProvider(): Promise<PromptProvider> {

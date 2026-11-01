@@ -125,6 +125,8 @@ type ModelTraits struct {
 	Thinking bool
 	// Local: the local engine serves the live label.
 	Local bool
+	// PromptExamples: the catalog entry turns the prompt's tool examples on by default.
+	PromptExamples bool
 }
 
 // templateTraits caches the traits read from a local model's chat template, per model ID and
@@ -187,6 +189,7 @@ func (m *Module) LiveModelTraits(ctx context.Context) ModelTraits {
 	if tr.PromptProvider == "" && inCatalog {
 		tr.PromptProvider = e.PromptProvider
 	}
+	tr.PromptExamples = inCatalog && e.PromptExamples
 	return tr
 }
 

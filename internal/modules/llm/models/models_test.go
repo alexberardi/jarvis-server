@@ -404,6 +404,12 @@ func TestCatalogLint(t *testing.T) {
 			t.Errorf("catalog lacks %s", want)
 		}
 	}
+	// The prompt's tool examples are on by default only for the small models (2026-11-01).
+	for _, e := range Catalog() {
+		if want := e.ID == "qwen3-1.7b" || e.ID == "qwen3-4b"; e.PromptExamples != want {
+			t.Errorf("%s: prompt_examples %v", e.ID, e.PromptExamples)
+		}
+	}
 	if !ids[engine.LabelDefs[2].DefaultModel] {
 		t.Error("embeddings default model not in catalog")
 	}
