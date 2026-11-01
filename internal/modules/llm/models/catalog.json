@@ -1,5 +1,27 @@
 [
   {
+    "id": "qwen3-1.7b",
+    "display": "Qwen 3 1.7B (Q8_0)",
+    "kind": "llm",
+    "repo": "Qwen/Qwen3-1.7B-GGUF",
+    "revision": "90862c4b9d2787eaed51d12237eafdfe7c5f6077",
+    "file": "Qwen3-1.7B-Q8_0.gguf",
+    "size": 1834426016,
+    "sha256": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+    "context_default": 16384,
+    "context_max": 40960,
+    "kv_bytes_per_token": 114688,
+    "prompt_provider": "Qwen3_8B_Compressed",
+    "thinking": true,
+    "chat_template": "qwen3.jinja",
+    "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
+    "tags": [
+      "live",
+      "background",
+      "small"
+    ]
+  },
+  {
     "id": "qwen3-4b",
     "display": "Qwen 3 4B (Q4_K_M)",
     "kind": "llm",
