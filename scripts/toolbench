@@ -2,19 +2,21 @@
 """Tool-selection benchmark: does the model pick the right tool, with the right arguments, from
 the exact prompt and tool list command-center sends?
 
-    scripts/toolbench capture [--name toolbench] [--set KEY=JSON]         # base requests from this checkout
-    scripts/toolbench run [--base DIR] [--repeat N] [--only REGEX] [--out FILE]
+    scripts/toolbench capture [--name toolbench] [--set KEY=JSON] [--voice-tools FILE]  # base requests from this checkout
+    scripts/toolbench run [--base DIR] [--repeat N] [--only REGEX] [--out FILE] [--voice-tools FILE]
                           [--url URL --model NAME | --env FILE]
 
 capture starts a sandbox from this checkout (scripts/sandbox, with JARVIS_HARNESS_ENV as set),
 says "hello" as the seeded voice node and as a desktop node through tools/pipeline, and saves
 each LLM request the tap logged (system messages, tools, sampling parameters) to
 .toolbench/base-voice.json and base-desktop.json. Those are byte-for-byte what the model saw.
+--voice-tools has the voice node send that JSON array of tools instead (node-go.json plus a
+household's Pantry tools, as the agent's sidecar describes them); pass the same file to run.
 
 run replays every case against that base: the base's system messages, the case's utterance in
 place of "hello" in the user message, the base's tools and parameters. A case is
-  - an example from tools/pipeline/toolsets/desktop.json (desktop node): its tool and
-    expected_parameters, or
+  - an example from tools/pipeline/toolsets/desktop.json (desktop node) or node-go.json (voice
+    node), or from --voice-tools' tools node-go.json lacks: its tool and expected_parameters, or
   - the first turn of a tools/pipeline/scenarios/*.json scenario: its tool / server_tool /
     any_tool / no_tool / not_tool, args and args_match. Scenarios with settings, results,
     another home or a voice-only node are skipped (single-turn, no setup, here). A scenario
@@ -62,7 +64,8 @@ def capture(args):
             body = shlex.quote(json.dumps({"value": json.loads(val)}))
             sh(f'. .sandbox/{name}/sandbox.env && curl -sf -o /dev/null -X PUT "$SBX_CC/settings/{key}" '
                f'-H "Authorization: Bearer $SBX_TOKEN" -H "Content-Type: application/json" -d {body}')
-        for kind, flags in (("voice", ""), ("desktop", '--node desktop --speaker ""')):
+        voice = f"--tools {shlex.quote(os.path.abspath(args.voice_tools))}" if args.voice_tools else ""
+        for kind, flags in (("voice", voice), ("desktop", '--node desktop --speaker ""')):
             before = sum(1 for _ in open(log)) if os.path.exists(log) else 0
             sh(f"go run ./tools/pipeline say --sandbox {name} {flags} hello >/dev/null")
             rows = [json.loads(l) for l in open(log)][before:]
@@ -115,14 +118,21 @@ def size(req):
     return sysc + len(json.dumps(req.get("tools") or [], separators=(",", ":")))
 
 
-def cases():
+def cases(voice_tools=None):
     out = []
-    for file, node, prefix in (("desktop.json", "desktop", "ex"), ("node-go.json", "voice", "vx")):
+    sets = [("desktop.json", "desktop", "ex"), ("node-go.json", "voice", "vx")]
+    if voice_tools:
+        sets.append((os.path.abspath(voice_tools), "voice", "px"))
+    seen = set()
+    for file, node, prefix in sets:
         ts = json.load(open(os.path.join(ROOT, "tools/pipeline/toolsets", file)))
         for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
             fn = t.get("function", t)
             if node == "voice" and fn["name"] == "act_on_items":
                 continue  # refers to a list shown earlier: not a single turn
+            if (node, fn["name"]) in seen:
+                continue  # --voice-tools repeats node-go.json's tools: scored once, as vx
+            seen.add((node, fn["name"]))
             for ex in t.get("examples") or fn.get("examples") or []:
                 c = {"id": f"{prefix}:{fn['name']}:{ex['voice_command']}", "node": node,
                      "say": ex["voice_command"], "tool": fn["name"], "args": ex.get("expected_parameters") or {}}
@@ -300,7 +310,7 @@ def run(args):
                             props[name]["description"] = d
                 for name in p.get("drop_params") or []:
                     props.pop(name, None)
-    allc = corpus_cases(args.corpus) if args.corpus else cases()
+    allc = corpus_cases(args.corpus) if args.corpus else cases(args.voice_tools)
     cs = [c for c in allc if c["node"] in bases and (not args.only or re.search(args.only, c["id"]))]
     cs = [c for c in cs if c["say"].lower() not in shown]  # held out: never score a shown example
     print(f"{len(cs)} cases x {args.repeat} against {url} (model {model})", file=sys.stderr)
@@ -381,12 +391,14 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("capture")
     c.add_argument("--name", default="toolbench")
+    c.add_argument("--voice-tools", help="a JSON array of tools for the voice node to send (default the golden node's)")
     c.add_argument("--set", action="append", default=[], metavar="KEY=JSON",
                    help='an install-wide setting before the capture, e.g. llm.tool_calling=\'"text"\'')
     r = sub.add_parser("run")
     r.add_argument("--base", default=OUT)
     r.add_argument("--repeat", type=int, default=1)
     r.add_argument("--only")
+    r.add_argument("--voice-tools", help="also score the examples of this file's tools that node-go.json lacks")
     r.add_argument("--out")
     r.add_argument("--url")
     r.add_argument("--model")
