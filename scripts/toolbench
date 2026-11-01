@@ -117,15 +117,18 @@ def size(req):
 
 def cases():
     out = []
-    ts = json.load(open(os.path.join(ROOT, "tools/pipeline/toolsets/desktop.json")))
-    for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
-        fn = t.get("function", t)
-        for ex in t.get("examples") or fn.get("examples") or []:
-            c = {"id": f"ex:{fn['name']}:{ex['voice_command']}", "node": "desktop",
-                 "say": ex["voice_command"], "tool": fn["name"], "args": ex.get("expected_parameters") or {}}
-            if fn["name"] == "get_current_time" and not (ex.get("expected_parameters") or {}).get("location"):
-                c["direct_ok"] = True  # the prompt's <calendar> block answers local date/time directly
-            out.append(c)
+    for file, node, prefix in (("desktop.json", "desktop", "ex"), ("node-go.json", "voice", "vx")):
+        ts = json.load(open(os.path.join(ROOT, "tools/pipeline/toolsets", file)))
+        for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
+            fn = t.get("function", t)
+            if node == "voice" and fn["name"] == "act_on_items":
+                continue  # refers to a list shown earlier: not a single turn
+            for ex in t.get("examples") or fn.get("examples") or []:
+                c = {"id": f"{prefix}:{fn['name']}:{ex['voice_command']}", "node": node,
+                     "say": ex["voice_command"], "tool": fn["name"], "args": ex.get("expected_parameters") or {}}
+                if fn["name"] == "get_current_time" and not (ex.get("expected_parameters") or {}).get("location"):
+                    c["direct_ok"] = True  # the prompt's <calendar> block answers local date/time directly
+                out.append(c)
     for path in sorted(glob.glob(os.path.join(ROOT, "tools/pipeline/scenarios/*.json"))):
         for sc in json.load(open(path)):
             toolset = sc.get("tools")
@@ -274,6 +277,9 @@ def run(args):
         p = os.path.join(args.base, f"base-{kind}.json")
         if os.path.exists(p):
             bases[kind] = json.load(open(p))
+    # Held out: never score an utterance the prompt shows as an example ({{examples}}).
+    shown = {u.lower() for b in bases.values() for m in b["messages"] if m.get("role") == "system"
+             for u in re.findall(r"^User: (.+)\n<tool_call>", str(m["content"]), re.M)}
     if args.patch:
         # {tool: {"description": str, "params": {name: str | null (drop the description)}, "drop_params": [...]}}
         patch = json.load(open(args.patch))
@@ -296,6 +302,7 @@ def run(args):
                     props.pop(name, None)
     allc = corpus_cases(args.corpus) if args.corpus else cases()
     cs = [c for c in allc if c["node"] in bases and (not args.only or re.search(args.only, c["id"]))]
+    cs = [c for c in cs if c["say"].lower() not in shown]  # held out: never score a shown example
     print(f"{len(cs)} cases x {args.repeat} against {url} (model {model})", file=sys.stderr)
     results = []
     for c in cs:
