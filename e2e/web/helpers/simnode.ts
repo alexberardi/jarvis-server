@@ -11,8 +11,8 @@ const sandbox = path.resolve(import.meta.dirname, '../../../scripts/sandbox')
  * startSimNode starts one named nodeName and returns the pairing code it shows. Once the code
  * is approved, the agent says yes to joining and comes online. The first call builds the agent.
  */
-export async function startSimNode(nodeName: string): Promise<string> {
-  const { stdout } = await promisify(execFile)(sandbox, ['node-sim', '--name', env('JARVIS_SANDBOX'), '--node-name', nodeName], {
+export async function startSimNode(nodeName: string, profile: 'pi' | 'desktop' = 'pi'): Promise<string> {
+  const { stdout } = await promisify(execFile)(sandbox, ['node-sim', '--name', env('JARVIS_SANDBOX'), '--node-name', nodeName, '--node-profile', profile], {
     timeout: 90_000,
   })
   const code = stdout.trim()

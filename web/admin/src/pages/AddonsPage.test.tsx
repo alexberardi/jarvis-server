@@ -180,11 +180,12 @@ describe('AddonsPage', () => {
     expect(await screen.findByTestId('this-computer')).toHaveTextContent("We can't tell which of your computers this is")
   })
 
-  it('points settings to the mobile app on every device', async () => {
+  it('offers ordinary settings while keeping secrets in the mobile app', async () => {
     renderPage()
     const list = await screen.findByRole('list', { name: 'Your devices' })
     for (const row of within(list).getAllByRole('listitem')) {
-      expect(row).toHaveTextContent('Settings for this computer are managed in the Jarvis Automation mobile app (admins).')
+      expect(row).toHaveTextContent('Voice settings are available here. Package secrets stay in the mobile app.')
+      expect(within(row).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     }
   })
 

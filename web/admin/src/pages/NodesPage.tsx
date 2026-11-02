@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Cpu, Laptop, RefreshCw } from 'lucide-react'
+import NodeSettings from '@/components/nodes/NodeSettings'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonList } from '@/components/ui'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
@@ -77,6 +78,7 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
           <code className="font-mono break-all text-text-muted">{node.node_id}</code>
         </Detail>
       </div>
+      {node.is_active && <div className="mt-4"><NodeSettings nodeId={node.node_id} name={node.name} online={live?.online === true} desktop={desktop} /></div>}
     </Card>
   )
 }

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getThisDevice } from '@/api/chat'
 import { extensionState, getNodeLiveness, signOutDevice, websiteAccessState } from '@/api/nodes'
 import type { NodeLiveness } from '@/api/nodes'
+import NodeSettings from '@/components/nodes/NodeSettings'
 import AgentDownload from '@/components/addons/AgentDownload'
 import PendingPairings from '@/components/nodes/PendingPairings'
 import {
@@ -82,8 +83,8 @@ function WebsiteAccessSteps({ families }: { families: BrowserFamily[] }) {
   )
 }
 
-/** SETTINGS_NOTE: node settings are end-to-end encrypted with a key only the phone app and the node hold. */
-export const SETTINGS_NOTE = 'Settings for this computer are managed in the Jarvis Automation mobile app (admins).'
+/** Ordinary config has a separate view; package secrets remain encrypted. */
+export const SETTINGS_NOTE = 'Voice settings are available here. Package secrets stay in the mobile app.'
 
 function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; maySignOut: boolean }) {
   const ext = extensionState(n)
@@ -102,7 +103,7 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
   return (
     <li className="py-3 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
           <p className="flex min-w-0 items-center gap-2 text-subheading text-text">
             <span
               aria-hidden="true"
@@ -121,6 +122,7 @@ function DeviceRow({ n, here, maySignOut }: { n: NodeLiveness; here: boolean; ma
           <p className="text-small text-text-muted">{SETTINGS_NOTE}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <NodeSettings nodeId={n.node_id} name={label} online={n.online} desktop />
           {!n.online && (
             <a
               href={AGENT_START_URL}
