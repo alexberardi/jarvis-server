@@ -71,6 +71,7 @@ type Call struct {
 	ending       End
 	endingDetail string
 	xfer         chan struct{} // the transfer, closed when it is over (nil: none tried)
+	xferFinal    chan int      // the transfer's final NOTIFY status, from the guard
 
 	lastRTP atomic.Int64 // unix nanos of the last RTP packet (or of the answer)
 }
