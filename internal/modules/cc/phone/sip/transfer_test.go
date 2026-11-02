@@ -115,7 +115,6 @@ func TestAByeRightAfterTheFinalNotifyIsATransfer(t *testing.T) {
 	afterFinalNotify = func(c *Call) {
 		select {
 		case <-c.dlg.Context().Done():
-			time.Sleep(200 * time.Millisecond) // serve has seen the BYE
 		case <-time.After(2 * time.Second):
 			t.Error("the PBX's BYE never ended the dialog")
 		}

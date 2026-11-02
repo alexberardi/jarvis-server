@@ -290,6 +290,11 @@ func (u *UA) guard(next sipgo.RequestHandler) sipgo.RequestHandler {
 				return
 			}
 		}
+		if req.Method == sip.NOTIFY {
+			if code, c := sipfragStatus(req), u.call(req.CallID()); code != 0 && c != nil {
+				c.referNotify(code)
+			}
+		}
 		next(req, tx)
 	}
 }
