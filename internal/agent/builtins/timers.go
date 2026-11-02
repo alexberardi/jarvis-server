@@ -41,9 +41,12 @@ func (t *Timers) Available(context.Context) []node.ToolDef {
 	return out
 }
 
-func (t *Timers) Call(_ context.Context, name string, args map[string]any, _ node.Request) (map[string]any, bool) {
+func (t *Timers) Call(_ context.Context, name string, args map[string]any, req node.Request) (map[string]any, bool) {
 	if !slices.Contains(timerNames, name) {
 		return nil, false
+	}
+	if name == "set_timer" {
+		args = setTimerFromSpeech(args, req.VoiceCommand)
 	}
 	if out := validated(def(name), args); out != nil {
 		return out, true
@@ -184,24 +187,26 @@ var informalDurations = []struct {
 	re   *regexp.Regexp
 	with string
 }{
+	{regexp.MustCompile(`(?i)\ban?\s+hour\s+and\s+a\s+half\b`), "90 minutes"},
 	{regexp.MustCompile(`(?i)\bhalf\s+an?\s+hour\b`), "30 minutes"},
 	{regexp.MustCompile(`(?i)\ba\s+half\s+hour\b`), "30 minutes"},
 	{regexp.MustCompile(`(?i)\bquarter\s+(?:of\s+an?\s+)?hour\b`), "15 minutes"},
 	{regexp.MustCompile(`(?i)\ban?\s+hour\b`), "60 minutes"},
 }
 
-// spokenCountRe is a number word before a unit ("two hour timer"), which N: doesn't read.
-var spokenCountRe = regexp.MustCompile(`(?i)\b(forty[\s-]five|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|sixty|ninety)(\s+(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\b)`)
+// spokenCountRe is a number word before a unit ("two hour timer", "twenty five minutes"),
+// which N: doesn't read.
+var spokenCountRe = regexp.MustCompile(`(?i)\b(?:(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[\s-]+(one|two|three|four|five|six|seven|eight|nine))?|(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen))(\s+(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\b)`)
 
-var spokenCounts = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
-	"eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20", "thirty": "30",
-	"forty": "40", "sixty": "60", "ninety": "90"}
+var spokenCounts = map[string]int{"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+	"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+	"sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+	"fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
 
+// spokenCount is the number in a spokenCountRe match: tens plus units, or one word.
 func spokenCount(m []string) string {
-	if n, ok := spokenCounts[m[1]]; ok {
-		return n
-	}
-	return "45" // forty five
+	l := strings.ToLower
+	return strconv.Itoa(spokenCounts[l(m[1])] + spokenCounts[l(m[2])] + spokenCounts[l(m[3])])
 }
 
 var labelStripWords = map[string]bool{
@@ -215,22 +220,41 @@ var labelStripWords = map[string]bool{
 
 var standaloneNumberRe = regexp.MustCompile(`\b\d+\b`)
 
-// setTimerMatch is TimerCommand.pre_route for one trigger: a duration in what was said (summed
-// when compound) and the label left once the time words are taken out.
-func setTimerMatch(said string) (map[string]any, bool) {
+// durationText is what was said in lower case with informal and spoken lengths as digits
+// ("half an hour" → "30 minutes", "twenty five minutes" → "25 minutes").
+func durationText(said string) string {
 	text := strings.ToLower(strings.TrimSpace(said))
 	for _, d := range informalDurations {
 		text = d.re.ReplaceAllString(text, d.with)
 	}
-	text = spokenCountRe.ReplaceAllStringFunc(text, func(w string) string {
+	return spokenCountRe.ReplaceAllStringFunc(text, func(w string) string {
 		m := spokenCountRe.FindStringSubmatch(w)
-		return spokenCount(m) + m[2]
+		return spokenCount(m) + m[4]
 	})
-	total := 0
-	for _, m := range timeChunkRe.FindAllStringSubmatch(text, -1) {
-		n, _ := strconv.Atoi(m[1])
-		total += n * timeUnits[strings.ToLower(m[2])]
+}
+
+// durationSeconds sums the lengths in text, and reports whether they are one length (chunks
+// joined only by spaces, commas or "and": "1 hour and 30 minutes", not "5 minutes then 10").
+func durationSeconds(text string) (int, bool) {
+	total, one, last := 0, true, -1
+	for _, loc := range timeChunkRe.FindAllStringSubmatchIndex(text, -1) {
+		n, _ := strconv.Atoi(text[loc[2]:loc[3]])
+		total += n * timeUnits[text[loc[4]:loc[5]]]
+		if last >= 0 && !chunkJoinRe.MatchString(text[last:loc[0]]) {
+			one = false
+		}
+		last = loc[1]
 	}
+	return total, one
+}
+
+var chunkJoinRe = regexp.MustCompile(`^[\s,]*(?:and\s*)?$`)
+
+// setTimerMatch is TimerCommand.pre_route for one trigger: a duration in what was said (summed
+// when compound) and the label left once the time words are taken out.
+func setTimerMatch(said string) (map[string]any, bool) {
+	text := durationText(said)
+	total, _ := durationSeconds(text)
 	if total <= 0 {
 		return nil, false
 	}
@@ -255,6 +279,50 @@ func timerLabel(text string) string {
 	return strings.Join(words, " ")
 }
 
+// setTimerFromSpeech corrects a model's set_timer from what was said (beyond N:): small models
+// get the arithmetic wrong ("give me 45 seconds" as 450) and drop the label. One length in the
+// words wins over the model's; "for the X" at the end fills a missing label.
+func setTimerFromSpeech(args map[string]any, said string) map[string]any {
+	text := durationText(said)
+	total, one := durationSeconds(text)
+	m := speechLabelRe.FindStringSubmatch(text)
+	fill := labelArg(args) == nil && m != nil && !speechLabelSkip[m[1]]
+	if (total <= 0 || !one) && !fill {
+		return args
+	}
+	out := make(map[string]any, len(args)+1)
+	for k, v := range args {
+		out[k] = v
+	}
+	if total > 0 && one {
+		out["duration_seconds"] = total
+	}
+	if fill {
+		out["label"] = m[1]
+	}
+	return out
+}
+
+var (
+	speechLabelRe   = regexp.MustCompile(`\bfor\s+(?:the\s+|my\s+|our\s+)?([a-z][a-z' ]{0,30}?)\s*[.!?]*$`)
+	speechLabelSkip = map[string]bool{"me": true, "us": true, "you": true, "it": true, "that": true, "now": true}
+)
+
+// setShapedRe is what "timer" with a length must look like to be set without the model (beyond
+// N:, which took any "timer" with a length, so "my oven timer took 20 minutes" set one): a verb
+// before "timer", or the length next to it ("10 minute timer", "timer for 5 minutes").
+var (
+	setShapedRe = regexp.MustCompile(`\b(?:set|start|make|create|put|give|run|need|want|add|begin)\b.*\btimer\b|` +
+		`\d+\s*-?\s*(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\s+timer\b|` +
+		`\btimer\b[\s,:-]*(?:for\s+|of\s+)?\d+\s*(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\b`)
+	timerQuestionRe = regexp.MustCompile(`^(?:is|are|was|what|what's|whats|how|why|when|where|does|did|do)\b`)
+)
+
+func setShaped(said string) bool {
+	text := durationText(said)
+	return setShapedRe.MatchString(text) && !timerQuestionRe.MatchString(text)
+}
+
 // setTriggers is _FAST_PATH_BY_TRIGGER: what was said belongs to the pattern of the first
 // trigger it contains (so turning "timer.set" off doesn't hand "wake me" phrases to it).
 var setTriggers = []struct{ phrase, id string }{
@@ -267,7 +335,7 @@ func setPattern(id, description, example string) pattern {
 		text := strings.ToLower(said)
 		for _, tr := range setTriggers {
 			if strings.Contains(text, tr.phrase) {
-				if tr.id != id {
+				if tr.id != id || id == "timer.set" && !setShaped(said) {
 					return nil, false
 				}
 				return setTimerMatch(said)

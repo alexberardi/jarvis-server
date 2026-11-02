@@ -96,7 +96,7 @@
       }
     ],
     "function": {
-      "description": "Add to, read, check off or clear the shopping list.",
+      "description": "The shopping list (things to buy): add ('I'm out of milk'), read, check off bought items, remove or clear. Tasks and chores: todo_list.",
       "name": "shopping_list",
       "parameters": {
         "properties": {
@@ -159,7 +159,7 @@
       "items is required for add, check_off, and remove — if unclear, ask which items",
       "This manages a shopping list, NOT time-based reminders — 'remind me to buy milk' belongs to the reminder command"
     ],
-    "description": "Add to, read, check off or clear the shopping list.",
+    "description": "The shopping list (things to buy): add ('I'm out of milk'), read, check off bought items, remove or clear. Tasks and chores: todo_list.",
     "examples": [
       {
         "expected_parameters": {

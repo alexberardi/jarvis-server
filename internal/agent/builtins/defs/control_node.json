@@ -41,7 +41,7 @@
       }
     ],
     "function": {
-      "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+      "description": "This speaker's own volume or mute: 'louder', 'speak up' (volume_up), 'you're too loud' (volume_down). A TV, soundbar or other smart-home device: control_device.",
       "name": "control_node",
       "parameters": {
         "properties": {
@@ -89,7 +89,7 @@
       "Treat 'volume up/down/louder/quieter' as relative — pick volume_up or volume_down, NOT set_volume.",
       "Map 'mute/silence the speaker' → action='mute'; 'unmute' → action='unmute'."
     ],
-    "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+    "description": "This speaker's own volume or mute: 'louder', 'speak up' (volume_up), 'you're too loud' (volume_down). A TV, soundbar or other smart-home device: control_device.",
     "examples": [
       {
         "expected_parameters": {

@@ -215,7 +215,7 @@
    "type": "function",
    "function": {
     "name": "recall",
-    "description": "Search saved memories about the user ('what's my locker code').",
+    "description": "Search saved memories about the user: what they told Jarvis to remember ('what's my locker code', 'where did I park', 'when is my wife's birthday').",
     "parameters": {
      "type": "object",
      "properties": {
@@ -301,7 +301,7 @@
    "type": "function",
    "function": {
     "name": "run_errand",
-    "description": "Plan a multi-step background task now, for the user to approve ('run an errand to ...'). Future or repeating: schedule_errand.",
+    "description": "Have Jarvis do a multi-step background task now, for the user to approve: research, compare, look up or find something for them ('research the best robot vacuums', 'find a plumber with good reviews'). A later or repeating task: schedule_errand.",
     "parameters": {
      "type": "object",
      "properties": {
@@ -320,7 +320,7 @@
    "type": "function",
    "function": {
     "name": "schedule_errand",
-    "description": "Schedule an errand for later or on a repeat ('tomorrow at 9', 'every morning').",
+    "description": "Have Jarvis do a task for the user later or on a repeat ('tomorrow at 9, check whether the store has shovels', 'every morning, check the traffic'). A reminder only tells the user something; an errand does the work.",
     "parameters": {
      "type": "object",
      "properties": {

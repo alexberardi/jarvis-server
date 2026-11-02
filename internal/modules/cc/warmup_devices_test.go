@@ -10,7 +10,7 @@ import (
 // goNodeTools is the shape of the Go Pi node's report: control_node, but no control_device
 // client tool (packages.PiBuiltins skips the Python builtin, #512).
 const goNodeTools = `[
- {"type": "function", "function": {"name": "control_node", "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+ {"type": "function", "function": {"name": "control_node", "description": "This speaker's own volume or mute: 'louder', 'speak up' (volume_up), 'you're too loud' (volume_down). A TV, soundbar or other smart-home device: control_device.",
   "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["volume_up", "volume_down", "set_volume", "mute", "unmute"]},
   "target_percent": {"type": "integer"}}, "required": ["action"]}},
   "keywords": ["volume", "mute"]}

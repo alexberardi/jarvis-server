@@ -21,7 +21,7 @@
       }
     ],
     "function": {
-      "description": "Read out or dismiss pending alerts (news, calendar).",
+      "description": "Read out or dismiss Jarvis's queued alerts (news, calendar) when asked for them ('any alerts', 'what's up', 'clear my alerts'). Never for devices, locks, reminders, alarms, memories or a question to someone else.",
       "name": "check_alerts",
       "parameters": {
         "properties": {
@@ -51,7 +51,7 @@
   "command": {
     "allow_direct_answer": false,
     "command_name": "check_alerts",
-    "description": "Read out or dismiss pending alerts (news, calendar).",
+    "description": "Read out or dismiss Jarvis's queued alerts (news, calendar) when asked for them ('any alerts', 'what's up', 'clear my alerts'). Never for devices, locks, reminders, alarms, memories or a question to someone else.",
     "examples": [
       {
         "expected_parameters": {},
