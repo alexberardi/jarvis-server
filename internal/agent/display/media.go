@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -159,27 +158,19 @@ func (e *Engine) ControlMedia(ctx context.Context, r MediaRequest) (map[string]a
 	if !cfg.Enabled {
 		return nil, errors.New("display mode is disabled")
 	}
+	if r.Destination == "" {
+		r.Destination = cfg.Destination
+	}
+	if r.Destination != "" && r.Destination != "local" {
+		if cc == nil {
+			return nil, errors.New("destination unavailable; choose local playback")
+		}
+		return ControlRemote(ctx, cc, r)
+	}
 	if r.Action == "status" {
 		status := e.GetPlaybackStatus()
 		delete(status, "socket")
 		return status, nil
-	}
-	if r.Destination == "" {
-		r.Destination = cfg.Destination
-	}
-	if r.Destination != "local" {
-		if cc == nil {
-			return nil, errors.New("destination unavailable; choose local playback")
-		}
-		var out map[string]any
-		err := cc.Do(ctx, "POST", "/api/v0/node/display/media", r, &out)
-		if err != nil {
-			return nil, fmt.Errorf("destination unavailable; choose local playback: %w", err)
-		}
-		if out["success"] == false {
-			return nil, errors.New("destination rejected playback; choose local playback")
-		}
-		return out, nil
 	}
 	if r.Action != "play" {
 		status := e.GetPlaybackStatus()
@@ -299,7 +290,7 @@ func (e *Engine) Available(context.Context) []node.ToolDef {
 	if !enabled {
 		return nil
 	}
-	return []node.ToolDef{(node.Spec{Name: "display_media", Description: "Play a video on this Jarvis display by default, or a named household media destination. Use query for YouTube search results for touch selection. Subscription shortcut names open the website for touch navigation.", Params: []node.Param{{Name: "action", Type: "string", Required: true, Enum: []string{"play", "pause", "resume", "seek", "stop", "status"}}, {Name: "url", Type: "string", Description: "Direct video URL, YouTube URL, streaming shortcut name or file in Videos"}, {Name: "query", Type: "string", Description: "YouTube search words"}, {Name: "destination", Type: "string", Description: "local or an advertised household media destination name"}, {Name: "seconds", Type: "float", Description: "Absolute seek position in seconds"}}}).Render()}
+	return []node.ToolDef{(node.Spec{Name: "display_media", Description: "Play a video on this Jarvis display by default, or a named household media destination. Use query for YouTube search results for touch selection. Subscription shortcut names open the website for touch navigation.", Params: []node.Param{{Name: "action", Type: "string", Required: true, Enum: []string{"play", "pause", "resume", "seek", "stop", "status"}}, {Name: "url", Type: "string", Description: "Direct video URL, YouTube URL, streaming shortcut name or file in Videos"}, {Name: "query", Type: "string", Description: "YouTube search words"}, {Name: "destination", Type: "string", Description: "local, or the name of one of the household's media devices"}, {Name: "seconds", Type: "float", Description: "Absolute seek position in seconds"}}}).Render()}
 }
 func (e *Engine) Call(ctx context.Context, name string, args map[string]any, _ node.Request) (map[string]any, bool) {
 	if name != "display_media" {

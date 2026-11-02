@@ -83,10 +83,13 @@ returns the PIN or verifier.
 
 `display_media` is a client tool with `action` (`play`, `pause`, `resume`, `seek`, `stop`, `status`),
 `url`, `query`, `destination` and `seconds`. An omitted destination uses the node's effective
-configuration. `local` means this display. A named household Home Assistant media player overrides
-it. External routing uses the existing node/plugin relay and the installed Home Assistant plugin,
-checks its advertised media feature flags and returns errors for unavailable or unsupported targets.
-That relay node also needs the updated agent. Nothing in the frontend connects directly to HA.
+configuration. `local` means this display. Any other destination is one of the household's imported
+devices whose type in the SDK device catalogue is media (by id, or by name or entity id for the voice
+tool; an ambiguous name is refused). The display drives it through the household device API
+(`/node/devices/{id}/state` and `/control`, as any node may), and the device's manager does the
+backend work on whichever node runs it, so the display names no backend. Media actions map to the
+catalogue's (`resume` is `play`; `play` with a link is `play_media`), status is the destination's own
+state, and Pause, Resume and Seek follow the features that device reports.
 
 Direct HTTP(S) media links and regular files under the kiosk user's `~/Videos` use mpv. Symlinks
 outside that directory, other local paths and non-web URL schemes are rejected. YouTube URLs and

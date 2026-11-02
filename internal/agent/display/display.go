@@ -22,6 +22,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
+	"github.com/alexberardi/jarvis-server/internal/devicetypes"
 	shared "github.com/alexberardi/jarvis-server/internal/display"
 )
 
@@ -508,19 +509,24 @@ func (e *Engine) HandleAPI(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, out)
 		return
 	}
+	if r.URL.Path == "/api/catalogue" && r.Method == "GET" {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(devicetypes.JSON())
+		return
+	}
 	if cc == nil {
 		http.Error(w, "Server offline", 503)
 		return
 	}
 	path := ""
 	if r.URL.Path == "/api/devices" && r.Method == "GET" {
-		path = "/api/v0/node/display/devices"
+		path = "/api/v0/node/devices"
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/devices/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/devices/")
 		parts := strings.Split(suffix, "/")
 		if len(parts) == 2 && len(parts[0]) < 128 && (parts[1] == "state" && r.Method == "GET" || parts[1] == "control" && r.Method == "POST") {
-			path = "/api/v0/node/display/devices/" + suffix
+			path = "/api/v0/node/devices/" + suffix
 		}
 	}
 	if path == "" {

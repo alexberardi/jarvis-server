@@ -3,10 +3,13 @@ import { createRoot } from 'react-dom/client'
 import { Home, Lightbulb, Play, Shield, Star, RotateCcw } from 'lucide-react'
 import './Display.css'
 import SpeechWaveform from './SpeechWaveform'
+import { type Catalogue, deviceType, isMediaDestination } from './catalogue'
 
 type Config = { waveform_colour?: string; waveform_emphasis?: number; enabled: boolean; clock: string; hour_24: boolean; timezone: string; idle_seconds: number; slide_seconds: number; photos: string[]; favourites: string[]; night_dim: boolean; dim_start: number; dim_end: number; dim_percent: number; shortcuts: { name: string; url: string }[]; destination: string }
 type Device = { id: string; name: string; domain: string; entity_id: string; room_name: string; supported_actions: { button_action: string; button_text: string }[] | null }
-type State = { configuration: Config; voice: string; last_interaction: number; playback: { active: boolean; kind: string; controllable: boolean; paused?: boolean; position?: number; duration?: number }; theme_url: string; receivers: Record<string, string>; status: string }
+type Playback = { active: boolean; kind: string; controllable: boolean; paused?: boolean; position?: number; duration?: number; features?: string[]; media_title?: string }
+type State = { configuration: Config; voice: string; last_interaction: number; playback: Playback; theme_url: string; receivers: Record<string, string>; status: string }
+
 async function CallDisplay(path: string, body?: unknown) {
   const r = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Jarvis-Display': '1', 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   const raw = await r.text()
@@ -34,7 +37,9 @@ export function ShowClock({ now, config }: { now: Date; config: Config }) {
 }
 export function ShowDisplay() {
   const [state, setState] = useState<State | null>(null)
-  const [devices, setDevices] = useState<Device[]>([])
+  const [allDevices, setDevices] = useState<Device[]>([])
+  const [catalogue, setCatalogue] = useState<Catalogue | null>(null)
+  const [remote, setRemote] = useState<{ target: string; playback: Playback } | null>(null)
   const [parameters, setParameters] = useState<{ device: Device; action: string; request?: string } | null>(null)
   const [parameterValue, setParameterValue] = useState('')
   const [hints, setHints] = useState<Record<string, { min_value?: number; max_value?: number; step?: number; features?: string[]; unit?: string }>>({})
@@ -60,6 +65,18 @@ export function ShowDisplay() {
   const dialog = useRef<HTMLDialogElement>(null)
   const confirmDialog = useRef<HTMLDialogElement>(null)
   const config = state?.configuration
+  const devices = useMemo(() => allDevices.filter(d => deviceType(catalogue, d.domain)?.visible !== false), [allDevices, catalogue])
+  const target = destination || config?.destination || 'local'
+  // A destination's status counts only for that destination, so switching never shows a stale one.
+  const remotePlayback = remote?.target === target ? remote.playback : undefined
+  const playback = useMemo<Playback | undefined>(() => target === 'local' ? state?.playback : remotePlayback ?? { active: false, kind: 'remote', controllable: false }, [target, state?.playback, remotePlayback])
+  useEffect(() => { void CallDisplay('catalogue').then(c => setCatalogue(c as unknown as Catalogue)).catch(() => { /* Without it every device shows, as before. */ }) }, [])
+  useEffect(() => {
+    if (target === 'local' || view !== 'Media') return
+    let active = true
+    const poll = async () => { try { const s = await CallDisplay('media', { action: 'status', destination: target }); if (active) setRemote({ target, playback: s as unknown as Playback }) } catch (e) { if (active) { setRemote(null); setError((e as Error).message) } } }
+    void poll(); const t = setInterval(() => void poll(), 3000); return () => { active = false; clearInterval(t) }
+  }, [target, view])
   useEffect(() => {
     let active = true, pending = false, previousTheme = ''
     const poll = async () => {
@@ -108,9 +125,13 @@ export function ShowDisplay() {
       respond(request, { success: true })
     } catch (e) { setError((e as Error).message); respond(request, { error: (e as Error).message }) } finally { setBusy('') }
   }
-  const media = async (action: string, target = url, local?: string, query?: string) => {
+  const media = async (action: string, link = url, local?: string, query?: string, seconds?: number) => {
     setError('')
-    try { await CallDisplay('media', { action, url: target, destination: local || destination || config?.destination, query }) } catch (e) { setError((e as Error).message) }
+    const to = local || target
+    try {
+      await CallDisplay('media', { action, url: link, destination: to, query, seconds })
+      if (to !== 'local') setRemote({ target: to, playback: await CallDisplay('media', { action: 'status', destination: to }) as unknown as Playback })
+    } catch (e) { setError((e as Error).message) }
   }
   useEffect(() => {
     const receive = (event: MessageEvent) => {
@@ -127,9 +148,9 @@ export function ShowDisplay() {
     }
     window.addEventListener('message', receive); return () => window.removeEventListener('message', receive)
   })
-  useEffect(() => { if (themeReady) frame.current?.contentWindow?.postMessage({ api_version: 1, type: 'state', devices: devices.map(d => ({ ...d, state: states[d.id] })), clock: { timestamp: now.getTime(), timezone: config?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }, display: { voice: state?.voice, view }, media: state?.playback }, '*') }, [themeReady, devices, states, now, config?.timezone, state?.voice, state?.playback, view])
+  useEffect(() => { if (themeReady) frame.current?.contentWindow?.postMessage({ api_version: 1, type: 'state', devices: devices.map(d => ({ ...d, state: states[d.id] })), clock: { timestamp: now.getTime(), timezone: config?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }, display: { voice: state?.voice, view }, media: playback }, '*') }, [themeReady, devices, states, now, config?.timezone, state?.voice, playback, view])
   if (!state || !config) return <main className="display-shell"><h1>Jarvis</h1><p role="status">Loading the display…</p>{error && <p role="alert">{error}</p>}</main>
-  const idle = !exit && !confirmation && !parameters && !state.playback.active && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
+  const idle = !exit && !confirmation && !parameters && !state.playback.active && !remotePlayback?.active && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
   const hour = Number(new Intl.DateTimeFormat('en-AU', { ...(config.timezone ? { timeZone: config.timezone } : {}), hour: '2-digit', hour12: false }).format(now)) % 24
   const dim = config.night_dim && (config.dim_start < config.dim_end ? hour >= config.dim_start && hour < config.dim_end : hour >= config.dim_start || hour < config.dim_end)
   const photo = config.photos.length ? config.photos[Math.floor(now.getTime() / (config.slide_seconds * 1000)) % config.photos.length] : ''
@@ -148,14 +169,14 @@ export function ShowDisplay() {
         {view === 'Home' && <ShowClock now={now} config={config} />}
         {view !== 'Media' && <>
           <div className="device-filters"><label>Search devices<input value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} /></label><label>Room<select value={room} onChange={e => { setRoom(e.target.value); setPage(0) }}><option value="">All rooms</option>{[...new Set(devices.map(d => d.room_name).filter(Boolean))].sort().map(r => <option key={r}>{r}</option>)}</select></label></div>
-          {!filtered.length && <p>{view === 'Home' ? 'Choose favourites in server settings, or browse Devices.' : 'No matching devices. Discover devices through Jarvis plugins or Home Assistant.'}</p>}
+          {!filtered.length && <p>{view === 'Home' ? 'Choose favourites in server settings, or browse Devices.' : 'No matching devices. Import devices in the Jarvis app.'}</p>}
           <div className="device-grid">{visible.map(d => <article key={d.id}><div className="device-heading"><h2>{d.name}</h2>{config.favourites.includes(d.id) && <Star size={18} aria-label="Favourite" />}</div><p>{d.room_name || 'No room'} · <span>{states[d.id] || 'State unavailable'}</span></p><div className="device-actions">{d.supported_actions?.map(a => <button key={a.button_action} disabled={busy === d.id || offline} onClick={() => void control(d, a.button_action)}>{a.button_text}</button>)}</div></article>)}</div>
           {filtered.length > 24 && <div className="pagination"><button disabled={!page} onClick={() => setPage(p => p - 1)}>Previous</button><span>{page + 1} / {Math.ceil(filtered.length / 24)}</span><button disabled={(page + 1) * 24 >= filtered.length} onClick={() => setPage(p => p + 1)}>Next</button></div>}
         </>}
-        {view === 'Media' && <><h1>Play something</h1><form onSubmit={e => { e.preventDefault(); void media('play') }}><label>Video link or streaming shortcut<input value={url} onChange={e => setURL(e.target.value)} /></label><label>Playback destination<select value={destination || config.destination} onChange={e => setDestination(e.target.value)}><option value="local">This display</option>{devices.filter(d => d.domain === 'media_player').map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select></label><div className="media-buttons"><button type="submit">Play</button><button type="button" onClick={() => void media('play', '', undefined, url)}>Search YouTube</button><button type="button" onClick={() => { setDestination('local'); void media('play', url, 'local') }}>Play locally</button></div></form>
+        {view === 'Media' && <><h1>Play something</h1><form onSubmit={e => { e.preventDefault(); void media('play') }}><label>Video link or streaming shortcut<input value={url} onChange={e => setURL(e.target.value)} /></label><label>Playback destination<select value={target} onChange={e => setDestination(e.target.value)}><option value="local">This display</option>{devices.filter(d => isMediaDestination(catalogue, d)).map(d => <option key={d.id} value={d.id}>{d.room_name ? `${d.name} (${d.room_name})` : d.name}</option>)}</select></label><div className="media-buttons"><button type="submit">Play</button><button type="button" onClick={() => void media('play', '', undefined, url)}>Search YouTube</button><button type="button" onClick={() => { setDestination('local'); void media('play', url, 'local') }}>Play locally</button></div></form>
           <div className="media-buttons">{config.shortcuts.map(s => <button key={s.name} onClick={() => void media('play', s.name, 'local')}>{s.name}</button>)}</div>
-          <p>{state.playback.active ? `Playing ${state.playback.kind || 'received media'}` : 'Nothing playing'}</p><div className="media-buttons"><button disabled={!state.playback.controllable} onClick={() => void media('pause')}>Pause</button><button disabled={!state.playback.controllable} onClick={() => void media('resume')}>Resume</button><button onClick={() => void media('stop')}>Stop and return</button></div>
-          {state.playback.controllable && <label>Seek<input type="range" min="0" max={state.playback.duration || 0} value={state.playback.position || 0} onChange={e => { void CallDisplay('media', { action: 'seek', seconds: Number(e.target.value), destination: 'local' }).catch(err => setError(err.message)) }} /></label>}
+          <p role="status">{!playback?.active ? 'Nothing playing' : playback.kind === 'remote' ? `${playback.paused ? 'Paused' : 'Playing'}${playback.media_title ? `: ${playback.media_title}` : ''}` : `Playing ${playback.kind || 'received media'}`}</p><div className="media-buttons"><button disabled={!playback?.controllable || (playback.kind === 'remote' && !playback.features?.includes('pause'))} onClick={() => void media('pause')}>Pause</button><button disabled={!playback?.controllable || (playback.kind === 'remote' && !playback.features?.includes('play'))} onClick={() => void media('resume')}>Resume</button><button onClick={() => void media('stop')}>{target === 'local' ? 'Stop and return' : 'Stop'}</button></div>
+          {playback?.controllable && (playback.kind !== 'remote' || playback.features?.includes('seek')) && <label>Seek<input type="range" min="0" max={playback.duration || 0} value={playback.position || 0} onChange={e => void media('seek', '', undefined, undefined, Number(e.target.value))} /></label>}
           <h2>Receivers</h2>{Object.entries(state.receivers).map(([k, v]) => <p key={k}>{k === 'cast' ? 'Experimental Cast V2' : 'Playercast (compatible Playercast senders)'}: {v}</p>)}<p className="display-note">Streaming services use this device’s browser sign-in. Control their pages by touch.</p></>}
       </section>}
     </>}

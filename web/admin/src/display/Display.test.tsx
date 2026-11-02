@@ -46,3 +46,52 @@ it('keeps the confirmed state after a failed device action', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('Device unavailable')
   expect(screen.getByText('off')).toBeInTheDocument()
 })
+
+const catalogue = { version: 1, domains: { media_player: { label: 'Media player', visible: true, control_type: 'media' }, light: { label: 'Light', visible: true, control_type: 'light' }, update: { label: 'Update', visible: false, control_type: 'sensor' } }, fallback: { label: 'Device', visible: true, control_type: 'sensor' } }
+it('follows a remote destination: its playback, its controls', async () => {
+  const sent: Record<string, unknown>[] = []
+  let remote = { active: true, kind: 'remote', controllable: true, paused: false, features: ['pause', 'play', 'stop'], media_title: 'Big Buck Bunny' }
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const path = url.replace('/api/', '')
+    let body: unknown = {}
+    if (path === 'state') body = { configuration: config, voice: 'idle', last_interaction: Date.now(), playback: { active: false, kind: '', controllable: false }, theme_url: '', receivers: {} }
+    else if (path === 'catalogue') body = catalogue
+    else if (path === 'devices') body = [{ id: 'tv-1', name: 'Lounge TV', room_name: 'Lounge', domain: 'media_player', entity_id: 'media_player.lounge', supported_actions: [] }, { ...devices[1] }]
+    else if (path === 'media') {
+      const m = JSON.parse(init!.body as string)
+      if (m.action === 'status') body = remote
+      else { sent.push(m); if (m.action === 'pause') remote = { ...remote, paused: true }; body = { success: true } }
+    }
+    return { ok: true, text: async () => JSON.stringify(body) }
+  }))
+  render(<ShowDisplay />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Media' }))
+  // Only media devices are destinations, by id.
+  const select = await screen.findByLabelText('Playback destination')
+  await waitFor(() => expect(screen.getByRole('option', { name: 'Lounge TV (Lounge)' })).toBeInTheDocument())
+  expect(screen.queryByRole('option', { name: /Light 1/ })).toBeNull()
+  expect(screen.getByText('Nothing playing')).toBeInTheDocument()
+  fireEvent.change(select, { target: { value: 'tv-1' } })
+  expect(await screen.findByText('Playing: Big Buck Bunny')).toBeInTheDocument()
+  const pause = screen.getByRole('button', { name: 'Pause' })
+  expect(pause).toBeEnabled()
+  fireEvent.click(pause)
+  await waitFor(() => expect(sent).toEqual([expect.objectContaining({ action: 'pause', destination: 'tv-1' })]))
+  expect(await screen.findByText('Paused: Big Buck Bunny')).toBeInTheDocument()
+  // A destination without seek offers no seek bar.
+  expect(screen.queryByLabelText('Seek')).toBeNull()
+})
+it('hides device types the catalogue hides', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const path = url.replace('/api/', '')
+    const body = path === 'state' ? { configuration: config, voice: 'idle', last_interaction: Date.now(), playback: { active: false }, theme_url: '', receivers: {} }
+      : path === 'catalogue' ? catalogue
+      : path === 'devices' ? [{ ...devices[1] }, { id: 'u1', name: 'Firmware', room_name: '', domain: 'update', entity_id: 'update.fw', supported_actions: null }]
+      : { state: { state: 'off' } }
+    return { ok: true, text: async () => JSON.stringify(body) }
+  }))
+  render(<ShowDisplay />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Devices' }))
+  expect(await screen.findByRole('heading', { name: 'Light 1' })).toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Firmware' })).toBeNull())
+})
