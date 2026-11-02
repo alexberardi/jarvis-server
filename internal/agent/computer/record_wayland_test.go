@@ -314,7 +314,7 @@ func (e *wlEnv) feed(s *evStream) {
 	}
 	// The recorder asks the compositor and AT-SPI on its worker: let it catch up before the
 	// test changes what they answer.
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // a hang guard: a click's keyframe encode under -race is seconds on Windows CI
 	for !e.src.settled() {
 		if time.Now().After(deadline) {
 			panic("the desktop recording's worker never caught up")
