@@ -159,6 +159,15 @@ func (l *Live) RefreshDevices() error {
 	return nil
 }
 
+// Managers are the configured package device managers (the heartbeat's managers); none
+// without a sidecar.
+func (l *Live) Managers() []string {
+	if sc := l.Current(); sc != nil {
+		return sc.Managers()
+	}
+	return []string{}
+}
+
 // Protocols are the configured device families (the heartbeat's protocols); none without a
 // sidecar.
 func (l *Live) Protocols() []string {

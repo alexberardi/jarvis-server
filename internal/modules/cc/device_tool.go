@@ -67,7 +67,7 @@ func (t *controlDeviceTool) Execute(ctx context.Context, call servertools.Call, 
 	if !d.controllable() {
 		return deviceToolError(d.entityID, action, "'"+d.name+"' is not controllable."), nil
 	}
-	node, err := t.m.pickNode(ctx, turn.HouseholdID, d.protocol.String)
+	node, err := t.m.pickDeviceNode(ctx, turn.HouseholdID, d)
 	if err != nil {
 		return deviceToolError(d.entityID, action, err.Error()), nil
 	}

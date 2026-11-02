@@ -31,6 +31,7 @@ type nodeRow struct {
 	gitSHA          sql.NullString
 	isActive        bool
 	protocols       sql.NullString
+	managers        sql.NullString // the heartbeat's device managers (JSON array)
 	needsK2         bool
 	contacted       bool // false from registration until the node first reaches us (F19)
 	nodeKind        sql.NullString
@@ -42,7 +43,7 @@ type nodeRow struct {
 
 const nodeCols = `node_id, room, "user", voice_mode, last_seen, household_id, last_seen_version,
 	install_mode, is_busy, git_sha, is_active, protocols, needs_k2, contacted, node_kind, capabilities,
-	owner_user_id, last_addr, runtime`
+	owner_user_id, last_addr, runtime, managers`
 
 type scanner interface{ Scan(...any) error }
 
@@ -50,7 +51,7 @@ func scanNode(s scanner) (*nodeRow, error) {
 	var n nodeRow
 	err := s.Scan(&n.nodeID, &n.room, &n.user, &n.voiceMode, &n.lastSeen, &n.householdID, &n.lastSeenVersion,
 		&n.installMode, &n.isBusy, &n.gitSHA, &n.isActive, &n.protocols, &n.needsK2, &n.contacted,
-		&n.nodeKind, &n.capabilities, &n.ownerUserID, &n.lastAddr, &n.runtime)
+		&n.nodeKind, &n.capabilities, &n.ownerUserID, &n.lastAddr, &n.runtime, &n.managers)
 	if err != nil {
 		return nil, err
 	}
@@ -257,6 +258,7 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 	versionInfo, hasVersion := b.object("version_info", false)
 	busy, hasBusy := b.boolean("is_busy")
 	protocols, hasProtocols := b.strList("protocols")
+	managers, hasManagers := b.strList("managers")
 	needsK2, hasK2 := b.boolean("needs_k2")
 	kind, hasKind := b.str("node_kind", false)
 	caps, hasCaps := b.object("capabilities", false)
@@ -293,6 +295,11 @@ func (m *Module) handleHeartbeat(w http.ResponseWriter, r *http.Request, n *node
 		if hasProtocols {
 			p, _ := json.Marshal(protocols)
 			sets = append(sets, "protocols = ?")
+			args = append(args, string(p))
+		}
+		if hasManagers {
+			p, _ := json.Marshal(managers)
+			sets = append(sets, "managers = ?")
 			args = append(args, string(p))
 		}
 		if hasK2 {

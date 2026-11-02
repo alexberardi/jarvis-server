@@ -35,6 +35,7 @@ func wireDevices(r *node.Runner, live *sidecar.Live, reg *devices.Registry, log 
 		n.AuthReady(ctx, cc, topic, payload)
 	}
 	r.Protocols = live.Protocols
+	r.Managers = live.Managers
 	live.OnSwap(r.BeatNow) // the families boot in the background, after the first beat
 	var once sync.Once
 	prev := r.OnMQTTConnect

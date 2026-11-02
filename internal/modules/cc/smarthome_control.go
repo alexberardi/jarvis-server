@@ -74,12 +74,35 @@ func (m *Module) handleControlDevice(w http.ResponseWriter, r *http.Request, a p
 	if !b.done(w) {
 		return
 	}
-	ctx := r.Context()
 	hh := r.PathValue("household_id")
-	if err := m.householdAccess(ctx, a, hh); err != nil {
+	if err := m.householdAccess(r.Context(), a, hh); err != nil {
 		m.writeErr(w, err)
 		return
 	}
+	m.controlDevice(w, r, hh, action, data)
+}
+
+// handleNodeControlDevice is the household route's control for a node (a touch display): a
+// device of the node's own household (from auth, never the request).
+func (m *Module) handleNodeControlDevice(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+	b, _, ok := readBody(w, r, false)
+	if !ok {
+		return
+	}
+	action, _ := b.str("action", true)
+	data, _ := b.object("data", false)
+	if !b.done(w) {
+		return
+	}
+	if n.HouseholdID == "" {
+		detail(w, http.StatusNotFound, "Device not found")
+		return
+	}
+	m.controlDevice(w, r, n.HouseholdID, action, data)
+}
+
+func (m *Module) controlDevice(w http.ResponseWriter, r *http.Request, hh, action string, data map[string]any) {
+	ctx := r.Context()
 	d, err := m.device(ctx, hh, r.PathValue("device_id"))
 	if err != nil {
 		m.writeErr(w, err)
@@ -89,7 +112,7 @@ func (m *Module) handleControlDevice(w http.ResponseWriter, r *http.Request, a p
 		detail(w, http.StatusBadRequest, "Device is not controllable")
 		return
 	}
-	node, err := m.pickNode(ctx, hh, d.protocol.String)
+	node, err := m.pickDeviceNode(ctx, hh, d)
 	if err != nil {
 		m.writeErr(w, err)
 		return
@@ -140,18 +163,32 @@ func (m *Module) controlDeviceAction(ctx context.Context, node *nodeRow, d *devi
 
 // handleDeviceState asks the node for the device's live state (never stored).
 func (m *Module) handleDeviceState(w http.ResponseWriter, r *http.Request, a provAuth) {
-	ctx := r.Context()
 	hh := r.PathValue("household_id")
-	if err := m.householdAccess(ctx, a, hh); err != nil {
+	if err := m.householdAccess(r.Context(), a, hh); err != nil {
 		m.writeErr(w, err)
 		return
 	}
+	m.deviceState(w, r, hh)
+}
+
+// handleNodeDeviceState is the household route's state for a node: a device of the node's own
+// household.
+func (m *Module) handleNodeDeviceState(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+	if n.HouseholdID == "" {
+		detail(w, http.StatusNotFound, "Device not found")
+		return
+	}
+	m.deviceState(w, r, n.HouseholdID)
+}
+
+func (m *Module) deviceState(w http.ResponseWriter, r *http.Request, hh string) {
+	ctx := r.Context()
 	d, err := m.device(ctx, hh, r.PathValue("device_id"))
 	if err != nil {
 		m.writeErr(w, err)
 		return
 	}
-	node, err := m.pickNode(ctx, hh, d.protocol.String)
+	node, err := m.pickDeviceNode(ctx, hh, d)
 	if err != nil {
 		m.writeErr(w, err)
 		return
