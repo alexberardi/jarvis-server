@@ -138,7 +138,7 @@ General transforms:
 - **The node-key cutover** depends on the auth module importing hashed node keys. `nodes.api_key` is intentionally discarded.
 - **Prod was not inspected** (off limits for this task). CHECK constraints were chosen from code and dev data. Run the importer's dry run against a prod snapshot to catch any out-of-set values (e.g. `node_tasks.state`, legacy errand states).
 
-## Touch display (00320)
+## Touch display (00330)
 
 `cc_display_config` stores sparse JSON overrides and a protected bcrypt exit verifier per scope
 (`defaults` or a node ID). `cc_display_ack` records a node-bound revision, application error and

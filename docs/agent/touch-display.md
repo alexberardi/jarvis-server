@@ -46,7 +46,7 @@ Server endpoints are `/cc/api/v0/display/config/{scope}` (`defaults` or a node I
 `/cc/api/v0/display/assets`. Administrative access requires a superuser at both the admin gateway
 and command-center. The node uses its existing credential for `/cc/api/v0/node/display`, its
 acknowledgement, assigned assets, device queries and media routing. Configuration and asset tables
-are additive cc migration **00320**.
+are additive cc migration **00330**.
 
 ## Touch and voice
 
