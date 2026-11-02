@@ -7,12 +7,15 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/nodeconfig"
 )
 
 // Deps is everything the page touches on this computer and the network, so tests swap it.
 type Deps struct {
-	Log *slog.Logger
-	Now func() time.Time
+	Settings func(context.Context, map[string]any) (nodeconfig.View, error)
+	Restart  func(context.Context) error
+	Log      *slog.Logger
+	Now      func() time.Time
 	// HTTP talks to jarvisd (and probes servers). Default: 10 s timeout.
 	HTTP *http.Client
 	// GOOS is the computer's OS (runtime.GOOS); the page shows the steps that apply.

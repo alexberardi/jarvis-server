@@ -252,6 +252,7 @@ func (s *Server) routes() *http.ServeMux {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /{$}", s.static("index.html"))
 	m.HandleFunc("GET /app.js", s.static("app.js"))
+	m.HandleFunc("GET /settings.js", s.static("settings.js"))
 	m.HandleFunc("GET /app.css", s.static("app.css"))
 	m.HandleFunc("GET /icon.png", func(w http.ResponseWriter, r *http.Request) {
 		if len(s.d.Icon) == 0 {
@@ -263,6 +264,9 @@ func (s *Server) routes() *http.ServeMux {
 	})
 	a := s.app
 	m.HandleFunc("GET /api/state", a.getState)
+	m.HandleFunc("GET /api/settings", a.getSettings)
+	m.HandleFunc("POST /api/settings", a.postSettings)
+	m.HandleFunc("POST /api/restart", a.postRestart)
 	m.HandleFunc("GET /api/servers", a.getServers)
 	m.HandleFunc("POST /api/servers/search", a.postSearch)
 	m.HandleFunc("POST /api/server", a.postServer)

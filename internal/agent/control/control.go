@@ -15,8 +15,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"slices"
+	"syscall"
 	"time"
 )
 
@@ -59,11 +62,13 @@ const (
 	// ("accessibility=granted microphone=not_asked"): the setup page says "restart Jarvis to
 	// apply" for one granted since the agent started.
 	Permissions = "permissions"
+	SettingsGet = "settings-get"
+	SettingsSet = "settings-set"
 )
 
 // Commands is every command the agent accepts.
 var Commands = []string{ShowRunning, Quit, Ping, VoiceOn, VoiceOff, Health, ComputerStop, ComputerStatus, ComputerOn, ComputerOff,
-	ComputerRecordStart, ComputerRecordStop, ComputerRecordDesktop, Permissions}
+	ComputerRecordStart, ComputerRecordStop, ComputerRecordDesktop, Permissions, SettingsGet, SettingsSet}
 
 // IOTimeout bounds a request and its answer.
 const IOTimeout = 3 * time.Second
@@ -81,7 +86,8 @@ func Timeout(cmd string) time.Duration {
 }
 
 type request struct {
-	Cmd string `json:"cmd"`
+	Cmd      string         `json:"cmd"`
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 type response struct {
@@ -92,6 +98,10 @@ type response struct {
 	// Version is the answering agent's version (every answer, from agents that know it).
 	Version string `json:"version,omitempty"`
 }
+
+type RejectedError struct{ Message string }
+
+func (e *RejectedError) Error() string { return e.Message }
 
 // Reply is an agent's answer.
 type Reply struct {
@@ -116,7 +126,13 @@ func ServeVersion(ctx context.Context, ln net.Listener, h Handler, version strin
 }
 
 // ServeAnswers is ServeVersion with a handler that reports something.
+type RequestHandler func(cmd string, settings map[string]any) (string, error)
+
 func ServeAnswers(ctx context.Context, ln net.Listener, h AnswerHandler, version string) error {
+	return ServeRequests(ctx, ln, func(cmd string, _ map[string]any) (string, error) { return h(cmd) }, version)
+}
+
+func ServeRequests(ctx context.Context, ln net.Listener, h RequestHandler, version string) error {
 	go func() {
 		<-ctx.Done()
 		_ = ln.Close()
@@ -133,10 +149,10 @@ func ServeAnswers(ctx context.Context, ln net.Listener, h AnswerHandler, version
 	}
 }
 
-func handle(c net.Conn, h AnswerHandler, version string) {
+func handle(c net.Conn, h RequestHandler, version string) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(IOTimeout))
-	line, err := bufio.NewReader(c).ReadBytes('\n')
+	line, err := bufio.NewReader(io.LimitReader(c, 64<<10)).ReadBytes('\n')
 	var req request
 	resp := response{OK: true}
 	switch {
@@ -148,7 +164,7 @@ func handle(c net.Conn, h AnswerHandler, version string) {
 		resp = response{Error: fmt.Sprintf("unknown command %q", req.Cmd)}
 	default:
 		_ = c.SetDeadline(time.Now().Add(Timeout(req.Cmd)))
-		answer, err := h(req.Cmd)
+		answer, err := h(req.Cmd, req.Settings)
 		if err != nil {
 			resp = response{Error: err.Error()}
 		} else {
@@ -173,18 +189,32 @@ func Send(dial Dialer, cmd string) error {
 }
 
 // Ask is Send, returning the answer.
-func Ask(dial Dialer, cmd string) (Reply, error) {
+func Ask(dial Dialer, cmd string) (Reply, error) { return ask(dial, cmd, nil, false) }
+
+// AskSettings preserves unexpected dial failures: they do not prove the agent stopped.
+func AskSettings(dial Dialer, values map[string]any) (Reply, error) {
+	cmd := SettingsGet
+	if values != nil {
+		cmd = SettingsSet
+	}
+	return ask(dial, cmd, values, true)
+}
+
+func ask(dial Dialer, cmd string, values map[string]any, strict bool) (Reply, error) {
 	c, err := dial()
 	if err != nil {
+		if strict && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ECONNREFUSED) {
+			return Reply{}, err
+		}
 		return Reply{}, ErrNotRunning
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(Timeout(cmd)))
-	b, _ := json.Marshal(request{Cmd: cmd})
+	b, _ := json.Marshal(request{Cmd: cmd, Settings: values})
 	if _, err := c.Write(append(b, '\n')); err != nil {
 		return Reply{}, err
 	}
-	line, err := bufio.NewReader(c).ReadBytes('\n')
+	line, err := bufio.NewReader(io.LimitReader(c, 64<<10)).ReadBytes('\n')
 	if err != nil {
 		return Reply{}, fmt.Errorf("the agent didn't answer: %w", err)
 	}
@@ -194,7 +224,7 @@ func Ask(dial Dialer, cmd string) (Reply, error) {
 	}
 	r := Reply{Version: resp.Version, Answer: resp.Answer}
 	if !resp.OK {
-		return r, errors.New(resp.Error)
+		return r, &RejectedError{Message: resp.Error}
 	}
 	return r, nil
 }

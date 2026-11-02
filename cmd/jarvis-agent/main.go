@@ -38,6 +38,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
+	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
@@ -614,6 +615,13 @@ func runAgent(ctx context.Context, args []string) error {
 	if crashForTest != "" {
 		return errors.New("crashForTest: this build fails on purpose (the agent-upgrade e2e's broken release)")
 	}
+	explicitFlags := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+	settingsReady, err := lockSettingsStartup()
+	if err != nil {
+		return err
+	}
+	defer settingsReady()
 	if err := applySettings(fs, *f.config, log); err != nil {
 		return err
 	}
@@ -651,6 +659,9 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	if err != nil {
 		log.Warn("control socket off: a second launch can't reach this agent", "err", err)
+	}
+	if ctl != nil {
+		settingsReady()
 	}
 	path, err := credsPath(*cp)
 	if err != nil {
@@ -709,6 +720,7 @@ func runAgent(ctx context.Context, args []string) error {
 	var swReady atomic.Pointer[voiceSwitch]
 	var recReady atomic.Pointer[computer.Recorder]
 	var runner atomic.Pointer[node.Runner]
+	var configReady atomic.Pointer[desktopSettings]
 	if ctl != nil {
 		// Healthy (the self-update's check) once connected to jarvisd's broker.
 		health := func() error {
@@ -717,7 +729,21 @@ func runAgent(ctx context.Context, args []string) error {
 			}
 			return errors.New("not connected to jarvisd yet")
 		}
-		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity, computerSw, recReady.Load)()
+		defer serveControl(ctx, ctl, log, pill, quit, swReady.Load, health, activity, computerSw, recReady.Load, func(cmd string, values map[string]any) (string, error) {
+			d := configReady.Load()
+			if d == nil {
+				return "", errors.New("settings are still starting")
+			}
+			if cmd == control.SettingsGet {
+				values = nil
+			}
+			v, err := d.edit(ctx, values)
+			if err != nil {
+				return "", err
+			}
+			b, err := json.Marshal(v)
+			return string(b), err
+		})()
 	}
 	// K2, command secrets and data live next to node.json; another node's are dropped here.
 	st, err := nodesettings.OpenStore(filepath.Dir(path), c.NodeID)
@@ -808,9 +834,8 @@ func runAgent(ctx context.Context, args []string) error {
 		tf.host.Alerts.Watch(alertLED(hd.leds))
 	}
 	var nodeConfig func() map[string]any
-	var live *voice.Live // the Pi's: the app's settings and noise measurements reach the pipeline
-	if !p.desktop {
-		live = voice.NewLive()
+	live := voice.NewLive() // shared by local and remote voice settings
+	{
 		sp, err := settingsPath(*f.config)
 		if err != nil {
 			return err
@@ -820,8 +845,16 @@ func runAgent(ctx context.Context, args []string) error {
 			audio = tf.host.Audio
 		}
 		var state func() pinode.State
-		nodeConfig, state = wirePiNode(r, vf, hf, f.mf, hd, live, audio, sp, log)
-		startMaintenance(ctx, state, quit, log)
+		var pn *pinode.Node
+		nodeConfig, state = wirePiNode(r, vf, hf, f.mf, hd, live, audio, sp, log, &pn)
+		pn.Desktop = p.desktop
+		pn.ReadOnly = overriddenNodeConfig(explicitFlags)
+		if p.desktop {
+			nodeConfig = func() map[string]any { return pn.Config(ctx).Values }
+			configReady.Store(&desktopSettings{node: pn, path: sp, startup: desktopValues(fs), running: true, locked: overriddenDesktop(explicitFlags)})
+		} else {
+			startMaintenance(ctx, state, quit, log)
+		}
 	}
 	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
 	// and are in its settings snapshot; a computer has none.
