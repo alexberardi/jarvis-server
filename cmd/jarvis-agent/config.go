@@ -88,18 +88,13 @@ func configCmd(args []string, w io.Writer) error {
 		if !ok {
 			return fmt.Errorf("unknown key %q; keys: %s", args[0], settings.KeyNames())
 		}
-		s, _, err := settings.Load(path)
-		if err != nil {
-			return err
-		}
-		if verb == "set" {
-			if err := s.Set(k, args[1]); err != nil {
-				return err
+		if err := settings.Update(path, func(s *settings.Settings) error {
+			if verb == "set" {
+				return s.Set(k, args[1])
 			}
-		} else {
 			s.Unset(k)
-		}
-		if err := settings.Save(path, s); err != nil {
+			return nil
+		}); err != nil {
 			return err
 		}
 		fmt.Fprintln(w, "Saved. Run `jarvis-agent restart` to apply it to the running agent.")

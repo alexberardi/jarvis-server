@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // FileName is the config file's name in the agent's config dir.
@@ -242,6 +243,10 @@ func Save(path string, s Settings) error {
 	if err != nil {
 		return err
 	}
+	return saveBytes(path, b)
+}
+
+func saveBytes(path string, b []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -274,14 +279,77 @@ var updateMu sync.Mutex
 func Update(path string, change func(*Settings) error) error {
 	updateMu.Lock()
 	defer updateMu.Unlock()
-	s, _, err := Load(path)
+	unlock, err := Lock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return updateLocked(path, change)
+}
+
+// Lock serializes work across processes using a private sidecar file. The release
+// function is safe to call more than once. Callers must not re-lock the same path.
+// Startup uses a separate path to coordinate loading settings with stopped edits.
+func Lock(path string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if err := lockFile(lock); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = lock.Close()
+			return nil, errors.New("settings are busy; try again")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return sync.OnceFunc(func() { _ = lock.Close() }), nil
+}
+
+func updateLocked(path string, change func(*Settings) error) error {
+	s, unknown, err := Load(path)
 	if err != nil {
 		return err
 	}
 	if err := change(&s); err != nil {
 		return err
 	}
-	return Save(path, s)
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(b, &out); err != nil {
+		return err
+	}
+	// Preserve fields written by another agent version, without exposing them.
+	if len(unknown) > 0 {
+		previous, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(previous, &raw); err != nil {
+			return err
+		}
+		for _, k := range unknown {
+			out[k] = raw[k]
+		}
+	}
+	b, err = json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	return saveBytes(path, b)
 }
 
 // Get is the value of key as text ("" when unset).
