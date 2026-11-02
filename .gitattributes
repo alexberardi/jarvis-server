@@ -10,3 +10,5 @@ internal/agent/install/testdata/** -text
 internal/platform/qrterm/testdata/** -text
 # The .deb's agent menu entry is compared with install.MenuEntry; its maintainer scripts run on Linux.
 scripts/packaging/deb/** -text
+# The embedded device catalogue is compared byte for byte with the SDK's copy.
+internal/devicetypes/device_types.json -text
