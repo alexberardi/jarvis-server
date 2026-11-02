@@ -107,6 +107,52 @@ try {
     report.push({ viewport, devices: devices.length, renderedDevices: 24, accessConfirmation: 'passed', fullScreenSpeech: 'passed', idleClock75Percent: 'passed', boundaryContrast, overflow, smallTargets, errors })
     await context.close()
   }
+  // A household through the real SDK catalogue: hidden types stay out, a speaker is a media destination.
+  const catalogue = JSON.parse(await readFile(path.join(root, 'internal/devicetypes/device_types.json'), 'utf8'))
+  const house = [
+    ['h1', 'Ceiling light', 'light', 'Living room', 'on', [['turn_off', 'Turn off'], ['set_brightness', 'Brightness']]],
+    ['h2', 'Living room speaker', 'media_player', 'Living room', 'playing', [['pause', 'Pause'], ['stop', 'Stop']]],
+    ['h3', 'Thermostat', 'climate', 'Hallway', 'heat', [['set_temperature', 'Temperature'], ['set_hvac_mode', 'Mode']]],
+    ['h4', 'Front door', 'lock', 'Hallway', 'locked', [['unlock', 'Unlock']]],
+    ['h5', 'Kitchen speaker', 'media_player', 'Kitchen', 'idle', [['play', 'Play']]],
+    ['h6', 'Bedroom blinds', 'cover', 'Bedroom', 'closed', [['open_cover', 'Open'], ['set_position', 'Position']]],
+    ['h7', 'Kettle', 'switch', 'Kitchen', 'off', [['turn_on', 'Turn on']]],
+    ['h8', 'Outdoor temperature', 'sensor', 'Garden', '14.5 °C', []],
+    ['h9', 'Shopping list', 'todo', 'Kitchen', '3', []],
+  ].map(([id, name, domain, room_name, state, actions]) => ({ id, name, domain, room_name, state, entity_id: `${domain}.${id}`, supported_actions: actions.map(([button_action, button_text]) => ({ button_action, button_text })) }))
+  const playing = { active: true, kind: 'remote', controllable: true, paused: false, media_title: 'Morning jazz', position: 754, duration: 2400, features: ['play', 'pause', 'stop', 'seek'] }
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    const context = await browser.newContext({ viewport, hasTouch: true, isMobile: true })
+    const page = await context.newPage(), errors = []
+    page.on('pageerror', e => errors.push(e.message))
+    await page.route('**/api/**', async route => {
+      const req = route.request(), api = new URL(req.url()).pathname
+      if (api === '/api/voice-stream') return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ voice: 'idle', level: 0 })}\n\n` })
+      const state = id => house.find(d => d.id === id)?.state
+      let body = { success: true }
+      if (api === '/api/state') body = { configuration: { ...config, favourites: ['h1', 'h2', 'h3', 'h4'] }, voice: 'idle', last_interaction: Date.now(), playback: { active: false, controllable: false }, theme_url: '', receivers: { playercast: 'running', cast: 'disabled' } }
+      else if (api === '/api/catalogue') body = catalogue
+      else if (api === '/api/devices') body = house.map(({ state, ...d }) => d)
+      else if (api.endsWith('/state')) body = { state: { state: state(decodeURIComponent(api.split('/')[3])) } }
+      else if (api === '/api/media') body = req.postDataJSON().destination === 'h2' ? playing : { active: false, kind: 'remote', controllable: false }
+      await route.fulfill({ json: body })
+    })
+    await page.goto(`${base}/display.html`)
+    await page.getByText('playing', { exact: true }).waitFor()
+    await page.screenshot({ path: path.join(output, `Household-Home-${viewport.width}x${viewport.height}.png`), fullPage: true })
+    await page.getByRole('button', { name: 'Devices', exact: true }).tap()
+    await page.getByText('14.5 °C', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('article').count(), 8, 'the catalogue hides the to-do list')
+    await page.screenshot({ path: path.join(output, `Household-Devices-${viewport.width}x${viewport.height}.png`), fullPage: true })
+    await page.getByRole('button', { name: 'Media', exact: true }).tap()
+    const destinations = await page.getByLabel('Playback destination').locator('option').allTextContents()
+    assert.deepEqual(destinations, ['This display', 'Living room speaker (Living room)', 'Kitchen speaker (Kitchen)'])
+    await page.getByLabel('Playback destination').selectOption('h2')
+    await page.getByText('Playing: Morning jazz').waitFor()
+    await page.screenshot({ path: path.join(output, `Household-Media-${viewport.width}x${viewport.height}.png`), fullPage: true })
+    assert.deepEqual(errors, [])
+    await context.close()
+  }
   await writeFile(path.join(output, 'Browser-Results.json'), JSON.stringify(report, null, 2))
   console.log(`Passed touch navigation, catalogue, confirmation and layout checks at ${report.length} sizes`)
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)) }

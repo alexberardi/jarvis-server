@@ -156,6 +156,9 @@ selected by `JARVIS_SIDECAR_PYTHON`. Run `npm test` and `npm run build` in `web/
 After installing `e2e/web` dependencies, `node scripts/display-browser-check.mjs /path/to/results`
 checks touch navigation, access confirmation, a 1,000-device catalogue, visible target sizes and
 horizontal overflow in landscape, portrait and phone viewports. It writes screenshots and JSON.
+It then renders a small household through the real SDK catalogue (`internal/devicetypes/device_types.json`):
+the hidden to-do list stays out, the two speakers are the only media destinations, and a remote destination's
+playback shows on Media.
 Hardware, receiver sender compatibility and subscription sign-in require their own recorded results;
 passing these checks alone does not establish compatibility with a phone application or website.
 
@@ -166,7 +169,8 @@ continuing. This hardware acceptance does not establish subscription or stock Ca
 
 ## Screenshots
 
-Captured from the rendered touch shell and admin pages, and from the Surface itself. Files are in
+Captured from the rendered touch shell and admin pages, and from the Surface itself. Home, Devices and Media come from the
+browser check's household scenario, after the move onto the device managers and the catalogue. Files are in
 [touch-display-screenshots](touch-display-screenshots/).
 
 | Speech                                              | Home                                          | Devices                                           |
