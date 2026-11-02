@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ShowClock, ShowDisplay } from './Display'
 
 const config = { enabled: true, clock: 'combined', hour_24: true, timezone: 'Australia/Perth', idle_seconds: 120, slide_seconds: 30, photos: [], favourites: [], night_dim: false, dim_start: 22, dim_end: 7, dim_percent: 35, destination: 'local', shortcuts: [] }
@@ -94,4 +94,29 @@ it('hides device types the catalogue hides', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Devices' }))
   expect(await screen.findByRole('heading', { name: 'Light 1' })).toBeInTheDocument()
   await waitFor(() => expect(screen.queryByRole('heading', { name: 'Firmware' })).toBeNull())
+})
+it('keeps device state requests at four through slow refreshes and page changes', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  let inFlight = 0, most = 0
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const path = url.replace('/api/', '')
+    if (path.endsWith('/state')) {
+      inFlight++; most = Math.max(most, inFlight)
+      await new Promise(r => setTimeout(r, 10000)) // a slow plugin node
+      inFlight--
+      return { ok: true, text: async () => JSON.stringify({ state: { state: 'on' } }) }
+    }
+    const body = path === 'state' ? { configuration: config, voice: 'idle', last_interaction: Date.now(), playback: { active: false }, theme_url: '', receivers: {} }
+      : path === 'devices' ? devices.slice(1, 49) : {}
+    return { ok: true, text: async () => JSON.stringify(body) }
+  }))
+  try {
+    render(<ShowDisplay />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Devices' }))
+    expect(await screen.findByRole('heading', { name: 'Light 1' })).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(16000)) // a refresh while the first batch is out
+    fireEvent.click(screen.getByRole('button', { name: 'Next' })) // another 24 devices, mid-flight
+    await act(() => vi.advanceTimersByTimeAsync(31000))
+    expect(most).toBe(4)
+  } finally { vi.useRealTimers() }
 })

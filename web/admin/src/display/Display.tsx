@@ -4,6 +4,7 @@ import { Home, Lightbulb, Play, Shield, Star, RotateCcw } from 'lucide-react'
 import './Display.css'
 import SpeechWaveform from './SpeechWaveform'
 import { type Catalogue, deviceType, isMediaDestination } from './catalogue'
+import { createLimiter } from './limit'
 
 type Config = { waveform_colour?: string; waveform_emphasis?: number; enabled: boolean; clock: string; hour_24: boolean; timezone: string; idle_seconds: number; slide_seconds: number; photos: string[]; favourites: string[]; night_dim: boolean; dim_start: number; dim_end: number; dim_percent: number; shortcuts: { name: string; url: string }[]; destination: string }
 type Device = { id: string; name: string; domain: string; entity_id: string; room_name: string; supported_actions: { button_action: string; button_text: string }[] | null }
@@ -61,6 +62,9 @@ export function ShowDisplay() {
   const [themeReady, setThemeReady] = useState(false)
   const [themeFailed, setThemeFailed] = useState(false)
   const [confirmation, setConfirmation] = useState<{ device: Device; action: string; request?: string } | null>(null)
+  // One limit for the display's whole life: a refresh, or a new page of devices, never adds to
+  // requests still outstanding from an earlier one.
+  const [limitStates] = useState(() => createLimiter(4))
   const frame = useRef<HTMLIFrameElement>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const confirmDialog = useRef<HTMLDialogElement>(null)
@@ -101,16 +105,19 @@ export function ShowDisplay() {
   const visibleKey = visible.map(d => d.id).join(',')
   useEffect(() => {
     if (!visibleKey) return
-    let cancelled = false
+    let cancelled = false, running = false
     const load = async () => {
-      const ids = visibleKey.split(',')
-      // Four workers bound requests for large catalogues and slow plugin nodes.
-      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
-        while (ids.length && !cancelled) { const id = ids.shift()!; try { const s = await CallDisplay(`devices/${encodeURIComponent(id)}/state`); const value = s.state as Record<string, unknown> | undefined; if (!cancelled && value) { setStates(old => ({ ...old, [id]: String(value.state ?? 'Unknown') })); if (s.ui_hints) setHints(old => ({ ...old, [id]: s.ui_hints as typeof old[string] })) } } catch { /* Keep the last confirmed state. */ } }
-      }))
+      if (running) return // the previous refresh is still out: skip this one
+      running = true
+      try {
+        await Promise.all(visibleKey.split(',').map(id => limitStates(async () => {
+          if (cancelled) return
+          try { const s = await CallDisplay(`devices/${encodeURIComponent(id)}/state`); const value = s.state as Record<string, unknown> | undefined; if (!cancelled && value) { setStates(old => ({ ...old, [id]: String(value.state ?? 'Unknown') })); if (s.ui_hints) setHints(old => ({ ...old, [id]: s.ui_hints as typeof old[string] })) } } catch { /* Keep the last confirmed state. */ }
+        })))
+      } finally { running = false }
     }
     void load(); const t = setInterval(() => void load(), 15000); return () => { cancelled = true; clearInterval(t) }
-  }, [visibleKey])
+  }, [visibleKey, limitStates])
   const respond = (request: string | undefined, result: unknown) => { if (request) frame.current?.contentWindow?.postMessage({ api_version: 1, type: 'result', request_id: request, result }, '*') }
   const control = async (device: Device, action: string, confirmed = false, request?: string, data?: Record<string, unknown>) => {
     if (!device.supported_actions?.some(a => a.button_action === action)) { respond(request, { error: 'Unsupported action' }); return }
