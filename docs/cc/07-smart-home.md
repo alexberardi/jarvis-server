@@ -260,6 +260,11 @@ reports its configured package managers (`cc_nodes.managers`, migration 00330), 
 sidecar reads and drives the device through the manager's SDK `get_state`/`control`
 (`pickDeviceNode`). Direct devices still go by `protocols`.
 
+A node can read and drive its own household's devices with its node credentials (jarvisd-only,
+for touch displays): `GET /api/v0/node/devices/{id}/state` and `POST /api/v0/node/devices/{id}/control`
+answer as the household routes do; `GET /node/devices` carries each device's `id` for them. Another
+household's device is 404.
+
 Online status is **not** considered: an offline node is a 10 s timeout.
 
 > **Changed by D4/M9:** Go publishes control and state without `trusted:true` (per-node broker ACLs make the command authentic). Node choice is one policy for control and state: protocol match → `primary_node_id` → online, most recent `last_seen`; with no online node the route fails fast with 503 instead of a 10 s timeout.

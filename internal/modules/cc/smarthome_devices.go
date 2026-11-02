@@ -487,7 +487,7 @@ func (m *Module) handleNodeDevices(w http.ResponseWriter, r *http.Request, n *no
 	}
 	for _, d := range devs {
 		out = append(out, map[string]any{
-			"entity_id": d.entityID, "name": d.name, "domain": d.domain, "source": nullable(d.source),
+			"id": d.id, "entity_id": d.entityID, "name": d.name, "domain": d.domain, "source": nullable(d.source),
 			"protocol": nullable(d.protocol), "local_ip": d.localIP.String, "mac_address": d.mac.String,
 			"cloud_id": d.cloudID.String, "model": d.model.String, "room_name": d.roomName.String,
 		})

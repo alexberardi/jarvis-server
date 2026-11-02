@@ -326,6 +326,64 @@ func TestPickDeviceNodeByManager(t *testing.T) {
 	}
 }
 
+// A node (a touch display, a Pi) reads and drives its own household's devices with its own
+// credentials: the request goes to the node running the device's manager, which answers as for
+// the app. Another household's device is not found; no credentials, no route.
+func TestNodeDeviceStateAndControl(t *testing.T) {
+	controlWait, stateWait = 2*time.Second, 2*time.Second
+	defer func() { controlWait, stateWait = 10*time.Second, 10*time.Second }()
+	e := newEnv(t)
+	tok := e.auth.addUser(1, "hh1", authn.RoleMember)
+	display, hub := e.createNode("display", "hh1"), e.createNode("hub", "hh1")
+	stranger := e.createNode("stranger", "hh2")
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"managers": []string{"home_assistant"}}, hub.h()).want(200)
+	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = 'hub'`, dbTime(e.now.Add(-time.Minute)))
+	c := e.dialNode(hub)
+	c.subscribe("jarvis/nodes/hub/#")
+	e.importDevices(tok, map[string]any{"entity_id": "media_player.tv", "name": "TV", "domain": "media_player", "source": "home_assistant", "protocol": "home_assistant"})
+	c.next() // invalidate
+
+	var tv string
+	for _, d := range e.do("GET", "/api/v0/node/devices", nil, display.h()).want(200).list() {
+		if m := d.(map[string]any); m["entity_id"] == "media_player.tv" {
+			tv, _ = m["id"].(string)
+		}
+	}
+	if tv == "" {
+		t.Fatal("/node/devices has no id for the TV")
+	}
+	path := "/api/v0/node/devices/" + tv
+
+	ch := make(chan *resp, 1)
+	go func() { ch <- e.do("POST", path+"/control", map[string]any{"action": "pause"}, display.h()) }()
+	verb, d := command(t, c.next())
+	if actx := d["context"].(map[string]any); verb != "action" || d["action_name"] != "pause" || actx["source"] != "home_assistant" {
+		t.Fatal(verb, d)
+	}
+	rid := d["request_id"].(string)
+	e.do("POST", "/api/v0/device-control-results/"+rid, map[string]any{"success": true}, hub.h()).want(200)
+	if r := (<-ch).want(200).json(); r["success"] != true || r["action"] != "pause" {
+		t.Fatal(r)
+	}
+
+	go func() { ch <- e.do("GET", path+"/state", nil, display.h()) }()
+	pk := c.next()
+	p := payload(t, pk)
+	if pk.TopicName != "jarvis/nodes/hub/device-state" || p["source"] != "home_assistant" {
+		t.Fatal(pk.TopicName, p)
+	}
+	e.do("POST", "/api/v0/device-state-results/"+p["request_id"].(string), map[string]any{"state": map[string]any{"state": "paused"},
+		"ui_hints": map[string]any{"control_type": "media", "features": []any{"play"}}}, hub.h()).want(200)
+	if r := (<-ch).want(200).json(); r["state"].(map[string]any)["state"] != "paused" || r["ui_hints"].(map[string]any)["control_type"] != "media" {
+		t.Fatal(r)
+	}
+
+	e.do("GET", path+"/state", nil, stranger.h()).detail(404, "Device not found")
+	e.do("POST", path+"/control", map[string]any{"action": "pause"}, stranger.h()).detail(404, "Device not found")
+	e.do("GET", path+"/state", nil, nil).want(400)
+	e.do("POST", path+"/control", map[string]any{}, display.h()).want(400)
+}
+
 func TestDeviceControlAndState(t *testing.T) {
 	controlWait, controlPairWait, stateWait = 300*time.Millisecond, 600*time.Millisecond, 300*time.Millisecond
 	defer func() { controlWait, controlPairWait, stateWait = 10*time.Second, 20*time.Second, 10*time.Second }()

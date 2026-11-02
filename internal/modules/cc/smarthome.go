@@ -87,6 +87,8 @@ func (m *Module) registerSmartHome(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+hh+"/devices/{device_id}/control", m.prov(m.handleControlDevice))
 	mux.HandleFunc("GET "+hh+"/devices/{device_id}/state", m.prov(m.handleDeviceState))
 	mux.HandleFunc("GET "+v0+"/node/devices", m.node(m.handleNodeDevices))
+	mux.HandleFunc("GET "+v0+"/node/devices/{device_id}/state", m.node(m.handleNodeDeviceState))
+	mux.HandleFunc("POST "+v0+"/node/devices/{device_id}/control", m.node(m.handleNodeControlDevice))
 	// /device-control-results and /device-state-results are the shared result sink (cc.go).
 
 	// Request/poll jobs.
