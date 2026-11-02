@@ -435,6 +435,26 @@ func TestTimerFastPaths(t *testing.T) {
 	}
 }
 
+func TestTimerLabelSkipsLeadIns(t *testing.T) {
+	for said, want := range map[string]string{
+		"start a timer for 45 seconds":            "",
+		"can you give me a 20 minute timer":       "",
+		"I need a 3 minute timer for the tea":     "tea",
+		"two hour timer please":                   "",
+		"set a forty-five minute timer for bread": "bread",
+		"set a 10 minute timer for pasta":         "pasta",
+		"could you start a new egg timer, 7 min":  "egg",
+	} {
+		args, ok := setTimerMatch(said)
+		if said == "two hour timer please" && args["duration_seconds"] != 7200 {
+			t.Errorf("%q: %v seconds, want 7200", said, args["duration_seconds"])
+		}
+		if got, _ := args["label"].(string); !ok || got != want {
+			t.Errorf("%q: label %q (matched %v), want %q", said, got, ok, want)
+		}
+	}
+}
+
 // Spoken numbers carry no trailing zeros: "5 miles", "2.5", "212°F".
 func TestSpokenNumbersDropTrailingZeros(t *testing.T) {
 	c := &Convert{}

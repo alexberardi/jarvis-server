@@ -645,7 +645,24 @@ var (
 	reminderDeleteAllRe = regexp.MustCompile(`(?i)^\s*(?:delete|cancel|clear|remove)\s+all\s+(?:my\s+|of\s+my\s+)?reminders?\s*[?.!]*$`)
 	snoozeBareRe        = regexp.MustCompile(`(?i)^\s*snooze(?:\s+(?:that|it|this|the\s+reminder))?\s*[?.!]*$`)
 	snoozeForRe         = regexp.MustCompile(`(?i)^\s*snooze(?:\s+(?:that|it|this))?\s+for\s+(\d+)\s+(minute|minutes|min|mins|hour|hours|hr|hrs)\s*[?.!]*$`)
+	// "remind me to X in N minutes" / "in N minutes, remind me to X": small models don't fill
+	// relative_minutes. shortcut: digits only ("in an hour" goes to the model).
+	reminderInRe = regexp.MustCompile(`(?i)^\s*(?:remind\s+me\s+to\s+(?P<text>.+?)\s+in\s+(?P<n>\d+)\s+(?P<unit>minutes?|mins?|hours?|hrs?)` +
+		`|in\s+(?P<n2>\d+)\s+(?P<unit2>minutes?|mins?|hours?|hrs?)\s*,?\s+remind\s+me\s+to\s+(?P<text2>.+?))\s*[?.!]*$`)
 )
+
+// reminderIn is reminderInRe's {set, text, relative_minutes}.
+func reminderIn(m []string) (map[string]any, bool) {
+	text, n, unit := group(reminderInRe, m, "text"), group(reminderInRe, m, "n"), group(reminderInRe, m, "unit")
+	if text == "" {
+		text, n, unit = group(reminderInRe, m, "text2"), group(reminderInRe, m, "n2"), group(reminderInRe, m, "unit2")
+	}
+	mins, _ := strconv.Atoi(n)
+	if u := strings.ToLower(unit); strings.HasPrefix(u, "h") {
+		mins *= 60
+	}
+	return map[string]any{"action": "set", "text": strings.TrimSpace(text), "relative_minutes": mins}, mins > 0
+}
 
 func reminderArgs(a map[string]any) func([]string) (map[string]any, bool) {
 	return func([]string) (map[string]any, bool) { return a, true }
@@ -670,6 +687,8 @@ var reminderPatterns = []pattern{
 		}),
 	regexPattern("reminder.snooze", "Bypass LLM for bare 'snooze' / 'snooze that' (uses default 10 min)", "snooze",
 		snoozeBareRe, reminderArgs(map[string]any{"action": "snooze"})),
+	regexPattern("reminder.set_in", "Bypass LLM for 'remind me to X in N minutes/hours'", "remind me to take out the trash in 30 minutes",
+		reminderInRe, reminderIn),
 }
 
 func (r *Reminder) Direct(ctx context.Context, said string) (map[string]any, bool) {

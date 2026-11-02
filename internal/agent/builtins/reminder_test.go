@@ -155,3 +155,24 @@ func TestReminderHuman(t *testing.T) {
 		}
 	}
 }
+
+func TestReminderInFastPath(t *testing.T) {
+	for said, want := range map[string]string{
+		"Remind me to take out the trash in 30 minutes": `{"action":"set","relative_minutes":30,"text":"take out the trash"}`,
+		"in 20 minutes remind me to move the laundry":   `{"action":"set","relative_minutes":20,"text":"move the laundry"}`,
+		"In 2 hours, remind me to call the bank.":       `{"action":"set","relative_minutes":120,"text":"call the bank"}`,
+		"remind me in 1 hour":                           ``, // nothing to remember: a timer
+		"remind me to call mom tomorrow at 3 pm":        ``,
+		"remind me every day at 8 to take my medicine":  ``,
+	} {
+		m, ok := ReminderMatch(said)
+		got := ""
+		if ok {
+			b, _ := json.Marshal(m.Args)
+			got = string(b)
+		}
+		if got != want {
+			t.Errorf("%q: %s, want %s", said, got, want)
+		}
+	}
+}
