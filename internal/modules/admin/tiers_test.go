@@ -25,6 +25,12 @@ import (
 // written out here, apart from the code, on purpose: a new route fails
 // TestEveryAPIRouteHasATier until someone decides its tier in this table.
 var wantTiers = map[string]tier{
+	"GET /api/cc/api/v0/display/config/{scope}":       tierSuperuser,
+	"PUT /api/cc/api/v0/display/config/{scope}":       tierSuperuser,
+	"GET /api/cc/api/v0/display/assets":               tierSuperuser,
+	"POST /api/cc/api/v0/display/assets":              tierSuperuser,
+	"GET /api/cc/api/v0/display/assets/{asset_id}":    tierSuperuser,
+	"DELETE /api/cc/api/v0/display/assets/{asset_id}": tierSuperuser,
 	// Bootstrap.
 	"POST /api/auth/login":       tierOpen,
 	"POST /api/auth/refresh":     tierOpen,

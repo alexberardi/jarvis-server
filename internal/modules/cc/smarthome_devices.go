@@ -490,6 +490,7 @@ func (m *Module) handleNodeDevices(w http.ResponseWriter, r *http.Request, n *no
 			"id": d.id, "entity_id": d.entityID, "name": d.name, "domain": d.domain, "source": nullable(d.source),
 			"protocol": nullable(d.protocol), "local_ip": d.localIP.String, "mac_address": d.mac.String,
 			"cloud_id": d.cloudID.String, "model": d.model.String, "room_name": d.roomName.String,
+			"is_controllable": d.controllable(), "supported_actions": supportedActions(d.domain, d.protocol.String, d.controllable()),
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)

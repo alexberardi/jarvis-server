@@ -186,6 +186,9 @@ func TestDeviceRegistry(t *testing.T) {
 	if first["entity_id"] != "light.k2" || first["local_ip"] != "" || first["room_name"] != "" || first["source"] != "home_assistant" {
 		t.Fatal(first)
 	}
+	if acts, _ := first["supported_actions"].([]any); first["is_controllable"] != true || len(acts) != 2 || acts[0].(map[string]any)["button_action"] != "turn_on" {
+		t.Fatal("a light's buttons for a display", first)
+	}
 	e.do("GET", "/api/v0/node/devices", nil, nil).want(400)
 
 	// DELETE: device_removed to the protocol node for direct devices, then invalidate.

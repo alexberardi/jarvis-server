@@ -3,10 +3,14 @@ package cc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/devicetypes"
+	"github.com/alexberardi/jarvis-server/internal/display"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
@@ -91,6 +95,7 @@ func (m *Module) handleNodeControlDevice(w http.ResponseWriter, r *http.Request,
 	}
 	action, _ := b.str("action", true)
 	data, _ := b.object("data", false)
+	confirmed, _ := b.boolean("confirmed")
 	if !b.done(w) {
 		return
 	}
@@ -98,7 +103,97 @@ func (m *Module) handleNodeControlDevice(w http.ResponseWriter, r *http.Request,
 		detail(w, http.StatusNotFound, "Device not found")
 		return
 	}
+	d, err := m.device(r.Context(), n.HouseholdID, r.PathValue("device_id"))
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	if status, msg := nodeActionGuard(d, action, data, confirmed); status != 0 {
+		detail(w, status, msg)
+		return
+	}
 	m.controlDevice(w, r, n.HouseholdID, action, data)
+}
+
+// parameterActions take a value in data; the device's manager checks they fit its domain.
+var parameterActions = []string{"set_temperature", "set_mode", "set_brightness", "set_color", "set_position", "set_percentage"}
+
+// nodeActionGuard is what a node (a touch display) may ask of a device: an action the device
+// advertises (its buttons, its catalogue features where those are actions, or a parameter
+// action), access devices only once confirmed, and only value fields in data, never identity
+// or routing ones. 0 allows it.
+func nodeActionGuard(d *deviceRow, action string, data map[string]any, confirmed bool) (int, string) {
+	allowed := slices.Contains(parameterActions, action)
+	for _, b := range supportedActions(d.domain, d.protocol.String, d.controllable()) {
+		allowed = allowed || b["button_action"] == action
+	}
+	if t, _ := devicetypes.Lookup(d.domain); t.ControlType == "media" || t.ControlType == "alarm" {
+		allowed = allowed || slices.Contains(t.Features, action)
+	}
+	if !allowed || !d.controllable() {
+		return http.StatusBadRequest, "Action is not advertised by this device"
+	}
+	if (action == "unlock" || strings.HasPrefix(action, "open")) && !confirmed {
+		return http.StatusConflict, "Confirm opening this access device"
+	}
+	for k, v := range data {
+		if msg := nodeActionValue(k, v); msg != "" {
+			return http.StatusBadRequest, msg
+		}
+	}
+	return 0, ""
+}
+
+// asFloat reads a JSON number (request bodies decode them as json.Number).
+func asFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case float64:
+		return n, true
+	}
+	return 0, false
+}
+
+func nodeActionValue(key string, value any) string {
+	num := func(lo, hi float64) string {
+		if v, ok := asFloat(value); !ok || v < lo || v > hi {
+			return "Invalid device action value"
+		}
+		return ""
+	}
+	switch key {
+	case "mode", "hvac_mode":
+		if v, ok := value.(string); !ok || v == "" || len(v) > 50 || strings.ContainsAny(v, "\x00\r\n") {
+			return "Invalid device mode"
+		}
+	case "url":
+		if v, ok := value.(string); !ok || len(v) > 2048 || !display.WebURL(v) {
+			return "Use a direct HTTP(S) media link"
+		}
+	case "temperature":
+		return num(-100, 150)
+	case "brightness", "volume", "position", "percentage":
+		return num(0, 100)
+	case "seconds":
+		return num(0, 864000)
+	case "color_temp":
+		return num(1000, 20000)
+	case "rgb":
+		c, ok := value.([]any)
+		if !ok || len(c) != 3 {
+			return "Invalid device action value"
+		}
+		for _, x := range c {
+			if v, ok := asFloat(x); !ok || v < 0 || v > 255 {
+				return "Invalid device action value"
+			}
+		}
+	default:
+		return fmt.Sprintf("Unsupported action field %q", key)
+	}
+	return ""
 }
 
 func (m *Module) controlDevice(w http.ResponseWriter, r *http.Request, hh, action string, data map[string]any) {
