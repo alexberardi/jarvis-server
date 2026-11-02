@@ -65,6 +65,14 @@ func TestControlForAnUnknownManager(t *testing.T) {
 	}
 }
 
+// The heartbeat's managers: configured package managers only, not the built-in jarvis_direct.
+func TestManagersForTheHeartbeat(t *testing.T) {
+	sc := startHub(t)
+	if got := sc.Managers(); !reflect.DeepEqual(got, []string{"fakehub", "fakemgr"}) {
+		t.Fatalf("managers = %v", got)
+	}
+}
+
 var tv = map[string]any{"entity_id": "media_player.tv", "domain": "media_player", "name": "TV", "source": "fakehub"}
 
 // A manager's device: its state as the manager reports it, the catalogue's media hints with

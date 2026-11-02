@@ -254,6 +254,12 @@ Mobile's axios timeout is 15 s (`MOB smartHomeApi.ts:141`), shorter than CC's 20
 2. Otherwise `primary_node_id`.
 3. Otherwise `nodes[-1]`. This is SQL order with no ORDER BY, so it is effectively arbitrary.
 
+**jarvisd addition (2026-11):** a manager's device (`source` names the device manager, e.g.
+`home_assistant`) is matched against the node's `managers` instead: the Go agent's heartbeat
+reports its configured package managers (`cc_nodes.managers`, migration 00330), and that node's
+sidecar reads and drives the device through the manager's SDK `get_state`/`control`
+(`pickDeviceNode`). Direct devices still go by `protocols`.
+
 Online status is **not** considered: an offline node is a 10 s timeout.
 
 > **Changed by D4/M9:** Go publishes control and state without `trusted:true` (per-node broker ACLs make the command authentic). Node choice is one policy for control and state: protocol match → `primary_node_id` → online, most recent `last_seen`; with no online node the route fails fast with 503 instead of a 10 s timeout.

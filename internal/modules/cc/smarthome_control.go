@@ -89,7 +89,7 @@ func (m *Module) handleControlDevice(w http.ResponseWriter, r *http.Request, a p
 		detail(w, http.StatusBadRequest, "Device is not controllable")
 		return
 	}
-	node, err := m.pickNode(ctx, hh, d.protocol.String)
+	node, err := m.pickDeviceNode(ctx, hh, d)
 	if err != nil {
 		m.writeErr(w, err)
 		return
@@ -151,7 +151,7 @@ func (m *Module) handleDeviceState(w http.ResponseWriter, r *http.Request, a pro
 		m.writeErr(w, err)
 		return
 	}
-	node, err := m.pickNode(ctx, hh, d.protocol.String)
+	node, err := m.pickDeviceNode(ctx, hh, d)
 	if err != nil {
 		m.writeErr(w, err)
 		return

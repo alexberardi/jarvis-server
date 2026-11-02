@@ -1152,7 +1152,7 @@ def device_families() -> dict:
              "description": _guard(errs, "description", lambda: mgr.description, ""),
              "can_edit_devices": _guard(errs, "can_edit_devices", lambda: bool(mgr.can_edit_devices), False),
              "is_available": _guard(errs, "is_available", lambda: bool(avail()) if callable(avail) else True, False),
-             "secrets": _secrets_of(mgr, name)}
+             "is_configured": _configured(mgr), "secrets": _secrets_of(mgr, name)}
         auth = _guard(errs, "authentication", lambda: mgr.authentication and mgr.authentication.to_dict(), None)
         if auth:
             e["authentication"] = auth

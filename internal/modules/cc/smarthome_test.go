@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"testing"
@@ -290,6 +291,38 @@ func TestPickNode(t *testing.T) {
 	}
 	if _, err := e.m.pickNode(ctx, "hh-empty", ""); err == nil || err.(*statusErr).status != 400 {
 		t.Fatal(err)
+	}
+}
+
+// A manager's device (source names the manager) goes to a node whose heartbeat reports that
+// manager, not to the most recently seen node.
+func TestPickDeviceNodeByManager(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	ha, other := e.createNode("ha", "hh1"), e.createNode("other", "hh1")
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"managers": []string{"home_assistant"}, "protocols": []string{"kasa"}}, ha.h()).want(200)
+	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = 'ha'`, dbTime(e.now.Add(-time.Minute)))
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{}, other.h()).want(200)
+	pick := func(source, protocol string) string {
+		d := &deviceRow{source: sql.NullString{String: source, Valid: source != ""}, protocol: sql.NullString{String: protocol, Valid: true}}
+		n, err := e.m.pickDeviceNode(ctx, "hh1", d)
+		if err != nil {
+			return err.Error()
+		}
+		return n.nodeID
+	}
+	if got := pick("home_assistant", "home_assistant"); got != "ha" {
+		t.Fatalf("HA device went to %s", got)
+	}
+	if got := pick("direct", "kasa"); got != "ha" {
+		t.Fatalf("kasa device went to %s", got) // direct devices still go by protocol
+	}
+	if got := pick("zigbee_hub", ""); got != "other" {
+		t.Fatalf("unknown manager went to %s", got) // no match: the most recent node, as for protocols
+	}
+	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = 'ha'`, dbTime(e.now.Add(-time.Hour)))
+	if got := pick("home_assistant", ""); got != "No online node with device manager 'home_assistant'" {
+		t.Fatal(got)
 	}
 }
 

@@ -224,6 +224,9 @@ type Beat struct {
 	// Protocols are the device families this node runs (a Pi's sidecar), so jarvisd picks it for
 	// their devices' state and removal. Nil leaves it out; empty reports none.
 	Protocols []string
+	// Managers are the device managers this node runs, so jarvisd picks it for a manager's
+	// devices (their source). Nil leaves it out; empty reports none.
+	Managers []string
 	// Busy reports is_busy: true, so jarvisd hands this heartbeat no work (pending_update).
 	// `jarvis-agent status` sends one: it isn't the running agent and couldn't act on it.
 	Busy bool
@@ -276,6 +279,9 @@ func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	}
 	if b.Protocols != nil {
 		body["protocols"] = b.Protocols
+	}
+	if b.Managers != nil {
+		body["managers"] = b.Managers
 	}
 	var resp struct {
 		PendingUpdate *struct {

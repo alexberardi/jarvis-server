@@ -27,6 +27,8 @@ type Runner struct {
 	// Protocols, if set, is asked for the heartbeat's protocols (the device families) on every
 	// beat.
 	Protocols func() []string
+	// Managers, if set, is asked for the heartbeat's managers (the device managers) on every beat.
+	Managers func() []string
 	// Changed, if set, returns a channel that is closed when a capability changes: the next
 	// heartbeat goes out at once instead of at the next tick (the admin's ticks turn green
 	// within seconds of the browser extension connecting).
@@ -437,6 +439,9 @@ func (r *Runner) beat() Beat {
 	}
 	if r.Protocols != nil {
 		b.Protocols = r.Protocols()
+	}
+	if r.Managers != nil {
+		b.Managers = r.Managers()
 	}
 	return b
 }
