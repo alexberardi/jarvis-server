@@ -6,13 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/alexberardi/jarvis-server/internal/display"
@@ -31,12 +29,8 @@ func (m *Module) RegisterDisplay(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v0/display/assets/{asset_id}", m.user(m.HandleDisplayAssets))
 	mux.HandleFunc("DELETE /api/v0/display/assets/{asset_id}", m.user(m.HandleDisplayAssets))
 	mux.HandleFunc("GET /api/v0/node/display", m.node(m.HandleDisplayDelivery))
-	mux.HandleFunc("POST /api/v0/node/display/media", m.node(m.HandleDisplayMedia))
 	mux.HandleFunc("POST /api/v0/node/display/ack", m.node(m.HandleDisplayAck))
 	mux.HandleFunc("GET /api/v0/node/display/assets/{asset_id}", m.node(m.HandleDisplayAsset))
-	mux.HandleFunc("GET /api/v0/node/display/devices", m.node(m.HandleDisplayDevices))
-	mux.HandleFunc("GET /api/v0/node/display/devices/{device_id}/state", m.node(m.HandleDisplayDevice))
-	mux.HandleFunc("POST /api/v0/node/display/devices/{device_id}/control", m.node(m.HandleDisplayDevice))
 }
 func (m *Module) GetDisplayLayer(ctx context.Context, scope string) (map[string]any, string, error) {
 	var raw, pin string
@@ -384,168 +378,11 @@ func (m *Module) HandleDisplayAsset(w http.ResponseWriter, r *http.Request, n *n
 	}
 	m.WriteDisplayAsset(w, r, id)
 }
-func (m *Module) GetDisplayOwner(ctx context.Context, n *nodeCtx) (provAuth, error) {
-	id := deviceOwner(n)
-	if id == 0 {
-		return provAuth{}, fail(403, "Sign this display in to a household member")
-	}
-	if err := m.requireRole(ctx, id, n.HouseholdID, authn.RoleMember); err != nil {
-		return provAuth{}, err
-	}
-	return provAuth{user: authn.User{ID: id, HouseholdID: n.HouseholdID}}, nil
-}
-func (m *Module) HandleDisplayDevices(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
-	if _, e := m.GetDisplayOwner(r.Context(), n); e != nil {
-		m.writeErr(w, e)
-		return
-	}
-	devs, e := m.queryDevices(r.Context(), `d.household_id=? AND d.is_active=1`, n.HouseholdID)
-	if e != nil {
-		m.internalError(w, e)
-		return
-	}
-	out := []map[string]any{}
-	for _, d := range devs {
-		out = append(out, map[string]any{"id": d.id, "name": d.name, "entity_id": d.entityID, "domain": d.domain, "room_name": d.roomName.String, "supported_actions": supportedActions(d.domain, d.protocol.String, d.controllable())})
-	}
-	httpx.WriteJSON(w, 200, out)
-}
-func (m *Module) HandleDisplayDevice(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
-	a, e := m.GetDisplayOwner(r.Context(), n)
-	if e != nil {
-		m.writeErr(w, e)
-		return
-	}
-	d, e := m.device(r.Context(), n.HouseholdID, r.PathValue("device_id"))
-	if e != nil {
-		m.writeErr(w, e)
-		return
-	}
-	r.SetPathValue("household_id", n.HouseholdID)
-	if r.Method == "GET" {
-		m.handleDeviceState(w, r, a)
-		return
-	}
-	var b struct {
-		Action    string         `json:"action"`
-		Data      map[string]any `json:"data"`
-		Confirmed bool           `json:"confirmed"`
-	}
-	if e = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&b); e != nil {
-		detail(w, 400, "Invalid device action")
-		return
-	}
-	allowed := false
-	for _, v := range supportedActions(d.domain, d.protocol.String, d.controllable()) {
-		allowed = allowed || v["button_action"] == b.Action
-	}
-	if !allowed {
-		detail(w, 400, "Action is not advertised by this device")
-		return
-	}
-	if (b.Action == "unlock" || strings.HasPrefix(b.Action, "open")) && !b.Confirmed {
-		detail(w, 409, "Confirm opening this access device")
-		return
-	}
-	// A display may supply values, never replace the catalogue's identity or routing fields.
-	for k := range b.Data {
-		switch k {
-		case "temperature", "brightness", "mode", "hvac_mode", "volume", "position", "percentage":
-		default:
-			detail(w, 400, fmt.Sprintf("Unsupported action field %q", k))
-			return
-		}
-	}
-	for key, value := range b.Data {
-		if key == "mode" || key == "hvac_mode" {
-			v, ok := value.(string)
-			if !ok || len(v) > 50 || strings.ContainsAny(v, "\x00\r\n") {
-				detail(w, 400, "Invalid device mode")
-				return
-			}
-		} else {
-			v, ok := value.(float64)
-			if !ok || v < -100 || v > 150 || (key != "temperature" && (v < 0 || v > 100)) {
-				detail(w, 400, "Invalid device action value")
-				return
-			}
-		}
-	}
-	raw, _ := json.Marshal(map[string]any{"action": b.Action, "data": b.Data})
-	r.Body = io.NopCloser(bytes.NewReader(raw))
-	m.handleControlDevice(w, r, a)
-}
-
 func (m *Module) GetDisplayInherited(ctx context.Context) display.Configuration {
 	l, _, _ := m.GetDisplayLayer(ctx, "defaults")
 	c, _ := display.MergeConfiguration(l)
 	return c
 }
-func (m *Module) HandleDisplayMedia(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
-	if _, err := m.GetDisplayOwner(r.Context(), n); err != nil {
-		m.writeErr(w, err)
-		return
-	}
-	var b struct {
-		Action      string  `json:"action"`
-		URL         string  `json:"url"`
-		Destination string  `json:"destination"`
-		Seconds     float64 `json:"seconds"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&b); err != nil {
-		detail(w, 400, "Invalid media request")
-		return
-	}
-	switch b.Action {
-	case "play", "pause", "resume", "seek", "stop", "status":
-	default:
-		detail(w, 400, "Unsupported media action")
-		return
-	}
-	if b.Action == "play" && !display.WebURL(b.URL) {
-		detail(w, 400, "External playback requires a direct HTTP(S) media link")
-		return
-	}
-	if b.Seconds < 0 || b.Seconds > 864000 {
-		detail(w, 400, "Invalid seek position")
-		return
-	}
-	devs, err := m.queryDevices(r.Context(), `d.household_id=? AND d.domain='media_player' AND d.is_active=1`, n.HouseholdID)
-	if err != nil {
-		m.internalError(w, err)
-		return
-	}
-	var selected *deviceRow
-	for _, d := range devs {
-		if d.id == b.Destination || d.entityID == b.Destination || strings.EqualFold(d.name, b.Destination) {
-			if selected != nil {
-				detail(w, 400, "Destination name is ambiguous; use its device ID")
-				return
-			}
-			selected = d
-		}
-	}
-	if selected == nil || selected.sourceOr() != "home_assistant" {
-		detail(w, 404, "Home Assistant media destination unavailable; choose local playback")
-		return
-	}
-	target, err := m.pickNode(r.Context(), n.HouseholdID, selected.protocol.String)
-	if err != nil {
-		m.writeErr(w, err)
-		return
-	}
-	rid := uuid4()
-	res, ok := m.awaitNode(r.Context(), target.nodeID, rid, controlWait, func() error {
-		m.bus.CommandWithID(target.nodeID, "display_media", map[string]any{"entity_id": selected.entityID, "action": b.Action, "url": b.URL, "seconds": b.Seconds, "reply_request_id": rid}, rid)
-		return nil
-	})
-	if !ok {
-		detail(w, 504, "Media destination unavailable; choose local playback")
-		return
-	}
-	httpx.WriteJSON(w, 200, res)
-}
-
 func (m *Module) GetDisplayDeviceOptions(ctx context.Context, id string) []map[string]any {
 	out := []map[string]any{}
 	n, err := m.nodeByID(ctx, id)
