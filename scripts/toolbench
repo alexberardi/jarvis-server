@@ -2,19 +2,21 @@
 """Tool-selection benchmark: does the model pick the right tool, with the right arguments, from
 the exact prompt and tool list command-center sends?
 
-    scripts/toolbench capture [--name toolbench]           # base requests from this checkout
-    scripts/toolbench run [--base DIR] [--repeat N] [--only REGEX] [--out FILE]
+    scripts/toolbench capture [--name toolbench] [--set KEY=JSON] [--voice-tools FILE]  # base requests from this checkout
+    scripts/toolbench run [--base DIR] [--repeat N] [--only REGEX] [--out FILE] [--voice-tools FILE]
                           [--url URL --model NAME | --env FILE]
 
 capture starts a sandbox from this checkout (scripts/sandbox, with JARVIS_HARNESS_ENV as set),
 says "hello" as the seeded voice node and as a desktop node through tools/pipeline, and saves
 each LLM request the tap logged (system messages, tools, sampling parameters) to
 .toolbench/base-voice.json and base-desktop.json. Those are byte-for-byte what the model saw.
+--voice-tools has the voice node send that JSON array of tools instead (node-go.json plus a
+household's Pantry tools, as the agent's sidecar describes them); pass the same file to run.
 
 run replays every case against that base: the base's system messages, the case's utterance in
 place of "hello" in the user message, the base's tools and parameters. A case is
-  - an example from tools/pipeline/toolsets/desktop.json (desktop node): its tool and
-    expected_parameters, or
+  - an example from tools/pipeline/toolsets/desktop.json (desktop node) or node-go.json (voice
+    node), or from --voice-tools' tools node-go.json lacks: its tool and expected_parameters, or
   - the first turn of a tools/pipeline/scenarios/*.json scenario: its tool / server_tool /
     any_tool / no_tool / not_tool, args and args_match. Scenarios with settings, results,
     another home or a voice-only node are skipped (single-turn, no setup, here). A scenario
@@ -57,7 +59,13 @@ def capture(args):
     sh(f"scripts/sandbox down --name {name} --purge >/dev/null 2>&1 || true")
     sh(f"scripts/sandbox up --name {name} >/dev/null")
     try:
-        for kind, flags in (("voice", ""), ("desktop", '--node desktop --speaker ""')):
+        for kv in args.set:  # install-wide settings as the sandbox superuser, e.g. llm.tool_calling="text"
+            key, val = kv.split("=", 1)
+            body = shlex.quote(json.dumps({"value": json.loads(val)}))
+            sh(f'. .sandbox/{name}/sandbox.env && curl -sf -o /dev/null -X PUT "$SBX_CC/settings/{key}" '
+               f'-H "Authorization: Bearer $SBX_TOKEN" -H "Content-Type: application/json" -d {body}')
+        voice = f"--tools {shlex.quote(os.path.abspath(args.voice_tools))}" if args.voice_tools else ""
+        for kind, flags in (("voice", voice), ("desktop", '--node desktop --speaker ""')):
             before = sum(1 for _ in open(log)) if os.path.exists(log) else 0
             sh(f"go run ./tools/pipeline say --sandbox {name} {flags} hello >/dev/null")
             rows = [json.loads(l) for l in open(log)][before:]
@@ -75,22 +83,62 @@ def capture(args):
         sh(f"scripts/sandbox down --name {name} --purge >/dev/null 2>&1 || true")
 
 
+def text_call(reply):
+    """The first call in a text-mode reply, read like parse.ParseToolCalls: the first {...} that
+    decodes; "tool_calls", else "tool_call", else the object itself as {name, arguments} or
+    {function: {name, arguments}}. shortcut: no # comment stripping or date-key normalizing,
+    so a call only those rescue scores as missing; port them if a model relies on it."""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(reply):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = dec.raw_decode(reply, i)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj.get("tool_calls"), list) and obj["tool_calls"]:
+            obj = obj["tool_calls"][0]
+        elif "tool_call" in obj:
+            obj = obj["tool_call"]
+        fn = obj.get("function", obj) if isinstance(obj, dict) else None
+        if not isinstance(fn, dict) or not isinstance(fn.get("name"), str):
+            return None
+        a = fn.get("arguments") or {}
+        if isinstance(a, str):
+            try:
+                a = json.loads(a)
+            except json.JSONDecodeError:
+                return None
+        return {"name": fn["name"], "args": a if isinstance(a, dict) else {}}
+    return None
+
+
 def size(req):
     sysc = sum(len(str(m.get("content"))) for m in req["messages"] if m.get("role") == "system")
     return sysc + len(json.dumps(req.get("tools") or [], separators=(",", ":")))
 
 
-def cases():
+def cases(voice_tools=None):
     out = []
-    ts = json.load(open(os.path.join(ROOT, "tools/pipeline/toolsets/desktop.json")))
-    for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
-        fn = t.get("function", t)
-        for ex in t.get("examples") or fn.get("examples") or []:
-            c = {"id": f"ex:{fn['name']}:{ex['voice_command']}", "node": "desktop",
-                 "say": ex["voice_command"], "tool": fn["name"], "args": ex.get("expected_parameters") or {}}
-            if fn["name"] == "get_current_time" and not (ex.get("expected_parameters") or {}).get("location"):
-                c["direct_ok"] = True  # the prompt's <calendar> block answers local date/time directly
-            out.append(c)
+    sets = [("desktop.json", "desktop", "ex"), ("node-go.json", "voice", "vx")]
+    if voice_tools:
+        sets.append((os.path.abspath(voice_tools), "voice", "px"))
+    seen = set()
+    for file, node, prefix in sets:
+        ts = json.load(open(os.path.join(ROOT, "tools/pipeline/toolsets", file)))
+        for t in (ts if isinstance(ts, list) else ts.get("tools", [])):
+            fn = t.get("function", t)
+            if node == "voice" and fn["name"] == "act_on_items":
+                continue  # refers to a list shown earlier: not a single turn
+            if (node, fn["name"]) in seen:
+                continue  # --voice-tools repeats node-go.json's tools: scored once, as vx
+            seen.add((node, fn["name"]))
+            for ex in t.get("examples") or fn.get("examples") or []:
+                c = {"id": f"{prefix}:{fn['name']}:{ex['voice_command']}", "node": node,
+                     "say": ex["voice_command"], "tool": fn["name"], "args": ex.get("expected_parameters") or {}}
+                if fn["name"] == "get_current_time" and not (ex.get("expected_parameters") or {}).get("location"):
+                    c["direct_ok"] = True  # the prompt's <calendar> block answers local date/time directly
+                out.append(c)
     for path in sorted(glob.glob(os.path.join(ROOT, "tools/pipeline/scenarios/*.json"))):
         for sc in json.load(open(path)):
             toolset = sc.get("tools")
@@ -258,6 +306,9 @@ def run(args):
         p = os.path.join(args.base, f"base-{kind}.json")
         if os.path.exists(p):
             bases[kind] = json.load(open(p))
+    # Held out: never score an utterance the prompt shows as an example ({{examples}}).
+    shown = {u.lower() for b in bases.values() for m in b["messages"] if m.get("role") == "system"
+             for u in re.findall(r"^User: (.+)\n<tool_call>", str(m["content"]), re.M)}
     if args.patch:
         # {tool: {"description": str, "params": {name: str | null (drop the description)}, "drop_params": [...]}}
         patch = json.load(open(args.patch))
@@ -278,8 +329,9 @@ def run(args):
                             props[name]["description"] = d
                 for name in p.get("drop_params") or []:
                     props.pop(name, None)
-    allc = corpus_cases(args.corpus) if args.corpus else cases()
+    allc = corpus_cases(args.corpus) if args.corpus else cases(args.voice_tools)
     cs = [c for c in allc if c["node"] in bases and (not args.only or re.search(args.only, c["id"]))]
+    cs = [c for c in cs if c["say"].lower() not in shown]  # held out: never score a shown example
     print(f"{len(cs)} cases x {args.repeat} against {url} (model {model})", file=sys.stderr)
     results = []
     for c in cs:
@@ -324,8 +376,9 @@ def run(args):
                 except json.JSONDecodeError:
                     a = {}
                 call = {"name": tc["function"]["name"], "args": a}
-            else:
-                call = bare_call(msg.get("content") or "", {t["function"]["name"] for t in body.get("tools") or []})
+            elif msg.get("content"):
+                call = bare_call(msg["content"], {t["function"]["name"] for t in body.get("tools") or []}) \
+                    or text_call(msg["content"])  # llm.tool_calling=text: the call is in the reply
             tool_ok, args_ok = (False, False) if err else score(c, call, msg.get("content") or "")
             usage = resp.get("usage") or {}
             results.append({"id": c["id"], "run": i, "tool_ok": tool_ok, "args_ok": tool_ok and args_ok,
@@ -358,10 +411,14 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("capture")
     c.add_argument("--name", default="toolbench")
+    c.add_argument("--voice-tools", help="a JSON array of tools for the voice node to send (default the golden node's)")
+    c.add_argument("--set", action="append", default=[], metavar="KEY=JSON",
+                   help='an install-wide setting before the capture, e.g. llm.tool_calling=\'"text"\'')
     r = sub.add_parser("run")
     r.add_argument("--base", default=OUT)
     r.add_argument("--repeat", type=int, default=1)
     r.add_argument("--only")
+    r.add_argument("--voice-tools", help="also score the examples of this file's tools that node-go.json lacks")
     r.add_argument("--out")
     r.add_argument("--url")
     r.add_argument("--model")

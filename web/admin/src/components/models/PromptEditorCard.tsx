@@ -35,6 +35,7 @@ const MODE_SOURCE_TEXT: Record<ModeSetting['source'], string> = {
   prompt: 'this prompt',
   template: 'chat template',
   remote: 'remote',
+  model: "the model's catalog entry",
   default: 'default',
 }
 

@@ -71,6 +71,38 @@ func dtKeysLine(keys []string) string {
 
 // toolGuidanceSection is context_builders.build_tool_guidance_section: each tool's stripped
 // top-level included_system_prompt_text, de-duplicated in first-seen order.
+// examplesSection is each offered tool's primary example, written as the <tool_call> the model
+// should make: shown as bare "tool {args}" lines a small model copied that text instead of
+// calling the tool (decision 2026-11-01-prompt-examples).
+func examplesSection(tools []Tool) string {
+	var shots []string
+	for _, t := range tools {
+		fn, _ := get(t, "function").(*pyjson.Object)
+		name := pyStr(get(fn, "name"))
+		exs, _ := get(t, "examples").([]any)
+		for _, e := range exs {
+			eo, ok := e.(*pyjson.Object)
+			said := parse.PyStrip(pyStr(get(eo, "voice_command")))
+			if !ok || name == "" || said == "" || !truthy(get(eo, "is_primary")) {
+				continue
+			}
+			args := get(eo, "expected_parameters")
+			if args == nil {
+				args = pyjson.NewObject()
+			}
+			call := pyjson.NewObject()
+			call.Set("name", name)
+			call.Set("arguments", args)
+			shots = append(shots, "User: "+said+"\n<tool_call>\n"+pyjson.Dumps(call, false)+"\n</tool_call>")
+			break
+		}
+	}
+	if len(shots) == 0 {
+		return ""
+	}
+	return "Examples (what the user said → the call to make):\n" + strings.Join(shots, "\n\n")
+}
+
 func toolGuidanceSection(tools []Tool) string {
 	var hints []string
 	seen := map[string]bool{}

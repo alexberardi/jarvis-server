@@ -83,6 +83,7 @@ beforeEach(() => {
     options: [],
     tool_calling: { value: 'auto', detected: '', effective: 'text', source: 'default' },
     thinking_switch: { value: 'auto', detected: '', effective: 'none', source: 'default' },
+    prompt_examples: { value: 'auto', detected: 'off', effective: 'off', source: 'default' },
   })
   api.hfTokenIsSet.mockResolvedValue(false)
 })

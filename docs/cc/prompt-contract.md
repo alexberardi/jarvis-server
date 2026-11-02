@@ -62,6 +62,7 @@ This is the whole list. Any other name is invalid (§7).
 | `tools_compact` | section | as `tools`, with parameter descriptions dropped |
 | `date_keys` | section | the `DT_KEYS` vocabulary and the rule to use its symbolic keys |
 | `tool_guidance` | section | the tools' own prompt hints, de-duplicated |
+| `examples` | section | each offered tool's primary example as the `<tool_call>` to make; empty unless `llm.prompt_examples` is on (§5) |
 | `direct_answers` | section | keep replies brief, and which commands must always call their tool |
 | `not_for_me` | inline | how to stay silent: "call not_for_me and nothing else." (native tool calling) or "reply with <not_for_me/> alone." (text) |
 | `agents` | section | the node's smart-home devices by room (or a per-domain summary over 20 devices, with floors and the room hierarchy) |
@@ -122,6 +123,16 @@ Tool Guidance:
 - Use search_web only for facts that change.
 ```
 
+**`examples`** (the built-in prompts place it after `{{tool_guidance}}`; empty while `llm.prompt_examples` is off, so their text is unchanged for larger models):
+
+```text
+Examples (what the user said → the call to make):
+User: Set a timer for 5 minutes
+<tool_call>
+{"name": "set_timer", "arguments": {"duration_seconds": 300}}
+</tool_call>
+```
+
 **`direct_answers`**:
 
 ```text
@@ -162,7 +173,7 @@ When user references a room with sub-rooms, target ALL devices in that room AND 
 
 ## 5. LLM settings
 
-Two settings carry what used to be provider quirks.
+Two settings carry what used to be provider quirks; a third, `llm.prompt_examples`, sizes the prompt for small models.
 
 | setting | values | means |
 | --- | --- | --- |
@@ -179,7 +190,9 @@ Two settings carry what used to be provider quirks.
    - A remote label (a remote OpenAI-compatible model with no template to read) → `native` with no suffix (`none`).
 4. Otherwise `text` and `none`.
 
-The two settings resolve independently: a superuser `tool_calling` of `text` with `thinking_switch` `auto` still reads the thinking switch from the prompt or the template.
+`llm.prompt_examples` (`auto` | `on` | `off`) fills `{{examples}}`. `auto` follows the live model's catalog entry (`prompt_examples`, on for `qwen3-1.7b` and `qwen3-4b`), else off; it costs about 600 tokens (decision 2026-11-01-prompt-examples).
+
+The two mode settings resolve independently: a superuser `tool_calling` of `text` with `thinking_switch` `auto` still reads the thinking switch from the prompt or the template.
 
 **Not settings:**
 
@@ -249,7 +262,7 @@ Four prompts are embedded in the server as `builtin/*.txt`. They keep the provid
 | built-in | was | catalog models that default to it (`prompt_provider`) |
 | --- | --- | --- |
 | `Qwen3_14B_Compressed` | the prod text prompt | `qwen3-14b`, `qwen3.8-27b` (the prod 27B) |
-| `Qwen3_8B_Compressed` | the dev text prompt | `qwen3-4b`, `qwen3-8b` |
+| `Qwen3_8B_Compressed` | the dev text prompt | `qwen3-1.7b`, `qwen3-4b`, `qwen3-8b` |
 | `Qwen3_5_9B_Compressed` | the native-tools prompt | `qwen3.5-9b` |
 | `Cloud` (was `ChatGPTOpenAI`, still accepted) | the e2e prompt (remote OpenAI); vendor-neutral | every remote live model (OpenAI, Anthropic, Gemini, OpenRouter…): `LiveModelTraits` derives it |
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -40,12 +41,19 @@ type PromptProviderStatus struct {
 	// live model's values and what a household without its own prompt values gets.
 	ToolCalling    ModeSetting `json:"tool_calling"`
 	ThinkingSwitch ModeSetting `json:"thinking_switch"`
+	// PromptExamples is llm.prompt_examples (on or off; detected from the catalog entry).
+	PromptExamples ModeSetting `json:"prompt_examples"`
 }
 
 // PromptProvider reports the effective prompt provider and where it comes from.
 func (m *Module) PromptProvider(ctx context.Context) PromptProviderStatus {
 	st := PromptProviderStatus{Options: prompts.BuiltinNames()}
 	_, st.ToolCalling, st.ThinkingSwitch = m.llmMode(ctx, prompts.ModePrefs{})
+	var traits llm.ModelTraits
+	if m.LiveModelTraits != nil {
+		traits = m.LiveModelTraits(ctx)
+	}
+	_, st.PromptExamples = m.promptExamples(ctx, traits)
 	if m.settings != nil {
 		st.Value = strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
 	}

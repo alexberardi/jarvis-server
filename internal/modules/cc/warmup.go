@@ -321,7 +321,8 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		Room: room, VoiceMode: voiceMode, HouseholdPersona: persona,
 		DateKeys: m.dateVocabulary(), Agents: conv.agents, RoomHierarchy: m.roomHierarchy(ctx, hh),
 	}
-	in := prompts.Inputs{Context: pctx, Tools: conv.tools, Flags: commandFlags(conv.commands), ToolCalling: mode.ToolCalling}
+	in := prompts.Inputs{Context: pctx, Tools: conv.tools, Flags: commandFlags(conv.commands), ToolCalling: mode.ToolCalling,
+		Examples: mode.Examples}
 	m.lastInputs.set(n.ID, in)
 	system, _ := prompts.SystemPrompt(text, in, prompts.Characterization{})
 	conv.commit([]chatMsg{sysMsg(system)})

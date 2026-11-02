@@ -20,6 +20,8 @@ type Mode struct {
 	ThinkingSuffix bool
 	// ForceTools arms the engine's force-tools guard (local models).
 	ForceTools bool
+	// Examples fills {{examples}} with the offered tools' main examples (llm.prompt_examples).
+	Examples bool
 }
 
 // ModePrefs are a prompt's own values: ToolCalling "", "native" or "text"; ThinkingSwitch

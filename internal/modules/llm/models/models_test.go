@@ -398,10 +398,16 @@ func TestCatalogLint(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"qwen3-4b", "qwen3-8b", "qwen3-14b", "qwen3.5-9b", "qwen3.8-27b", "all-minilm-l6-v2", "whisper-large-v3-turbo",
+	for _, want := range []string{"qwen3-1.7b", "qwen3-4b", "qwen3-8b", "qwen3-14b", "qwen3.5-9b", "qwen3.8-27b", "all-minilm-l6-v2", "whisper-large-v3-turbo",
 		"kokoro-multi-lang-v1_0", "eres2net-voxceleb-16k"} {
 		if !ids[want] {
 			t.Errorf("catalog lacks %s", want)
+		}
+	}
+	// The prompt's tool examples are on by default only for the small models (2026-11-01).
+	for _, e := range Catalog() {
+		if want := e.ID == "qwen3-1.7b" || e.ID == "qwen3-4b"; e.PromptExamples != want {
+			t.Errorf("%s: prompt_examples %v", e.ID, e.PromptExamples)
 		}
 	}
 	if !ids[engine.LabelDefs[2].DefaultModel] {
@@ -439,6 +445,10 @@ func TestFitAndRecommend(t *testing.T) {
 	}
 	if r := Recommend(card(8192), nil, nil); r["live"] != "qwen3-4b" {
 		t.Errorf("8 GB: %v", r)
+	}
+	// 6 GB: the 4B is only tight; the 1.7B fits, and a fitting model wins over a tight one.
+	if r := Recommend(card(6144), nil, nil); r["live"] != "qwen3-1.7b" {
+		t.Errorf("6 GB: %v", r)
 	}
 	cpu := engine.Hardware{Flavour: engine.FlavourCPU}
 	if r := Recommend(cpu, nil, nil); r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
