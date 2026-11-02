@@ -256,7 +256,7 @@ Mobile's axios timeout is 15 s (`MOB smartHomeApi.ts:141`), shorter than CC's 20
 
 **jarvisd addition (2026-11):** a manager's device (`source` names the device manager, e.g.
 `home_assistant`) is matched against the node's `managers` instead: the Go agent's heartbeat
-reports its configured package managers (`cc_nodes.managers`, migration 00330), and that node's
+reports its configured package managers (`cc_nodes.managers`, migration 00320), and that node's
 sidecar reads and drives the device through the manager's SDK `get_state`/`control`
 (`pickDeviceNode`). Direct devices still go by `protocols`.
 
