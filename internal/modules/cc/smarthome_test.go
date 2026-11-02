@@ -215,7 +215,9 @@ func TestSupportedActions(t *testing.T) {
 		{"light", "lifx", true, []string{"turn_on", "turn_off", "toggle"}},
 		{"light", "", true, []string{"turn_on", "turn_off"}},
 		{"lock", "unknownproto", true, []string{"lock", "unlock"}},
-		{"thing", "", true, []string{"turn_on", "turn_off"}},
+		{"thing", "", true, nil}, // unknown domain: no guessed buttons (SDK catalogue fallback)
+		{"media_player", "", true, []string{"play", "pause"}},
+		{"automation", "", true, []string{"trigger", "turn_on", "turn_off"}},
 		{"climate", "nest", true, []string{"set_temperature", "set_mode", "turn_off"}},
 		{"dishwasher", "homeconnect", true, []string{"start_auto", "start_eco", "start_quick", "start_glass", "start_prerinse", "stop"}},
 		{"light", "lifx", false, nil},
@@ -226,12 +228,20 @@ func TestSupportedActions(t *testing.T) {
 		for _, a := range got {
 			acts = append(acts, a["button_action"].(string))
 		}
-		if fmt.Sprint(acts) != fmt.Sprint(c.want) || (c.want == nil) != (got == nil) {
+		if fmt.Sprint(acts) != fmt.Sprint(c.want) || (!c.ctl && got != nil) {
 			t.Errorf("%s/%s: %v, want %v", c.domain, c.protocol, acts, c.want)
 		}
 	}
 	if b := supportedActions("x", "homeconnect", true)[1]; b["button_text"] != "Eco 50°" || b["button_icon"] != "leaf" {
 		t.Fatal(b)
+	}
+}
+
+func TestImportControllable(t *testing.T) {
+	for domain, want := range map[string]bool{"light": true, "sensor": false, "update": false, "todo": false, "dishwasher": true} {
+		if got := importControllable(domain); got != want {
+			t.Errorf("%s: %v, want %v", domain, got, want)
+		}
 	}
 }
 

@@ -8,16 +8,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/devicetypes"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
 
 // The device registry (smart_home.py:688-1052): import (upsert by entity_id), list, PATCH,
 // DELETE, the node's /node/devices, and the supported-actions tables.
-
-// sensorDomains are the non-controllable HA domains (_SENSOR_DOMAINS).
-var sensorDomains = map[string]bool{
-	"sensor": true, "binary_sensor": true, "weather": true, "sun": true, "zone": true, "person": true, "device_tracker": true,
-}
 
 // button is a JarvisButtonResponse.
 type button struct{ text, action, typ, icon string }
@@ -67,61 +63,17 @@ var protocolActions = map[string][]button{
 	},
 }
 
-// domainActions is the fallback for devices without a known protocol (_DOMAIN_ACTIONS).
-var domainActions = map[string][]button{
-	"light": {
-		{"Turn On", "turn_on", "primary", "lightbulb-on"},
-		{"Turn Off", "turn_off", "secondary", "lightbulb-off"},
-	},
-	"switch": {
-		{"Turn On", "turn_on", "primary", "power"},
-		{"Turn Off", "turn_off", "secondary", "power-off"},
-	},
-	"lock": {
-		{"Lock", "lock", "primary", "lock"},
-		{"Unlock", "unlock", "destructive", "lock-open"},
-	},
-	"climate": {
-		{"Set Temperature", "set_temperature", "primary", "thermometer"},
-		{"Set Mode", "set_mode", "secondary", "thermostat"},
-		{"Turn Off", "turn_off", "secondary", "power-off"},
-	},
-	"camera": {
-		{"Get Stream", "get_stream", "primary", "video"},
-	},
-	"kettle": {
-		{"Boil", "turn_on", "primary", "kettle"},
-		{"Set Temperature", "set_temperature", "secondary", "thermometer"},
-		{"Turn Off", "turn_off", "secondary", "power-off"},
-	},
-	"fan": {
-		{"Turn On", "turn_on", "primary", "fan"},
-		{"Turn Off", "turn_off", "secondary", "fan-off"},
-	},
-	"cover": {
-		{"Open", "open_cover", "primary", "blinds-open"},
-		{"Close", "close_cover", "secondary", "blinds"},
-	},
-	"media_player": {
-		{"Play", "media_play", "primary", "play"},
-		{"Pause", "media_pause", "secondary", "pause"},
-	},
-}
-
-var genericActions = []button{
-	{"Turn On", "turn_on", "primary", "power"},
-	{"Turn Off", "turn_off", "secondary", "power-off"},
-}
-
-// supportedActions is _get_actions_for_raw: nil (JSON null) for a non-controllable device.
+// supportedActions is _get_actions_for_raw: nil (JSON null) for a non-controllable device; a
+// protocol's own buttons, else the SDK catalogue's for the domain (none for an unknown one).
 func supportedActions(domain, protocol string, controllable bool) []map[string]any {
 	if !controllable {
 		return nil
 	}
 	bs, ok := protocolActions[protocol]
 	if !ok || protocol == "" {
-		if bs, ok = domainActions[domain]; !ok {
-			bs = genericActions
+		t, _ := devicetypes.Lookup(domain)
+		for _, a := range t.Actions {
+			bs = append(bs, button{a.Text, a.Action, a.Type, a.Icon})
 		}
 	}
 	out := make([]map[string]any, len(bs))
@@ -129,6 +81,13 @@ func supportedActions(domain, protocol string, controllable bool) []map[string]a
 		out[i] = b.json()
 	}
 	return out
+}
+
+// importControllable: only a domain the catalogue knows as read-only (sensor, update, …) is
+// imported as not controllable; an unknown domain's family may still have its own buttons.
+func importControllable(domain string) bool {
+	t, known := devicetypes.Lookup(domain)
+	return !known || t.Controllable
 }
 
 // --- rows ---
@@ -353,7 +312,7 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 					return fail(http.StatusBadRequest, "Room not found in this household")
 				}
 			}
-			controllable := !sensorDomains[it.domain]
+			controllable := importControllable(it.domain)
 			name := uniqueName(it.name)
 			var id string
 			err := tx.QueryRowContext(ctx, `SELECT id FROM cc_devices WHERE household_id = ? AND entity_id = ?`, hh, it.entityID).Scan(&id)
