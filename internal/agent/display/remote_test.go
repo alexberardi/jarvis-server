@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
-	shared "github.com/alexberardi/jarvis-server/internal/display"
+	displayconfig "github.com/alexberardi/jarvis-server/internal/display"
 )
 
 // fakeHousehold is jarvisd's household device API with one remote media destination (a TV whose
@@ -68,12 +68,12 @@ func remoteEngine(t *testing.T) (*Engine, *fakeHousehold) {
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	e := &Engine{ctx: context.Background(), cc: node.NewCC(srv.URL, node.Creds{NodeID: "n", NodeKey: "k"})}
-	c, err := shared.MergeConfiguration(nil)
+	c, err := displayconfig.MergeConfiguration(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Enabled = true
-	e.delivery = shared.Delivery{Configuration: c}
+	e.delivery = displayconfig.Delivery{Configuration: c}
 	return e, f
 }
 

@@ -23,7 +23,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/devicetypes"
-	shared "github.com/alexberardi/jarvis-server/internal/display"
+	displayconfig "github.com/alexberardi/jarvis-server/internal/display"
 )
 
 type Engine struct {
@@ -34,7 +34,7 @@ type Engine struct {
 	mediaMu                 sync.Mutex
 	ducked                  []string
 	root                    string
-	delivery                shared.Delivery
+	delivery                displayconfig.Delivery
 	cc                      *node.CC
 	ui                      fs.FS
 	address, secret         string
@@ -50,7 +50,7 @@ type Engine struct {
 	blockedUntil            time.Time
 	receivers               map[string]*exec.Cmd
 	receiverStatus          map[string]string
-	theme                   *shared.Theme
+	theme                   *displayconfig.Theme
 	statusError             string
 	ctx                     context.Context
 	cancel                  context.CancelFunc
@@ -71,7 +71,7 @@ func StartDisplay(ctx context.Context, root string, ui fs.FS) (*Engine, error) {
 			cancel()
 			return nil, errors.New("invalid display cache")
 		}
-		if e.delivery.Revision != shared.GetRevision(e.delivery.Configuration, e.delivery.Verifier) {
+		if e.delivery.Revision != displayconfig.GetRevision(e.delivery.Configuration, e.delivery.Verifier) {
 			cancel()
 			return nil, errors.New("display cache revision mismatch")
 		}
@@ -127,7 +127,7 @@ func (e *Engine) LoadTheme() {
 	if err != nil {
 		return
 	}
-	t, err := shared.ReadTheme(b)
+	t, err := displayconfig.ReadTheme(b)
 	if err == nil {
 		e.theme = &t
 	}
@@ -138,7 +138,7 @@ func (e *Engine) Synchronise(ctx context.Context, cc *node.CC) error {
 	e.mu.Lock()
 	e.cc = cc
 	e.mu.Unlock()
-	var d shared.Delivery
+	var d displayconfig.Delivery
 	if err := cc.Do(ctx, "GET", "/api/v0/node/display", nil, &d); err != nil {
 		return err
 	}
@@ -147,13 +147,13 @@ func (e *Engine) Synchronise(ctx context.Context, cc *node.CC) error {
 	e.mu.Unlock()
 	applyError := ""
 	if !same {
-		if d.Revision != shared.GetRevision(d.Configuration, d.Verifier) {
+		if d.Revision != displayconfig.GetRevision(d.Configuration, d.Verifier) {
 			return errors.New("invalid display revision")
 		}
 		b, _ := json.Marshal(d.Configuration)
 		var l map[string]any
 		_ = json.Unmarshal(b, &l)
-		if _, err := shared.MergeConfiguration(l); err != nil {
+		if _, err := displayconfig.MergeConfiguration(l); err != nil {
 			return err
 		}
 		if d.Configuration.Enabled && d.Verifier == "" {
@@ -165,7 +165,7 @@ func (e *Engine) Synchronise(ctx context.Context, cc *node.CC) error {
 		}
 		for _, id := range ids {
 			filename := filepath.Join(e.root, id)
-			if b, err := os.ReadFile(filename); err == nil && shared.Digest(b) == id {
+			if b, err := os.ReadFile(filename); err == nil && displayconfig.Digest(b) == id {
 				continue
 			}
 			req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(cc.BaseURL, "/")+"/api/v0/node/display/assets/"+id, nil)
@@ -177,26 +177,26 @@ func (e *Engine) Synchronise(ctx context.Context, cc *node.CC) error {
 			if err != nil {
 				return err
 			}
-			raw, err := io.ReadAll(io.LimitReader(resp.Body, shared.MaxAssetBytes+1))
+			raw, err := io.ReadAll(io.LimitReader(resp.Body, displayconfig.MaxAssetBytes+1))
 			resp.Body.Close()
-			if err != nil || resp.StatusCode != 200 || len(raw) > shared.MaxAssetBytes || shared.Digest(raw) != id {
+			if err != nil || resp.StatusCode != 200 || len(raw) > displayconfig.MaxAssetBytes || displayconfig.Digest(raw) != id {
 				applyError = "Display asset download failed"
 				break
 			}
 			if id == d.Configuration.Theme {
-				if _, err = shared.ReadTheme(raw); err != nil {
+				if _, err = displayconfig.ReadTheme(raw); err != nil {
 					applyError = "Theme validation failed"
 					break
 				}
 			}
-			if err = shared.WriteCache(filename, raw); err != nil {
+			if err = displayconfig.WriteCache(filename, raw); err != nil {
 				applyError = "Display asset cache failed"
 				break
 			}
 		}
 		if applyError == "" {
 			raw, _ := json.Marshal(d)
-			if err := shared.WriteCache(filepath.Join(e.root, "configuration.json"), raw); err != nil {
+			if err := displayconfig.WriteCache(filepath.Join(e.root, "configuration.json"), raw); err != nil {
 				applyError = "Display configuration cache failed"
 			} else {
 				e.mu.Lock()
@@ -469,7 +469,7 @@ func (e *Engine) HandleAPI(w http.ResponseWriter, r *http.Request) {
 			PIN string `json:"pin"`
 		}
 		err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128)).Decode(&body)
-		if err != nil || shared.CheckPIN(e.delivery.Verifier, body.PIN) != nil {
+		if err != nil || displayconfig.CheckPIN(e.delivery.Verifier, body.PIN) != nil {
 			e.failures++
 			if e.failures >= 5 {
 				e.blockedUntil = time.Now().Add(time.Minute)

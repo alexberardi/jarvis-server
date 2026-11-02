@@ -16,7 +16,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
-	shared "github.com/alexberardi/jarvis-server/internal/display"
+	displayconfig "github.com/alexberardi/jarvis-server/internal/display"
 )
 
 type MediaRequest struct {
@@ -224,7 +224,7 @@ func (e *Engine) ControlMedia(ctx context.Context, r MediaRequest) (map[string]a
 			website = true
 		}
 	}
-	if shared.WebURL(target) {
+	if displayconfig.WebURL(target) {
 		u, _ := url.Parse(target)
 		host := strings.ToLower(u.Hostname())
 		if host == "youtube.com" || strings.HasSuffix(host, ".youtube.com") || host == "youtu.be" {
@@ -331,7 +331,7 @@ func RunReceiverPlayer(ctx context.Context, args []string) error {
 	}
 	args = append([]string{"--no-config", "--load-scripts=no", "--fullscreen"}, args...)
 	raw, _ := json.Marshal(map[string]any{"socket": socket})
-	if err := shared.WriteCache(marker, raw); err != nil {
+	if err := displayconfig.WriteCache(marker, raw); err != nil {
 		return err
 	}
 	defer os.Remove(marker)
