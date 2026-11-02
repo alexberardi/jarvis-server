@@ -52,6 +52,19 @@ func deviceState(t *testing.T, sc *Sidecar, details map[string]any) map[string]a
 	return out
 }
 
+// A source no configured manager has is not found.
+func TestControlForAnUnknownManager(t *testing.T) {
+	sc := startHub(t)
+	res, _ := sc.Action(map[string]any{"command_name": "control_device", "action_name": "turn_on",
+		"context": map[string]any{"entity_id": "switch.x", "source": "nowhere"}})
+	if res["error"] != "Device manager 'nowhere' not found or not configured" {
+		t.Fatalf("unknown manager = %v", res)
+	}
+	if got := deviceState(t, sc, map[string]any{"entity_id": "switch.x", "source": "nowhere"}); got["error"] != "Failed to query device state" {
+		t.Fatalf("unknown manager state = %v", got)
+	}
+}
+
 var tv = map[string]any{"entity_id": "media_player.tv", "domain": "media_player", "name": "TV", "source": "fakehub"}
 
 // A manager's device: its state as the manager reports it, the catalogue's media hints with
@@ -98,15 +111,15 @@ func TestManagerControlsItsDeviceAndStateFollows(t *testing.T) {
 	}
 }
 
-// A manager without get_state/control (written before them) keeps the old paths.
-func TestManagerWithoutStateOrControlKeepsTheOldPath(t *testing.T) {
+// A manager without get_state/control (written before them) gets the SDK's unsupported answers.
+func TestManagerWithoutStateOrControlIsUnsupported(t *testing.T) {
 	sc := startHub(t)
 	plug := map[string]any{"entity_id": "switch.hub_plug", "domain": "switch", "source": "fakemgr"}
 	if got := deviceState(t, sc, plug); got["error"] != "Failed to query device state" {
 		t.Fatalf("plug state = %v", got)
 	}
 	res, _ := sc.Action(map[string]any{"command_name": "control_device", "action_name": "turn_on", "context": plug})
-	if res["error"] != "No protocol specified in device context" {
+	if res["success"] != false || res["error"] != "Fake Hub can't control devices" {
 		t.Fatalf("plug control = %v", res)
 	}
 }
