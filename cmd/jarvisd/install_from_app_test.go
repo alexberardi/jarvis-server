@@ -215,7 +215,7 @@ func TestRunningVersion(t *testing.T) {
 		"stale":      {mod: func(s *serviceStatus) { s.Stale = true }},
 		"unhealthy":  {mod: func(s *serviceStatus) { s.Healthy = false }},
 		"other home": {home: "/other"},
-		"run-as":     {runAs: "alex"},
+		"run-as":     {runAs: "another-user"},
 	} {
 		s := st
 		if c.mod != nil {
