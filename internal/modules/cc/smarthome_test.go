@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"testing"
@@ -185,6 +186,9 @@ func TestDeviceRegistry(t *testing.T) {
 	if first["entity_id"] != "light.k2" || first["local_ip"] != "" || first["room_name"] != "" || first["source"] != "home_assistant" {
 		t.Fatal(first)
 	}
+	if acts, _ := first["supported_actions"].([]any); first["is_controllable"] != true || len(acts) != 2 || acts[0].(map[string]any)["button_action"] != "turn_on" {
+		t.Fatal("a light's buttons for a display", first)
+	}
 	e.do("GET", "/api/v0/node/devices", nil, nil).want(400)
 
 	// DELETE: device_removed to the protocol node for direct devices, then invalidate.
@@ -215,7 +219,9 @@ func TestSupportedActions(t *testing.T) {
 		{"light", "lifx", true, []string{"turn_on", "turn_off", "toggle"}},
 		{"light", "", true, []string{"turn_on", "turn_off"}},
 		{"lock", "unknownproto", true, []string{"lock", "unlock"}},
-		{"thing", "", true, []string{"turn_on", "turn_off"}},
+		{"thing", "", true, nil}, // unknown domain: no guessed buttons (SDK catalogue fallback)
+		{"media_player", "", true, []string{"play", "pause"}},
+		{"automation", "", true, []string{"trigger", "turn_on", "turn_off"}},
 		{"climate", "nest", true, []string{"set_temperature", "set_mode", "turn_off"}},
 		{"dishwasher", "homeconnect", true, []string{"start_auto", "start_eco", "start_quick", "start_glass", "start_prerinse", "stop"}},
 		{"light", "lifx", false, nil},
@@ -226,12 +232,20 @@ func TestSupportedActions(t *testing.T) {
 		for _, a := range got {
 			acts = append(acts, a["button_action"].(string))
 		}
-		if fmt.Sprint(acts) != fmt.Sprint(c.want) || (c.want == nil) != (got == nil) {
+		if fmt.Sprint(acts) != fmt.Sprint(c.want) || (!c.ctl && got != nil) {
 			t.Errorf("%s/%s: %v, want %v", c.domain, c.protocol, acts, c.want)
 		}
 	}
 	if b := supportedActions("x", "homeconnect", true)[1]; b["button_text"] != "Eco 50°" || b["button_icon"] != "leaf" {
 		t.Fatal(b)
+	}
+}
+
+func TestImportControllable(t *testing.T) {
+	for domain, want := range map[string]bool{"light": true, "sensor": false, "update": false, "todo": false, "dishwasher": true} {
+		if got := importControllable(domain); got != want {
+			t.Errorf("%s: %v, want %v", domain, got, want)
+		}
 	}
 }
 
@@ -281,6 +295,96 @@ func TestPickNode(t *testing.T) {
 	if _, err := e.m.pickNode(ctx, "hh-empty", ""); err == nil || err.(*statusErr).status != 400 {
 		t.Fatal(err)
 	}
+}
+
+// A manager's device (source names the manager) goes to a node whose heartbeat reports that
+// manager, not to the most recently seen node.
+func TestPickDeviceNodeByManager(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	ha, other := e.createNode("ha", "hh1"), e.createNode("other", "hh1")
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"managers": []string{"home_assistant"}, "protocols": []string{"kasa"}}, ha.h()).want(200)
+	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = 'ha'`, dbTime(e.now.Add(-time.Minute)))
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{}, other.h()).want(200)
+	pick := func(source, protocol string) string {
+		d := &deviceRow{source: sql.NullString{String: source, Valid: source != ""}, protocol: sql.NullString{String: protocol, Valid: true}}
+		n, err := e.m.pickDeviceNode(ctx, "hh1", d)
+		if err != nil {
+			return err.Error()
+		}
+		return n.nodeID
+	}
+	if got := pick("home_assistant", "home_assistant"); got != "ha" {
+		t.Fatalf("HA device went to %s", got)
+	}
+	if got := pick("direct", "kasa"); got != "ha" {
+		t.Fatalf("kasa device went to %s", got) // direct devices still go by protocol
+	}
+	if got := pick("zigbee_hub", ""); got != "other" {
+		t.Fatalf("unknown manager went to %s", got) // no match: the most recent node, as for protocols
+	}
+	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = 'ha'`, dbTime(e.now.Add(-time.Hour)))
+	if got := pick("home_assistant", ""); got != "No online node with device manager 'home_assistant'" {
+		t.Fatal(got)
+	}
+}
+
+// A node (a touch display, a Pi) reads and drives its own household's devices with its own
+// credentials: the request goes to the node running the device's manager, which answers as for
+// the app. Another household's device is not found; no credentials, no route.
+func TestNodeDeviceStateAndControl(t *testing.T) {
+	controlWait, stateWait = 2*time.Second, 2*time.Second
+	defer func() { controlWait, stateWait = 10*time.Second, 10*time.Second }()
+	e := newEnv(t)
+	tok := e.auth.addUser(1, "hh1", authn.RoleMember)
+	display, hub := e.createNode("display", "hh1"), e.createNode("hub", "hh1")
+	stranger := e.createNode("stranger", "hh2")
+	e.do("POST", "/api/v0/admin/nodes/heartbeat", map[string]any{"managers": []string{"home_assistant"}}, hub.h()).want(200)
+	e.d.Write.Exec(`UPDATE cc_nodes SET last_seen = ? WHERE node_id = 'hub'`, dbTime(e.now.Add(-time.Minute)))
+	c := e.dialNode(hub)
+	c.subscribe("jarvis/nodes/hub/#")
+	e.importDevices(tok, map[string]any{"entity_id": "media_player.tv", "name": "TV", "domain": "media_player", "source": "home_assistant", "protocol": "home_assistant"})
+	c.next() // invalidate
+
+	var tv string
+	for _, d := range e.do("GET", "/api/v0/node/devices", nil, display.h()).want(200).list() {
+		if m := d.(map[string]any); m["entity_id"] == "media_player.tv" {
+			tv, _ = m["id"].(string)
+		}
+	}
+	if tv == "" {
+		t.Fatal("/node/devices has no id for the TV")
+	}
+	path := "/api/v0/node/devices/" + tv
+
+	ch := make(chan *resp, 1)
+	go func() { ch <- e.do("POST", path+"/control", map[string]any{"action": "pause"}, display.h()) }()
+	verb, d := command(t, c.next())
+	if actx := d["context"].(map[string]any); verb != "action" || d["action_name"] != "pause" || actx["source"] != "home_assistant" {
+		t.Fatal(verb, d)
+	}
+	rid := d["request_id"].(string)
+	e.do("POST", "/api/v0/device-control-results/"+rid, map[string]any{"success": true}, hub.h()).want(200)
+	if r := (<-ch).want(200).json(); r["success"] != true || r["action"] != "pause" {
+		t.Fatal(r)
+	}
+
+	go func() { ch <- e.do("GET", path+"/state", nil, display.h()) }()
+	pk := c.next()
+	p := payload(t, pk)
+	if pk.TopicName != "jarvis/nodes/hub/device-state" || p["source"] != "home_assistant" {
+		t.Fatal(pk.TopicName, p)
+	}
+	e.do("POST", "/api/v0/device-state-results/"+p["request_id"].(string), map[string]any{"state": map[string]any{"state": "paused"},
+		"ui_hints": map[string]any{"control_type": "media", "features": []any{"play"}}}, hub.h()).want(200)
+	if r := (<-ch).want(200).json(); r["state"].(map[string]any)["state"] != "paused" || r["ui_hints"].(map[string]any)["control_type"] != "media" {
+		t.Fatal(r)
+	}
+
+	e.do("GET", path+"/state", nil, stranger.h()).detail(404, "Device not found")
+	e.do("POST", path+"/control", map[string]any{"action": "pause"}, stranger.h()).detail(404, "Device not found")
+	e.do("GET", path+"/state", nil, nil).want(400)
+	e.do("POST", path+"/control", map[string]any{}, display.h()).want(400)
 }
 
 func TestDeviceControlAndState(t *testing.T) {

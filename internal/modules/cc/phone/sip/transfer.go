@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emiago/diago"
 	"github.com/emiago/sipgo"
+	"github.com/emiago/sipgo/sip"
 )
 
 // Blind transfer (docs/cc/phone-sip.md §3.4, §4 step 4): an answered inbound call is handed to
@@ -58,26 +61,20 @@ func (c *Call) Transfer(ctx context.Context, target string) error {
 		c.mu.Unlock()
 		return ErrTransferAttempted
 	}
-	xfer := make(chan struct{})
-	c.xfer = xfer
+	xfer, final := make(chan struct{}), make(chan int, 1)
+	c.xfer, c.xferFinal = xfer, final
 	c.mu.Unlock()
 	defer close(xfer)
 
 	log := c.ua.cfg.Log.With("call_id", c.id, "target", target)
 	to := c.ua.registrar.Clone()
 	to.User = target
-	final := make(chan int, 1)
-	onNotify := func(code int) {
-		log.Info("sip: transfer progress", "notify", code)
-		if code >= 200 {
-			select {
-			case final <- code:
-			default:
-			}
-		}
-	}
 	rctx, cancel := context.WithTimeout(ctx, c.ua.cfg.RequestTimeout)
-	err := c.srv.ReferOptions(rctx, *to, diago.ReferServerOptions{OnNotify: onNotify})
+	err := c.srv.ReferOptions(rctx, *to, diago.ReferServerOptions{
+		// diago answers a NOTIFY before this runs, and a PBX may BYE as soon as it has the 200, so
+		// the guard reports progress instead (referNotify). Without a callback diago would hang up.
+		OnNotify: func(int) {},
+	})
 	cancel()
 	if err != nil {
 		te := &TransferError{Detail: "the phone system refused the transfer: " + err.Error()}
@@ -129,6 +126,33 @@ func (c *Call) Transfer(ctx context.Context, target string) error {
 	c.finish(EndTransferred, detail)
 	log.Info("sip: call transferred")
 	return nil
+}
+
+// referNotify takes a transfer NOTIFY's status from the guard, before diago answers it.
+func (c *Call) referNotify(code int) {
+	c.mu.Lock()
+	final := c.xferFinal
+	c.mu.Unlock()
+	c.ua.cfg.Log.Info("sip: transfer progress", "call_id", c.id, "notify", code)
+	if final != nil && code >= 200 {
+		select {
+		case final <- code:
+		default:
+		}
+	}
+}
+
+// sipfragStatus is the status line's code in a NOTIFY's sipfrag body (RFC 3515), 0 when it has none.
+func sipfragStatus(req *sip.Request) int {
+	if ct := req.ContentType(); ct == nil || !strings.HasPrefix(ct.Value(), "message/sipfrag") {
+		return 0
+	}
+	f := strings.Fields(string(req.Body()))
+	if len(f) < 2 || f[0] != "SIP/2.0" {
+		return 0
+	}
+	code, _ := strconv.Atoi(f[1])
+	return code
 }
 
 // afterFinalNotify runs once Transfer has the PBX's final NOTIFY; tests hold it to let the PBX's

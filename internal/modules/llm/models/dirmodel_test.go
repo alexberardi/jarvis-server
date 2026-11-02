@@ -372,8 +372,8 @@ func TestRecommendMLXByMemory(t *testing.T) {
 	if r := Recommend(macHW(32), nil, nil); r["live"] != "qwen3.5-27b-mlx" {
 		t.Fatalf("32 GB Mac: %v", r)
 	}
-	// 8 GB: no MLX entry fits; the smallest GGUF, as before.
-	if r := Recommend(macHW(8), nil, nil); r["live"] != "qwen3-4b" {
+	// 8 GB: no MLX entry fits, and the 4B GGUF is only tight; the 1.7B fits.
+	if r := Recommend(macHW(8), nil, nil); r["live"] != "qwen3-1.7b" {
 		t.Fatalf("8 GB Mac: %v", r)
 	}
 	cuda := engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{

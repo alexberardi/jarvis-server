@@ -2,7 +2,7 @@
 """Tool-selection benchmark: does the model pick the right tool, with the right arguments, from
 the exact prompt and tool list command-center sends?
 
-    scripts/toolbench capture [--name toolbench]           # base requests from this checkout
+    scripts/toolbench capture [--name toolbench] [--set KEY=JSON]         # base requests from this checkout
     scripts/toolbench run [--base DIR] [--repeat N] [--only REGEX] [--out FILE]
                           [--url URL --model NAME | --env FILE]
 
@@ -57,6 +57,11 @@ def capture(args):
     sh(f"scripts/sandbox down --name {name} --purge >/dev/null 2>&1 || true")
     sh(f"scripts/sandbox up --name {name} >/dev/null")
     try:
+        for kv in args.set:  # install-wide settings as the sandbox superuser, e.g. llm.tool_calling="text"
+            key, val = kv.split("=", 1)
+            body = shlex.quote(json.dumps({"value": json.loads(val)}))
+            sh(f'. .sandbox/{name}/sandbox.env && curl -sf -o /dev/null -X PUT "$SBX_CC/settings/{key}" '
+               f'-H "Authorization: Bearer $SBX_TOKEN" -H "Content-Type: application/json" -d {body}')
         for kind, flags in (("voice", ""), ("desktop", '--node desktop --speaker ""')):
             before = sum(1 for _ in open(log)) if os.path.exists(log) else 0
             sh(f"go run ./tools/pipeline say --sandbox {name} {flags} hello >/dev/null")
@@ -73,6 +78,36 @@ def capture(args):
                   f"{size(req)} chars of system+tools (~{size(req)//4} tok)")
     finally:
         sh(f"scripts/sandbox down --name {name} --purge >/dev/null 2>&1 || true")
+
+
+def text_call(reply):
+    """The first call in a text-mode reply, read like parse.ParseToolCalls: the first {...} that
+    decodes; "tool_calls", else "tool_call", else the object itself as {name, arguments} or
+    {function: {name, arguments}}. shortcut: no # comment stripping or date-key normalizing,
+    so a call only those rescue scores as missing; port them if a model relies on it."""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(reply):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = dec.raw_decode(reply, i)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj.get("tool_calls"), list) and obj["tool_calls"]:
+            obj = obj["tool_calls"][0]
+        elif "tool_call" in obj:
+            obj = obj["tool_call"]
+        fn = obj.get("function", obj) if isinstance(obj, dict) else None
+        if not isinstance(fn, dict) or not isinstance(fn.get("name"), str):
+            return None
+        a = fn.get("arguments") or {}
+        if isinstance(a, str):
+            try:
+                a = json.loads(a)
+            except json.JSONDecodeError:
+                return None
+        return {"name": fn["name"], "args": a if isinstance(a, dict) else {}}
+    return None
 
 
 def size(req):
@@ -324,8 +359,9 @@ def run(args):
                 except json.JSONDecodeError:
                     a = {}
                 call = {"name": tc["function"]["name"], "args": a}
-            else:
-                call = bare_call(msg.get("content") or "", {t["function"]["name"] for t in body.get("tools") or []})
+            elif msg.get("content"):
+                call = bare_call(msg["content"], {t["function"]["name"] for t in body.get("tools") or []}) \
+                    or text_call(msg["content"])  # llm.tool_calling=text: the call is in the reply
             tool_ok, args_ok = (False, False) if err else score(c, call, msg.get("content") or "")
             usage = resp.get("usage") or {}
             results.append({"id": c["id"], "run": i, "tool_ok": tool_ok, "args_ok": tool_ok and args_ok,
@@ -358,6 +394,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("capture")
     c.add_argument("--name", default="toolbench")
+    c.add_argument("--set", action="append", default=[], metavar="KEY=JSON",
+                   help='an install-wide setting before the capture, e.g. llm.tool_calling=\'"text"\'')
     r = sub.add_parser("run")
     r.add_argument("--base", default=OUT)
     r.add_argument("--repeat", type=int, default=1)
