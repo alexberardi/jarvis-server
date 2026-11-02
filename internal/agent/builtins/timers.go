@@ -190,10 +190,27 @@ var informalDurations = []struct {
 	{regexp.MustCompile(`(?i)\ban?\s+hour\b`), "60 minutes"},
 }
 
+// spokenCountRe is a number word before a unit ("two hour timer"), which N: doesn't read.
+var spokenCountRe = regexp.MustCompile(`(?i)\b(forty[\s-]five|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|sixty|ninety)(\s+(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\b)`)
+
+var spokenCounts = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
+	"eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20", "thirty": "30",
+	"forty": "40", "sixty": "60", "ninety": "90"}
+
+func spokenCount(m []string) string {
+	if n, ok := spokenCounts[m[1]]; ok {
+		return n
+	}
+	return "45" // forty five
+}
+
 var labelStripWords = map[string]bool{
 	"set": true, "a": true, "an": true, "the": true, "timer": true, "for": true, "remind": true, "me": true,
 	"in": true, "wake": true, "up": true, "let": true, "know": true, "notify": true, "and": true,
 	"please": true, "half": true, "quarter": true, "about": true,
+	// Lead-ins N: doesn't strip ("start a timer for 45 seconds" was labelled "start").
+	"start": true, "give": true, "make": true, "create": true, "put": true, "can": true, "could": true,
+	"you": true, "i": true, "need": true, "want": true, "new": true, "us": true,
 }
 
 var standaloneNumberRe = regexp.MustCompile(`\b\d+\b`)
@@ -205,6 +222,10 @@ func setTimerMatch(said string) (map[string]any, bool) {
 	for _, d := range informalDurations {
 		text = d.re.ReplaceAllString(text, d.with)
 	}
+	text = spokenCountRe.ReplaceAllStringFunc(text, func(w string) string {
+		m := spokenCountRe.FindStringSubmatch(w)
+		return spokenCount(m) + m[2]
+	})
 	total := 0
 	for _, m := range timeChunkRe.FindAllStringSubmatch(text, -1) {
 		n, _ := strconv.Atoi(m[1])
