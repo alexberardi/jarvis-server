@@ -36,6 +36,7 @@ var Variables = []Variable{
 	{"tools_compact", KindSection, "As tools, without parameter descriptions."},
 	{"date_keys", KindSection, "The DT_KEYS date vocabulary and how to use it."},
 	{"tool_guidance", KindSection, "Hints the offered tools add to the prompt."},
+	{"examples", KindSection, "Each offered tool's main example as the <tool_call> to make; empty unless llm.prompt_examples is on."},
 	{"direct_answers", KindSection, "Keep replies brief, and which commands must always call their tool."},
 	{"not_for_me", KindInline, "How to stay silent: call the not_for_me tool (native) or reply <not_for_me/> alone (text)."},
 	{"agents", KindSection, "The node's smart-home devices by room, or a summary over 20 devices."},

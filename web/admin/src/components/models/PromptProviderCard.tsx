@@ -22,14 +22,28 @@ function detectedText(m: ModeSetting): string | null {
   if (!m.detected) return 'not detected'
   if (m.source === 'template') return "from the model's chat template"
   if (m.source === 'remote') return 'remote model'
+  if (m.source === 'model') return "from the model's catalog entry"
   return null
 }
 
 /**
  * ModeRow shows one LLM mode setting (docs/cc/prompt-contract.md): what turns use, whether it was
  * detected or set by the superuser, and a select to override it ("auto" follows the detection).
+ * byHousehold says a household's own prompt may set it too (not llm.prompt_examples).
  */
-function ModeRow({ id, label, mode, options }: { id: string; label: string; mode: ModeSetting; options: string[] }) {
+function ModeRow({
+  id,
+  label,
+  mode,
+  options,
+  byHousehold = true,
+}: {
+  id: string
+  label: string
+  mode: ModeSetting
+  options: string[]
+  byHousehold?: boolean
+}) {
   const qc = useQueryClient()
   const set = useMutation<unknown, Error, string>({
     mutationFn: (value) => updateSetting('cc', `llm.${id}`, value),
@@ -52,7 +66,7 @@ function ModeRow({ id, label, mode, options }: { id: string; label: string; mode
       {setByYou ? (
         <Badge tone="primary">set by you</Badge>
       ) : (
-        <span className="text-small text-text-muted">households' prompts may set their own</span>
+        byHousehold && <span className="text-small text-text-muted">households' prompts may set their own</span>
       )}
       <select
         id={`llm-${id}`}
@@ -205,6 +219,7 @@ export default function PromptProviderCard() {
           <div className="divide-y divide-border border-t border-border pt-3">
             <ModeRow id="tool_calling" label="Tool calling" mode={data.tool_calling} options={['native', 'text']} />
             <ModeRow id="thinking_switch" label="Thinking switch" mode={data.thinking_switch} options={['suffix', 'none']} />
+            <ModeRow id="prompt_examples" label="Tool examples" mode={data.prompt_examples} options={['on', 'off']} byHousehold={false} />
           </div>
         </div>
       )}

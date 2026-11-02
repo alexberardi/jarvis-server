@@ -19,6 +19,8 @@ type Inputs struct {
 	Tools       []Tool
 	Flags       []CommandFlag
 	ToolCalling ToolCalling
+	// Examples fills {{examples}} (Mode.Examples).
+	Examples bool
 }
 
 // notForMeInstruction is how the model stays silent: the not_for_me tool with native tool
@@ -44,7 +46,12 @@ func (in Inputs) Values() map[string]string {
 		return "You are provided with function signatures within <tools></tools> XML tags:\n" +
 			toolsBlock(in.Tools, buildOptions{paramDescriptions: desc, excludeRefinable: true}) + "\n\n" + qwenToolFormat
 	}
+	examples := ""
+	if in.Examples {
+		examples = examplesSection(in.Tools)
+	}
 	return map[string]string{
+		"examples":         examples,
 		"room":             c.Room,
 		"voice_mode":       c.VoiceMode,
 		"persona":          PersonalityBlock(c.HouseholdPersona),

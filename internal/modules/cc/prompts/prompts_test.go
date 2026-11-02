@@ -127,3 +127,28 @@ func TestUserMessage(t *testing.T) {
 		t.Error("bare utterance")
 	}
 }
+
+// {{examples}} is each tool's primary example as the <tool_call> to make, only when Examples is
+// on: tools without a primary one add nothing, and off renders "" (larger models' prompts stay
+// as they were).
+func TestExamplesSection(t *testing.T) {
+	tools := mustTools(t, `[
+	 {"type":"function","function":{"name":"set_timer"},"examples":[
+	  {"voice_command":"Timer for 30 seconds","expected_parameters":{"duration_seconds":30},"is_primary":false},
+	  {"voice_command":"Set a timer for 5 minutes","expected_parameters":{"duration_seconds":300},"is_primary":true}]},
+	 {"type":"function","function":{"name":"tell_joke"},"examples":[{"voice_command":"Tell me a joke","is_primary":true}]},
+	 {"type":"function","function":{"name":"recall"},"examples":[{"voice_command":"what did I say","is_primary":false}]},
+	 {"type":"function","function":{"name":"remember"}}]`)
+	want := "Examples (what the user said → the call to make):\n" +
+		"User: Set a timer for 5 minutes\n<tool_call>\n{\"name\": \"set_timer\", \"arguments\": {\"duration_seconds\": 300}}\n</tool_call>\n\n" +
+		"User: Tell me a joke\n<tool_call>\n{\"name\": \"tell_joke\", \"arguments\": {}}\n</tool_call>"
+	if got := (Inputs{Tools: tools, Examples: true}).Values()["examples"]; got != want {
+		t.Errorf("examples:\n%s\nwant:\n%s", got, want)
+	}
+	if got := (Inputs{Tools: tools}).Values()["examples"]; got != "" {
+		t.Errorf("off: %q", got)
+	}
+	if got := (Inputs{Tools: tools[2:], Examples: true}).Values()["examples"]; got != "" {
+		t.Errorf("no primary examples: %q", got)
+	}
+}

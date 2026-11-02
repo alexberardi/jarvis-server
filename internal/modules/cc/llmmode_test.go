@@ -115,6 +115,7 @@ func TestLLMModeSettingsValidate(t *testing.T) {
 	for key, ok := range map[string][]string{
 		settingToolCalling:    {"auto", "native", "text"},
 		settingThinkingSwitch: {"auto", "suffix", "none"},
+		settingPromptExamples: {"auto", "on", "off"},
 	} {
 		for _, v := range ok {
 			if err := e.m.settings.Set(ctx, key, v, settings.Scope{}); err != nil {
@@ -159,6 +160,40 @@ func TestPromptProviderStatusLLMMode(t *testing.T) {
 			if obj[f] != v {
 				t.Errorf("%s.%s = %v, want %v", k, f, obj[f], v)
 			}
+		}
+	}
+}
+
+// llm.prompt_examples: on/off as set, else the live model's catalog entry, else off; Mode
+// carries it to the prompt.
+func TestLLMModePromptExamples(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		set      string
+		catalog  bool
+		want     bool
+		source   string
+		detected string
+	}{
+		{"", false, false, ModeSourceDefault, "off"},
+		{"", true, true, ModeSourceModel, "on"},
+		{"auto", true, true, ModeSourceModel, "on"},
+		{"off", true, false, ModeSourceSetting, "on"},
+		{"on", false, true, ModeSourceSetting, "off"},
+	} {
+		e := newEnv(t, envOpts{configure: func(m *Module) {
+			m.LiveModelTraits = func(context.Context) llm.ModelTraits { return llm.ModelTraits{Local: true, PromptExamples: c.catalog} }
+		}})
+		if c.set != "" {
+			if err := e.m.settings.Set(ctx, settingPromptExamples, c.set, settings.Scope{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		mode, _, _ := e.m.llmMode(ctx, prompts.ModePrefs{})
+		st := e.m.PromptProvider(ctx).PromptExamples
+		if mode.Examples != c.want || st.Effective != map[bool]string{true: "on", false: "off"}[c.want] ||
+			st.Source != c.source || st.Detected != c.detected {
+			t.Errorf("set %q catalog %v: mode %v, status %+v", c.set, c.catalog, mode.Examples, st)
 		}
 	}
 }

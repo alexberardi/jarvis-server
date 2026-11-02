@@ -19,6 +19,8 @@ const (
 	modeAuto       = "auto"
 	thinkingSuffix = "suffix"
 	thinkingNone   = "none"
+	examplesOn     = "on"
+	examplesOff    = "off"
 )
 
 // Mode sources (ModeSetting.Source).
@@ -28,6 +30,7 @@ const (
 	ModeSourceTemplate = "template"
 	ModeSourceRemote   = "remote"
 	ModeSourceDefault  = "default"
+	ModeSourceModel    = "model" // the live model's catalog entry (llm.prompt_examples)
 )
 
 // ModeSetting is what the admin shows for one LLM mode setting.
@@ -81,7 +84,26 @@ func (m *Module) llmMode(ctx context.Context, prefs prompts.ModePrefs) (prompts.
 		ThinkingSuffix: th.Effective == thinkingSuffix,
 		ForceTools:     traits.Local || m.LiveModelTraits == nil,
 	}
+	mode.Examples, _ = m.promptExamples(ctx, traits)
 	return mode, tc, th
+}
+
+// promptExamples resolves llm.prompt_examples: the superuser's on/off, else the live model's
+// catalog entry (on for the small models), else off.
+func (m *Module) promptExamples(ctx context.Context, traits llm.ModelTraits) (bool, ModeSetting) {
+	st := ModeSetting{Value: m.modeValue(ctx, settingPromptExamples), Detected: examplesOff}
+	if traits.PromptExamples {
+		st.Detected = examplesOn
+	}
+	switch {
+	case st.Value != modeAuto:
+		st.Effective, st.Source = st.Value, ModeSourceSetting
+	case traits.PromptExamples:
+		st.Effective, st.Source = examplesOn, ModeSourceModel
+	default:
+		st.Effective, st.Source = examplesOff, ModeSourceDefault
+	}
+	return st.Effective == examplesOn, st
 }
 
 // modeValue reads an LLM mode setting; unset or blank is auto.

@@ -24,6 +24,7 @@ const none: llm.PromptProvider = {
   options: ['ChatGPTOpenAI', 'Qwen3_8B_Compressed'],
   tool_calling: { value: 'auto', detected: '', effective: 'text', source: 'default' },
   thinking_switch: { value: 'auto', detected: '', effective: 'none', source: 'default' },
+  prompt_examples: { value: 'auto', detected: 'off', effective: 'off', source: 'default' },
 }
 
 const qwen: llm.PromptProvider = {
@@ -34,6 +35,7 @@ const qwen: llm.PromptProvider = {
   valid: true,
   tool_calling: { value: 'auto', detected: 'native', effective: 'native', source: 'template' },
   thinking_switch: { value: 'none', detected: 'suffix', effective: 'none', source: 'setting' },
+  prompt_examples: { value: 'auto', detected: 'on', effective: 'on', source: 'model' },
 }
 
 function state(modelsConfigured: boolean): authApi.SetupState {
@@ -103,6 +105,15 @@ describe('PromptProviderCard', () => {
 
     fireEvent.change(tools, { target: { value: 'text' } })
     await waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('cc', 'llm.tool_calling', 'text'))
+
+    // Tool examples: on from the small model's catalog entry; households can't set it.
+    const examples = screen.getByLabelText('Tool examples')
+    const examplesRow = examples.parentElement as HTMLElement
+    expect(within(examplesRow).getByText('on', { selector: 'code' })).toBeInTheDocument()
+    expect(within(examplesRow).getByText("from the model's catalog entry")).toBeInTheDocument()
+    expect(within(examplesRow).queryByText(/households' prompts may set their own/)).toBeNull()
+    fireEvent.change(examples, { target: { value: 'off' } })
+    await waitFor(() => expect(settings.updateSetting).toHaveBeenCalledWith('cc', 'llm.prompt_examples', 'off'))
   })
 
   it('says when the model has no detected mode', async () => {

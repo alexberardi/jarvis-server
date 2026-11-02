@@ -57,7 +57,10 @@ type Entry struct {
 	HostBytes      int64  `json:"host_bytes,omitempty"`
 	PromptProvider string `json:"prompt_provider,omitempty"`
 	Thinking       bool   `json:"thinking,omitempty"`
-	Dims           int    `json:"dims,omitempty"`
+	// PromptExamples turns the prompt's tool examples on while llm.prompt_examples is auto: a
+	// small model picks tools far better with them (decision 2026-11-01-prompt-examples).
+	PromptExamples bool `json:"prompt_examples,omitempty"`
+	Dims           int  `json:"dims,omitempty"`
 	// ChatTemplate names the pinned chat template (a file under templates/) and
 	// ChatTemplateSHA256 its digest; LLM entries only (ID12).
 	ChatTemplate       string `json:"chat_template,omitempty"`

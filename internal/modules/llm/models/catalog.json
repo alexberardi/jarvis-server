@@ -13,6 +13,7 @@
     "kv_bytes_per_token": 114688,
     "prompt_provider": "Qwen3_8B_Compressed",
     "thinking": true,
+    "prompt_examples": true,
     "chat_template": "qwen3.jinja",
     "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
     "tags": [
@@ -35,6 +36,7 @@
     "kv_bytes_per_token": 147456,
     "prompt_provider": "Qwen3_8B_Compressed",
     "thinking": true,
+    "prompt_examples": true,
     "chat_template": "qwen3.jinja",
     "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
     "tags": [

@@ -324,6 +324,7 @@ func (m *Module) handlePreviewPrompt(w http.ResponseWriter, r *http.Request, hh 
 	if cached {
 		in.Context.HouseholdPersona = persona
 		in.ToolCalling = mode.ToolCalling
+		in.Examples = mode.Examples
 	} else {
 		room, voiceMode := nodeRoomVoice(n)
 		in = prompts.Inputs{
@@ -331,6 +332,7 @@ func (m *Module) handlePreviewPrompt(w http.ResponseWriter, r *http.Request, hh 
 				DateKeys: m.dateVocabulary(), RoomHierarchy: m.roomHierarchy(ctx, hh)},
 			Tools:       m.previewServerTools(ctx, hh, mode.Native()),
 			ToolCalling: mode.ToolCalling,
+			Examples:    mode.Examples,
 		}
 	}
 	system, _ := prompts.SystemPrompt(text, in, prompts.Characterization{})
