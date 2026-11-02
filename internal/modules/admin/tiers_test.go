@@ -43,6 +43,9 @@ var wantTiers = map[string]tier{
 
 	// cc, scoped to the caller's households by cc (G9, §2.2).
 	"GET /api/cc/api/v0/admin/nodes":                                 tierUser,
+	"GET /api/cc/api/v0/nodes/{node_id}/node-config":                 tierUser,
+	"PATCH /api/cc/api/v0/nodes/{node_id}/node-config":               tierUser,
+	"POST /api/cc/api/v0/nodes/{node_id}/node-config/basic":          tierUser,
 	"POST /api/cc/api/v0/mobile/chat":                                tierUser,
 	"POST /api/cc/api/v0/mobile/chat/warmup":                         tierUser,
 	"GET /api/cc/api/v0/mobile/chat/capabilities":                    tierUser,

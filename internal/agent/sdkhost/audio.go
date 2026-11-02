@@ -65,7 +65,7 @@ func (a *Audio) load() volumeState {
 	return s
 }
 
-func (a *Audio) save(s volumeState) {
+func (a *Audio) save(s volumeState) error {
 	b, _ := json.Marshal(s)
 	tmp := a.Path + ".tmp"
 	err := os.WriteFile(tmp, b, 0o600)
@@ -75,6 +75,7 @@ func (a *Audio) save(s volumeState) {
 	if err != nil {
 		a.log().Warn("audio: volume not persisted", "err", err)
 	}
+	return err
 }
 
 func clamp(p int) int { return max(0, min(100, p)) }
@@ -207,4 +208,51 @@ func (a *Audio) Restore(ctx context.Context) {
 	if s.Muted {
 		a.apply(ctx, []string{"set-sink-mute", "1"}, []string{"-q", "sset", "Master", "mute"})
 	}
+}
+
+// Configure reports persistence and mixer errors separately from the older SDK's
+// boolean setters. Other config keys are ignored; the caller validates its patch.
+func (a *Audio) Configure(ctx context.Context, values map[string]any) error {
+	volume, setVolume := values["volume_percent"]
+	mute, setMute := values["is_muted"]
+	if !setVolume && !setMute {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.load()
+	if setVolume {
+		v, ok := volume.(float64)
+		if !ok || v < 0 || v > 100 {
+			return errors.New("invalid speaker volume")
+		}
+		p := int(v)
+		s.Percent = &p
+	}
+	if setMute {
+		v, ok := mute.(bool)
+		if !ok {
+			return errors.New("invalid speaker mute")
+		}
+		s.Muted = v
+	}
+	if err := a.save(s); err != nil {
+		return errors.New("speaker preferences could not be saved")
+	}
+	if setVolume {
+		pct := strconv.Itoa(*s.Percent) + "%"
+		if !a.apply(ctx, []string{"set-sink-volume", pct}, []string{"-q", "sset", "Master", pct}) {
+			return errors.New("speaker preferences saved, but the mixer could not apply them")
+		}
+	}
+	if setMute {
+		flag, sw := "0", "unmute"
+		if s.Muted {
+			flag, sw = "1", "mute"
+		}
+		if !a.apply(ctx, []string{"set-sink-mute", flag}, []string{"-q", "sset", "Master", sw}) {
+			return errors.New("speaker preferences saved, but the mixer could not apply them")
+		}
+	}
+	return nil
 }

@@ -103,6 +103,9 @@ var passRoutes = []passRoute{
 	// nodes of their own households, and checks ?household_id= membership (G9: the picker
 	// passes the active household, which also scopes a superuser's list).
 	ccUserRoute("GET /api/cc/api/v0/admin/nodes"),
+	ccUserRoute("GET /api/cc/api/v0/nodes/{node_id}/node-config"),
+	ccUserRoute("PATCH /api/cc/api/v0/nodes/{node_id}/node-config"),
+	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/node-config/basic"),
 	// Chat (webapp 01 §3.1): cc's mobile chat, unchanged. A node of another household is 404.
 	ccUserRoute("POST /api/cc/api/v0/mobile/chat"),
 	ccUserRoute("POST /api/cc/api/v0/mobile/chat/warmup"),
