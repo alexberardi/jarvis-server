@@ -145,12 +145,28 @@ func action(a string) func([]string) (map[string]any, bool) {
 var controlNodePatterns = []pattern{
 	regexPattern("control_node.mute", "Bypass LLM for 'mute' / 'mute the speaker'", "mute", muteRe, action("mute")),
 	regexPattern("control_node.unmute", "Bypass LLM for 'unmute' / 'unmute the speaker'", "unmute", unmuteRe, action("unmute")),
-	regexPattern("control_node.volume_set", "Bypass LLM for 'set volume to N' / 'change volume to N%'", "set the volume to 50%",
-		volumeSetRe, volumeTarget),
-	regexPattern("control_node.volume_up", "Bypass LLM for 'volume up' / 'louder' / 'turn it up'", "volume up", volumeUpRe, action("volume_up")),
-	regexPattern("control_node.volume_down", "Bypass LLM for 'volume down' / 'quieter' / 'turn it down'", "volume down",
-		volumeDownRe, action("volume_down")),
-	regexPattern("control_node.volume_bare", "Bypass LLM for bare 'volume N' / 'volume N%' (no verb)", "volume 7", volumeBareRe, volumeTarget),
+	thisSpeaker(regexPattern("control_node.volume_set", "Bypass LLM for 'set volume to N' / 'change volume to N%'", "set the volume to 50%",
+		volumeSetRe, volumeTarget)),
+	thisSpeaker(regexPattern("control_node.volume_up", "Bypass LLM for 'volume up' / 'louder' / 'turn it up'", "volume up", volumeUpRe, action("volume_up"))),
+	thisSpeaker(regexPattern("control_node.volume_down", "Bypass LLM for 'volume down' / 'quieter' / 'turn it down'", "volume down",
+		volumeDownRe, action("volume_down"))),
+	thisSpeaker(regexPattern("control_node.volume_bare", "Bypass LLM for bare 'volume N' / 'volume N%' (no verb)", "volume 7", volumeBareRe, volumeTarget)),
+}
+
+// otherDeviceRe is a media device named in a volume request ("turn the TV volume down"): that is
+// control_device's, not this speaker's (beyond N:, whose pattern took it).
+var otherDeviceRe = regexp.MustCompile(`(?i)\b(?:tv|television|telly|soundbar|sonos|stereo|receiver|roku|chromecast|apple\s+tv|fire\s+stick)\b`)
+
+// thisSpeaker leaves what names another media device to the model.
+func thisSpeaker(p pattern) pattern {
+	match := p.match
+	p.match = func(said string) (map[string]any, bool) {
+		if otherDeviceRe.MatchString(said) {
+			return nil, false
+		}
+		return match(said)
+	}
+	return p
 }
 
 // --- check_alerts: "what's up" ---

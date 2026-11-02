@@ -455,6 +455,23 @@ func TestTimerLabelSkipsLeadIns(t *testing.T) {
 	}
 }
 
+// Spoken lengths: compounds ("twenty five") and "an hour and a half" (blind toolbench misses).
+func TestTimerSpokenDurations(t *testing.T) {
+	for said, want := range map[string]int{
+		"timer, twenty five minutes":            1500,
+		"set a forty-five minute timer":         2700,
+		"set a timer for an hour and a half":    5400,
+		"timer for half an hour":                1800,
+		"set a timer for fifteen seconds":       15,
+		"set a timer for ninety minutes":        5400,
+		"timer for one hour and thirty minutes": 5400,
+	} {
+		if args, ok := setTimerMatch(said); !ok || args["duration_seconds"] != want {
+			t.Errorf("%q: %v (matched %v), want %d", said, args["duration_seconds"], ok, want)
+		}
+	}
+}
+
 // Spoken numbers carry no trailing zeros: "5 miles", "2.5", "212°F".
 func TestSpokenNumbersDropTrailingZeros(t *testing.T) {
 	c := &Convert{}
@@ -510,5 +527,21 @@ func TestShoppingAddAsARegular(t *testing.T) {
 	out, _ = s.Direct(ctx, "what's on my shopping list")
 	if out["message"] != "You have 3 items on your shopping list: chips, salsa, and soda." {
 		t.Fatalf("read = %v", out["message"])
+	}
+}
+
+// A volume request that names a TV or soundbar is control_device's: no speaker fast path.
+func TestControlNodeLeavesOtherDevices(t *testing.T) {
+	for said, want := range map[string]bool{
+		"turn the TV volume down":        false,
+		"soundbar volume up":             false,
+		"set the volume to 30 on the tv": false,
+		"turn the volume down":           true,
+		"louder":                         true,
+		"set the volume to 30":           true,
+	} {
+		if _, ok := ControlNodeMatch(said); ok != want {
+			t.Errorf("%q: fast path %v, want %v", said, ok, want)
+		}
 	}
 }

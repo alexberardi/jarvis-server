@@ -184,24 +184,26 @@ var informalDurations = []struct {
 	re   *regexp.Regexp
 	with string
 }{
+	{regexp.MustCompile(`(?i)\ban?\s+hour\s+and\s+a\s+half\b`), "90 minutes"},
 	{regexp.MustCompile(`(?i)\bhalf\s+an?\s+hour\b`), "30 minutes"},
 	{regexp.MustCompile(`(?i)\ba\s+half\s+hour\b`), "30 minutes"},
 	{regexp.MustCompile(`(?i)\bquarter\s+(?:of\s+an?\s+)?hour\b`), "15 minutes"},
 	{regexp.MustCompile(`(?i)\ban?\s+hour\b`), "60 minutes"},
 }
 
-// spokenCountRe is a number word before a unit ("two hour timer"), which N: doesn't read.
-var spokenCountRe = regexp.MustCompile(`(?i)\b(forty[\s-]five|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|sixty|ninety)(\s+(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\b)`)
+// spokenCountRe is a number word before a unit ("two hour timer", "twenty five minutes"),
+// which N: doesn't read.
+var spokenCountRe = regexp.MustCompile(`(?i)\b(?:(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[\s-]+(one|two|three|four|five|six|seven|eight|nine))?|(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen))(\s+(?:minutes?|seconds?|hours?|mins?|secs?|hrs?)\b)`)
 
-var spokenCounts = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
-	"eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20", "thirty": "30",
-	"forty": "40", "sixty": "60", "ninety": "90"}
+var spokenCounts = map[string]int{"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+	"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+	"sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+	"fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
 
+// spokenCount is the number in a spokenCountRe match: tens plus units, or one word.
 func spokenCount(m []string) string {
-	if n, ok := spokenCounts[m[1]]; ok {
-		return n
-	}
-	return "45" // forty five
+	l := strings.ToLower
+	return strconv.Itoa(spokenCounts[l(m[1])] + spokenCounts[l(m[2])] + spokenCounts[l(m[3])])
 }
 
 var labelStripWords = map[string]bool{
@@ -224,7 +226,7 @@ func setTimerMatch(said string) (map[string]any, bool) {
 	}
 	text = spokenCountRe.ReplaceAllStringFunc(text, func(w string) string {
 		m := spokenCountRe.FindStringSubmatch(w)
-		return spokenCount(m) + m[2]
+		return spokenCount(m) + m[4]
 	})
 	total := 0
 	for _, m := range timeChunkRe.FindAllStringSubmatch(text, -1) {
