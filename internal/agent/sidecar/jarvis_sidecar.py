@@ -991,11 +991,68 @@ def _get_state(fam, details: dict):
                          model=details.get("model") or "")
 
 
+def _manager_for(details: dict, method: str):
+    """The configured manager whose name is the device's source, when it implements method
+    (get_state/control, optional in the SDK); None keeps the device on its usual path."""
+    from jarvis_command_sdk import IJarvisDeviceManager
+
+    source = details.get("source") or "direct"
+    mgr = MANAGERS.get(source) if source != "direct" else None
+    if mgr is None or not _configured(mgr):
+        return None
+    own = getattr(type(mgr), method, None)
+    return mgr if own is not None and own is not getattr(IJarvisDeviceManager, method, None) else None
+
+
+def _manager_device(details: dict):
+    from jarvis_command_sdk import DeviceManagerDevice
+
+    entity_id = details.get("entity_id") or ""
+    return DeviceManagerDevice(
+        name=details.get("name") or entity_id, entity_id=entity_id,
+        domain=details.get("domain") or (entity_id.split(".", 1)[0] if "." in entity_id else ""),
+        protocol=details.get("protocol"), source=details.get("source") or "direct", model=details.get("model"),
+        local_ip=details.get("local_ip"), mac_address=details.get("mac_address"), cloud_id=details.get("cloud_id"))
+
+
+def _manager_state(mgr, details: dict) -> dict:
+    """A manager's device state: already in the SDK catalogue's fields, with the catalogue's UI
+    hints for its domain; the device's available_features narrow the type's."""
+    from jarvis_command_sdk import device_type
+
+    dev = _manager_device(details)
+    try:
+        raw = _run(mgr.get_state(dev))
+    except Exception as exc:
+        print(f"sidecar: manager {mgr.name} state failed for {dev.entity_id}: {exc}", file=sys.stderr)
+        raw = None
+    if not raw or raw.get("error"):
+        return {"entity_id": dev.entity_id, "domain": dev.domain, "state": {"state": "unknown"},
+                "error": str((raw or {}).get("error") or "Failed to query device state")}
+    t = device_type(dev.domain, raw.get("unit"))
+    hints = {"control_type": t["control_type"], "min_value": None, "max_value": None, "step": None, "unit": None,
+             **t["ui_hints"]}
+    if "available_features" in raw:
+        hints["features"] = list(raw["available_features"])
+    state = {k: v for k, v in raw.items() if k != "available_features"}
+    return {"entity_id": dev.entity_id, "domain": dev.domain, "state": state, "ui_hints": hints}
+
+
+def _manager_control(mgr, action_name: str, context: dict) -> dict:
+    dev = _manager_device(context)
+    try:
+        result = _control_loop().run_until_complete(mgr.control(dev, action_name, context))
+    except Exception as exc:
+        print(f"sidecar: manager {mgr.name}: control {action_name} failed for {dev.entity_id}: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    return {"success": bool(result.success), "error": None if result.success else result.error}
+
+
 def device_state(params: dict) -> dict:
     """The body for POST /device-state-results/{rid}: the device's state from its family,
     normalized for its domain, with UI hints; {"needs_pairing": true} with control_type
-    "pairing" when the family says so. A Home Assistant device (source not "direct") has no
-    state here: N: asks HA through ha_shared, which this node doesn't have."""
+    "pairing" when the family says so. A device whose source is a manager that implements
+    get_state (Home Assistant, say) gets its state from that manager instead."""
     details = params.get("details") or {}
     entity_id = details.get("entity_id") or ""
     domain = details.get("domain") or ""
@@ -1003,6 +1060,9 @@ def device_state(params: dict) -> dict:
         return {"error": "missing entity_id"}
     if not domain and "." in entity_id:
         domain = entity_id.split(".", 1)[0]
+    mgr = _manager_for(details, "get_state")
+    if mgr is not None:
+        return _manager_state(mgr, {**details, "domain": domain})
     raw = None
     if (details.get("source") or "direct") == "direct":
         fam = _active_families().get(details.get("protocol") or "")
@@ -1281,6 +1341,9 @@ def action(commands: dict, params: dict) -> dict:
     name = params.get("command_name") or ""
     action_name = params.get("action_name") or ""
     context = params.get("context") or {}
+    mgr = _manager_for(context, "control") if name == "control_device" else None
+    if mgr is not None:
+        return _manager_control(mgr, action_name, context)
     cmd = commands.get(name) if params.get("enabled", True) else None
     if cmd is None and name == "control_device":
         return _device_control(action_name, context)
