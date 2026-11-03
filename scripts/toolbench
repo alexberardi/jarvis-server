@@ -267,6 +267,25 @@ def score(case, call, reply=""):
     return True, a_ok
 
 
+def bare_call(reply, offered):
+    """jarvisd's rescue of a call the server didn't parse (cc/engine.go trailingBareCall): a
+    {"name", "arguments"} object of an offered tool ending the reply, outside any <think>."""
+    text = re.sub(r"(?is)<think>.*?(?:</think>|\Z)", "", reply).strip()
+    for m in re.finditer(r"\{", text):
+        try:
+            obj, end = json.JSONDecoder().raw_decode(text, m.start())
+        except json.JSONDecodeError:
+            continue
+        if text[end:].strip():
+            continue  # as pyjson.Loads(text[i:]) fails on anything after the object
+        if not isinstance(obj, dict):
+            return None
+        if obj.get("name") not in offered or not isinstance(obj.get("arguments"), dict):
+            return None
+        return {"name": obj["name"], "args": obj["arguments"]}
+    return None
+
+
 def run(args):
     url, model, hdr = endpoint(args)
     bases = {}
@@ -341,7 +360,8 @@ def run(args):
                     a = {}
                 call = {"name": tc["function"]["name"], "args": a}
             elif msg.get("content"):
-                call = text_call(msg["content"])  # llm.tool_calling=text: the call is in the reply
+                call = bare_call(msg["content"], {t["function"]["name"] for t in body.get("tools") or []}) \
+                    or text_call(msg["content"])  # llm.tool_calling=text: the call is in the reply
             tool_ok, args_ok = (False, False) if err else score(c, call, msg.get("content") or "")
             usage = resp.get("usage") or {}
             results.append({"id": c["id"], "run": i, "tool_ok": tool_ok, "args_ok": tool_ok and args_ok,

@@ -90,7 +90,7 @@
       }
     ],
     "function": {
-      "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list, delete or snooze them. Not for a length of time: use set_timer.",
+      "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list ('what alarms do I have'), delete or snooze them. Not for a length of time: use set_timer. Not for Jarvis doing a task: schedule_errand.",
       "name": "reminder",
       "parameters": {
         "properties": {
@@ -187,7 +187,7 @@
       "At least one time parameter (resolved_datetimes with a time-of-day key, time, or relative_minutes) is required for 'set'",
       "This is for reminders (absolute time), NOT timers (relative duration countdowns)"
     ],
-    "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list, delete or snooze them. Not for a length of time: use set_timer.",
+    "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list ('what alarms do I have'), delete or snooze them. Not for a length of time: use set_timer. Not for Jarvis doing a task: schedule_errand.",
     "examples": [
       {
         "expected_parameters": {

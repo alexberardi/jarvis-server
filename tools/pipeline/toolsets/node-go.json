@@ -445,7 +445,7 @@
   "type": "function",
   "function": {
    "name": "control_node",
-   "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+   "description": "This speaker's own volume or mute: 'louder', 'speak up' (volume_up), 'you're too loud' (volume_down). A TV, soundbar or other smart-home device: control_device.",
    "parameters": {
     "type": "object",
     "properties": {
@@ -727,7 +727,7 @@
   "type": "function",
   "function": {
    "name": "reminder",
-   "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list, delete or snooze them. Not for a length of time: use set_timer.",
+   "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list ('what alarms do I have'), delete or snooze them. Not for a length of time: use set_timer. Not for Jarvis doing a task: schedule_errand.",
    "parameters": {
     "type": "object",
     "properties": {
@@ -899,7 +899,7 @@
   "type": "function",
   "function": {
    "name": "shopping_list",
-   "description": "Add to, read, check off or clear the shopping list.",
+   "description": "The shopping list (things to buy): add ('we need eggs'), read, check off bought items, remove or clear. Tasks, chores and anything said for the to-do list ('put bread on my to-do list'): todo_list.",
    "parameters": {
     "type": "object",
     "properties": {
@@ -1236,7 +1236,7 @@
   "type": "function",
   "function": {
    "name": "todo_list",
-   "description": "Add to, read, complete or clear the to-do list. Not for timed reminders.",
+   "description": "The to-do list (tasks to do): add, read ('what do I still need to do'), complete ('I finished X', 'check off X', 'mark it done'), uncomplete ('I didn't finish X') or clear. Things to buy: shopping_list. Timed reminders: reminder.",
    "parameters": {
     "type": "object",
     "properties": {
@@ -1379,7 +1379,7 @@
   "type": "function",
   "function": {
    "name": "check_alerts",
-   "description": "Read out or dismiss pending alerts (news, calendar).",
+   "description": "Read out or dismiss Jarvis's queued alerts (news, calendar) when asked for them ('any alerts', 'what's up', 'clear my alerts'). Never for devices, locks, reminders, alarms, memories or a question to someone else.",
    "parameters": {
     "type": "object",
     "properties": {

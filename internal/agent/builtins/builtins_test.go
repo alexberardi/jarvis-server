@@ -455,6 +455,68 @@ func TestTimerLabelSkipsLeadIns(t *testing.T) {
 	}
 }
 
+// Spoken lengths: compounds ("twenty five") and "an hour and a half" (blind toolbench misses).
+func TestTimerSpokenDurations(t *testing.T) {
+	for said, want := range map[string]int{
+		"timer, twenty five minutes":            1500,
+		"set a forty-five minute timer":         2700,
+		"set a timer for an hour and a half":    5400,
+		"timer for half an hour":                1800,
+		"set a timer for fifteen seconds":       15,
+		"set a timer for ninety minutes":        5400,
+		"timer for one hour and thirty minutes": 5400,
+	} {
+		if args, ok := setTimerMatch(said); !ok || args["duration_seconds"] != want {
+			t.Errorf("%q: %v (matched %v), want %d", said, args["duration_seconds"], ok, want)
+		}
+	}
+}
+
+// The set fast path wants a set-shaped phrase, not any "timer" with a length.
+func TestTimerSetFastPathIsSetShaped(t *testing.T) {
+	for said, want := range map[string]bool{
+		"set a timer for 5 minutes":                     true,
+		"egg timer 7 minutes":                           true,
+		"two hour timer please":                         true,
+		"timer, twenty five minutes":                    true,
+		"I need a 3 minute timer for the tea":           true,
+		"could you start a new egg timer, 7 min":        true,
+		"my oven timer took 20 minutes":                 false,
+		"what's a good timer app for 5 minute workouts": false,
+		"is the 10 minute timer done":                   false,
+		"the timer went off after 3 minutes":            false,
+	} {
+		if m, ok := TimersMatch(said); (ok && m.Command == "set_timer") != want {
+			t.Errorf("%q: set fast path %v (%+v), want %v", said, ok, m, want)
+		}
+	}
+}
+
+// The model's set_timer is corrected from what was said: one length wins, "for the X" fills a
+// missing label; several lengths or none leave the model's call alone.
+func TestSetTimerFromSpeech(t *testing.T) {
+	for _, c := range []struct {
+		said  string
+		args  map[string]any
+		secs  any
+		label any
+	}{
+		{"give me 45 seconds", map[string]any{"duration_seconds": 450}, 45, nil},
+		{"can you time an hour and a half for the roast", map[string]any{"duration_seconds": 900}, 5400, "roast"},
+		{"hey can you do 25 minutes for the pizza", map[string]any{"duration_seconds": 1500}, 1500, "pizza"},
+		{"count down 30 minutes, I'm taking a nap", map[string]any{"duration_seconds": 1800}, 1800, nil},
+		{"okay time that for me", map[string]any{"duration_seconds": 720}, 720, nil},
+		{"set a timer for 5 minutes then another for 10 minutes", map[string]any{"duration_seconds": 300}, 300, nil},
+		{"3 minutes for the eggs", map[string]any{"duration_seconds": 180, "label": "boiled eggs"}, 180, "boiled eggs"},
+		{"", map[string]any{"duration_seconds": 60}, 60, nil},
+	} {
+		got := setTimerFromSpeech(c.args, c.said)
+		if got["duration_seconds"] != c.secs || got["label"] != c.label {
+			t.Errorf("%q: %v, want %v seconds label %v", c.said, got, c.secs, c.label)
+		}
+	}
+}
+
 // Spoken numbers carry no trailing zeros: "5 miles", "2.5", "212°F".
 func TestSpokenNumbersDropTrailingZeros(t *testing.T) {
 	c := &Convert{}
@@ -510,5 +572,53 @@ func TestShoppingAddAsARegular(t *testing.T) {
 	out, _ = s.Direct(ctx, "what's on my shopping list")
 	if out["message"] != "You have 3 items on your shopping list: chips, salsa, and soda." {
 		t.Fatalf("read = %v", out["message"])
+	}
+}
+
+// A volume request that names a TV or soundbar is control_device's: no speaker fast path.
+func TestControlNodeLeavesOtherDevices(t *testing.T) {
+	for said, want := range map[string]bool{
+		"turn the TV volume down":        false,
+		"soundbar volume up":             false,
+		"set the volume to 30 on the tv": false,
+		"turn the volume down":           true,
+		"louder":                         true,
+		"set the volume to 30":           true,
+	} {
+		if _, ok := ControlNodeMatch(said); ok != want {
+			t.Errorf("%q: fast path %v, want %v", said, ok, want)
+		}
+	}
+}
+
+// A check-off on the wrong list lands on the list that holds every item, and only when the
+// other list holds none of them.
+func TestCheckOffFindsTheRightList(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, td := &Shopping{Store: st}, &Todo{Store: st}
+	ctx, uid := context.Background(), int64(7)
+	req := node.Request{UserID: &uid}
+	td.Call(ctx, todoName, map[string]any{"action": "add", "tasks": []any{"call the plumber", "eggs"}}, req)
+	s.Call(ctx, shoppingName, map[string]any{"action": "add", "items": []any{"milk", "eggs"}}, req)
+	done := func(find func(string) (rec, bool), item, field string) bool {
+		r, ok := find(item)
+		return ok && r.truthy(field)
+	}
+
+	s.Call(ctx, shoppingName, map[string]any{"action": "check_off", "items": []any{"call the plumber"}}, req)
+	if !done(td.find, "call the plumber", "completed") {
+		t.Error("a to-do task checked off the shopping list wasn't completed")
+	}
+	td.Call(ctx, todoName, map[string]any{"action": "complete", "tasks": []any{"milk"}}, req)
+	if !done(s.find, "milk", "checked") {
+		t.Error("a shopping item marked done on the to-do list wasn't checked off")
+	}
+	// On both lists: each tool keeps to its own.
+	s.Call(ctx, shoppingName, map[string]any{"action": "check_off", "items": []any{"eggs"}}, req)
+	if !done(s.find, "eggs", "checked") || done(td.find, "eggs", "completed") {
+		t.Error("eggs on both lists: the shopping check-off should stay on the shopping list")
 	}
 }

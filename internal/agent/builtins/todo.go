@@ -58,6 +58,9 @@ func (t *Todo) Call(_ context.Context, name string, args map[string]any, req nod
 	case "read":
 		return t.read(), true
 	case "complete":
+		if sh := (&Shopping{Store: t.Store, Now: t.Now}); onlyOn(sh.find, t.find, tasks) {
+			return sh.checkOff(tasks), true // a bought item marked done on the wrong list
+		}
 		return t.setCompleted(tasks, true), true
 	case "uncomplete":
 		return t.setCompleted(tasks, false), true

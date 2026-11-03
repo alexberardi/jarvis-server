@@ -146,7 +146,7 @@ Kitchen:
 Living Room:
 - light.lamp: Lamp (on)
 
-Use control_device to control devices. Use get_device_status to check state. Copy entity_id EXACTLY as shown above.
+Use control_device to control devices. Answer questions about their state from this list. Copy entity_id EXACTLY as shown above.
 When the user doesn't specify a room, prefer devices in 'kitchen' (the current room).
 ```
 

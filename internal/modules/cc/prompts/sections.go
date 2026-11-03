@@ -237,7 +237,7 @@ func agentContextSummary(ctx Context) string {
 	if f := floorParts(ha); f != "" {
 		s += "\nFloors: " + f
 	}
-	s += "\nCall control_device to control devices. Call get_device_status to check device state."
+	s += "\nCall control_device to control devices. Call get_ha_entities to find devices or check their state."
 	if ctx.Room != "" {
 		s += "\nWhen the user doesn't specify a room, prefer devices in '" + ctx.Room + "' (the current room)."
 	}
@@ -332,7 +332,6 @@ func agentContextByRoom(ctx Context, ha *pyjson.Object) string {
 		}
 	}
 	s += "\nUse control_device to control devices. "
-	s += "Use get_device_status to check state. "
 	s += "Copy entity_id EXACTLY as shown above."
 	if ctx.Room != "" {
 		s += "\nWhen the user doesn't specify a room, prefer devices in '" + ctx.Room + "' (the current room)."

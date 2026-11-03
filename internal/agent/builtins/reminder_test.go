@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
@@ -173,6 +174,35 @@ func TestReminderInFastPath(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("%q: %s, want %s", said, got, want)
+		}
+	}
+}
+
+// Small models write "every ..." as a date key; the post-process moves it into recurrence.
+func TestReminderRecurrenceFromDateKeys(t *testing.T) {
+	cases := []struct {
+		args       map[string]any
+		recurrence any
+		keys       []any
+	}{
+		{map[string]any{"resolved_datetimes": []any{"every weekday"}}, "weekdays", nil},
+		{map[string]any{"resolved_datetimes": []any{"every_day"}}, "daily", nil},
+		{map[string]any{"resolved_datetimes": []any{"Every Friday"}}, "weekly", []any{"next_friday"}},
+		{map[string]any{"resolved_datetimes": []any{"every other sunday"}}, "biweekly", []any{"next_sunday"}},
+		{map[string]any{"resolved_datetimes": []any{"every mondays"}}, "weekly", []any{"next_monday"}},
+		{map[string]any{"resolved_datetimes": []any{"tomorrow", "monthly"}}, "monthly", []any{"tomorrow"}},
+		// left alone: no "every", or the model already filled recurrence
+		{map[string]any{"resolved_datetimes": []any{"tomorrow"}}, nil, []any{"tomorrow"}},
+		{map[string]any{"resolved_datetimes": []any{"every weekday"}, "recurrence": "daily"}, "daily", []any{"every weekday"}},
+	}
+	for _, c := range cases {
+		c.args["text"] = "x"
+		got := reminderPostProcess(c.args)
+		if got["recurrence"] != c.recurrence || !reflect.DeepEqual(got["resolved_datetimes"], c.keys) && len(c.keys) > 0 {
+			t.Errorf("%v: got recurrence %v keys %v, want %v %v", c.args, got["recurrence"], got["resolved_datetimes"], c.recurrence, c.keys)
+		}
+		if len(c.keys) == 0 && len(got["resolved_datetimes"].([]any)) != 0 {
+			t.Errorf("%v: keys left %v", c.args, got["resolved_datetimes"])
 		}
 	}
 }

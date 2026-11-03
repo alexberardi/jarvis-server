@@ -228,7 +228,50 @@ func reminderPostProcess(in map[string]any) map[string]any {
 			args["action"] = "set"
 		}
 	}
+	if !pyTruthy(args["recurrence"]) {
+		recurrenceFromKeys(args)
+	}
 	return args
+}
+
+// recurrenceFromKeys moves an "every ..." date key into recurrence: small models write
+// "every weekday" or "every friday" as a date key instead of filling recurrence.
+func recurrenceFromKeys(args map[string]any) {
+	keys, ok := args["resolved_datetimes"].([]any)
+	if !ok {
+		return
+	}
+	var kept []any
+	found := ""
+	for _, k := range keys {
+		s := strings.Join(strings.Fields(strings.ReplaceAll(strings.ToLower(pyStr(k)), "_", " ")), " ")
+		if rc, ok := keyRecurrences[s]; ok && found == "" {
+			found = rc
+			continue
+		}
+		rest, every := strings.CutPrefix(s, "every ")
+		day, biweekly := strings.CutPrefix(rest, "other ")
+		day = strings.TrimSuffix(day, "s")
+		if _, isDay := weekdayNames[day]; every && isDay && found == "" {
+			found = "weekly"
+			if biweekly {
+				found = "biweekly"
+			}
+			kept = append(kept, "next_"+day)
+			continue
+		}
+		kept = append(kept, k)
+	}
+	if found != "" {
+		args["recurrence"] = found
+		args["resolved_datetimes"] = kept
+	}
+}
+
+var keyRecurrences = map[string]string{
+	"daily": "daily", "every day": "daily", "everyday": "daily", "each day": "daily",
+	"weekdays": "weekdays", "every weekday": "weekdays", "weekly": "weekly", "every week": "weekly",
+	"biweekly": "biweekly", "every other week": "biweekly", "monthly": "monthly", "every month": "monthly",
 }
 
 func (r *Reminder) set(args map[string]any, user *int64) map[string]any {

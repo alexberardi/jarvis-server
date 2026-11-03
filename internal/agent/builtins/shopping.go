@@ -64,6 +64,9 @@ func (s *Shopping) Call(_ context.Context, name string, args map[string]any, req
 	case "read":
 		return s.read(), true
 	case "check_off":
+		if t := (&Todo{Store: s.Store, Now: s.Now}); onlyOn(t.find, s.find, items) {
+			return t.setCompleted(items, true), true // a task checked off on the wrong list
+		}
 		return s.checkOff(items), true
 	case "remove":
 		return s.remove(items), true
@@ -574,4 +577,19 @@ func (s *Shopping) Summaries(_ context.Context, _ string, records []nodesettings
 
 func (s *Shopping) Create(context.Context, string, nodesettings.Object, json.Number) (string, json.RawMessage, error) {
 	return "", nil, noCreate(shoppingName)
+}
+
+// onlyOn reports whether every item is on the list mine finds and none on the list other finds:
+// small models check a to-do task off the shopping list ("mark call the plumber as done") and
+// the other way round.
+func onlyOn(mine func(string) (rec, bool), other func(string) (rec, bool), items []string) bool {
+	for _, i := range items {
+		if _, ok := other(i); ok {
+			return false
+		}
+		if _, ok := mine(i); !ok {
+			return false
+		}
+	}
+	return len(items) > 0
 }
