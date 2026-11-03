@@ -332,7 +332,6 @@ func agentContextByRoom(ctx Context, ha *pyjson.Object) string {
 		}
 	}
 	s += "\nUse control_device to control devices. "
-	s += "Answer questions about their state from this list. "
 	s += "Copy entity_id EXACTLY as shown above."
 	if ctx.Room != "" {
 		s += "\nWhen the user doesn't specify a room, prefer devices in '" + ctx.Room + "' (the current room)."
