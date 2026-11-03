@@ -769,7 +769,7 @@
    "type": "function",
    "function": {
     "name": "shopping_list",
-    "description": "The shopping list (things to buy): add ('I'm out of milk'), read, check off bought items, remove or clear. Tasks and chores: todo_list.",
+    "description": "The shopping list (things to buy): add ('we need eggs'), read, check off bought items, remove or clear. Tasks, chores and anything said for the to-do list ('put bread on my to-do list'): todo_list.",
     "parameters": {
      "type": "object",
      "properties": {
