@@ -425,6 +425,54 @@ func TestGateHidesDisabledCommands(t *testing.T) {
 }
 
 // A Pi's node_config (Handler.NodeConfig) goes in the snapshot as given.
+// A snapshot for a user lists the fields that user's settings call for (UserSecrets: the
+// sidecar's required_secrets read as them): picking "proton" shows the IMAP host. Without a user,
+// or when the lookup fails, the commands' own lists go out; a command missing from the map keeps
+// its own.
+func TestSnapshotListsTheUsersSecretFields(t *testing.T) {
+	h, f, _ := newHandler(t, "n1")
+	provider := SecretSpec{Key: "MAIL_PROVIDER", Scope: "user", ValueType: "string", EnumValues: []string{"gmail", "proton"}}
+	host := SecretSpec{Key: "MAIL_IMAP_HOST", Scope: "user", ValueType: "string"}
+	h.Commands = func(context.Context) []Command {
+		return []Command{{Name: "mailbox", Secrets: []SecretSpec{provider}}, {Name: "get_weather", Secrets: weatherCmds[0].Secrets}}
+	}
+	var asked []int64
+	var fail error
+	h.UserSecrets = func(_ context.Context, uid int64) (map[string][]SecretSpec, error) {
+		asked = append(asked, uid)
+		return map[string][]SecretSpec{"mailbox": {provider, host}}, fail
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	seven := int64(7)
+	_ = h.Store.SetSecret("MAIL_IMAP_HOST", "127.0.0.1", "user", "", &seven)
+	ctx := context.Background()
+
+	h.Handle(ctx, TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1","user_id":7}`))
+	snap := decryptUpload(t, f, h, "r1")
+	if s := secretsOf(snap, "mailbox"); len(s) != 2 || s["MAIL_IMAP_HOST"]["value"] != "127.0.0.1" {
+		t.Fatalf("user 7's mailbox fields = %v", s)
+	}
+	if s := secretsOf(snap, "get_weather"); len(s) != len(weatherCmds[0].Secrets) {
+		t.Errorf("a command missing from the map lost its fields: %v", s)
+	}
+	if len(asked) != 1 || asked[0] != 7 {
+		t.Errorf("asked for %v", asked)
+	}
+
+	h.Handle(ctx, TopicSettingsRequest, []byte(`{"request_id":"r2","node_id":"n1"}`))
+	if s := secretsOf(decryptUpload(t, f, h, "r2"), "mailbox"); len(s) != 1 || len(asked) != 1 {
+		t.Errorf("no user: fields %v, asked %v", s, asked)
+	}
+
+	fail = errors.New("sidecar gone")
+	h.Handle(ctx, TopicSettingsRequest, []byte(`{"request_id":"r3","node_id":"n1","user_id":7}`))
+	if s := secretsOf(decryptUpload(t, f, h, "r3"), "mailbox"); len(s) != 1 {
+		t.Errorf("failed lookup: fields %v", s)
+	}
+}
+
 func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
 	h, f, _ := newHandler(t, "n1")
 	h.Commands = func(context.Context) []Command { return nil }
