@@ -36,8 +36,12 @@ type Reminder struct {
 	Log   *slog.Logger
 	Now   func() time.Time // nil: time.Now
 	Loc   *time.Location   // the node's zone; nil: time.Local
+	// OnChange is called after a reminder is set, deleted or snoozed (the poller's Wake, so it
+	// re-plans its next poll). nil: none.
+	OnChange func()
 
-	mu sync.Mutex // one change at a time: the poller, the commands and the app read, then write
+	mu     sync.Mutex     // one change at a time: the poller, the commands and the app read, then write
+	unsent []reminderData // fired while not connected: pushed by the next Due once connected
 }
 
 const (
@@ -207,13 +211,49 @@ func (r *Reminder) Call(_ context.Context, name string, args map[string]any, req
 	defer r.mu.Unlock()
 	switch args["action"] {
 	case "set":
+		defer r.changed()
 		return r.set(args, req.UserID), true
 	case "list":
 		return r.list(args, req.UserID), true
 	case "delete":
+		defer r.changed()
 		return r.remove(args, req.UserID), true
 	}
+	defer r.changed()
 	return r.snooze(args, req.UserID), true
+}
+
+func (r *Reminder) changed() {
+	if r.OnChange != nil {
+		r.OnChange()
+	}
+}
+
+// NextDue is the earliest time a pending reminder comes due: its due time, or its snooze's end
+// when that is later. false: none pending.
+func (r *Reminder) NextDue() (time.Time, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var next time.Time
+	found := false
+	for _, d := range r.all() {
+		if d.Announced {
+			continue
+		}
+		at, _, ok := pyFromISO(d.DueAt)
+		if !ok {
+			continue
+		}
+		if d.SnoozeUntil != nil {
+			if s, _, ok := pyFromISO(*d.SnoozeUntil); ok && s.After(at) {
+				at = s
+			}
+		}
+		if !found || at.Before(next) {
+			next, found = at, true
+		}
+	}
+	return next, found
 }
 
 // reminderPostProcess is post_process_tool_call: no action is set with a text, else list.
@@ -531,6 +571,12 @@ func (r *Reminder) Due(ctx context.Context) ([]reminders.Due, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
+	if held := r.unsent; len(held) > 0 && r.connected() {
+		r.unsent = nil
+		for _, d := range held {
+			r.push(ctx, d)
+		}
+	}
 	for _, d := range r.all() {
 		if !d.Announced || d.Recurrence != nil || d.LastAnnouncedAt == nil {
 			continue
@@ -577,13 +623,18 @@ func isPast(iso string, now time.Time) bool {
 
 const pushTimeout = 10 * time.Second
 
+func (r *Reminder) connected() bool { return r.CC != nil && r.CC() != nil }
+
+// push sends d's push, or holds it until connected (a reminder due while the node was down
+// fires at the first poll, before the connection is up). Callers hold mu.
 func (r *Reminder) push(ctx context.Context, d reminderData) {
 	var cc *node.CC
 	if r.CC != nil {
 		cc = r.CC()
 	}
 	if cc == nil {
-		r.log().Warn("reminder: push not sent: not connected", "id", d.ReminderID)
+		r.log().Info("reminder: push held until connected", "id", d.ReminderID)
+		r.unsent = append(r.unsent, d)
 		return
 	}
 	body := map[string]any{"title": "Reminder", "body": d.Text, "priority": "high", "category": "reminder"}
