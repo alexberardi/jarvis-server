@@ -89,6 +89,13 @@ func (l *Live) DataCommands() []nodesettings.DataCommand {
 	return nil
 }
 
+func (l *Live) UserSecrets(ctx context.Context, uid int64) (map[string][]nodesettings.SecretSpec, error) {
+	if sc := l.Current(); sc != nil {
+		return sc.UserSecrets(ctx, uid)
+	}
+	return nil, ErrNoPackages
+}
+
 func (l *Live) Summaries(ctx context.Context, command string, records []nodesettings.Object) ([]map[string]any, error) {
 	if sc := l.Current(); sc != nil {
 		return sc.Summaries(ctx, command, records)
