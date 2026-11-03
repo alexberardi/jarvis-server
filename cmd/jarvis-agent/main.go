@@ -865,8 +865,8 @@ func runAgent(ctx context.Context, args []string) error {
 		duck.EC.Cleanup(ctx)   // nor the echo canceller loaded
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
-	if tf.host != nil {
-		alerts := startAlerts(ctx, tf.host, mic, tf.reminder, log)
+	if q := alertQueue(tf.host, tf.reminder); q != nil {
+		alerts := startAlerts(ctx, q, mic, tf.reminder, log)
 		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
 	}
 	hd := openHat(hf, press, log)
