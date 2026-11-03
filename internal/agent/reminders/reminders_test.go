@@ -31,8 +31,8 @@ func newClock() *fakeClock {
 
 func (c *fakeClock) After(d time.Duration) <-chan time.Time { c.waits <- d; return c.fire }
 
-// Run polls at once, then every minute while a reminder is pending and every five otherwise
-// (N:reminder_agent.py); each due reminder is queued as a priority-3 "Reminder: …" alert for ten
+// Run polls at once, then every minute (N:reminder_agent.py's five idle minutes made a reminder
+// up to five minutes late); each due reminder is queued as a priority-3 "Reminder: …" alert for ten
 // minutes; a failed poll is logged once and retried in a minute.
 func TestPollerScheduleAndAlerts(t *testing.T) {
 	answers := make(chan answer, 1)
@@ -83,4 +83,47 @@ func TestPollerScheduleAndAlerts(t *testing.T) {
 	if n := strings.Count(logs.String(), "reminders: not checked"); n != 1 {
 		t.Errorf("the error was logged %d times:\n%s", n, logs.String())
 	}
+}
+
+// A poll is never later than the next due time (a little after it, so it is past), and Wake
+// polls at once: a reminder set while idle fires on time, not at the next interval.
+func TestPollerWaitsForTheNextDueAndWakes(t *testing.T) {
+	answers := make(chan answer, 1)
+	clock := newClock()
+	next, has := clock.now.Add(20*time.Second), true
+	p := &Poller{Alerts: &sdkhost.Alerts{}, Now: func() time.Time { return clock.now }, After: clock.After,
+		Next:  func() (time.Time, bool) { return next, has },
+		Check: func(context.Context) ([]Due, int, error) { a := <-answers; return a.due, a.pending, a.err }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+
+	answers <- answer{pending: 1}
+	if got := <-clock.waits; got != 20*time.Second+nextSlack {
+		t.Fatalf("next due in 20 s: waits %v", got)
+	}
+	// Woken before the wait ends (a reminder set): polls again at once, now with nothing due.
+	has = false
+	p.Wake()
+	answers <- answer{}
+	if got := <-clock.waits; got != Idle {
+		t.Fatalf("after the wake: waits %v", got)
+	}
+	clock.fire <- clock.now
+	next, has = clock.now.Add(-time.Second), true // overdue (snoozed elsewhere): no busy loop
+	answers <- answer{pending: 1}
+	if got := <-clock.waits; got != nextSlack {
+		t.Fatalf("overdue: waits %v", got)
+	}
+	next = clock.now.Add(time.Hour) // far off: the interval still bounds the wait
+	clock.fire <- clock.now
+	answers <- answer{pending: 1}
+	if got := <-clock.waits; got != Refresh {
+		t.Fatalf("an hour off: waits %v", got)
+	}
+	cancel()
+	<-done
+	idle := &Poller{}
+	idle.Wake()
+	idle.Wake() // not running: the wakes collapse into one, never block
 }

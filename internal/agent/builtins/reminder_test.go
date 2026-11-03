@@ -176,3 +176,65 @@ func TestReminderInFastPath(t *testing.T) {
 		}
 	}
 }
+
+// A reminder that fires before the node is connected (due while it was down: the first poll runs
+// before the connection is up) keeps its push, and the next Due once connected sends it once.
+func TestReminderPushHeldUntilConnected(t *testing.T) {
+	r, _ := newYorkReminder(t)
+	cc := &fakeCC{}
+	client := cc.start(t)
+	var live *node.CC
+	r.CC = func() *node.CC { return live }
+	r.save(reminderData{ReminderID: "rem_1", Text: "walk the dogs", DueAt: "2026-10-27T15:00:00+00:00", CreatedAt: "x"})
+	if err := r.Store.SetSecret(reminderPushKey, "true", "integration", "bool", nil); err != nil {
+		t.Fatal(err)
+	}
+	if due, _, _ := r.Due(context.Background()); len(due) != 1 {
+		t.Fatalf("offline: due %+v", due)
+	}
+	if p := cc.last("/api/v0/node/push-notification"); p != nil {
+		t.Fatalf("pushed while offline: %v", p)
+	}
+	live = client
+	if due, _, _ := r.Due(context.Background()); len(due) != 0 {
+		t.Fatalf("fired again: %+v", due)
+	}
+	if p := cc.last("/api/v0/node/push-notification"); p["body"] != "walk the dogs" {
+		t.Fatalf("held push = %v", p)
+	}
+	if len(r.unsent) != 0 {
+		t.Errorf("still held: %+v", r.unsent)
+	}
+}
+
+// NextDue is the earliest pending due time, a snooze's end when later; setting a reminder calls
+// OnChange (the poller re-plans), listing doesn't.
+func TestReminderNextDueAndOnChange(t *testing.T) {
+	r, _ := newYorkReminder(t)
+	if _, ok := r.NextDue(); ok {
+		t.Fatal("next with none pending")
+	}
+	changes := 0
+	r.OnChange = func() { changes++ }
+	user := int64(1)
+	if out, _ := r.Call(context.Background(), "reminder", map[string]any{"action": "set", "text": "tea", "relative_minutes": 5},
+		node.Request{UserID: &user}); out["reminder_id"] == nil {
+		t.Fatalf("set: %v", out)
+	}
+	if changes != 1 {
+		t.Errorf("set: %d changes", changes)
+	}
+	r.Call(context.Background(), "reminder", map[string]any{"action": "list"}, node.Request{UserID: &user})
+	if changes != 1 {
+		t.Errorf("list: %d changes", changes)
+	}
+	if at, ok := r.NextDue(); !ok || !at.Equal(time.Date(2026, 10, 27, 16, 5, 0, 0, time.UTC)) {
+		t.Errorf("next = %v, %v", at, ok)
+	}
+	snooze := "2026-10-27T17:00:00+00:00"
+	r.save(reminderData{ReminderID: "rem_s", Text: "early", DueAt: "2026-10-27T15:00:00+00:00", CreatedAt: "x", SnoozeUntil: &snooze})
+	r.save(reminderData{ReminderID: "rem_a", Text: "done", DueAt: "2026-10-27T14:00:00+00:00", CreatedAt: "x", Announced: true})
+	if at, _ := r.NextDue(); !at.Equal(time.Date(2026, 10, 27, 16, 5, 0, 0, time.UTC)) {
+		t.Errorf("with a snoozed and an announced one: next = %v", at)
+	}
+}
