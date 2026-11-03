@@ -46,6 +46,17 @@ func settingsCommands(tools node.Multi) func(ctx context.Context) []nodesettings
 	}
 }
 
+// userSecrets is the sidecar's commands' secrets as one user sees them, for that user's
+// snapshot (nil without a sidecar: the defaults stand).
+func userSecrets(tools node.Multi) func(context.Context, int64) (map[string][]nodesettings.SecretSpec, error) {
+	for _, t := range tools {
+		if sc, ok := t.(*sidecar.Live); ok {
+			return sc.UserSecrets
+		}
+	}
+	return nil
+}
+
 // secretsDeclarer is a Go built-in with settings of its own (the shopping export's store).
 type secretsDeclarer interface {
 	Secrets(command string) []nodesettings.SecretSpec
@@ -141,7 +152,8 @@ func (m mergedData) UpdateRecord(command, key string, patch nodesettings.Object,
 // when set, runs after the app pushes secrets (a Pi describes its families again).
 func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, nodeConfig func() map[string]any,
 	devs func(context.Context) nodesettings.Devices, secrets func(), log *slog.Logger) {
-	h := &nodesettings.Handler{NodeID: r.Creds.NodeID, Store: st, Commands: settingsCommands(tools), NodeConfig: nodeConfig, Log: log,
+	h := &nodesettings.Handler{NodeID: r.Creds.NodeID, Store: st, Commands: settingsCommands(tools),
+		UserSecrets: userSecrets(tools), NodeConfig: nodeConfig, Log: log,
 		Devices: devs, SecretsChanged: secrets, KeyChanged: r.BeatNow} // the app sees needs_k2: false within seconds
 	var once sync.Once
 	bind := func(cc *node.CC) *nodesettings.Handler {
