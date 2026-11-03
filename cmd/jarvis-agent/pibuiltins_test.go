@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
+	"github.com/alexberardi/jarvis-server/internal/agent/reminders"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
@@ -91,6 +94,46 @@ func TestAlertsOnTheHat(t *testing.T) {
 	readAlerts(ctx, a, leds, log)
 	if q.Count() != 1 || leds.Current() != hat.Error {
 		t.Errorf("unheard: %d queued, LEDs %q", q.Count(), leds.Current())
+	}
+}
+
+// A desktop has no Pi host, but the reminders it takes still fire: they get a queue of their
+// own, the poller moves a due one into it and the announcer says it (it once never fired).
+func TestDesktopRemindersFire(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 2, 20, 0, 0, 0, time.UTC)
+	rem := &builtins.Reminder{Store: st, Loc: time.UTC, Now: func() time.Time { return now }, Log: log}
+	user := int64(1)
+	if out, _ := rem.Call(ctx, "reminder", map[string]any{"action": "set", "text": "walk the dogs", "relative_minutes": 1},
+		node.Request{UserID: &user}); out["reminder_id"] == nil {
+		t.Fatalf("set: %v", out)
+	}
+	if alertQueue(nil, nil) != nil {
+		t.Error("no host and no reminders: a queue")
+	}
+	q := alertQueue(nil, rem)
+	if q == nil {
+		t.Fatal("the desktop's reminders have no queue")
+	}
+
+	now = now.Add(2 * time.Minute)
+	(&reminders.Poller{Alerts: q, Log: log, Check: rem.Due}).Poll(ctx)
+	if q.Count() != 1 {
+		t.Fatalf("due: %d queued", q.Count())
+	}
+	said := make(chan string, 1)
+	tick := make(chan time.Time)
+	a := &sdkhost.Announcer{Alerts: q, Log: log, Say: func(_ context.Context, text string) error { said <- text; return nil }}
+	go a.Run(ctx, tick)
+	tick <- now
+	if got := <-said; got != "Reminder: walk the dogs" {
+		t.Errorf("said %q", got)
 	}
 }
 

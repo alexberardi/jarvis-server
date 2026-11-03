@@ -66,15 +66,28 @@ func newPiHost(ctx context.Context, stateDir string, mic *voice.Mic, log *slog.L
 	return h
 }
 
-// startAlerts runs the Pi's alerts: the announcer, which says the queue's announceable alerts
-// between turns, and the reminders, polled from the reminder built-in into the queue
-// (go-pi-node.md §7 4.5). It stops when ctx ends.
-func startAlerts(ctx context.Context, h *sdkhost.Host, mic *voice.Mic, rem *builtins.Reminder, log *slog.Logger) *sdkhost.Announcer {
-	a := &sdkhost.Announcer{Alerts: h.Alerts, Say: sayNow(mic), Log: log}
+// alertQueue is the queue startAlerts runs on: the Pi host's, or on a desktop (no host) one of
+// its own, so the reminders it takes still fire and are said. nil: neither (no store, no
+// reminders).
+func alertQueue(h *sdkhost.Host, rem *builtins.Reminder) *sdkhost.Alerts {
+	if h != nil {
+		return h.Alerts
+	}
+	if rem != nil {
+		return &sdkhost.Alerts{}
+	}
+	return nil
+}
+
+// startAlerts runs the node's alerts: the announcer, which says q's announceable alerts between
+// turns, and the reminders, polled from the reminder built-in into q (go-pi-node.md §7 4.5).
+// It stops when ctx ends.
+func startAlerts(ctx context.Context, q *sdkhost.Alerts, mic *voice.Mic, rem *builtins.Reminder, log *slog.Logger) *sdkhost.Announcer {
+	a := &sdkhost.Announcer{Alerts: q, Say: sayNow(mic), Log: log}
 	tick := time.NewTicker(sdkhost.SweepEvery)
 	go func() { defer tick.Stop(); a.Run(ctx, tick.C) }()
 	if rem != nil {
-		go (&reminders.Poller{Alerts: h.Alerts, Log: log, Check: rem.Due}).Run(ctx)
+		go (&reminders.Poller{Alerts: q, Log: log, Check: rem.Due}).Run(ctx)
 	}
 	return a
 }
