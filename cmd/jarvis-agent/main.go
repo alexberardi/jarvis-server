@@ -865,8 +865,10 @@ func runAgent(ctx context.Context, args []string) error {
 		duck.EC.Cleanup(ctx)   // nor the echo canceller loaded
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
-	if tf.host != nil {
-		alerts := startAlerts(ctx, tf.host, mic, tf.reminder, log)
+	var wakeReminders func()
+	if q := alertQueue(tf.host, tf.reminder); q != nil {
+		var alerts *sdkhost.Announcer
+		alerts, wakeReminders = startAlerts(ctx, q, mic, tf.reminder, log)
 		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
 	}
 	hd := openHat(hf, press, log)
@@ -1005,6 +1007,7 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 		r.Topics["display/config"] = func(ctx context.Context, cc *node.CC, _ []byte) { _ = displayEngine.Synchronise(ctx, cc); r.BeatNow() }
 	}
+	connectReminders(r, wakeReminders)
 	connectCC(r, &liveCC)
 	inner := r.OnConnected
 	r.OnConnected = func(ctx context.Context, cc *node.CC) {

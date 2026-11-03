@@ -11,17 +11,20 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 )
 
-// The poll intervals of N:reminder_agent.py: REFRESH_INTERVAL_SECONDS while a reminder is
-// pending, IDLE_INTERVAL_SECONDS otherwise. A failed poll (the sidecar still installing at
-// first boot) is retried at Refresh.
+// The longest waits between polls: Refresh while a reminder is pending, Idle otherwise. A poll
+// is never later than the next reminder's due time (Next), and Wake polls at once, so these
+// only bound how late a change made elsewhere (the app) is seen. N:reminder_agent.py polled
+// only at these (60 s and 300 s), so a reminder could fire five minutes late. A failed poll
+// (the sidecar still installing at first boot) is retried at Refresh.
 const (
 	Refresh = 60 * time.Second
-	Idle    = 300 * time.Second
+	Idle    = 60 * time.Second
 )
 
 // AlertTTL is how long a fired reminder stays queued unheard (N: now + 10 minutes).
@@ -41,11 +44,30 @@ type Poller struct {
 	Check  func(ctx context.Context) ([]Due, int, error)
 	Alerts *sdkhost.Alerts
 	Log    *slog.Logger
+	// Next is the earliest time a pending reminder comes due (false: none); a poll waits no
+	// longer than that. nil: the fixed intervals only.
+	Next func() (time.Time, bool)
 	// Now and After are the clock (nil: time.Now, time.After); tests drive their own.
 	Now   func() time.Time
 	After func(time.Duration) <-chan time.Time
 
-	lastErr string
+	lastErr  string
+	wakeOnce sync.Once
+	wake     chan struct{}
+}
+
+// Wake makes Run poll now (a reminder set or changed, the node connected, so a held push goes
+// out). It never blocks; wakes before the next poll collapse into one.
+func (p *Poller) Wake() {
+	select {
+	case p.wakeC() <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Poller) wakeC() chan struct{} {
+	p.wakeOnce.Do(func() { p.wake = make(chan struct{}, 1) })
+	return p.wake
 }
 
 func (p *Poller) now() time.Time {
@@ -81,11 +103,21 @@ func (p *Poller) Poll(ctx context.Context) time.Duration {
 		p.Alerts.Add(sdkhost.Alert{ID: newID(), SourceAgent: "reminder_alerts", Title: title, Summary: title,
 			Priority: 3, CreatedAt: now, ExpiresAt: now.Add(AlertTTL), Category: "general"})
 	}
+	wait := Idle
 	if pending > 0 {
-		return Refresh
+		wait = Refresh
 	}
-	return Idle
+	if p.Next != nil {
+		if at, ok := p.Next(); ok {
+			// The next due time, a little after it so the check finds it past; never a busy loop.
+			wait = min(wait, max(at.Sub(now)+nextSlack, nextSlack))
+		}
+	}
+	return wait
 }
+
+// nextSlack is how long after a reminder's due time its poll runs.
+const nextSlack = 100 * time.Millisecond
 
 // Run polls at once (run_on_startup), then on the schedule, until ctx ends.
 func (p *Poller) Run(ctx context.Context) {
@@ -99,6 +131,7 @@ func (p *Poller) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-after(wait):
+		case <-p.wakeC():
 		}
 	}
 }
