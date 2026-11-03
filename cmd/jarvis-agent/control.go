@@ -108,11 +108,17 @@ func appEvents(pill *runningPill, window func(), activity *computer.Activity, lo
 // report what Jarvis is doing with the computer, computer-record-start|stop record (recorder
 // is nil, or answers nil, until the recorder exists). It returns a func that waits for it.
 func serveControl(ctx context.Context, ln net.Listener, log *slog.Logger, pill *runningPill, quit func(), voice func() *voiceSwitch,
-	health func() error, activity *computer.Activity, computerSw *computer.Switch, recorder func() *computer.Recorder) func() {
+	health func() error, activity *computer.Activity, computerSw *computer.Switch, recorder func() *computer.Recorder, configs ...control.RequestHandler) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		err := control.ServeAnswers(ctx, ln, func(cmd string) (string, error) {
+		err := control.ServeRequests(ctx, ln, func(cmd string, values map[string]any) (string, error) {
+			if cmd == control.SettingsGet || cmd == control.SettingsSet {
+				if len(configs) == 0 {
+					return "", errors.New("settings are not available yet")
+				}
+				return configs[0](cmd, values)
+			}
 			switch cmd {
 			case control.Health:
 				return "", health()

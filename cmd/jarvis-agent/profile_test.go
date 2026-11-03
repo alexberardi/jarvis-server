@@ -201,7 +201,7 @@ func TestPiNodeReportsUpdates(t *testing.T) {
 		return "", nil
 	}}
 	cfg, state := wirePiNode(r, vf, hf, &maintFlags{at: "03:00", ceilingMB: -1}, nil, live, audio, path, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if len(r.Verbs) != 3 {
+	if len(r.Verbs) != 4 {
 		t.Fatalf("verbs %v", r.Verbs)
 	}
 	b, _ := json.Marshal([]map[string]any{{"command": "update_node_config", "details": map[string]any{
@@ -242,7 +242,7 @@ func TestAPiKeepsAllItsVerbs(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	wirePiNode(r, &voiceFlags{threshold: 0.4}, &hatFlags{mode: "auto", brightness: 100}, &maintFlags{}, nil, voice.NewLive(), nil, "", log)
 	addVerbs(r, voiceProfileVerbs(piProfile, voice.NewMic(), log))
-	want := []string{"enroll_voice", "measure_ambient_noise", "preview_led_pattern", "update_node_config", "verify_voice"}
+	want := []string{"enroll_voice", "get_node_config", "measure_ambient_noise", "preview_led_pattern", "update_node_config", "verify_voice"}
 	if got := slices.Sorted(maps.Keys(r.Verbs)); !slices.Equal(got, want) {
 		t.Fatalf("verbs = %v", got)
 	}

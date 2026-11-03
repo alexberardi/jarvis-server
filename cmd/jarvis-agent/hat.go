@@ -316,10 +316,16 @@ type piAudio interface {
 // and into agent.json at path. It returns the settings snapshot's node_config, which reports them,
 // and the settings in effect (the maintenance restart reads them: mf is its flags).
 func wirePiNode(r *node.Runner, vf *voiceFlags, hf *hatFlags, mf *maintFlags, hd *hatDevices, live *voice.Live, audio *sdkhost.Audio,
-	path string, log *slog.Logger) (func() map[string]any, func() pinode.State) {
+	path string, log *slog.Logger, configured ...**pinode.Node) (func() map[string]any, func() pinode.State) {
 	st := piState(vf, hf)
 	st.Maintenance = mf.settings()
+	ram, _ := memTotalMB()
+	st.Maintenance.CeilingMB = st.Maintenance.Ceiling(ram)
 	pn := pinode.New(st, path, log)
+	pn.VoiceUnsupported = !voice.Supported
+	if len(configured) > 0 {
+		*configured[0] = pn
+	}
 	var pa piAudio
 	if audio != nil {
 		pn.Audio, pa = audio, audio

@@ -156,6 +156,8 @@ func setupDeps(log *slog.Logger, o setupOptions) firstrun.Deps {
 	name = mdns.HostLabel(name)
 	d := firstrun.Deps{
 		Log:          log,
+		Settings:     localSettings,
+		Restart:      func(ctx context.Context) error { return restartCmd(ctx, nil, io.Discard) },
 		GOOS:         runtime.GOOS,
 		ComputerName: name,
 		Identity:     node.Registration{DeviceID: deviceid.Get(), NodeKind: desktopProfile.nodeKind}, // the setup page is a computer's

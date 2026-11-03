@@ -2156,8 +2156,10 @@ settings a Pi has: command secrets (API keys, URLs, per-user values), which comm
 command data. On a Pi these are edited only by a household admin in the mobile app, and they are
 **end-to-end encrypted** with the node's K2 key: the phone and the node hold K2; command-center
 relays ciphertext ([cc/05](../cc/05-nodes.md) §3.2–3.3). The agent now speaks that protocol
-unchanged, so the mobile app's existing node-settings screens work for it. The web app gets no
-settings view: the browser has no K2, and command-center must never see the plaintext. Code:
+unchanged, so the mobile app's existing node-settings screens work for it. The web app has no
+view of these encrypted package settings: the browser has no K2, and command-center must
+never see their plaintext. Ordinary voice and hardware preferences have a separate,
+allowlisted [node settings view](NODE-SETTINGS.md), which never reads the K2 store. Code:
 `internal/agent/nodesettings`, wired in `cmd/jarvis-agent/nodesettings.go`.
 
 **How a headless node gets K2 today, and what the agent does.** A Pi gets K2 from the phone over

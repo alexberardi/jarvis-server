@@ -10,6 +10,12 @@ the wire contracts).
   `detail` strings that clients branch on. Ids, tokens and timestamps are matched by type.
 - Every file has the `contract` build tag, so a plain `go test ./...` skips the package.
 
+The ordinary node-preferences API is **jarvisd-only**: `TestCCPlainNodeConfig`
+freezes GET/PATCH `/api/v0/nodes/{id}/node-config` and POST `node-config/basic`,
+the verified MQTT commands and their sanitized responses. It exercises household
+isolation and secret exclusion without provisioning K2. Python nodes continue to
+use the existing send-only update command.
+
 ## Running
 
 ```sh

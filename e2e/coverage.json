@@ -22,7 +22,7 @@
     "/admin/logs": { "tests": ["e2e/web/tests/admin/logs.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/traces": { "tests": ["e2e/web/tests/admin/traces.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/traces/:id": { "tests": ["e2e/web/tests/admin/traces.spec.ts"] },
-    "/admin/nodes": { "tests": ["e2e/web/tests/admin/nodes.spec.ts", "e2e/web/tests/pairing.spec.ts", "e2e/web/tests/roles.spec.ts"] },
+    "/admin/nodes": { "tests": ["e2e/web/tests/admin/nodes.spec.ts", "e2e/web/tests/node-settings.spec.ts", "e2e/web/tests/pairing.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/store": { "tests": ["e2e/web/tests/admin/store.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/admin/store/:name": { "tests": ["e2e/web/tests/admin/store.spec.ts"] },
     "/admin/users": { "tests": ["e2e/web/tests/admin/users.spec.ts", "e2e/web/tests/roles.spec.ts"] },

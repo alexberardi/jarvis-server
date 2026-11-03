@@ -78,9 +78,13 @@ func (s State) LEDMode() string {
 
 // Node handles the verbs. Set LEDs, Voice and Audio after New when the Pi has them.
 type Node struct {
-	LEDs  LEDs  // nil: no HAT
-	Voice Voice // nil: voice can't run on this build
-	Audio Audio // nil: no mixer to set
+	VoiceUnsupported bool
+	ReadOnly         []string
+	Desktop          bool       // expose only settings applicable to a desktop
+	configMu         sync.Mutex // serializes entire config transactions
+	LEDs             LEDs       // nil: no HAT
+	Voice            Voice      // nil: voice can't run on this build
+	Audio            Audio      // nil: no mixer to set
 	// MeasureWait is how long a measurement may wait for a turn in progress to end (30 s).
 	MeasureWait time.Duration
 
@@ -110,6 +114,7 @@ type Verb func(ctx context.Context, cc node.Backend, details map[string]any)
 func (n *Node) Verbs() map[string]Verb {
 	return map[string]Verb{
 		"update_node_config":    n.updateNodeConfig,
+		"get_node_config":       func(ctx context.Context, cc node.Backend, det map[string]any) { n.configCommand(ctx, cc, det, false) },
 		"preview_led_pattern":   n.previewLEDPattern,
 		"measure_ambient_noise": n.measureAmbientNoise,
 	}
@@ -264,13 +269,26 @@ func parse(key string, v any) (change, string) {
 	return change{}, "not a Go node setting; not applied or saved"
 }
 
-func (n *Node) updateNodeConfig(ctx context.Context, _ node.Backend, det map[string]any) {
+func (n *Node) updateNodeConfig(ctx context.Context, cc node.Backend, det map[string]any) {
+	if confirmed, _ := det["confirm"].(bool); confirmed {
+		n.configCommand(ctx, cc, det, true)
+		return
+	}
+	n.configMu.Lock()
+	defer n.configMu.Unlock()
 	in, _ := det["settings"].(map[string]any)
 	if len(in) == 0 {
 		n.log.Warn("update_node_config: no settings provided")
 		return
 	}
 	in, rejected := FilterTrustAnchors(in)
+	if n.Desktop {
+		for k := range in {
+			if strings.HasPrefix(k, "led_") || strings.HasPrefix(k, "maintenance_") || k == "volume_percent" || k == "is_muted" {
+				delete(in, k)
+			}
+		}
+	}
 	if len(rejected) > 0 {
 		n.log.Warn("update_node_config: rejected trust-anchor/policy keys: a config push may not repoint "+
 			"the CC URL, node identity, or broker, nor flip update/egress consent gates", "rejected", rejected)

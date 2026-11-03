@@ -114,6 +114,9 @@ var passRoutes = []passRoute{
 	{pattern: "GET /api/cc/api/v0/display/assets/{asset_id}", listener: pconfig.ListenerCC, strip: "/api/cc"},
 	{pattern: "DELETE /api/cc/api/v0/display/assets/{asset_id}", listener: pconfig.ListenerCC, strip: "/api/cc"},
 	ccUserRoute("GET /api/cc/api/v0/admin/nodes"),
+	ccUserRoute("GET /api/cc/api/v0/nodes/{node_id}/node-config"),
+	ccUserRoute("PATCH /api/cc/api/v0/nodes/{node_id}/node-config"),
+	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/node-config/basic"),
 	// Chat (webapp 01 §3.1): cc's mobile chat, unchanged. A node of another household is 404.
 	ccUserRoute("POST /api/cc/api/v0/mobile/chat"),
 	ccUserRoute("POST /api/cc/api/v0/mobile/chat/warmup"),

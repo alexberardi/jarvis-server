@@ -387,6 +387,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Commands and result sinks (node_commands.py, smart_home.py, node_tools.py, ...).
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/actions", m.user(m.handleNodeAction))
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/node-config", m.user(m.handleNodeConfig))
+	mux.HandleFunc("GET "+v0+"/nodes/{node_id}/node-config", m.user(m.handlePlainNodeConfig))
+	mux.HandleFunc("PATCH "+v0+"/nodes/{node_id}/node-config", m.user(m.handlePlainNodeConfig))
+	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/node-config/basic", m.user(m.handlePlainNodeConfig))
 	mux.HandleFunc("POST "+v0+"/nodes/{node_id}/led/preview", m.user(m.handleLEDPreview))
 	mux.HandleFunc("POST "+v0+"/commands/{request_id}/verify", m.node(m.handleVerifyCommand))
 	// Computer tasks: the agent verifies a single-use approval token before a risky action.

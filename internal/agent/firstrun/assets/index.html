@@ -9,6 +9,7 @@
 <link rel="icon" href="icon.png">
 <link rel="stylesheet" href="app.css">
 <script src="app.js" defer></script>
+<script src="settings.js" defer></script>
 </head>
 <body>
 <main id="app" aria-live="polite">
@@ -26,6 +27,7 @@
       <a href="#perm-step" id="running-perms">Permissions</a>
       <a href="#browser-step">Browser</a>
       <a href="#voice-step" id="running-voice">Voice and microphone</a>
+      <a href="#settings-step">Settings</a>
       <a href="#server-step">Server and sign-in</a>
     </p>
   </nav>
@@ -155,6 +157,22 @@
       </div>
     </section>
   </div>
+
+  <section class="card" id="settings-step" aria-labelledby="settings-title">
+    <h2 id="settings-title">Settings</h2>
+    <p class="muted">Personalize voice and this computer. Voice changes take effect between turns or the next time listening starts.</p>
+    <p id="settings-loading" role="status">Loading settings…</p>
+    <form id="settings-form" hidden>
+      <div id="settings-fields"></div>
+      <div class="inline">
+        <button type="submit" id="settings-save" disabled>Save changes</button>
+        <button type="button" class="link" id="settings-reload">Reload saved settings</button>
+      </div>
+    </form>
+    <p class="error" id="settings-error" role="alert" hidden></p>
+    <p id="settings-result" role="status"></p>
+    <button type="button" id="settings-restart" hidden>Restart Jarvis to apply desktop changes</button>
+  </section>
 
   <section class="card finish" id="finished" hidden>
     <h2 id="finished-title"></h2>

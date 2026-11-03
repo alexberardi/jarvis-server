@@ -13,7 +13,7 @@
 #   scripts/sandbox llm [--name N]         re-point the sandbox at its model again (the mode `up`
 #                                          chose; after writing the app client, or a model change)
 #   scripts/sandbox list
-#   scripts/sandbox node-sim [--name N] [--node-name X]
+#   scripts/sandbox node-sim [--name N] [--node-name X] [--node-profile pi|desktop]
 #                                          a simulated node pairing with a code (below); prints
 #                                          the code
 #
@@ -90,7 +90,7 @@
 #                    and .sandbox/<name>/sandbox-lan.env is sandbox.env with every URL on that
 #                    address but the LLM tap (loopback only), for the other machine. The seeded
 #                    logins and keys are open to the LAN while it is up: take it down after.
-# node-sim builds ./cmd/jarvis-agent and runs the real agent headless as a Pi node (--profile pi,
+# node-sim builds ./cmd/jarvis-agent and runs the real agent headless (default --node-profile pi,
 # voice off, no auto-update) with its own HOME under .sandbox/<name>/simnode/<X>/: `enroll --code`
 # against the sandbox, so a pending pairing appears for the admin's Nodes page or the app to
 # approve. It prints the pairing code on stdout once the agent shows it (and writes it to
@@ -115,6 +115,7 @@ CMD=${1:-}
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local SPEECH_API=openai
+NODE_PROFILE=pi
 while [ $# -gt 0 ]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -134,6 +135,7 @@ while [ $# -gt 0 ]; do
     --single-port) SINGLE_PORT=1; shift ;;
     --purge) PURGE=1; shift ;;
     --node-name) NODE_NAME=$2; shift 2 ;;
+    --node-profile) NODE_PROFILE=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
     -h|--help) sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
@@ -141,6 +143,7 @@ while [ $# -gt 0 ]; do
 done
 case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
 case $NODE_NAME in *[!a-zA-Z0-9_-]*|'') die "--node-name: letters, digits, - and _ only" ;; esac
+case $NODE_PROFILE in pi|desktop) ;; *) die "--node-profile: pi or desktop" ;; esac
 case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or scripted" ;; esac
 case $PROFILE in minimal | rich | empty) ;; *) die "--profile: minimal, rich or empty" ;; esac
 case $RELAY in fake | none | http://* | https://*) ;; *) die "--relay: fake, none or an http(s) URL" ;; esac
@@ -685,13 +688,13 @@ cmd_node_sim() {
   # files or a desktop agent they run. Stdin is the "y" the join question reads once a member
   # approved the code.
   local agent=$DIR/jarvis-agent creds=$sim/node.json h=$sim/home
-  env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_SESSION_TYPE -u XDG_CURRENT_DESKTOP \
+  detach env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_SESSION_TYPE -u XDG_CURRENT_DESKTOP \
     HOME=$h XDG_CONFIG_HOME=$h/.config XDG_CACHE_HOME=$h/.cache XDG_DATA_HOME=$h/.local/share \
     XDG_STATE_HOME=$h/.local/state XDG_RUNTIME_DIR=$run \
     JARVIS_AGENT_CONTROL_SOCKET=$run/control.sock JARVIS_AGENT_BROWSER_SOCKET=$run/browser.sock \
-    detach bash -c 'echo y | "$1" enroll --code --profile pi --no-browser --name "$2" --creds "$3" --server "$4" &&
-      exec "$1" run --profile pi --voice=false --no-auto-update --creds "$3"' \
-    simnode "$agent" "$NODE_NAME" "$creds" "http://127.0.0.1:$(port 7700)" >"$sim/agent.log" 2>&1 </dev/null &
+    bash -c 'echo y | "$1" enroll --code --profile "$5" --no-browser --name "$2" --creds "$3" --server "$4" &&
+      exec "$1" run --profile "$5" --voice=false --no-overlay --no-tray --no-browser --no-auto-update --creds "$3"' \
+    simnode "$agent" "$NODE_NAME" "$creds" "http://127.0.0.1:$(port 7700)" "$NODE_PROFILE" >"$sim/agent.log" 2>&1 </dev/null &
   pid=$!
   echo "$pid" >"$sim/pid"
   # The code is the indented line after "approve this code" (pairWithCode in cmd/jarvis-agent).
