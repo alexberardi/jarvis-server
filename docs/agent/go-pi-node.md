@@ -354,10 +354,10 @@ Trixie arm64, Seeed 2-mic HAT, `dsnoopmic` at 48 kHz, 1 GHz, no throttling (49�
 ### 3.7 Desktop voice landed (phase 3, 2026-10-10)
 
 `jarvis-agent run --voice` (and `jarvis-agent listen`, the pipeline alone) runs the §1.1 MVS turn
-on Linux and macOS. Code: `internal/audio/device` (ALSA over purego on Linux, AudioQueue over
-purego on macOS, `wav:FILE` on every OS) and `internal/agent/voice` (pipeline, endpointing,
-command-center client, wake-model fetch). Windows reports "not supported yet" and links no
-onnxruntime.
+on Linux, macOS and Windows. Code: `internal/audio/device` (ALSA over purego on Linux, AudioQueue
+over purego on macOS, winmm waveIn/waveOut on Windows, `wav:FILE` on every OS) and
+`internal/agent/voice` (pipeline, endpointing, command-center client, wake-model fetch). Windows
+uses the default devices only ([decision](../decisions/2026-10-30-windows-voice-winmm.md)).
 
 **What it does, in wire order** (rows refer to §1.1):
 
@@ -810,6 +810,11 @@ silence window (after the 2 s minimum) cut the speaker off. With a wait set, sil
 recording only once speech has been heard (a chunk at or above the threshold) or the wait is
 over; the 7 s cap still applies. 0 keeps the Python node's behaviour.
 
+**Defaults raised 2026-10-25** (deliberate, off the Python node): `--listen-onset-wait` 1.5 s
+and `--listen-silence` 1.2 s (was 0 and 0.8). Real use on the desktop cut commands off after two
+words ("start the…", "Oh, Firefox." for "open Firefox and YouTube"); 1.2 s is what a follow-up
+answer already gets. The app's `listen_silence` setting still overrides it.
+
 **`--listen-preroll DURATION`** (default 1s; `Endpointing.PreRollSecs`; loop #229). The wake
 chime plays synchronously after the fire, and everything the microphone captured meanwhile used
 to be flushed (the Python node's `history_secs=0`). A command said right after "hey Jarvis"
@@ -888,6 +893,7 @@ to agent.json in one serialized write (`settings.Update`, shared with the voice 
 | Python key | agent.json key / flag | Live |
 |---|---|---|
 | `led_enabled` | `leds` / `--no-leds` | `LEDs.SetEnabled` |
+| `led_idle_enabled` | `led_idle` / `--no-led-idle` | `LEDs.SetIdleDark`: false keeps the dim idle glow off, so the LEDs light only while the node responds (wake, listening, thinking, speaking, errors, alerts); the admin's Nodes page shows `led_enabled` and this as one LED mode (always on, only when responding, off) per node, from the `led_mode` capability the node reports |
 | `led_brightness_percent` | `led_brightness` / `--led-brightness` | `LEDs.SetBrightness` |
 | `wake_word_threshold` | `wake_threshold` / `--wake-threshold` | the running pipeline, from its next chunk (`voice.Live.Tune`) |
 | `wake_ack_audio_enabled` | `chimes` / `--no-chimes` | same |
@@ -1344,7 +1350,7 @@ checked on the lab Pi 4 since it was built.
 | 4.2 self-update on the Pi | built | partly: `systemd-run --user` reaches pi's manager; **open (e)**: the rollback repro after rerunning `install-pi.sh` (#220) |
 | 4.3 `install-pi.sh` (3a, 3b), the release | built | no; no published release yet |
 | 4.4 provisioning API, NetworkManager backend, recovery, setup mode at boot | built | no; setup mode at boot (#292) unit-tested, pending the lab Pi |
-| 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; **open (b)**: `control_device`, `routine`, `send_link` are skipped (`internal/agent/packages/python.go:58`) |
+| 4.5 the built-in commands in the sidecar; reminders, alerts, button | built | no; (b) built, not yet on a Pi: `control_device`, `routine` (and the `routine` verb), `send_link` are Go built-ins (`internal/agent/builtins`, decision 2026-10-27-go-builtins) |
 | 5.1 follow-up | built (heard on the desktop) | no |
 | 5.2 barge-in | built (rig tests) | no |
 | 5.3 client tools / continue | built | no |

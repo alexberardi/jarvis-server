@@ -110,7 +110,7 @@ func TestErrandNodeAdapter(t *testing.T) {
 	// A silent node times out with the legacy failure dict.
 	silent := newEnv(t, envOpts{noMQTT: true})
 	out = errandNodes{silent.m}.RunTool(ctx, "node-1", "x", nil, nil, "", 10*time.Millisecond)
-	if got := pyjson.Dumps(out, false); got != `{"success": false, "error": "could not dispatch to node: MQTT is unavailable"}` {
+	if got := pyjson.Dumps(out, false); got != `{"success": false, "error": "could not dispatch to node: MQTT is unavailable", "error_code": "no_broker"}` {
 		t.Fatal(got)
 	}
 }
@@ -134,7 +134,7 @@ func TestErrandNodeImages(t *testing.T) {
 	}
 	silent := newEnv(t, envOpts{noMQTT: true})
 	out, imgs, err = errandNodes{silent.m}.RunToolImages(ctx, "node-1", "x", nil, nil, 10*time.Millisecond)
-	if err == nil || imgs != nil || pyjson.Dumps(out, false) != `{"success": false, "error": "could not dispatch to node: MQTT is unavailable"}` {
+	if err == nil || imgs != nil || pyjson.Dumps(out, false) != `{"success": false, "error": "could not dispatch to node: MQTT is unavailable", "error_code": "no_broker"}` {
 		t.Fatalf("no MQTT = %s %v", pyjson.Dumps(out, false), err)
 	}
 }

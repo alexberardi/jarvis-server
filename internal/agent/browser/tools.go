@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/jarvispage"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/winmatch"
 )
 
 // Tool names, in the desktop_* style.
@@ -96,7 +98,8 @@ func NewTools(h *Hub) *Tools {
 	required := tabParam
 	required.Required = true
 	t.tools = []tool{
-		{node.Spec{Name: ToolListTabs, Description: "List the browser's open tabs: answers 'what's open' or 'is X open', and gives the tab_id to switch or close one.",
+		{node.Spec{Name: ToolListTabs, Description: "List the browser's open tabs: answers 'what's open' or 'is X open', and gives the tab_id to switch or close one. " +
+			"A spoken tab name may be misheard ('COD' for 'Claude'): take the tab whose title sounds like it; if none or several could be meant, read those titles back and ask which.",
 			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional filter word"}},
 			Keywords: []string{"browser", "tabs", "tab", "open", "website", "firefox", "chrome"},
 			Examples: []node.Example{
@@ -111,7 +114,7 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "open youtube in my browser", Params: map[string]any{"url": "https://www.youtube.com"}, Primary: true},
 				{VoiceCommand: "search youtube for lofi music", Params: map[string]any{"url": "https://www.youtube.com/results?search_query=lofi+music"}},
 			}}, 0, t.open, false},
-		{node.Spec{Name: ToolSwitchTab, Description: "Switch to a browser tab (tab_id from browser_list_tabs).",
+		{node.Spec{Name: ToolSwitchTab, Description: "Switch to a browser tab (tab_id from browser_list_tabs). To switch by the name the user said, use desktop_view when it is offered: it matches misheard names and asks when unsure.",
 			Params:   []node.Param{required},
 			Keywords: []string{"browser", "switch", "tab", "go to", "show"}}, 0, t.simple("switch_tab"), false},
 		{node.Spec{Name: ToolCloseTab, Description: "Close a browser tab (tab_id from browser_list_tabs).",
@@ -532,6 +535,9 @@ func (t *Tools) listTabs(ctx context.Context, args map[string]any) (map[string]a
 		}
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
+	if q, _ := extra["query"].(string); q != "" && len(tabs) == 0 && len(errs) == 0 {
+		return t.allTabsClosestTo(ctx, q)
+	}
 	out := map[string]any{"tabs": tabs, "count": count}
 	if truncated {
 		out["truncated"] = true
@@ -539,6 +545,26 @@ func (t *Tools) listTabs(ctx context.Context, args map[string]any) (map[string]a
 	if len(errs) > 0 {
 		out["errors"] = errs
 	}
+	return out, nil
+}
+
+// allTabsClosestTo is every tab, the titles most like q first, for a query that matched none:
+// a spoken name is often misheard ("Claude pad", "Cloud Fair" for the Claude tab), and an
+// empty list left the model guessing (2026-10-25: it opened an add-on page instead).
+func (t *Tools) allTabsClosestTo(ctx context.Context, q string) (map[string]any, error) {
+	out, err := t.listTabs(ctx, map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	tabs, _ := out["tabs"].([]any)
+	score := func(e any) float64 {
+		m, _ := e.(map[string]any)
+		title, _ := m["title"].(string)
+		return winmatch.Similarity(q, title)
+	}
+	sort.SliceStable(tabs, func(i, j int) bool { return score(tabs[i]) > score(tabs[j]) })
+	out["no_match"] = fmt.Sprintf("No tab title contains %q; it may be misheard. These are all open tabs, "+
+		"closest first: switch to the one that sounds like it, or read the likely ones back and ask.", q)
 	return out, nil
 }
 
@@ -571,6 +597,9 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
+	if res := t.reuseTaskTab(ctx, u); res != nil {
+		return res, nil
+	}
 	extra := map[string]any{"url": u}
 	behind := false
 	if t.Origins.Known() {
@@ -593,6 +622,37 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		res["opened_behind_chat"] = true
 	}
 	return res, nil
+}
+
+// reuseTaskTab answers an open of a site's home page (https://www.google.com) while the task tab
+// is already on that site (#587: "search for cats instead" opened a second Google tab, and its
+// fill missed the box): nothing opens, and the model is told to search in the task tab. Nil
+// when there is no such tab, or u is another site or a page deeper in it.
+func (t *Tools) reuseTaskTab(ctx context.Context, u string) map[string]any {
+	want, err := url.Parse(u)
+	if err != nil || (want.Path != "" && want.Path != "/") || want.RawQuery != "" || want.Fragment != "" {
+		return nil
+	}
+	task := t.taskTab()
+	if task == "" {
+		return nil
+	}
+	cur, ok := t.tabURL(ctx, map[string]any{"tab_id": task})
+	if !ok {
+		return nil
+	}
+	have, err := url.Parse(cur)
+	if err != nil || siteHost(have) != siteHost(want) {
+		return nil
+	}
+	return map[string]any{"success": true, "tab_id": task, "reused": true, "url": cur,
+		"note": "The task tab is already on " + have.Hostname() + "; nothing new was opened. " +
+			"Use browser_fill with field search (and submit true) on it; it acts on this tab without a tab_id."}
+}
+
+// siteHost is u's host without a "www." prefix, lower case.
+func siteHost(u *url.URL) string {
+	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
 }
 
 func intArg(args map[string]any, k string) (int, bool) {
@@ -782,6 +842,15 @@ func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, 
 		t.show("Filling " + where + ": " + shown)
 		extra := map[string]any{"text": text, "field": field, "submit": submit}
 		res, err := t.call(ctx, "fill", args, extra)
+		var ce *CommandError
+		if field == "" && errors.As(err, &ce) && ce.Code == "field_not_found" {
+			// #587: nothing focused (a results page after a search): the page's one search box,
+			// when it has one. Otherwise the extension's own error, which lists the fields.
+			extra["field"] = "search"
+			if r, err2 := t.call(ctx, "fill", args, extra); err2 == nil {
+				return r, nil
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

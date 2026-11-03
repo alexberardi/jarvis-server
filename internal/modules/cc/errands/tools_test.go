@@ -118,6 +118,12 @@ func TestRunErrandTool(t *testing.T) {
 	if got != `{"error": "missing_goal", "message": "I need to know what the errand should do."}` {
 		t.Fatal(got)
 	}
+	for _, g := range []string{"start the...", "Start the…", "order more coffee for"} {
+		got = res(tool.Execute(ctx, servertools.Call{Args: mustObj(t, `{"goal": "`+g+`"}`)}, turnFor(7)))
+		if got != `{"error": "unclear_goal", "message": "That sounded cut off — what should I do?"}` {
+			t.Fatalf("%q: %s", g, got)
+		}
+	}
 	got = res(tool.Execute(ctx, servertools.Call{Args: mustObj(t, `{"goal": "check weather"}`)}, turnFor(7)))
 	if got != `{"status": "accepted", "message": "On it — I'm putting together a plan for that errand and I'll send it to your phone to review. Tap Run when you're ready."}` {
 		t.Fatal(got)

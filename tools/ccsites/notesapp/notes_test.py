@@ -43,6 +43,13 @@ class NotesAppTest(unittest.TestCase):
         notes.NotesApp(self.root, state_path=self.state)
         self.assertEqual(self.root.title(), "Jarvis Test Notes")
 
+    def test_buttons_advertise_their_shortcuts(self):
+        # A Tk app gives the agent screenshots only (no AT-SPI), so the screen carries the
+        # affordances: the buttons name their accelerators, as real apps' menus and tooltips do.
+        app = notes.NotesApp(self.root, state_path=self.state)
+        self.assertEqual(app.new_button["text"], "New note (Ctrl+N)")
+        self.assertEqual(app.save_button["text"], "Save (Ctrl+S)")
+
     def test_create_save_read_state(self):
         app = notes.NotesApp(self.root, state_path=self.state)
         self.root.update()

@@ -290,10 +290,42 @@ func parseDesktopTrace(raw json.RawMessage) ([]desktopEvent, error) {
 		}
 		out = append(out, e)
 	}
+	out = trimStopClicks(out)
 	if len(out) > learnMaxEvents {
 		out = out[:learnMaxEvents]
 	}
 	return out, nil
+}
+
+// stopClicksMax is the most clicks the user's stop can take at the end of a trace: the status
+// icon, then its menu's "Stop recording".
+const stopClicksMax = 3
+
+// trimStopClicks drops the user's own stop from the end of a trace (#581): the last click
+// outside the window it was recorded in (on Wayland a click's window is the focused one, so a
+// click on the bar's status icon still names the app below it) and the clicks after it. Typing
+// or a key after such a click keeps everything.
+// shortcut: by geometry only, so a last click on the bar that was part of the task is dropped
+// too; the trace's stop reason (recorder.go) would tell the icon apart, if it reached jarvisd.
+func trimStopClicks(evs []desktopEvent) []desktopEvent {
+	for i := len(evs) - 1; i >= 0 && i >= len(evs)-stopClicksMax; i-- {
+		if evs[i].Kind != "click" {
+			break
+		}
+		if evs[i].outsideWindow() {
+			return evs[:i]
+		}
+	}
+	return evs
+}
+
+// outsideWindow is a click whose point is known and isn't in its recorded window.
+func (e desktopEvent) outsideWindow() bool {
+	w := e.Window
+	if w == nil || w.W <= 0 || w.H <= 0 || (e.X == 0 && e.Y == 0) { // 0,0: no point (sway)
+		return false
+	}
+	return e.X < w.X || e.Y < w.Y || e.X >= w.X+w.W || e.Y >= w.Y+w.H
 }
 
 // --- parameter candidates ---
@@ -481,7 +513,8 @@ const desktopLearnSystemPrompt = `You turn a recording of someone doing a task i
 
 const (
 	learnSuccessBrowser = `- success: how to tell the task worked: {"download": {"name_like": "statement_*.csv"}} for a download, {"url_contains": "..."} or {"text_present": ["..."]} for a page that shows it.`
-	learnSuccessDesktop = `- success: how to tell the task worked: {"text_present": ["..."]} for text the app shows when it is done, or {"screen": "..."} saying what the screen shows then.`
+	learnSuccessDesktop = `- success: how to tell the task worked: {"text_present": ["..."]} for the result the app shows when it is done (the value or text the task ends with, never just the app's name), or {"screen": "..."} saying what the screen shows then.
+- Opening an app (a launcher, a menu, its icon) needs no step: a replay opens each step's app itself.`
 )
 
 // desktopLearnInstructions are learnInstructions with a success check a desktop can show.
@@ -744,7 +777,8 @@ func startStep(steps []WStep, start string) (WStep, bool) {
 }
 
 // buildDesktopWorkflow is buildWorkflow for a desktop trace: each step targets the recorded
-// app and window, and replays its last event (a click at the recorded point, typing, a key).
+// app and window, and each of its events is a step of its own with the model's intent (a click
+// at the recorded point, typing, a key): "type the message" is the text, then Enter (#581).
 // A step whose event had an accessibility element (AX on macOS, AT-SPI on Linux) records it
 // with source "ax", so a replay finds it again; a click the vision model named
 // (nameClicksBySight) records that with source "vision"; one without (no accessibility
@@ -753,41 +787,50 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 	w := newDraft(rec, out)
 	subs := learnParams(&w, out, cands)
 	for _, s := range out.Steps {
-		nums := stepEvents(s.EventSeqs, len(evs))
-		if len(nums) == 0 {
-			continue
+		for _, n := range stepEvents(s.EventSeqs, len(evs)) {
+			e := evs[n-1]
+			described := describeDesktopEvent(e)
+			if e.Element != nil && e.Element.Did != "" {
+				described = e.Element.Did
+			}
+			intent := stepIntent(s.Intent, described)
+			a, ok := desktopEventAction(e, intent)
+			if !ok {
+				continue
+			}
+			step := WStep{Intent: intent, Target: "desktop", App: e.App, Action: a, Window: stepWindow(e)}
+			step.Element = desktopRecordedElement(e.Element)
+			var el *computeruse.Element
+			if e.Element != nil {
+				el = &computeruse.Element{Role: e.Element.Role, Name: e.Element.Name, Secure: e.Masked}
+			}
+			risk, ok := stepRisk(a, el, computeruse.Target{Kind: "desktop", App: e.App}, e.Masked)
+			if !ok {
+				continue
+			}
+			step.Risk = risk
+			addStep(&w, step, subs[n])
 		}
-		n := nums[len(nums)-1]
-		e := evs[n-1]
-		described := describeDesktopEvent(e)
-		if e.Element != nil && e.Element.Did != "" {
-			described = e.Element.Did
-		}
-		intent := stepIntent(s.Intent, described)
-		a, ok := desktopEventAction(e, intent)
-		if !ok {
-			continue
-		}
-		step := WStep{Intent: intent, Target: "desktop", App: e.App, Action: a}
-		if e.Window != nil && (e.Window.Class != "" || e.Window.Title != "") {
-			step.Window = &StepWindow{Class: e.Window.Class, Title: e.Window.Title}
-		}
-		step.Element = desktopRecordedElement(e.Element)
-		var el *computeruse.Element
-		if e.Element != nil {
-			el = &computeruse.Element{Role: e.Element.Role, Name: e.Element.Name, Secure: e.Masked}
-		}
-		risk, ok := stepRisk(a, el, computeruse.Target{Kind: "desktop", App: e.App}, e.Masked)
-		if !ok {
-			continue
-		}
-		step.Risk = risk
-		addStep(&w, step, subs[n])
 	}
 	// No URL or download on a desktop: the model's text or screen check, if any.
 	sc := successCheck(out.Success, nil)
 	sc.URLContains = ""
 	return finishDraft(w, sc)
+}
+
+// stepWindow is the window a desktop step was recorded in, with a click's point in it (from
+// its top-left, and the window's size then) when the point is inside: a replay's model round
+// finds the place by it when the window moved (#581).
+func stepWindow(e desktopEvent) *StepWindow {
+	w := e.Window
+	if w == nil || (w.Class == "" && w.Title == "") {
+		return nil
+	}
+	sw := &StepWindow{Class: w.Class, Title: w.Title}
+	if e.Kind == "click" && w.W > 0 && w.H > 0 && (e.X != 0 || e.Y != 0) && !e.outsideWindow() {
+		sw.Point = &WindowPoint{X: e.X - w.X, Y: e.Y - w.Y, W: w.W, H: w.H}
+	}
+	return sw
 }
 
 // newDraft is the draft's owner, name and triggers.

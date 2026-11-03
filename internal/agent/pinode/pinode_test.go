@@ -27,6 +27,7 @@ type fakeLEDs struct {
 	mu       sync.Mutex
 	previews []string
 	enabled  []bool
+	idleDark []bool
 	bright   []int
 }
 
@@ -36,6 +37,11 @@ func (l *fakeLEDs) Preview(name string, d time.Duration) {
 	l.previews = append(l.previews, name+" "+d.String())
 }
 func (l *fakeLEDs) SetEnabled(on bool) { l.mu.Lock(); l.enabled = append(l.enabled, on); l.mu.Unlock() }
+func (l *fakeLEDs) SetIdleDark(d bool) {
+	l.mu.Lock()
+	l.idleDark = append(l.idleDark, d)
+	l.mu.Unlock()
+}
 func (l *fakeLEDs) SetBrightness(p int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -104,7 +110,7 @@ func (f *fakeCC) PostAmbientResult(_ context.Context, rid string, p map[string]a
 }
 
 func initial() State {
-	return State{WakeThreshold: 0.4, WakeAck: true, FollowUpListen: 4, FollowUpSilence: 1, LEDEnabled: true, LEDBrightness: 100,
+	return State{WakeThreshold: 0.4, WakeAck: true, FollowUpListen: 4, FollowUpSilence: 1, LEDEnabled: true, LEDIdle: true, LEDBrightness: 100,
 		SilenceThreshold: 300, SilenceSecs: 0.8, FollowUpMinAfterOnset: 0.7, FollowUpMinSpeech: 0.3,
 		Maintenance: maintenance.Settings{Enabled: true, At: "03:00", CeilingMB: -1}}
 }
@@ -169,6 +175,7 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 	}
 	run(t, n, newFakeCC(), "update_node_config", map[string]any{"settings": map[string]any{
 		"led_enabled":                "false",
+		"led_idle_enabled":           "false",
 		"led_brightness_percent":     40.0,
 		"wake_word_threshold":        0.55,
 		"wake_word_threshold_auto":   "true",
@@ -193,13 +200,13 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 		f.MinAfterOnsetSecs != 0.9 || f.MinSpeechSecs != 0.45 {
 		t.Fatalf("endpointing %+v, follow-up %+v", e, f)
 	}
-	if !slices.Equal(leds.enabled, []bool{false}) || !slices.Equal(leds.bright, []int{40}) {
-		t.Fatalf("leds %v %v", leds.enabled, leds.bright)
+	if !slices.Equal(leds.enabled, []bool{false}) || !slices.Equal(leds.bright, []int{40}) || !slices.Equal(leds.idleDark, []bool{true}) {
+		t.Fatalf("leds %v %v %v", leds.enabled, leds.bright, leds.idleDark)
 	}
 	if v.cfg.WakeThreshold != 0.55 || !v.cfg.WakeThresholdAuto || v.cfg.Chimes || v.cfg.FollowUp.ListenSecs != 0 || v.cfg.FollowUp.SilenceSecs != 0.7 {
 		t.Fatalf("voice cfg %+v", v.cfg)
 	}
-	want := State{WakeThreshold: 0.55, WakeAuto: true, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDBrightness: 40,
+	want := State{WakeThreshold: 0.55, WakeAuto: true, WakeAck: false, FollowUpListen: 0, FollowUpSilence: 0.7, LEDEnabled: false, LEDIdle: false, LEDBrightness: 40,
 		SilenceThreshold: 1000, SilenceSecs: 0.5, FollowUpMinAfterOnset: 0.9, FollowUpMinSpeech: 0.45, Maintenance: initial().Maintenance}
 	if got := n.State(); got != want {
 		t.Fatalf("state %+v", got)
@@ -208,7 +215,7 @@ func TestUpdateAppliesLiveAndPersists(t *testing.T) {
 	if err != nil || len(unknown) != 0 {
 		t.Fatal(err, unknown)
 	}
-	if *s.Voice != true || *s.LEDs != false || *s.LEDBrightness != 40 || *s.WakeThreshold != 0.55 || !*s.WakeAuto ||
+	if *s.Voice != true || *s.LEDs != false || *s.LEDIdle != false || *s.LEDBrightness != 40 || *s.WakeThreshold != 0.55 || !*s.WakeAuto ||
 		*s.Chimes != false || *s.FollowUp != 0 || *s.FollowUpSilence != 0.7 ||
 		*s.SilenceThreshold != 1000 || *s.ListenSilence != 0.5 || *s.FollowUpMinAfterOnset != 0.9 || *s.FollowUpMinSpeech != 0.45 {
 		t.Fatalf("saved %+v", s)
@@ -482,5 +489,16 @@ func TestUpdateRejectsANegativeFollowUpWindow(t *testing.T) {
 	}})
 	if v.tunes != 0 || n.State() != initial() {
 		t.Fatalf("tunes %d, state %+v", v.tunes, n.State())
+	}
+}
+
+func TestLEDMode(t *testing.T) {
+	for _, c := range []struct {
+		enabled, idle bool
+		want          string
+	}{{true, true, "always"}, {true, false, "responding"}, {false, true, "off"}, {false, false, "off"}} {
+		if got := (State{LEDEnabled: c.enabled, LEDIdle: c.idle}).LEDMode(); got != c.want {
+			t.Fatalf("enabled %v idle %v: %q, want %q", c.enabled, c.idle, got, c.want)
+		}
 	}
 }

@@ -27,6 +27,8 @@ type Runner struct {
 	// Protocols, if set, is asked for the heartbeat's protocols (the device families) on every
 	// beat.
 	Protocols func() []string
+	// Managers, if set, is asked for the heartbeat's managers (the device managers) on every beat.
+	Managers func() []string
 	// Changed, if set, returns a channel that is closed when a capability changes: the next
 	// heartbeat goes out at once instead of at the next tick (the admin's ticks turn green
 	// within seconds of the browser extension connecting).
@@ -217,6 +219,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	ccURL, _ := svcs.Need(SvcCommandCenter)
 	mqURL, _ := svcs.Need(SvcMQTT)
 	cc := NewCC(ccURL, r.Creds)
+	cc.Services = svcs
 
 	// The channel is taken before each beat is built, so a change during a beat wakes the next.
 	watch := func() <-chan struct{} {
@@ -436,6 +439,9 @@ func (r *Runner) beat() Beat {
 	}
 	if r.Protocols != nil {
 		b.Protocols = r.Protocols()
+	}
+	if r.Managers != nil {
+		b.Managers = r.Managers()
 	}
 	return b
 }

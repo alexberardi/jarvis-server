@@ -40,7 +40,7 @@ var uvReleaseBase = "https://github.com/astral-sh/uv/releases/download/"
 // SDKRequirement is the jarvis-command-sdk every venv gets, pinned to a commit (the SDK isn't
 // on PyPI; CI's sidecar test installs the same tree). JARVIS_AGENT_SDK overrides it, e.g. with
 // a local checkout's path. Move it forward when the sidecar script needs a newer SDK.
-const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/708193cc3e74d23294cf05625dabdac61336d57e.tar.gz"
+const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/d8c6917268eae14a325c73072bf248db98642551.tar.gz"
 
 // NodeCommandsRequirement is the Pi's built-in commands: jarvis-node-setup pinned to a commit
 // (its pyproject packages commands*, core*, services*, …, and needs only the SDK >= 0.13.0).
@@ -49,13 +49,27 @@ const NodeCommandsRequirement = "jarvis-node-setup @ https://github.com/alexbera
 
 // PiBuiltins are the built-in commands the Pi profile loads: every module of jarvis-node-setup's
 // commands package but those that still call the Python node's own code
-// (docs/decisions/2026-10-18-pi-builtin-commands.md).
+// (docs/decisions/2026-10-18-pi-builtin-commands.md). The skipped ones are Go built-ins
+// (internal/agent/builtins, docs/decisions/2026-10-27-go-builtins.md).
 func PiBuiltins(requirement string) *Builtins {
 	if requirement == "" {
 		requirement = NodeCommandsRequirement
 	}
 	return &Builtins{Requirement: requirement, Package: "commands",
-		Skip: []string{"control_device_command", "routine_command", "send_link_command"}}
+		Skip: append([]string{"control_device_command", "routine_command", "send_link_command"}, PortedToGo...)}
+}
+
+// PortedToGo are the built-in modules the Go agent now serves itself (internal/agent/builtins
+// and the clock), so the sidecar doesn't load the Python copy, which would shadow the Go one.
+var PortedToGo = []string{
+	"timer_command", "check_timers_command", "cancel_timer_command", // builtins.Timers
+	"timezone_command",                                                            // the clock (get_current_time)
+	"calculator_command", "measurement_conversion_command", "tell_a_joke_command", // Calculate, Convert, Joke
+	"answer_question_command", "chat_command", // Talk
+	"control_node_command", "whats_up_command", "act_on_items_command", // ControlNode, CheckAlerts, ActOnItems
+	"shopping_list_command", "todo_list_command", // Shopping, Todo
+	"export_shopping_list_command", "export_todo_list_command", // ExportShopping, ExportTodo
+	"reminder_command", // Reminder (and the poller's check: reminder_service in Go)
 }
 
 // pythonVersion is the interpreter uv installs for the venv: its own standalone build, so the

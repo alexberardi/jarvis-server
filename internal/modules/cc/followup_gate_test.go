@@ -108,6 +108,19 @@ func TestFollowUpGateDropsADifferentFarVoiceBeforeTheModel(t *testing.T) {
 	}
 }
 
+func TestFollowUpGateDropsABareExclamationBeforeTheModel(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	gateConv(t, ve)
+	calls := len(ve.eng.requests())
+	b := followUp(ve, "Oh my gosh", map[string]any{"level_vs_wake_db": 2.2})
+	if b["stop_reason"] != "not_for_me" || b["keep_listening"] != true {
+		t.Fatalf("body %v", b)
+	}
+	if n := len(ve.eng.requests()); n != calls {
+		t.Fatalf("the model was called %d times for an exclamation", n-calls)
+	}
+}
+
 func TestFollowUpGateHintsTheModelAndSkipsTheDoubleCheck(t *testing.T) {
 	cases := []struct {
 		name      string

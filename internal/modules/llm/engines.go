@@ -131,7 +131,7 @@ type ModelTraits struct {
 // path: a template never changes for an installed file.
 var templateTraits sync.Map // id+"\x00"+path -> ModelTraits
 
-// LiveModelTraits reports the live label's model traits. A remote label calls tools natively
+// LiveModelTraits reports the live label's model traits. A remote label calls tools natively, uses the Cloud prompt
 // and has no thinking switch. A local model's come from the chat template llama-server
 // renders with: the catalog entry's pinned one (--chat-template-file), else the one in the
 // model's files (GGUF header, chat_template.jinja, tokenizer_config.json). The zero value
@@ -150,7 +150,8 @@ func (m *Module) LiveModelTraits(ctx context.Context) ModelTraits {
 		if c.RemoteURL == "" {
 			return ModelTraits{}
 		}
-		return ModelTraits{ToolCalling: "native", ToolCallingFrom: "remote"}
+		// Cloud is cc's vendor-neutral built-in prompt for remote models (prompts.Cloud).
+		return ModelTraits{PromptProvider: "Cloud", ToolCalling: "native", ToolCallingFrom: "remote"}
 	case engine.ModeOff:
 		return ModelTraits{}
 	}

@@ -12,6 +12,7 @@ import (
 	"maps"
 	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,9 @@ type OpenPolicy struct {
 }
 
 var openSchemes = map[string]bool{"http": true, "https": true, "mailto": true}
+
+// reDomain is a bare site name, "google.com" or "news.ycombinator.com".
+var reDomain = regexp.MustCompile(`(?i)^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$`)
 
 // targetKind classifies a desktop_open target.
 type targetKind int
@@ -107,7 +111,10 @@ type Tools struct {
 	// question.
 	Confirm *dictate.Confirmer
 	// Now is the clock for "it" (the last window acted on, for a minute); nil: time.Now.
-	Now   func() time.Time
+	Now func() time.Time
+	// Views lists and switches the tabs and sheets inside app windows (views.go); nil: the
+	// view tools aren't offered.
+	Views ViewSource
 	tools []tool
 
 	mu        sync.Mutex
@@ -125,6 +132,12 @@ type Tools struct {
 	// closes of the same app in that turn get the same question instead of closing.
 	closing     string
 	closingWait map[string]any
+	// viewChoices is the numbered list of views the island last showed (one list at a time:
+	// a window list clears it and the other way round), for the app as said.
+	viewChoices   []View
+	viewChoiceApp string
+	// mixedChoices: a funnel-stage-1 list of different kinds (a window or a tab), each a call.
+	mixedChoices []func(context.Context) (map[string]any, error)
 }
 
 // New builds the toolset over a host and an apps catalogue (nil for none).
@@ -133,7 +146,7 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	winID := node.Param{Name: "window_id", Type: "string",
 		Description: "The app or window as the user said it ('TextEdit', 'the terminal', 'it'), or an id from desktop_list_windows. Leave out for the window in front"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text.",
+		{node.Spec{Name: ToolOpen, Description: "Open or launch an app ('open Steam', 'launch slack') or a link on the computer. For 'open X and type Y', open X, then desktop_type_text. A job inside an app ('in X, make a note and save it') is an errand: run_errand.",
 			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "The app's name as said, or a URL"}},
 			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
 			Examples: []node.Example{
@@ -168,6 +181,12 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 			Params:   []node.Param{winID, {Name: "all_of_app", Type: "bool", Description: "Close every window of the app, not just this one"}},
 			Keywords: []string{"close", "window"}},
 			host.CapWindowsClose, t.close, nil},
+	}
+	vs := viewsSpecs()
+	for i, call := range []func(context.Context, map[string]any) (map[string]any, error){t.listViews, t.switchView} {
+		spec := vs[i]
+		t.tools = append(t.tools, tool{spec: spec, call: call,
+			render: func(map[string]bool) (node.Spec, bool) { return spec, t.Views != nil }})
 	}
 	return t
 }
@@ -294,6 +313,14 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		return nil, err
 	}
 	p, err := apps.Find(list, target)
+	if errors.Is(err, apps.ErrNotFound) && reDomain.MatchString(strings.TrimSpace(target)) {
+		// "open google.com": no app has that name, so it's the site.
+		link := "https://" + strings.TrimSpace(target)
+		if err := t.Host.Open(ctx, link); err != nil {
+			return nil, err
+		}
+		return map[string]any{"opened": link, "note": "requested; launch is not confirmed"}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +335,10 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{"launched": app.Name, "matched_app": app.Name, "note": "requested; launch is not confirmed"}
+	out := map[string]any{"launched": app.Name, "matched_app": app.Name,
+		"note": "requested; launch is not confirmed. For work inside the app (make, edit or save something), " +
+			"call run_errand with the whole request, the app named in the goal (\"in " + app.Name + ", …\"): " +
+			"desktop_type_text only types into the focused window and cannot work the app's controls"}
 	if p.Fuzzy {
 		out["fuzzy_match"], out["heard_as"] = true, p.HeardAs
 	}

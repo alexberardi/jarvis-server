@@ -72,6 +72,20 @@ func (s *Sidecar) Protocols() []string {
 	return out
 }
 
+// Managers are the configured package device managers' names, sorted: the heartbeat's
+// "managers", which jarvisd uses to pick the node for a manager's device. The built-in
+// jarvis_direct is left out: its devices go by protocol.
+func (s *Sidecar) Managers() []string {
+	out := []string{}
+	for _, m := range s.Devices().Managers {
+		if name, _ := m.Entry["manager_name"].(string); name != "" && name != "jarvis_direct" && m.Entry["is_configured"] == true {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // DeviceCall runs one of the sidecar's device methods (device_scan, device_list,
 // device_state, device_removed) and returns its result as is: the body the Python node posts.
 // A scan waits for every family's discover (up to 10 s each, together), and the sidecar

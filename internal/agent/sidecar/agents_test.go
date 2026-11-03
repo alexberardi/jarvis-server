@@ -142,3 +142,36 @@ func TestSidecarRunsPackageAgents(t *testing.T) {
 		t.Fatalf("second run = %v, %v", alerts, err)
 	}
 }
+
+// The zwave package's agent failed on the Go Pi with "No module named 'device_families.zwave'":
+// every package has its own top-level device_families/, and the first root on sys.path took the
+// name. Packages sharing a top-level package with an empty __init__ share it, as one namespace.
+func TestPackagesShareTopLevelFamilies(t *testing.T) {
+	py := python(t)
+	abs := func(n string) string {
+		p, err := filepath.Abs(filepath.Join("testdata", "packages", n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	b, _ := json.Marshal(map[string]any{"packages": []any{
+		map[string]any{"name": "famone", "root": abs("famone")},
+		map[string]any{"name": "famtwo", "root": abs("famtwo"), "agents": []string{"agents/twin/agent.py"}},
+	}})
+	listing := filepath.Join(t.TempDir(), "commands.json")
+	if err := os.WriteFile(listing, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sc, err := StartWith(context.Background(), py, listing, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sc.Close() })
+	if f := sc.Failed(); len(f) != 0 {
+		t.Fatalf("failed = %v", f)
+	}
+	if _, err := sc.RunAgent(context.Background(), "twin"); err != nil {
+		t.Fatalf("twin: %v", err)
+	}
+}

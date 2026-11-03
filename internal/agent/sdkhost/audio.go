@@ -120,6 +120,15 @@ func (a *Audio) setLocked(ctx context.Context, pct int) bool {
 		return false
 	}
 	a.log().Info("audio: volume set", "percent", pct)
+	// Turning a muted speaker up unmutes it, as any speaker's volume does: the app's slider and
+	// "volume up" otherwise moved a level nobody could hear.
+	if s.Muted && pct > 0 {
+		if a.apply(ctx, []string{"set-sink-mute", "0"}, []string{"-q", "sset", "Master", "unmute"}) {
+			s.Muted = false
+			a.save(s)
+			a.log().Info("audio: unmuted by the volume")
+		}
+	}
 	return true
 }
 
@@ -221,6 +230,7 @@ func (a *Audio) Configure(ctx context.Context, values map[string]any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.load()
+	applyMute := setMute
 	if setVolume {
 		v, ok := volume.(float64)
 		if !ok || v < 0 || v > 100 {
@@ -228,6 +238,12 @@ func (a *Audio) Configure(ctx context.Context, values map[string]any) error {
 		}
 		p := int(v)
 		s.Percent = &p
+		// Apply even on retries: persisted preferences may be ahead of a mixer
+		// that failed during the previous request.
+		if p > 0 && !setMute {
+			s.Muted = false
+			applyMute = true
+		}
 	}
 	if setMute {
 		v, ok := mute.(bool)
@@ -245,7 +261,7 @@ func (a *Audio) Configure(ctx context.Context, values map[string]any) error {
 			return errors.New("speaker preferences saved, but the mixer could not apply them")
 		}
 	}
-	if setMute {
+	if applyMute {
 		flag, sw := "0", "unmute"
 		if s.Muted {
 			flag, sw = "1", "mute"

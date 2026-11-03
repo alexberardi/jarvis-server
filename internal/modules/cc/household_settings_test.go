@@ -20,7 +20,7 @@ func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
 			t.Errorf("%s: Household=%v, allowlisted=%v", d.Key, d.Household, allowed)
 		}
 	}
-	if len(householdControllable) != 22 {
+	if len(householdControllable) != 23 {
 		t.Fatal(len(householdControllable))
 	}
 	for _, s := range householdControllable {
@@ -41,7 +41,7 @@ func TestHouseholdSettingsGet(t *testing.T) {
 		`"phone_calls.audio_retention_days":30,"phone_calls.max_call_seconds":600,"phone_calls.calls_per_day":10,` +
 		`"phone_calls.monthly_minutes_cap":60,"phone_calls.max_concurrent_calls":1,"household.location":"",` +
 		`"persona.household_prompt":` + jsonStr(prompts.DefaultPersona) + `,"memory.enabled":true,"memory.extraction_enabled":true,` +
-		`"household.timezone":"","phone.twilio_account_sid":null,"phone.twilio_auth_token":null,"phone.twilio_from_number":null,"pantry.enabled":false,"watches.enabled":false,"errands.autonomous_enabled":false,"computer.recording_retention_days":30}}`
+		`"household.timezone":"","phone.twilio_account_sid":null,"phone.twilio_auth_token":null,"phone.twilio_from_number":null,"pantry.enabled":false,"pantry.default_bundle":"","watches.enabled":false,"errands.autonomous_enabled":false,"computer.recording_retention_days":30}}`
 	if got := string(bytes.TrimSpace(r.body)); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

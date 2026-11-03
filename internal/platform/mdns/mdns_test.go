@@ -409,3 +409,21 @@ func TestAdvertiseServiceType(t *testing.T) {
 		t.Fatalf("registered %+v, want _jarvis-setup._tcp on 8080", r)
 	}
 }
+
+// The default SRV target is not the host's own name (#567): zeroconf multicasts unique A/AAAA
+// records for it, which avahi (or mDNSResponder) takes as a conflict on its host name and
+// renames the host to <host>-2.
+func TestAdvertiseDefaultHostIsNotTheHostName(t *testing.T) {
+	regs := make(chan registration, 1)
+	srv := &fakeServer{shutdowns: make(chan struct{}, 1)}
+	stop, err := Advertise(t.Context(), hermetic(Options{}, regs, srv, "10.0.0.179/24"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	h, _ := os.Hostname()
+	label, _, _ := strings.Cut(HostLabel(h), ".")
+	if r := <-regs; r.host != label+"-jarvis" {
+		t.Fatalf("host = %q, want %q (not the host's own %q)", r.host, label+"-jarvis", HostLabel(h))
+	}
+}

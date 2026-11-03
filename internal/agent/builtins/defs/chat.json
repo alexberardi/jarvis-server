@@ -1,0 +1,203 @@
+{
+  "client_tool": {
+    "allow_direct_answer": true,
+    "antipatterns": [
+      {
+        "command_name": "answer_question",
+        "description": "Factual questions, definitions, history, science, geography, biographies"
+      },
+      {
+        "command_name": "search_web",
+        "description": "Current events, live information, news, recent data"
+      },
+      {
+        "command_name": "get_weather",
+        "description": "Weather forecasts, temperature, conditions"
+      },
+      {
+        "command_name": "calculate",
+        "description": "Math calculations, arithmetic, number crunching"
+      },
+      {
+        "command_name": "set_timer",
+        "description": "Setting timers or alarms"
+      },
+      {
+        "command_name": "control_device",
+        "description": "Smart home device control, turning on/off lights"
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "message": "Hey Jarvis, how's it going?"
+        },
+        "is_primary": true,
+        "voice_command": "Hey Jarvis, how's it going?"
+      },
+      {
+        "expected_parameters": {
+          "message": "Good morning!"
+        },
+        "is_primary": false,
+        "voice_command": "Good morning!"
+      },
+      {
+        "expected_parameters": {
+          "message": "What do you think about space travel?"
+        },
+        "is_primary": false,
+        "voice_command": "What do you think about space travel?"
+      },
+      {
+        "expected_parameters": {
+          "message": "Tell me something interesting"
+        },
+        "is_primary": false,
+        "voice_command": "Tell me something interesting"
+      },
+      {
+        "expected_parameters": {
+          "message": "How are you doing today?"
+        },
+        "is_primary": false,
+        "voice_command": "How are you doing today?"
+      }
+    ],
+    "function": {
+      "description": "Chat: small talk and greetings. Put your own spoken reply in message. Facts: answer_question.",
+      "name": "chat",
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "Your reply, spoken as written (not the user's words)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "chat",
+      "talk",
+      "hello",
+      "hi",
+      "hey",
+      "how are you",
+      "what's up",
+      "good morning",
+      "good evening",
+      "good night",
+      "good afternoon",
+      "how's it going",
+      "what do you think",
+      "tell me about yourself",
+      "who are you"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": true,
+    "antipatterns": [
+      {
+        "command_name": "answer_question",
+        "description": "Factual questions, definitions, history, science, geography, biographies"
+      },
+      {
+        "command_name": "search_web",
+        "description": "Current events, live information, news, recent data"
+      },
+      {
+        "command_name": "get_weather",
+        "description": "Weather forecasts, temperature, conditions"
+      },
+      {
+        "command_name": "calculate",
+        "description": "Math calculations, arithmetic, number crunching"
+      },
+      {
+        "command_name": "set_timer",
+        "description": "Setting timers or alarms"
+      },
+      {
+        "command_name": "control_device",
+        "description": "Smart home device control, turning on/off lights"
+      }
+    ],
+    "command_name": "chat",
+    "critical_rules": [
+      "Casual conversation only. NOT for facts, weather, timers, music, or devices."
+    ],
+    "description": "Chat: small talk and greetings. Put your own spoken reply in message. Facts: answer_question.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "message": "Hey Jarvis, how's it going?"
+        },
+        "is_primary": true,
+        "voice_command": "Hey Jarvis, how's it going?"
+      },
+      {
+        "expected_parameters": {
+          "message": "Good morning!"
+        },
+        "is_primary": false,
+        "voice_command": "Good morning!"
+      },
+      {
+        "expected_parameters": {
+          "message": "What do you think about space travel?"
+        },
+        "is_primary": false,
+        "voice_command": "What do you think about space travel?"
+      },
+      {
+        "expected_parameters": {
+          "message": "Tell me something interesting"
+        },
+        "is_primary": false,
+        "voice_command": "Tell me something interesting"
+      },
+      {
+        "expected_parameters": {
+          "message": "How are you doing today?"
+        },
+        "is_primary": false,
+        "voice_command": "How are you doing today?"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "chat",
+      "talk",
+      "hello",
+      "hi",
+      "hey",
+      "how are you",
+      "what's up",
+      "good morning",
+      "good evening",
+      "good night",
+      "good afternoon",
+      "how's it going",
+      "what do you think",
+      "tell me about yourself",
+      "who are you"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": "Your reply, spoken as written (not the user's words)",
+        "enum_values": null,
+        "name": "message",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      }
+    ]
+  }
+}

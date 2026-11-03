@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -203,14 +204,21 @@ func lockSettingsStartup() (func(), error) {
 }
 
 func supportedDesktopFields() []nodeconfig.Field {
-	if voice.Supported {
-		return desktopFields
-	}
+	return desktopFieldsFor(runtime.GOOS, voice.Supported)
+}
+
+func desktopFieldsFor(goos string, voiceSupported bool) []nodeconfig.Field {
 	var fields []nodeconfig.Field
 	for _, f := range desktopFields {
-		if f.Group != "Audio devices" && f.Key != "choice_listen_seconds" {
-			fields = append(fields, f)
+		// AudioQueue and WinMM always use the OS default device. Only ALSA
+		// supports names; a saved arbitrary name would prevent voice starting.
+		if f.Group == "Audio devices" && (!voiceSupported || goos != "linux") {
+			continue
 		}
+		if f.Key == "choice_listen_seconds" && !voiceSupported {
+			continue
+		}
+		fields = append(fields, f)
 	}
 	return fields
 }

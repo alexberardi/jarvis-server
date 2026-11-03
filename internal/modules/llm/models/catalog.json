@@ -1,5 +1,27 @@
 [
   {
+    "id": "qwen3-1.7b",
+    "display": "Qwen 3 1.7B (Q8_0)",
+    "kind": "llm",
+    "repo": "Qwen/Qwen3-1.7B-GGUF",
+    "revision": "90862c4b9d2787eaed51d12237eafdfe7c5f6077",
+    "file": "Qwen3-1.7B-Q8_0.gguf",
+    "size": 1834426016,
+    "sha256": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+    "context_default": 16384,
+    "context_max": 40960,
+    "kv_bytes_per_token": 114688,
+    "prompt_provider": "Qwen3_8B_Compressed",
+    "thinking": true,
+    "chat_template": "qwen3.jinja",
+    "chat_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
+    "tags": [
+      "live",
+      "background",
+      "small"
+    ]
+  },
+  {
     "id": "qwen3-4b",
     "display": "Qwen 3 4B (Q4_K_M)",
     "kind": "llm",
@@ -286,8 +308,8 @@
     "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2",
     "archive": "tar.bz2",
     "file": "kokoro-multi-lang-v1_0.tar.bz2",
-    "size": 349906910,
-    "sha256": "c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298",
+    "size": 349886476,
+    "sha256": "60703707bc05ccd48d60e1eb723f38b07d6e474795a0b6a588d7220400e0f7a4",
     "tags": [
       "tts"
     ],

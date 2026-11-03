@@ -239,12 +239,17 @@ func anthropicTools(tools []Tool) []anthropicTool {
 		schema := jsonObject(fn.Parameters)
 		if fn.Name == "" && len(t.Raw) > 0 {
 			var bare struct {
+				Function    ToolFunction    `json:"function"`
 				Name        string          `json:"name"`
 				Description string          `json:"description"`
 				Parameters  json.RawMessage `json:"parameters"`
 				InputSchema json.RawMessage `json:"input_schema"`
 			}
-			if json.Unmarshal(t.Raw, &bare) == nil {
+			switch {
+			case json.Unmarshal(t.Raw, &bare) != nil:
+			case bare.Function.Name != "": // OpenAI-shaped Raw with Function unset (cc's warmup)
+				fn, schema = bare.Function, jsonObject(bare.Function.Parameters)
+			default:
 				fn = ToolFunction{Name: bare.Name, Description: bare.Description}
 				if schema = jsonObject(bare.Parameters); schema == nil {
 					schema = jsonObject(bare.InputSchema)

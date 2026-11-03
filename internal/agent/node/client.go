@@ -94,6 +94,7 @@ const (
 	SvcCommandCenter = "jarvis-command-center"
 	SvcAuth          = "jarvis-auth"
 	SvcMQTT          = "jarvis-mqtt-broker"
+	SvcLogs          = "jarvis-logs"
 )
 
 // Discover reads GET {configURL}/services?style=remote&remote_host={host}: the LAN-side URLs,
@@ -141,9 +142,10 @@ func (s Services) Need(name string) (string, error) {
 
 // CC is command-center as a node sees it: every call carries X-API-Key node_id:node_key.
 type CC struct {
-	BaseURL string
-	Creds   Creds
-	HTTP    *http.Client
+	BaseURL  string
+	Creds    Creds
+	HTTP     *http.Client
+	Services Services // what discovery listed, when Runner.Run made it
 }
 
 func NewCC(baseURL string, c Creds) *CC {
@@ -152,6 +154,19 @@ func NewCC(baseURL string, c Creds) *CC {
 
 func (c *CC) do(ctx context.Context, method, path string, body, out any) error {
 	return doJSON(ctx, c.HTTP, method, joinURL(c.BaseURL, path), map[string]string{"X-API-Key": c.Creds.APIKey()}, body, out)
+}
+
+// WithTimeout is a copy of c whose calls may take up to d (a model's reply outlasts the
+// client's 15 s).
+func (c *CC) WithTimeout(d time.Duration) *CC {
+	slow := *c
+	hc := http.Client{}
+	if c.HTTP != nil {
+		hc = *c.HTTP
+	}
+	hc.Timeout = d
+	slow.HTTP = &hc
+	return &slow
 }
 
 // Do is one node-authenticated call to command-center: body (nil for none) as JSON, the JSON
@@ -209,6 +224,9 @@ type Beat struct {
 	// Protocols are the device families this node runs (a Pi's sidecar), so jarvisd picks it for
 	// their devices' state and removal. Nil leaves it out; empty reports none.
 	Protocols []string
+	// Managers are the device managers this node runs, so jarvisd picks it for a manager's
+	// devices (their source). Nil leaves it out; empty reports none.
+	Managers []string
 	// Busy reports is_busy: true, so jarvisd hands this heartbeat no work (pending_update).
 	// `jarvis-agent status` sends one: it isn't the running agent and couldn't act on it.
 	Busy bool
@@ -261,6 +279,9 @@ func (c *CC) Beat(ctx context.Context, b Beat) (BeatReply, error) {
 	}
 	if b.Protocols != nil {
 		body["protocols"] = b.Protocols
+	}
+	if b.Managers != nil {
+		body["managers"] = b.Managers
 	}
 	var resp struct {
 		PendingUpdate *struct {

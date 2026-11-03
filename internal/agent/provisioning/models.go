@@ -44,6 +44,9 @@ type NodeInfo struct {
 	Capabilities          []string `json:"capabilities"`
 	State                 State    `json:"state"`
 	PreviouslyProvisioned bool     `json:"previously_provisioned"`
+	// SetupMode is "hotspot" (the app joins the node's SSID) or "lan" (no hotspot; the node is
+	// on the user's network, found over mDNS). Not in the Python node, hence omitempty.
+	SetupMode string `json:"setup_mode,omitempty"`
 }
 
 // NetworkInfo is one Wi-Fi scan result.

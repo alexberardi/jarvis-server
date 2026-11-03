@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,6 +39,9 @@ func TestBeatReplyAndUpdateFailure(t *testing.T) {
 		t.Fatalf("is_busy = %v, protocols = %v", sent["is_busy"], sent["protocols"])
 	}
 	// A Pi with no device families says so (jarvisd keeps the last list otherwise).
+	if _, err := c.Beat(ctx, Beat{Managers: []string{"home_assistant"}}); err != nil || fmt.Sprint(sent["managers"]) != "[home_assistant]" {
+		t.Fatalf("managers = %v, %v", sent["managers"], err)
+	}
 	if _, err := c.Beat(ctx, Beat{Protocols: []string{}}); err != nil || sent["protocols"] == nil || len(sent["protocols"].([]any)) != 0 {
 		t.Fatalf("protocols = %v, %v", sent["protocols"], err)
 	}

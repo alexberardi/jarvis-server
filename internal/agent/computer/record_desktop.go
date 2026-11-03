@@ -138,7 +138,8 @@ type DesktopEvent struct {
 	DX          int             `json:"dx,omitempty"` // scroll: lines
 	DY          int             `json:"dy,omitempty"`
 	Window      *EventWindow    `json:"window,omitempty"`
-	// Context is "none" when the recording has no accessibility context (no element, no mask).
+	// Context is "none" when the recording, or the event's app, has no accessibility context
+	// (no element, no mask).
 	Context string `json:"context,omitempty"`
 	// KeyframePoint: the event has a keyframe with its point marked, here.
 	KeyframePoint *KeyframePoint `json:"keyframe_point,omitempty"`
@@ -446,6 +447,9 @@ func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *EventWindow, a
 	e := DesktopEvent{RecordingID: d.id, Kind: kind, TS: at.UnixMilli(), Window: win, Context: d.context}
 	if el != nil {
 		e.App = el.App
+		if el.NoContext {
+			e.Context = ContextNone
+		}
 		if el.Role != "" || el.Name != "" || el.Path != "" {
 			e.Element = &DesktopElement{Role: el.Role, Name: el.Name, AXPath: el.Path}
 		}
@@ -514,7 +518,9 @@ func (d *deskRecorder) sendAt(e DesktopEvent, pt *Point) {
 }
 
 // keyframe takes event seq's keyframe unless the last one is too recent (on the inputs'
-// clock), and returns where the point is on it when the platform marks it.
+// clock), and returns where the point is on it when the platform marks it. A click the
+// platform marks (Wayland) always gets one: it is all the learner has to name the click by
+// sight, and quick clicks ("7", "7", "=") are each a step (#581).
 func (d *deskRecorder) keyframe(seq int64, pt *Point) *KeyframePoint {
 	if d.p.Keyframe == nil && d.p.Frame == nil {
 		return nil
@@ -523,7 +529,8 @@ func (d *deskRecorder) keyframe(seq int64, pt *Point) *KeyframePoint {
 	if now.IsZero() {
 		now = d.now()
 	}
-	if !d.lastShot.IsZero() && now.Sub(d.lastShot) < cmp.Or(d.p.KeyframeEvery, KeyframeEvery) {
+	marked := pt != nil && d.p.Frame != nil
+	if !marked && !d.lastShot.IsZero() && now.Sub(d.lastShot) < cmp.Or(d.p.KeyframeEvery, KeyframeEvery) {
 		return nil
 	}
 	d.lastShot = now

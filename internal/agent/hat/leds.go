@@ -155,6 +155,7 @@ type LEDs struct {
 	stable    string
 	transient string // "" = none
 	enabled   bool
+	idleDark  bool // the idle "normal" pattern shows dark: the LEDs light only while responding
 	scale     int
 	timer     *time.Timer // a pending auto-clear (Preview, Flash)
 	lastErr   string
@@ -240,6 +241,15 @@ func (l *LEDs) SetEnabled(on bool) {
 	l.poke()
 }
 
+// SetIdleDark keeps the idle "normal" pattern dark, so the LEDs light only while the node responds
+// (wake, listening, thinking, speaking, errors) or an alert is queued (led_idle_enabled false).
+func (l *LEDs) SetIdleDark(dark bool) {
+	l.mu.Lock()
+	l.idleDark = dark
+	l.mu.Unlock()
+	l.poke()
+}
+
 // SetBrightness scales every pattern's brightness, 0-100 (led_brightness_percent).
 func (l *LEDs) SetBrightness(percent int) {
 	l.mu.Lock()
@@ -267,6 +277,9 @@ func (l *LEDs) loop() {
 	for {
 		l.mu.Lock()
 		name, on, scale := l.out.pick(l.stable, l.transient), l.enabled, l.scale
+		if name == Normal && l.idleDark {
+			name = Off
+		}
 		l.mu.Unlock()
 		if !on {
 			name, scale = Off, 0

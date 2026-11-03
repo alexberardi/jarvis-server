@@ -32,7 +32,7 @@ test(`node settings save and reload without K2 (${profile})`, async ({ page, con
       await page.evaluate(theme => { localStorage.setItem('jarvis-admin-theme', theme); document.documentElement.classList.toggle('dark', theme === 'dark') }, colorScheme)
       await page.setViewportSize({ width, height: 900 })
       const shot = info.outputPath(`node-settings-${width}-${colorScheme}.png`)
-      await page.screenshot({ path: shot, animations: 'disabled' })
+      await dialog.screenshot({ path: shot, animations: 'disabled' })
       await info.attach('screenshot', { path: shot, contentType: 'image/png' })
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     }

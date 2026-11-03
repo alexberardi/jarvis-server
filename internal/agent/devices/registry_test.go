@@ -45,8 +45,8 @@ func TestRegistryKeepsTheDirectDevices(t *testing.T) {
 	}
 	// jarvisd unreachable: the cache stays as it was.
 	delete(api.gets, "/api/v0/node/devices")
-	if _, err := r.Refresh(ctx, api); err == nil || len(r.cached()) != 1 {
-		t.Fatalf("failed refresh: %v, cache %v", err, r.cached())
+	if _, err := r.Refresh(ctx, api); err == nil || len(r.Cached()) != 1 {
+		t.Fatalf("failed refresh: %v, cache %v", err, r.Cached())
 	}
 }
 

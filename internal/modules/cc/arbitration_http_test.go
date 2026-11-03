@@ -21,7 +21,7 @@ func expiredWindow(m *Module) {
 // Loop #287: one "Hey Jarvis" heard by two nodes of a household is answered once; the other
 // node gets a silent not_for_me marked stood_down.
 func TestTwoNodesOneWakeOneAnswer(t *testing.T) {
-	ve := newVoiceEnv(t, prompts.ChatGPT, expiredWindow)
+	ve := newVoiceEnv(t, prompts.Cloud, expiredWindow)
 	other := ve.createNode("node-v2", voiceHH)
 	ve.start("wake-a", `[]`)
 	ve.do("POST", "/api/v0/conversation/start",
@@ -49,7 +49,7 @@ func TestTwoNodesOneWakeOneAnswer(t *testing.T) {
 
 // Two nodes of different households hearing the same words both answer.
 func TestTwoHouseholdsSameWordsBothAnswer(t *testing.T) {
-	ve := newVoiceEnv(t, prompts.ChatGPT, expiredWindow)
+	ve := newVoiceEnv(t, prompts.Cloud, expiredWindow)
 	ve.auth.addUser(9, "hh-other", "member")
 	other := ve.createNode("node-x", "hh-other")
 	ve.start("wake-a", `[]`)

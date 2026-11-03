@@ -46,6 +46,12 @@ func NativeDesktop(apps Apps) *Desktop {
 	}
 }
 
+// NativeWindows is this session's window list with pids (the compositor's, else X11's), for
+// reading an app's accessibility tree outside a task (views).
+func NativeWindows() Windows {
+	return &linuxWindows{getenv: os.Getenv, wayland: &screen.Wayland{X: screen.OSExec{}}, x11: &x11.Display{}}
+}
+
 // x11Clients is the slice of *x11.Display the Linux desktop uses.
 type x11Clients interface {
 	Clients(ctx context.Context) ([]x11.Client, error)

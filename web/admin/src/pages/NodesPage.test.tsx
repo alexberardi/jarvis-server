@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import NodesPage from './NodesPage'
 
 const get = vi.spyOn(apiClient, 'get')
+const post = vi.spyOn(apiClient, 'post')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -22,7 +23,7 @@ beforeEach(() => {
       return {
         data: [
           { node_id: 'pc1', room: 'office', household_id: 'hh1', online: true, last_seen: null, last_seen_version: null, is_busy: false, node_kind: 'desktop', capabilities: { browser_extension: 'connected', computer_control: 'on' } },
-          { node_id: 'pi1', room: 'kitchen', household_id: 'hh1', online: true, last_seen: null, last_seen_version: null, is_busy: false, node_kind: null, capabilities: {} },
+          { node_id: 'pi1', room: 'kitchen', household_id: 'hh1', online: true, last_seen: null, last_seen_version: null, is_busy: false, node_kind: null, capabilities: { led_mode: 'responding' } },
         ],
       }
     if (url === '/api/cc/api/v0/nodes/pairings') return { data: { waiting: 0, households: [] } }
@@ -159,5 +160,33 @@ describe('NodesPage', () => {
     )
     expect(await screen.findByText('No nodes yet')).toBeInTheDocument()
     expect(screen.getByText(/Jarvis Automation phone app/)).toBeInTheDocument()
+  })
+
+  it('shows a voice node its LED mode and sends a change to that node alone', async () => {
+    post.mockResolvedValue({ data: { status: 'sent' } })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NodesPage />
+      </QueryClientProvider>,
+    )
+    const leds = await screen.findByLabelText('LEDs')
+    // Only the Pi reports an LED mode; the computer has no such row.
+    expect(screen.getAllByLabelText('LEDs')).toHaveLength(1)
+    expect(leds).toHaveValue('responding')
+    fireEvent.change(leds, { target: { value: 'always' } })
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/cc/api/v0/nodes/pi1/node-config', {
+        settings: { led_enabled: true, led_idle_enabled: true },
+        restart: false,
+      }),
+    )
+    fireEvent.change(leds, { target: { value: 'off' } })
+    await waitFor(() =>
+      expect(post).toHaveBeenLastCalledWith('/api/cc/api/v0/nodes/pi1/node-config', {
+        settings: { led_enabled: false },
+        restart: false,
+      }),
+    )
   })
 })

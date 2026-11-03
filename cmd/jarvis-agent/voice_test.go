@@ -25,8 +25,8 @@ func TestWakeDebounceFlag(t *testing.T) {
 		if got := wakeDebounce(f.debounce); got != c.want {
 			t.Errorf("%v → %v, want %v", c.args, got, c.want)
 		}
-		if c.args == nil && f.onsetWait != 0 {
-			t.Errorf("--listen-onset-wait defaults to %v, want 0", f.onsetWait)
+		if c.args == nil && (f.onsetWait != 1500*time.Millisecond || f.listenSilence != 1.2) {
+			t.Errorf("--listen-onset-wait / --listen-silence default to %v / %v, want 1.5s / 1.2", f.onsetWait, f.listenSilence)
 		}
 		if c.args == nil && f.preRoll != time.Second {
 			t.Errorf("--listen-preroll defaults to %v, want 1s", f.preRoll)

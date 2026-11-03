@@ -57,6 +57,11 @@ func TestFindNeverLaunchesASoundNearGuess(t *testing.T) {
 	if len(nf.Suggestions) == 0 || nf.Suggestions[0] != "Neovim" {
 		t.Fatalf("suggestions %v", nf.Suggestions)
 	}
+	// A sound-alike that shares nothing a person would hear isn't offered (2026-10-25).
+	_, err = Find([]App{{Name: "Google Photos"}}, "calculator")
+	if !errors.As(err, &nf) || len(nf.Suggestions) != 0 {
+		t.Fatalf("calculator: %v", err)
+	}
 	for _, q := range []string{"the kitchen lights", "oven", "toaster", "foo"} {
 		if p, err := Find(desktopApps, q); err == nil {
 			t.Errorf("%q launched %q", q, p.App.Name)

@@ -1,0 +1,441 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "set_timer",
+        "description": "Short relative-duration countdowns: 'set a timer for 5 minutes', 'timer for 30 seconds', 'countdown from 10', 'wake me up in 5 minutes'."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "set",
+          "resolved_datetimes": [
+            "tomorrow"
+          ],
+          "text": "call mom",
+          "time": "15:00"
+        },
+        "is_primary": true,
+        "voice_command": "Remind me to call mom tomorrow at 3 PM"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "relative_minutes": 30,
+          "text": "take out the trash"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me to take out the trash in 30 minutes"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "recurrence": "daily",
+          "text": "take my medicine",
+          "time": "08:00"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me every day at 8 AM to take my medicine"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "recurrence": "weekly",
+          "resolved_datetimes": [
+            "next_monday"
+          ],
+          "text": "submit my timesheet",
+          "time": "09:00"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me every Monday at 9 AM to submit my timesheet"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "recurrence": "biweekly",
+          "resolved_datetimes": [
+            "next_sunday"
+          ],
+          "text": "call grandma",
+          "time": "12:00"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me every other Sunday at noon to call grandma"
+      },
+      {
+        "expected_parameters": {
+          "action": "list"
+        },
+        "is_primary": false,
+        "voice_command": "What reminders do I have?"
+      },
+      {
+        "expected_parameters": {
+          "action": "delete",
+          "text": "call mom"
+        },
+        "is_primary": false,
+        "voice_command": "Cancel my reminder to call mom"
+      },
+      {
+        "expected_parameters": {
+          "action": "snooze",
+          "minutes": 15
+        },
+        "is_primary": false,
+        "voice_command": "Snooze for 15 minutes"
+      }
+    ],
+    "function": {
+      "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list, delete or snooze them. Not for a length of time: use set_timer.",
+      "name": "reminder",
+      "parameters": {
+        "properties": {
+          "action": {
+            "enum": [
+              "set",
+              "list",
+              "delete",
+              "snooze"
+            ],
+            "type": "string"
+          },
+          "filter": {
+            "enum": [
+              "all",
+              "today",
+              "recurring"
+            ],
+            "type": "string"
+          },
+          "minutes": {
+            "description": "Snooze length",
+            "type": "integer"
+          },
+          "recurrence": {
+            "enum": [
+              "daily",
+              "weekdays",
+              "weekly",
+              "biweekly",
+              "monthly"
+            ],
+            "type": "string"
+          },
+          "relative_minutes": {
+            "description": "Minutes from now",
+            "type": "integer"
+          },
+          "resolved_datetimes": {
+            "description": "Date keys, e.g. tomorrow, next_monday",
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "one",
+              "all"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "description": "What to remind about",
+            "type": "string"
+          },
+          "time": {
+            "description": "HH:MM, 24h",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "remind",
+      "reminder",
+      "reminders",
+      "remind me",
+      "don't forget",
+      "remember to",
+      "snooze",
+      "alarm",
+      "wake me"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "set_timer",
+        "description": "Short relative-duration countdowns: 'set a timer for 5 minutes', 'timer for 30 seconds', 'countdown from 10', 'wake me up in 5 minutes'."
+      }
+    ],
+    "command_name": "reminder",
+    "critical_rules": [
+      "text is ALWAYS required for action='set' — if unclear, ask 'What should I remind you about?'",
+      "At least one time parameter (resolved_datetimes with a time-of-day key, time, or relative_minutes) is required for 'set'",
+      "This is for reminders (absolute time), NOT timers (relative duration countdowns)"
+    ],
+    "description": "Reminders and alarms at a clock time or date ('at 7am', 'wake me up at 6', 'tomorrow at noon'); also list, delete or snooze them. Not for a length of time: use set_timer.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "set",
+          "resolved_datetimes": [
+            "tomorrow"
+          ],
+          "text": "call mom",
+          "time": "15:00"
+        },
+        "is_primary": true,
+        "voice_command": "Remind me to call mom tomorrow at 3 PM"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "relative_minutes": 30,
+          "text": "take out the trash"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me to take out the trash in 30 minutes"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "recurrence": "daily",
+          "text": "take my medicine",
+          "time": "08:00"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me every day at 8 AM to take my medicine"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "recurrence": "weekly",
+          "resolved_datetimes": [
+            "next_monday"
+          ],
+          "text": "submit my timesheet",
+          "time": "09:00"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me every Monday at 9 AM to submit my timesheet"
+      },
+      {
+        "expected_parameters": {
+          "action": "set",
+          "recurrence": "biweekly",
+          "resolved_datetimes": [
+            "next_sunday"
+          ],
+          "text": "call grandma",
+          "time": "12:00"
+        },
+        "is_primary": false,
+        "voice_command": "Remind me every other Sunday at noon to call grandma"
+      },
+      {
+        "expected_parameters": {
+          "action": "list"
+        },
+        "is_primary": false,
+        "voice_command": "What reminders do I have?"
+      },
+      {
+        "expected_parameters": {
+          "action": "delete",
+          "text": "call mom"
+        },
+        "is_primary": false,
+        "voice_command": "Cancel my reminder to call mom"
+      },
+      {
+        "expected_parameters": {
+          "action": "snooze",
+          "minutes": 15
+        },
+        "is_primary": false,
+        "voice_command": "Snooze for 15 minutes"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "remind",
+      "reminder",
+      "reminders",
+      "remind me",
+      "don't forget",
+      "remember to",
+      "snooze",
+      "alarm",
+      "wake me"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "set",
+          "list",
+          "delete",
+          "snooze"
+        ],
+        "name": "action",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "What to remind about",
+        "enum_values": null,
+        "name": "text",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Date keys, e.g. tomorrow, next_monday",
+        "enum_values": null,
+        "name": "resolved_datetimes",
+        "options_source": null,
+        "required": false,
+        "type": "array\u003cdatetime\u003e"
+      },
+      {
+        "default_value": null,
+        "description": "HH:MM, 24h",
+        "enum_values": null,
+        "name": "time",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Minutes from now",
+        "enum_values": null,
+        "name": "relative_minutes",
+        "options_source": null,
+        "required": false,
+        "type": "int"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "daily",
+          "weekdays",
+          "weekly",
+          "biweekly",
+          "monthly"
+        ],
+        "name": "recurrence",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "all",
+          "today",
+          "recurring"
+        ],
+        "name": "filter",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "one",
+          "all"
+        ],
+        "name": "scope",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Snooze length",
+        "enum_values": null,
+        "name": "minutes",
+        "options_source": null,
+        "required": false,
+        "type": "int"
+      }
+    ],
+    "proposable_actions": [
+      {
+        "blast_tier": "reversible",
+        "callback": "set_at",
+        "card_title": "Set a reminder?",
+        "confirm_label": "Set reminder",
+        "dismiss_label": "Dismiss",
+        "editable": [
+          "text"
+        ],
+        "idempotency_param": "idempotency_key",
+        "outputs": [],
+        "params": [
+          {
+            "default_value": null,
+            "description": "What to be reminded about.",
+            "enum_values": null,
+            "name": "text",
+            "options_source": null,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default_value": null,
+            "description": "Absolute ISO-8601 time to fire the reminder.",
+            "enum_values": null,
+            "name": "due_at_iso",
+            "options_source": null,
+            "required": true,
+            "type": "datetime"
+          },
+          {
+            "default_value": null,
+            "description": "Stable de-dup key so a retried confirmation does not create a duplicate reminder.",
+            "enum_values": null,
+            "name": "idempotency_key",
+            "options_source": null,
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    ],
+    "rules": [
+      "Default action is 'set' when user says 'remind me...'",
+      "For 'in 30 minutes' or 'in 2 hours', use relative_minutes (30, 120)",
+      "For 'at 3 PM', use time='15:00'",
+      "For 'tomorrow at 3 PM', use resolved_datetimes=['tomorrow'] + time='15:00'",
+      "For 'every day at 8 AM', use time='08:00' + recurrence='daily'",
+      "For 'every Monday', use resolved_datetimes=['next_monday'] + recurrence='weekly'",
+      "For 'every other Sunday', use resolved_datetimes=['next_sunday'] + recurrence='biweekly'",
+      "The text parameter should capture WHAT to be reminded about, not WHEN",
+      "'snooze' with no target snoozes the most recently fired reminder"
+    ]
+  }
+}

@@ -259,3 +259,33 @@ func TestResolveNeverTakesPathsOrArguments(t *testing.T) {
 		}
 	}
 }
+
+// "open the calculator" on Omarchy: the app is Omacalc, a Calculator by GenericName and Keywords.
+func TestLinuxGenericNameAndKeywordsResolve(t *testing.T) {
+	root := t.TempDir()
+	usr := filepath.Join(root, "usr", "share")
+	touch(t, filepath.Join(usr, "applications", "omacalc.desktop"),
+		desktop("Omacalc", "GenericName=Calculator\nKeywords=calculator;calc;math;arithmetic;\n"))
+	touch(t, filepath.Join(usr, "applications", "libreoffice-calc.desktop"),
+		desktop("LibreOffice Calc", "GenericName=Spreadsheet\nKeywords=Accounting;Stats;ods;xls;xlsx;\n"))
+	touch(t, filepath.Join(usr, "applications", "gnumeric.desktop"), desktop("Gnumeric", "GenericName=Spreadsheet\n"))
+	e := Env{GOOS: "linux", Home: filepath.Join(root, "home"), Getenv: func(k string) string {
+		if k == "XDG_DATA_DIRS" {
+			return usr
+		}
+		return ""
+	}}
+	list, err := Build(e, Config{}).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"calculator", "the calculator", "math"} {
+		if p, err := Find(list, q); err != nil || p.App.Name != "Omacalc" || p.Fuzzy {
+			t.Errorf("%q: %+v %v", q, p, err)
+		}
+	}
+	var amb *AmbiguousError
+	if _, err := Find(list, "spreadsheet"); !errors.As(err, &amb) {
+		t.Errorf("two spreadsheets: %v", err)
+	}
+}

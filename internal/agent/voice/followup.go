@@ -49,7 +49,15 @@ type FollowUpConfig struct {
 	// default 8, at most MaxChoiceListenSecs): reading a list and answering takes longer than
 	// the 3 s follow-up (DESKTOP-COMMANDS.md Q9).
 	ChoiceListenSecs float64
+	// ChainListenSecs: the window after a silent desktop command (the island showed it), so
+	// the user can say the next step of a process ("switch to the Claude tab… now the budget
+	// sheet… maximize it"): the 3 s after a spoken reply was too short to think of it (voice
+	// test, 2026-10-25). Such steps don't count toward MaxIterations; maxChainSteps bounds them.
+	ChainListenSecs float64
 }
+
+// maxChainSteps bounds one wake word's follow-up turns, silent desktop steps included.
+const maxChainSteps = 30
 
 // choiceHint biases whisper toward an answer to a numbered list in the choice window.
 const choiceHint = "The first one. The second one. The third one. Number four. The last one."
@@ -76,7 +84,7 @@ func ClampFollowUpListen(secs float64) float64 { return min(secs, MaxFollowUpLis
 func DefaultFollowUp() FollowUpConfig {
 	return FollowUpConfig{ListenSecs: MaxFollowUpListenSecs, MaxIterations: 5,
 		QuietWaitSecs: 0.5, SilenceSecs: 1.2, MinAfterOnsetSecs: 0.7, MinSpeechSecs: 0.3,
-		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2, ChoiceListenSecs: 8}
+		MaxRecordSecs: 10, MaxIgnored: 5, IgnoredGraceSecs: 2, ChoiceListenSecs: 8, ChainListenSecs: 8}
 }
 
 // Fixed parts of the Python node's follow-up listening.
@@ -130,11 +138,13 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 	ignored := 0
 	used := 0          // chunks of this iteration's window already heard (ignored answers included)
 	afterReply := true // the last thing that happened was us speaking (or the wake exchange)
+	steps := 0
 	for it := 1; ; {
-		if it > cfg.MaxIterations {
+		if it > cfg.MaxIterations || steps >= maxChainSteps {
 			t.FollowUpEnd = EndMaxIterations
 			return
 		}
+		steps++
 		window := max(min(cfg.MinTimeoutSecs, cfg.ListenSecs), cfg.ListenSecs-float64(it-1)*cfg.DecaySecs)
 		// Speech that wasn't for us doesn't buy the room a new window: after an ignored
 		// answer, only what is left of this one (but at least IgnoredGraceSecs).
@@ -152,6 +162,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		if s.quietTurn {
 			s.quietTurn = false
 			afterReply = false
+			if !choosing {
+				timeout = cmp.Or(cfg.ChainListenSecs, DefaultFollowUp().ChainListenSecs)
+			}
 		}
 		s.log.Info("follow-up: listening", "iteration", it, "window_s", timeout)
 		// Again before each listen: the last reply's command may have just started a player.
@@ -215,7 +228,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 						s.quietTurn = true
 					}
 					noise, prev, used = 0, text, 0
-					it++
+					if !s.quietTurn {
+						it++ // a silent step of a process doesn't use up the window count
+					}
 					continue
 				}
 			}
@@ -245,6 +260,27 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		noise, prev = 0, text
 		if tr.Speaker != nil && tr.Speaker.UserID != nil {
 			s.userID = tr.Speaker.UserID
+		}
+		// A shortcut skips command-center's follow-up gate, so right after a reply it never runs
+		// on a transcript that shares a word with that reply: the mic may have half-heard it
+		// ("Volume 70 percent." came back as "Volume 1." and set the volume to 10%). Such a
+		// transcript goes to command-center, whose gate tells the node's voice from the user's.
+		if heardAfterReply && sharesAWord(text, lastSaid) {
+			s.log.Info("follow-up: like our reply, so no shortcut", "transcript", text)
+		} else if end, ok := p.direct(ctx, s, &ex, text); ok { // funnel stage 1: done here, no command-center turn
+			t.FollowUps = append(t.FollowUps, ex)
+			if end != "" {
+				t.FollowUpEnd = end
+				return
+			}
+			if ex.Message != "" { // a spoken routine: its tail is drained before listening again
+				lastSaid, afterReply = ex.Message, true
+			}
+			ignored, used = 0, 0
+			if !s.quietTurn {
+				it++
+			}
+			continue
 		}
 
 		// A follow_up turn of the same conversation, on the blocking route as the Python node
@@ -283,7 +319,9 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		}
 		ignored, used = 0, 0
 		afterReply = true
-		it++
+		if !s.quietTurn {
+			it++ // a silent step of a process doesn't use up the window count
+		}
 	}
 }
 
@@ -362,11 +400,12 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 		maxSecs = p.Cfg.Endpointing.MaxSecs
 	}
 	maxF := max(1, frames(maxSecs))
-	silent := 0
+	silent, ended := 0, "max"
 	for post := 1; post <= maxF; post++ {
 		c, err := recv(ctx, s.chunks, time.Second)
 		if errors.Is(err, errChunkTimeout) {
 			s.log.Warn("follow-up recording stopped: no audio for 1 s")
+			ended = "no_audio"
 			break
 		}
 		if err != nil {
@@ -381,14 +420,21 @@ func (p *Pipeline) listenFollowUp(ctx context.Context, s *session, timeoutSecs f
 			silent = 0
 		}
 		if post >= minAfter && silent >= silenceF {
+			ended = "silence"
+			if post == minAfter {
+				ended = "silence_at_min"
+			}
 			break
 		}
 	}
+	all := slices.Concat(heard...)
+	s.log.Info("follow-up: recorded", append([]any{"secs", fmt.Sprintf("%.2f", float64(len(heard))*chunkSecs), "ended", ended},
+		levelSummary(all, s.threshold)...)...)
 	if secs := float64(len(heard)) * chunkSecs; secs < cfg.MinSpeechSecs {
 		s.log.Info("follow-up recording too short; noise", "secs", secs)
 		return nil, nil
 	}
-	return slices.Concat(heard...), nil
+	return all, nil
 }
 
 // mapChunkTimeout: a microphone that stalls during the window closes it, like a timeout.
@@ -449,6 +495,25 @@ var echoWord = regexp.MustCompile(`[a-z0-9']+`)
 // echoTokens are s's words in order, lower-cased, apostrophes kept ("it's" is one word).
 func echoTokens(s string) []string {
 	return echoWord.FindAllString(strings.ToLower(s), -1)
+}
+
+// fillerWords don't make a transcript look like our reply (sharesAWord).
+var fillerWords = map[string]bool{"a": true, "an": true, "the": true, "to": true, "is": true, "it": true, "of": true,
+	"and": true, "i": true, "you": true, "your": true, "my": true, "for": true, "in": true, "on": true, "at": true,
+	"that": true, "this": true, "be": true, "are": true, "it's": true, "i'm": true}
+
+// sharesAWord reports whether the transcript has any word of what we last said, filler aside.
+func sharesAWord(text, lastSaid string) bool {
+	said := map[string]bool{}
+	for _, w := range echoTokens(lastSaid) {
+		said[w] = true
+	}
+	for _, w := range echoTokens(text) {
+		if said[w] && !fillerWords[w] {
+			return true
+		}
+	}
+	return false
 }
 
 // Self-echo thresholds (LooksLikeSelfEcho).

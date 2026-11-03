@@ -614,6 +614,9 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		return "", true
 	}
 	activity := p.computerTurn(s, tr.Text, false) // a stop phrase stops it locally, at once; the server still hears it
+	if end, ok := p.direct(ctx, s, ex, tr.Text); ok {
+		return end, true
+	}
 
 	// Row 11: join the warmup (bounded), then the streaming turn.
 	select {
@@ -667,6 +670,44 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	return end, ex.Outcome != OutcomeError
 }
 
+// direct is funnel stage 1 (VOICE-FLOWS.md Q27): a clear one-step command the node's own tools
+// carry out ("switch to the Claude tab"), with no model and no command-center turn. It reports
+// like a silent desktop command: the island shows it, the next window waits for the next step,
+// a list on the island opens the choice window. A result that asks to be spoken (Signals.Speak)
+// is a spoken reply instead; end is then why the follow-up window stays shut ("" opens it).
+func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text string) (end FollowUpEnd, handled bool) {
+	d, ok := p.Tools.(node.Director)
+	if !ok {
+		return "", false
+	}
+	out, ok := d.Direct(node.WithSpeaker(ctx, s.userID), text)
+	if !ok {
+		return "", false
+	}
+	sig := node.TakeSignals(out)
+	success, _ := out["success"].(bool)
+	choice, _ := out[node.ChoiceKey].(bool)
+	ex.Outcome = OutcomeSilent
+	ex.Tools = append(ex.Tools, ToolRun{Name: "direct", Args: map[string]any{"said": text}, Success: success})
+	s.log.Info("direct: done on the node", "transcript", text, "success", success, "choice", choice)
+	if msg, _ := out["message"].(string); sig.Speak && msg != "" {
+		end := FollowUpEnd("")
+		if sig.ClearHistory {
+			end = EndClearHistory
+		}
+		return p.say(ctx, s, ex, msg, end), true
+	}
+	if choice {
+		s.choice = true
+		return "", true
+	}
+	if !success {
+		p.chime(ctx, errorChime)
+	}
+	s.quietTurn = true
+	return "", true
+}
+
 // transcribe sends one recording to STT: the normalised command, and speaker_audio = the wake
 // clip + the command (the same wake clip for every follow-up: they have no wake word of their
 // own). Failures are reported on ex with the error chime.
@@ -702,6 +743,17 @@ func (p *Pipeline) record(ctx context.Context, s *session) (pcm []int16, hitMax 
 			break
 		}
 	}
+	ended := "silence"
+	switch {
+	case rec.hitMax:
+		ended = "max"
+	case !rec.done:
+		ended = "no_audio"
+	case rec.n == rec.minFrames+1:
+		ended = "silence_at_min" // stopped the first moment it could: speech under the threshold?
+	}
+	s.log.Info("voice: recorded", append([]any{"secs", fmt.Sprintf("%.2f", float64(len(rec.pcm))/CaptureRate), "ended", ended},
+		levelSummary(rec.pcm, s.threshold)...)...)
 	return rec.pcm, rec.hitMax, nil
 }
 

@@ -66,6 +66,7 @@ agent forwards to its log. The Go agent owns the node's identity, key and MQTT; 
 never sees them.
 """
 
+import ast
 import importlib
 import importlib.machinery
 import importlib.util
@@ -374,6 +375,7 @@ def load_packages(listing: str) -> dict:
         doc = json.load(f)
     packages = doc.get("packages") or []
     found = load_builtins(doc["builtins"]) if doc.get("builtins") else {}
+    _share_top_level([pkg["root"] for pkg in packages])
     for pkg in packages:
         name, root = pkg["name"], pkg["root"]
         top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
@@ -412,6 +414,37 @@ def load_packages(listing: str) -> dict:
         for rel in pkg.get("agents") or []:
             _load_agent(name, top, rel)
     return found
+
+
+def _share_top_level(roots: list) -> None:
+    """A top-level package that several package roots have (each its own device_families/) is
+    one package over all their directories, as the Python node's single device_families tree
+    was: otherwise the first root on sys.path takes the name and the others' absolute imports
+    (from device_families.zwave import …) fail. Only when every __init__.py is empty or a
+    docstring and comments: one with code is left to the normal import (first root wins)."""
+    dirs = {}
+    for root in roots:
+        try:
+            entries = sorted(pathlib.Path(root).iterdir())
+        except OSError:
+            continue
+        for d in entries:
+            if d.name.isidentifier() and (d / "__init__.py").is_file():
+                dirs.setdefault(d.name, []).append(d)
+    for name, found in dirs.items():
+        if len(found) < 2 or name in sys.modules or not all(_empty_init(d / "__init__.py") for d in found):
+            continue
+        spec = importlib.machinery.ModuleSpec(name, None, is_package=True)
+        spec.submodule_search_locations = [str(d) for d in found]
+        sys.modules[name] = importlib.util.module_from_spec(spec)
+
+
+def _empty_init(path: pathlib.Path) -> bool:
+    try:
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+    except (OSError, SyntaxError, ValueError):
+        return False
+    return all(isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) for n in body)
 
 
 def _load_agent(package: str, top: str, rel: str) -> None:
@@ -761,6 +794,26 @@ class _JarvisDirect:
             mac_address=d.mac_address, cloud_id=d.cloud_id, device_class=d.device_class, source="direct",
         ) for d in await _discover_all()]
 
+    async def get_state(self, device):
+        """The device's family's state, normalized into the catalogue's fields for its domain;
+        the family's available modes/features ride along as available_features."""
+        import dataclasses
+
+        fam = _active_families().get(device.protocol or "")
+        if fam is None:
+            return None
+        raw = await _get_state(fam, dataclasses.asdict(device))
+        if raw is None or raw.get("needs_pairing") or raw.get("error"):
+            return raw
+        available = [str(m).lower() for m in raw.get("available_features", raw.get("available_modes", []))]
+        state = _normalize(device.domain, raw)
+        if available:
+            state["available_features"] = available
+        return state
+
+    async def control(self, device, action, data=None):
+        return await _family_control(action, data or {})
+
 
 def _managers(configured_only: bool) -> dict:
     out = {"jarvis_direct": _JarvisDirect()}
@@ -902,72 +955,115 @@ def _normalize_lock(raw: dict) -> dict:
     return {"state": state, "is_locked": state == "locked"}
 
 
-def _hints(control_type, features, default=(), lo=None, hi=None, step=None, unit=None) -> dict:
-    return {"control_type": control_type, "features": features or list(default), "min_value": lo,
-            "max_value": hi, "step": step, "unit": unit}
+def _normalize(domain: str, raw: dict) -> dict:
+    """N:'s device_families/domains: a family's raw state in the catalogue's fields for
+    domain; a domain without a handler keeps the raw state."""
+    normalizers = {"light": _normalize_light, "climate": lambda r: _normalize_climate(r, _temp_unit()),
+                   "switch": lambda r: {"state": str(r.get("state", "unknown")).lower()},
+                   "lock": _normalize_lock, "camera": _normalize_camera, "cover": _normalize_cover,
+                   "media_player": _normalize_media, "kettle": _normalize_kettle}
+    fn = normalizers.get(domain)
+    return fn(raw) if fn else dict(raw)
 
 
-def _domain(domain: str, raw: dict, features):
-    """N:'s device_families/domains: (normalized state, ui_hints) for domain, or None for a
-    domain without a handler."""
-    if domain == "light":
-        return _normalize_light(raw), _hints("light", features, ("brightness", "color", "color_temp"), 0, 100, 1, "%")
-    if domain == "climate":
-        unit = _temp_unit()
-        return _normalize_climate(raw, unit), _hints("thermostat", features, ("heat", "cool", "off"),
-                                                     50 if unit == "F" else 10, 90 if unit == "F" else 32, 1, unit)
-    if domain == "switch":
-        return {"state": str(raw.get("state", "unknown")).lower()}, _hints("toggle", features)
-    if domain == "lock":
-        return _normalize_lock(raw), _hints("lock", features)
-    if domain == "camera":
-        return _normalize_camera(raw), _hints("camera", features)
-    if domain == "cover":
-        return _normalize_cover(raw), _hints("cover", features, (), 0, 100, 1, "%")
-    if domain == "media_player":
-        return _normalize_media(raw), _hints("media", features)
-    if domain == "kettle":
-        return _normalize_kettle(raw), _hints("kettle", features, ("boil", "keep_warm", "off"), 40, 100, 1, "C")
-    return None
+def _get_state(fam, details: dict):
+    """A family's get_state, called the way it is written. The SDK's signature is
+    get_state(ip, **kwargs) and gets the device's fields as keywords; families written from
+    jarvis-node-setup's documented example take get_state(device) (Apple, LIFX, Kasa, Schlage,
+    SimpliSafe, Home Connect) and get the DiscoveredDevice, as control() does."""
+    import inspect
+
+    from jarvis_command_sdk import DiscoveredDevice
+
+    entity_id = details.get("entity_id") or ""
+    try:
+        params = inspect.signature(fam.get_state).parameters
+    except (TypeError, ValueError):
+        params = {"ip": None}
+    if "ip" not in params:
+        protocol = details.get("protocol") or ""
+        return fam.get_state(DiscoveredDevice(
+            entity_id=entity_id, name=details.get("name") or entity_id,
+            domain=details.get("domain") or "switch", manufacturer=protocol, model=details.get("model") or "",
+            protocol=protocol, cloud_id=details.get("cloud_id"), local_ip=details.get("local_ip"),
+            mac_address=details.get("mac_address")))
+    return fam.get_state(ip=details.get("local_ip") or "", entity_id=entity_id,
+                         cloud_id=details.get("cloud_id") or "",
+                         mac_address=details.get("mac_address") or "",
+                         model=details.get("model") or "")
+
+
+def _manager_for(details: dict):
+    """The manager that owns the device: its source names it ("direct" is Jarvis Direct). A
+    manager without get_state/control (optional in the SDK) gets the SDK's unsupported answer."""
+    source = details.get("source") or "direct"
+    return _managers(configured_only=True).get("jarvis_direct" if source == "direct" else source)
+
+
+def _manager_device(details: dict):
+    from jarvis_command_sdk import DeviceManagerDevice
+
+    entity_id = details.get("entity_id") or ""
+    return DeviceManagerDevice(
+        name=details.get("name") or entity_id, entity_id=entity_id,
+        domain=details.get("domain") or (entity_id.split(".", 1)[0] if "." in entity_id else ""),
+        protocol=details.get("protocol"), source=details.get("source") or "direct", model=details.get("model"),
+        local_ip=details.get("local_ip"), mac_address=details.get("mac_address"), cloud_id=details.get("cloud_id"))
+
+
+def _manager_state(mgr, details: dict) -> dict:
+    """A manager's device state: already in the SDK catalogue's fields, with the catalogue's UI
+    hints for its domain; the device's available_features narrow the type's."""
+    from jarvis_command_sdk import device_type
+
+    dev = _manager_device(details)
+    try:
+        raw = _run(mgr.get_state(dev))
+    except Exception as exc:
+        print(f"sidecar: device state query failed for {dev.entity_id}: {exc}", file=sys.stderr)
+        raw = None
+    if raw and raw.get("needs_pairing"):
+        return {"entity_id": dev.entity_id, "domain": dev.domain, "state": {"needs_pairing": True},
+                "ui_hints": {"control_type": "pairing"}}
+    if not raw or raw.get("error"):
+        return {"entity_id": dev.entity_id, "domain": dev.domain, "state": {"state": "unknown"},
+                "error": str((raw or {}).get("error") or "Failed to query device state")}
+    t = device_type(dev.domain, raw.get("unit"))
+    hints = {"control_type": t["control_type"], "min_value": None, "max_value": None, "step": None, "unit": None,
+             **t["ui_hints"]}
+    if "available_features" in raw:
+        hints["features"] = list(raw["available_features"])
+    state = {k: v for k, v in raw.items() if k != "available_features"}
+    return {"entity_id": dev.entity_id, "domain": dev.domain, "state": state, "ui_hints": hints}
+
+
+def _manager_control(mgr, action_name: str, context: dict) -> dict:
+    dev = _manager_device(context)
+    try:
+        result = _control_loop().run_until_complete(mgr.control(dev, action_name, context))
+    except Exception as exc:
+        print(f"sidecar: manager {mgr.name}: control {action_name} failed for {dev.entity_id}: {exc}", file=sys.stderr)
+        return {"success": False, "error": str(exc)}
+    out = {"success": bool(result.success), "error": None if result.success else result.error}
+    if getattr(result, "input_required", None):
+        out["input_required"] = result.input_required.to_dict()
+    return out
 
 
 def device_state(params: dict) -> dict:
-    """The body for POST /device-state-results/{rid}: the device's state from its family,
-    normalized for its domain, with UI hints; {"needs_pairing": true} with control_type
-    "pairing" when the family says so. A Home Assistant device (source not "direct") has no
-    state here: N: asks HA through ha_shared, which this node doesn't have."""
+    """The body for POST /device-state-results/{rid}: the state the device's manager reports
+    (Jarvis Direct's from the device's family), with the catalogue's UI hints for its domain;
+    {"needs_pairing": true} with control_type "pairing" when the device says so."""
     details = params.get("details") or {}
     entity_id = details.get("entity_id") or ""
-    domain = details.get("domain") or ""
     if not entity_id:
         return {"error": "missing entity_id"}
-    if not domain and "." in entity_id:
-        domain = entity_id.split(".", 1)[0]
-    raw = None
-    if (details.get("source") or "direct") == "direct":
-        fam = _active_families().get(details.get("protocol") or "")
-        if fam is not None:
-            try:
-                raw = _run(fam.get_state(ip=details.get("local_ip") or "", entity_id=entity_id,
-                                         cloud_id=details.get("cloud_id") or "",
-                                         mac_address=details.get("mac_address") or "",
-                                         model=details.get("model") or ""))
-            except Exception as exc:
-                print(f"sidecar: device state query failed for {entity_id}: {exc}", file=sys.stderr)
-    if raw is None:
+    domain = details.get("domain") or (entity_id.split(".", 1)[0] if "." in entity_id else "")
+    mgr = _manager_for(details)
+    if mgr is None:
         return {"entity_id": entity_id, "domain": domain, "state": {"state": "unknown"},
                 "error": "Failed to query device state"}
-    if raw.get("needs_pairing"):
-        return {"entity_id": entity_id, "domain": domain, "state": {"needs_pairing": True},
-                "ui_hints": {"control_type": "pairing"}}
-    if raw.get("error"):
-        # The family answered but couldn't read the device: "unknown", never "off".
-        return {"entity_id": entity_id, "domain": domain, "state": {"state": "unknown"},
-                "error": str(raw["error"])}
-    available = [str(m).lower() for m in raw.get("available_features", raw.get("available_modes", []))]
-    handled = _domain(domain, raw, available or None)
-    state, hints = handled if handled else (raw, _hints("toggle", None))
-    return {"entity_id": entity_id, "domain": domain, "state": state, "ui_hints": hints}
+    return _manager_state(mgr, {**details, "domain": domain})
 
 
 def device_removed(params: dict) -> dict:
@@ -1056,7 +1152,7 @@ def device_families() -> dict:
              "description": _guard(errs, "description", lambda: mgr.description, ""),
              "can_edit_devices": _guard(errs, "can_edit_devices", lambda: bool(mgr.can_edit_devices), False),
              "is_available": _guard(errs, "is_available", lambda: bool(avail()) if callable(avail) else True, False),
-             "secrets": _secrets_of(mgr, name)}
+             "is_configured": _configured(mgr), "secrets": _secrets_of(mgr, name)}
         auth = _guard(errs, "authentication", lambda: mgr.authentication and mgr.authentication.to_dict(), None)
         if auth:
             e["authentication"] = auth
@@ -1136,10 +1232,17 @@ def call(commands: dict, params: dict) -> dict:
         conversation_id=req.get("tool_call_id") or "desktop",
         user_id=req.get("user_id"),
     )
+    arguments = dict(params.get("arguments") or {})
+    # The model's arguments fixed up first, as N:'s command execution does for every tool call
+    # (a string where the command takes a list, "true" for a boolean, a missing query).
+    try:
+        arguments = cmd.post_process_tool_call(arguments, req.get("voice_command") or "") or arguments
+    except Exception as exc:
+        print(f"sidecar: {name}: post_process_tool_call failed: {exc}", file=sys.stderr)
     # User-scoped secrets resolve to the requesting user, as on a Pi.
     set_current_user_id(req.get("user_id"))
     try:
-        resp = cmd.execute(ri, **(params.get("arguments") or {}))
+        resp = cmd.execute(ri, **arguments)
     except Exception as exc:
         return {"output": {"success": False, "error": str(exc)}}
     finally:
@@ -1172,44 +1275,51 @@ def _control_loop():
     return _CONTROL_LOOP
 
 
-def _device_control(action_name: str, context: dict) -> dict:
-    """N:'s _handle_device_protocol_control: control_device with no such command goes to the
-    device's family, configured or not. As on N:, the family's control() gets the device itself
-    where the SDK says ip, and the whole action context as data."""
-    from jarvis_command_sdk import DiscoveredDevice
+async def _family_control(action_name: str, context: dict):
+    """Jarvis Direct's control (N:'s _handle_device_protocol_control): the device's family,
+    configured or not. As on N:, the family's control() gets the device itself where the SDK
+    says ip, and the whole action context as data."""
+    from jarvis_command_sdk import DeviceControlResult, DiscoveredDevice
 
     protocol = context.get("protocol") or ""
     if not protocol:
-        return {"success": False, "error": "No protocol specified in device context"}
+        return DeviceControlResult(False, context.get("entity_id") or "", action_name,
+                                   error="No protocol specified in device context")
     fam = FAMILIES.get(protocol)
     if fam is None:
-        return {"success": False, "error": f"Device protocol '{protocol}' not found"}
+        return DeviceControlResult(False, context.get("entity_id") or "", action_name,
+                                   error=f"Device protocol '{protocol}' not found")
     entity_id = context.get("entity_id") or ""
+    if context.get("color") and not context.get("rgb"):
+        # A spoken colour also as rgb, for the families that only take rgb (LIFX, Kasa), as
+        # N:'s control_device does.
+        try:
+            from jarvis_command_sdk import resolve_color
+        except ImportError:  # an SDK before the shared palette
+            resolve_color = None
+        rgb = resolve_color(context["color"]) if resolve_color else None
+        if rgb is not None:
+            context = {**context, "rgb": list(rgb)}
     dev = DiscoveredDevice(entity_id=entity_id, name=context.get("name") or entity_id,
                            domain=context.get("domain") or "switch", manufacturer=protocol,
                            model=context.get("model") or "", protocol=protocol, cloud_id=context.get("cloud_id"),
                            local_ip=context.get("local_ip"), mac_address=context.get("mac_address"))
-    try:
-        result = _control_loop().run_until_complete(fam.control(dev, action_name, context))
-    except Exception as exc:
-        print(f"sidecar: {protocol}: control {action_name} failed for {entity_id}: {exc}", file=sys.stderr)
-        return {"success": False, "error": str(exc)}
-    out = {"success": bool(result.success), "error": None if result.success else result.error}
-    if result.input_required:
-        out["input_required"] = result.input_required.to_dict()
-    return out
+    return await fam.control(dev, action_name, context)
 
 
 def action(commands: dict, params: dict) -> dict:
     """{success, error, input_required?, message} for a command's handle_action, as the
-    requesting user; control_device with no such command (or one the household turned off) is
-    the device family's control. message is what N: speaks for a voice-originated action."""
+    requesting user; control_device is the control of the device's manager (its source; Jarvis
+    Direct for "direct"). message is what N: speaks for a voice-originated action."""
     name = params.get("command_name") or ""
     action_name = params.get("action_name") or ""
     context = params.get("context") or {}
+    if name == "control_device":
+        mgr = _manager_for(context)
+        if mgr is None:
+            return {"success": False, "error": f"Device manager '{context.get('source')}' not found or not configured"}
+        return _manager_control(mgr, action_name, context)
     cmd = commands.get(name) if params.get("enabled", True) else None
-    if cmd is None and name == "control_device":
-        return _device_control(action_name, context)
     if cmd is None:
         return {"success": False, "error": f"Command '{name}' not found on this node"}
     set_current_user_id(params.get("user_id"))

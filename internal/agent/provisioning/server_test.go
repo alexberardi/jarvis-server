@@ -193,7 +193,7 @@ func TestProvisionHappyPath(t *testing.T) {
 		t.Errorf("marked %v, on_provisioned %d", r.marked.Load(), r.provised.Load())
 	}
 	_, info := r.do("GET", "/api/v1/info", "")
-	if want := `{"node_id":"jarvis-a1b2c3d4","firmware_version":"0.9.0","hardware":"pi-zero-w","mac_address":"b8:27:eb:a1:b2:c3","capabilities":["voice","speaker"],"state":"PROVISIONED","previously_provisioned":true}`; info != want {
+	if want := `{"node_id":"jarvis-a1b2c3d4","firmware_version":"0.9.0","hardware":"pi-zero-w","mac_address":"b8:27:eb:a1:b2:c3","capabilities":["voice","speaker"],"state":"PROVISIONED","previously_provisioned":true,"setup_mode":"hotspot"}`; info != want {
 		t.Errorf("info %s", info)
 	}
 }
@@ -462,5 +462,23 @@ func TestHardware(t *testing.T) {
 func TestConfigURLFromAMountedCommandCenter(t *testing.T) {
 	if got := configURL(ProvisionRequest{CommandCenterURL: "http://h:7700/cc"}); got != "http://h:7700" {
 		t.Fatalf("configURL = %q", got)
+	}
+}
+
+func TestInfoSetupMode(t *testing.T) {
+	for _, tc := range []struct{ ssid, want string }{{"Jarvis-Setup-1234", "hotspot"}, {"", "lan"}} {
+		r := newRig(t, func(o *Options) { o.APSSID = tc.ssid })
+		for _, when := range []string{"fresh", "after factory reset"} {
+			var info NodeInfo
+			_, body := r.do("GET", "/api/v1/info", "")
+			if err := json.Unmarshal([]byte(body), &info); err != nil {
+				t.Fatal(err)
+			}
+			// state stays AP_MODE in both: apps that only know AP_MODE keep working.
+			if info.SetupMode != tc.want || info.State != StateAPMode {
+				t.Errorf("ssid %q, %s: %s", tc.ssid, when, body)
+			}
+			r.do("POST", "/api/v1/factory-reset", "")
+		}
 	}
 }

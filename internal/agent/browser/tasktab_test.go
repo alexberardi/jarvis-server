@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ type taskExt struct {
 	mu      sync.Mutex
 	closed  bool
 	current float64
+	url     string // tab 42's address ("" is Google's home page)
 }
 
 func (e *taskExt) handle(m Message) Message {
@@ -32,7 +34,11 @@ func (e *taskExt) handle(m Message) Message {
 			map[string]any{"tab_id": 5.0, "url": "https://docs.example.com/", "title": "Docs", "current": e.current == 5},
 		}
 		if !e.closed {
-			tabs = append(tabs, map[string]any{"tab_id": 42.0, "url": "https://www.google.com/", "title": "Google", "current": false})
+			u := e.url
+			if u == "" {
+				u = "https://www.google.com/"
+			}
+			tabs = append(tabs, map[string]any{"tab_id": 42.0, "url": u, "title": "Google", "current": false})
 		}
 		return ok(map[string]any{"tabs": tabs, "count": len(tabs)})
 	case "open":
@@ -169,5 +175,60 @@ func TestTaskTabGoesIdle(t *testing.T) {
 	ts.Call(ctx, ToolReadPage, map[string]any{}, node.Request{})
 	if a := lastArgs(t, f, "read_page"); a["tab_id"] != nil {
 		t.Fatalf("idle task tab still used: %v", a)
+	}
+}
+
+// #587: a follow-up "open google.com" while the task tab is already on Google (its home page or
+// a results page) opens nothing: the model is told to search in the task tab. Another page of
+// the site, or another site, still opens a tab.
+func TestOpenTheTaskTabsSiteAgainReusesIt(t *testing.T) {
+	h, path := startHub(t)
+	e := &taskExt{current: 3}
+	f := connectExt(t, h, path, "Firefox", true, e.handle)
+	ts := NewTools(h)
+	ts.Origins = pageOrigins()
+	ctx := context.Background()
+	opens := func() int {
+		n := 0
+		for _, m := range f.received() {
+			if m.Cmd == "open" {
+				n++
+			}
+		}
+		return n
+	}
+	call := func(name string, args map[string]any) map[string]any {
+		out, _ := ts.Call(ctx, name, args, node.Request{})
+		return out
+	}
+
+	if out := call(ToolOpen, map[string]any{"url": "google.com"}); out["success"] != true || out["reused"] != nil {
+		t.Fatalf("first open: %v", out)
+	}
+	for _, u := range []string{"https://www.google.com", "google.com/", "https://google.com"} {
+		out := call(ToolOpen, map[string]any{"url": u})
+		if out["success"] != true || out["reused"] != true || out["tab_id"] != "firefox:42" || opens() != 1 {
+			t.Fatalf("open %s again: %v (%d opens)", u, out, opens())
+		}
+		if n, _ := out["note"].(string); !strings.Contains(n, "browser_fill") {
+			t.Errorf("note: %q", n)
+		}
+	}
+	// On the results page after a search, too; the next fill goes to that tab.
+	e.mu.Lock()
+	e.url = "https://www.google.com/search?q=dogs"
+	e.mu.Unlock()
+	if out := call(ToolOpen, map[string]any{"url": "www.google.com"}); out["reused"] != true || opens() != 1 {
+		t.Fatalf("open on the results page: %v", out)
+	}
+	call(ToolFill, map[string]any{"field": "search", "text": "cats", "submit": true})
+	if a := lastArgs(t, f, "fill"); a["tab_id"] != 42.0 {
+		t.Errorf("fill after reuse went to %v", a["tab_id"])
+	}
+
+	for i, u := range []string{"https://google.com/maps", "https://www.google.com/search?q=cats", "https://duckduckgo.com"} {
+		if out := call(ToolOpen, map[string]any{"url": u}); out["reused"] != nil || opens() != 2+i {
+			t.Errorf("open %s: %v (%d opens)", u, out, opens())
+		}
 	}
 }

@@ -208,10 +208,13 @@ func TestG1PromptsGolden(t *testing.T) {
 }
 
 func TestBuiltins(t *testing.T) {
-	want := []string{ChatGPT, Qwen3_14B, Qwen3_5_9B, Qwen3_8B}
+	want := []string{Cloud, Qwen3_14B, Qwen3_5_9B, Qwen3_8B}
 	sort.Strings(want)
 	if got := BuiltinNames(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("BuiltinNames = %v, want %v", got, want)
+	}
+	if old, _ := Builtin("ChatGPTOpenAI"); old == "" || old != func() string { s, _ := Builtin(Cloud); return s }() {
+		t.Fatal("ChatGPTOpenAI (a stored old name) no longer resolves to Cloud")
 	}
 	for _, n := range want {
 		text, ok := Builtin(n)
@@ -405,7 +408,7 @@ func TestG5ParseGolden(t *testing.T) {
 			sanDiff[name]++
 		}
 	}
-	for _, n := range []string{Qwen3_8B, Qwen3_5_9B, ChatGPT} {
+	for _, n := range []string{Qwen3_8B, Qwen3_5_9B, Cloud} {
 		t.Logf("G5 %s: %d/13 parse_response and %d/13 sanitize_text rows differ from legacy", n, parseDiff[n], sanDiff[n])
 	}
 }

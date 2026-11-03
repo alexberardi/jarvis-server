@@ -6,7 +6,9 @@
 //     pulse plugin on a desktop; asound.conf names (dsnoopmic, output) work on a Pi.
 //   - macOS: AudioToolbox AudioQueue over purego, no cgo. The device name must be "default" (the
 //     system default input/output); AudioQueue converts from the hardware rate.
-//   - Elsewhere (Windows for now): ErrUnsupported.
+//   - Windows: winmm waveIn/waveOut, no cgo. The device name must be "default" (WAVE_MAPPER,
+//     which converts from the hardware format).
+//   - Elsewhere: ErrUnsupported.
 //   - "wav:PATH", on every OS: a WAV file as the microphone (paced in real time, then
 //     silence), or a WAV file as the speaker. For tests and scripted end-to-end checks.
 //
@@ -69,7 +71,8 @@ func OpenPlayback(name string, rate, channels int) (Playback, error) {
 	return openNativePlayback(name, rate, channels)
 }
 
-// Backend names the native backend on this OS ("alsa", "audioqueue" or "" when unsupported).
+// Backend names the native backend on this OS ("alsa", "audioqueue", "winmm" or "" when
+// unsupported).
 func Backend() string { return nativeBackend }
 
 func wholeFrames(n, channels int) bool { return channels > 0 && n%channels == 0 }

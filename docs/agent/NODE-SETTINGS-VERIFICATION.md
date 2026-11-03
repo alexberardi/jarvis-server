@@ -5,8 +5,8 @@ disposable agents and scripted jarvisd sandboxes; no installed agent or producti
 
 ## Automated checks
 
-- `scripts/check --all --base main`: all green, including the full Go race suite,
-  Linux/macOS/Windows vet, admin lint/typechecking and 72 UI test files (532 tests).
+- `scripts/check --all --base origin/main`: all green, including the full Go race suite,
+  Linux/macOS/Windows vet, admin lint/typechecking and 79 UI test files (559 tests).
   The sandbox build compiles the admin bundle; E2E TypeScript checking also passes.
 - Shared schema tests reject secret, transport, identity and consent keys, malformed
   types and out-of-range values. Inverting the unsupported-key condition makes the
@@ -24,7 +24,7 @@ disposable agents and scripted jarvisd sandboxes; no installed agent or producti
 - `scripts/e2e web --name node-settings-e2e --filter 'node settings save and reload' --keep`
   passes for both desktop and Pi profiles using real headless Go agents paired
   without K2. The test edits follow-up duration, saves and reloads it.
-  Final report and screenshots: `.e2e/20261101-224917-9c60ae/report.md`.
+  Final report and screenshots: `.e2e/20261102-192128-bbea72/report.md`.
 - `JARVIS_SETTINGS_BROWSER=1 go test ./cmd/jarvis-agent -run '^TestLocalSettingsBrowser$'`
   passes against the protected local HTTP page and a disposable settings file:
   chime/follow-up/desktop saves, reload, invalid audio-device rejection, error recovery,
@@ -32,6 +32,15 @@ disposable agents and scripted jarvisd sandboxes; no installed agent or producti
 
 Use the toolchain and cache configuration in the repository guide. Browser integration
 requires `npm ci` in `e2e/web` and its Playwright Chromium installation.
+
+After integrating current main, the contract filter
+`TestCCPlainNodeConfig|TestCCMQTTCatalogue/update_node_config` passes against a
+scripted sandbox (jarvisd only). It checks GET/PATCH readback, explicit unconfirmed
+POST compatibility, MQTT shapes, household isolation and secret filtering without
+K2. The isolated sandbox enables registration to create disposable contract users.
+The local page and both profile E2Es were rerun successfully. Regression tests
+also cover platform audio-device capabilities and volume auto-unmute, including
+retry after a mixer failure.
 
 ## UI audit
 
@@ -57,7 +66,22 @@ Loading/empty states, keyboard focus and hover styles were inspected in code;
 screen-reader use, measured interaction performance, physical Pi LEDs/speakers,
 native macOS/Windows execution, and a live Python node were **not verified**.
 The Python compatibility mode uses its existing command without claiming readback
-or confirmation. Windows has no voice controls until its voice runtime supports them.
+or confirmation. Voice controls follow the compiled runtime capabilities, including Windows voice
+support from current main; native Windows execution was not exercised locally.
+
+### Published screenshots
+
+These captures use disposable fixtures. Admin images are the scrollable editor,
+without the page's host information; local images show the complete Settings section.
+
+| Viewport | Admin desktop | Admin Pi | Local desktop |
+| --- | --- | --- | --- |
+| 390px light | [View](node-settings-screenshots/admin-desktop-390-light.png) | [View](node-settings-screenshots/admin-pi-390-light.png) | [View](node-settings-screenshots/local-390-light.png) |
+| 390px dark | [View](node-settings-screenshots/admin-desktop-390-dark.png) | [View](node-settings-screenshots/admin-pi-390-dark.png) | [View](node-settings-screenshots/local-390-dark.png) |
+| 820px light | [View](node-settings-screenshots/admin-desktop-820-light.png) | [View](node-settings-screenshots/admin-pi-820-light.png) | [View](node-settings-screenshots/local-820-light.png) |
+| 820px dark | [View](node-settings-screenshots/admin-desktop-820-dark.png) | [View](node-settings-screenshots/admin-pi-820-dark.png) | [View](node-settings-screenshots/local-820-dark.png) |
+| 1440px light | [View](node-settings-screenshots/admin-desktop-1440-light.png) | [View](node-settings-screenshots/admin-pi-1440-light.png) | [View](node-settings-screenshots/local-1440-light.png) |
+| 1440px dark | [View](node-settings-screenshots/admin-desktop-1440-dark.png) | [View](node-settings-screenshots/admin-pi-1440-dark.png) | [View](node-settings-screenshots/local-1440-dark.png) |
 
 ## Review findings and release boundary
 

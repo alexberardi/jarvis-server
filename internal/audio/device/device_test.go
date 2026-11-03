@@ -102,7 +102,7 @@ func TestWAVPlaybackAppendsUtterances(t *testing.T) {
 }
 
 func TestNativeBackendName(t *testing.T) {
-	want := map[string]string{"linux": "alsa", "darwin": "audioqueue"}[runtime.GOOS]
+	want := map[string]string{"linux": "alsa", "darwin": "audioqueue", "windows": "winmm"}[runtime.GOOS]
 	if Backend() != want {
 		t.Fatalf("Backend() = %q, want %q", Backend(), want)
 	}

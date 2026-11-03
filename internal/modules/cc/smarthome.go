@@ -87,6 +87,8 @@ func (m *Module) registerSmartHome(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+hh+"/devices/{device_id}/control", m.prov(m.handleControlDevice))
 	mux.HandleFunc("GET "+hh+"/devices/{device_id}/state", m.prov(m.handleDeviceState))
 	mux.HandleFunc("GET "+v0+"/node/devices", m.node(m.handleNodeDevices))
+	mux.HandleFunc("GET "+v0+"/node/devices/{device_id}/state", m.node(m.handleNodeDeviceState))
+	mux.HandleFunc("POST "+v0+"/node/devices/{device_id}/control", m.node(m.handleNodeControlDevice))
 	// /device-control-results and /device-state-results are the shared result sink (cc.go).
 
 	// Request/poll jobs.
@@ -192,7 +194,22 @@ func (m *Module) householdNodes(ctx context.Context, hh string) ([]*nodeRow, err
 // nodes with no protocols), online only; the household's primary node first, else the most
 // recent last_seen. No node at all is legacy's 400; no online node fails fast with 503
 // instead of a 10 s timeout.
+// pickDeviceNode is the node that reads and drives d: one running the device's manager (its
+// source) for a manager's device, else one with its protocol; failing that, as pickNode.
+func (m *Module) pickDeviceNode(ctx context.Context, hh string, d *deviceRow) (*nodeRow, error) {
+	if source := d.sourceOr(); source != "direct" {
+		return m.pickNodeBy(ctx, hh, source, "device manager", func(n *nodeRow) sql.NullString { return n.managers })
+	}
+	return m.pickNode(ctx, hh, d.protocol.String)
+}
+
 func (m *Module) pickNode(ctx context.Context, hh, protocol string) (*nodeRow, error) {
+	return m.pickNodeBy(ctx, hh, protocol, "protocol", func(n *nodeRow) sql.NullString { return n.protocols })
+}
+
+// pickNodeBy prefers the online nodes whose list (a JSON array column) has key, then the
+// household primary among them, then the most recently seen.
+func (m *Module) pickNodeBy(ctx context.Context, hh, key, what string, list func(*nodeRow) sql.NullString) (*nodeRow, error) {
 	nodes, err := m.householdNodes(ctx, hh)
 	if err != nil {
 		return nil, err
@@ -201,11 +218,11 @@ func (m *Module) pickNode(ctx context.Context, hh, protocol string) (*nodeRow, e
 		return nil, fail(http.StatusBadRequest, "No active node available in household")
 	}
 	candidates := nodes
-	if protocol != "" {
+	if key != "" {
 		var matching []*nodeRow
 		for _, n := range nodes {
 			var ps []string
-			if n.protocols.Valid && json.Unmarshal([]byte(n.protocols.String), &ps) == nil && slices.Contains(ps, protocol) {
+			if l := list(n); l.Valid && json.Unmarshal([]byte(l.String), &ps) == nil && slices.Contains(ps, key) {
 				matching = append(matching, n)
 			}
 		}
@@ -221,8 +238,8 @@ func (m *Module) pickNode(ctx context.Context, hh, protocol string) (*nodeRow, e
 		}
 	}
 	if len(online) == 0 {
-		if protocol != "" {
-			return nil, fail(http.StatusServiceUnavailable, fmt.Sprintf("No online node with protocol '%s'", protocol))
+		if key != "" {
+			return nil, fail(http.StatusServiceUnavailable, fmt.Sprintf("No online node with %s '%s'", what, key))
 		}
 		return nil, fail(http.StatusServiceUnavailable, "No online node available in household")
 	}

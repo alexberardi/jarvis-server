@@ -123,3 +123,17 @@ func TestNodeSettingsRespectExplicitFlags(t *testing.T) {
 		t.Fatal("changed command-line setting")
 	}
 }
+
+func TestDesktopAudioFieldsMatchBackendCapabilities(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		for _, supported := range []bool{false, true} {
+			fields := desktopFieldsFor(goos, supported)
+			for _, key := range []string{"voice_input", "voice_output"} {
+				found := slices.ContainsFunc(fields, func(f nodeconfig.Field) bool { return f.Key == key })
+				if found != (goos == "linux" && supported) {
+					t.Fatalf("%s voice=%v exposed %s: %v", goos, supported, key, found)
+				}
+			}
+		}
+	}
+}

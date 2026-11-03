@@ -47,14 +47,23 @@ func (e *env) admit(acct SIPAccount, in sip.Incoming) (*inboundTicket, int) {
 func TestInboundIsOffUnlessTheHouseholdTurnedItOn(t *testing.T) {
 	e, acct := inboundEnv(t)
 	h := settings.Scope{HouseholdID: hh}
-	e.set(SettingInboundEnabled, nil, h)
+	if _, err := e.s.Settings.Delete(context.Background(), SettingInboundEnabled, h); err != nil {
+		t.Fatal(err)
+	}
 	if tk, code := e.admit(acct, bob); tk != nil || code != 480 {
 		t.Fatalf("inbound unset: ticket %v, status %d, want 480", tk, code)
 	}
-	// A system-wide true does not turn it on for anyone: per household only.
+	// The install's default turns it on for a household without its own value; the household's
+	// own false turns it off again.
 	e.set(SettingInboundEnabled, true, settings.Scope{})
+	if tk, _ := e.admit(acct, bob); tk == nil || tk.hh != hh {
+		t.Fatalf("system value only: %+v, want the household's call", tk)
+	} else {
+		tk.release()
+	}
+	e.set(SettingInboundEnabled, false, h)
 	if tk, code := e.admit(acct, bob); tk != nil || code != 480 {
-		t.Fatalf("system value only: status %d, want 480", code)
+		t.Fatalf("household off over a system on: status %d, want 480", code)
 	}
 	e.set(SettingInboundEnabled, true, h)
 	e.set(SettingEnabled, false, h)
@@ -72,6 +81,51 @@ func TestInboundIsOffUnlessTheHouseholdTurnedItOn(t *testing.T) {
 	other.Extension = "101"
 	if tk, code := e.admit(other, bob); tk != nil || code != 480 {
 		t.Fatalf("another extension: status %d, want 480", code)
+	}
+}
+
+// twoHouseholds knows both test households' names, as auth does on an install with two.
+type twoHouseholds struct{ names }
+
+func (twoHouseholds) HouseholdNames(context.Context) (map[string]string, error) {
+	return map[string]string{hh: "The Averys", otherHH: "The Cabin"}, nil
+}
+
+// The setup guide's path: one household, the system SIP account and the default turned on in
+// the admin's Settings, no household values at all.
+func TestTheDefaultAnswersForTheOnlyHousehold(t *testing.T) {
+	e := newEnv(t)
+	e.s.Names = householdNames{names{1: "Alex"}}
+	sys := settings.Scope{}
+	e.set(SettingProvider, ProviderSIP, sys)
+	e.set(SettingSIPServer, "pbx.lan", sys)
+	e.set(SettingSIPExtension, "100", sys)
+	e.set(SettingSIPPassword, "secret", sys)
+	e.set(SettingEnabled, true, sys)
+	acct, _, err := e.s.sipAccount(context.Background(), hh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk, code := e.admit(acct, bob); tk != nil || code != 480 {
+		t.Fatalf("inbound off by default: status %d, want 480", code)
+	}
+	e.set(SettingInboundEnabled, true, sys)
+	tk, code := e.admit(acct, bob)
+	if tk == nil || tk.hh != hh {
+		t.Fatalf("default on: ticket %+v, status %d", tk, code)
+	}
+	tk.release()
+	// A second household on the same system account makes it ambiguous: nobody's.
+	e.s.Names = twoHouseholds{names{1: "Alex"}}
+	if tk, code := e.admit(acct, bob); tk != nil || code != 480 {
+		t.Fatalf("two households inherit the default: status %d, want 480", code)
+	}
+	// Until one of them turns it off for itself.
+	e.set(SettingInboundEnabled, false, settings.Scope{HouseholdID: otherHH})
+	if tk, _ := e.admit(acct, bob); tk == nil || tk.hh != hh {
+		t.Fatalf("the cabin opted out: %+v", tk)
+	} else {
+		tk.release()
 	}
 }
 

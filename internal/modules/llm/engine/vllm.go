@@ -52,8 +52,12 @@ func init() {
 		HealthPath:    "/health",
 		RequestModel:  "default_model",
 		APIKeyEnv:     "VLLM_API_KEY",
+		// FlashInfer's top-k/top-p sampler is compiled on first use (nvcc, ninja, a host
+		// compiler and matching CUDA headers), which a host without a CUDA toolkit lacks: its
+		// warmup killed the default start and its first sampled request the EngineCore (#582).
+		// PyTorch's sampler needs none of it.
 		Env: map[string]string{"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1",
-			"VLLM_NO_USAGE_STATS": "1", "DO_NOT_TRACK": "1"},
+			"VLLM_NO_USAGE_STATS": "1", "DO_NOT_TRACK": "1", "VLLM_USE_FLASHINFER_SAMPLER": "0"},
 		// Kernel and compile caches vLLM, torch and triton write at run time; under the
 		// install so jarvisd's home stays the only place it writes.
 		CacheEnv: map[string]string{"VLLM_CACHE_ROOT": "vllm", "TRITON_CACHE_DIR": "triton",

@@ -13,6 +13,9 @@ type Recorded struct {
 	Path string
 	PID  int
 	App  string // the app's bundle id; "" when unknown
+	// NoContext: the app isn't on the accessibility bus (Wayland: foot, a Qt app without
+	// accessibility), so its event has no context.
+	NoContext bool
 }
 
 // RecordedAt returns the element under global point (x, y) for a recorded click; nil when

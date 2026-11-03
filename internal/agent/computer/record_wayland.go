@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/atspi"
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/evdev"
@@ -24,8 +25,10 @@ import (
 // pointers under /dev/input, which needs the user in the input group, Linux's Input
 // Monitoring), decoded with the desktop's keyboard layout. Where it happened comes from the
 // compositor: the cursor (hyprctl cursorpos; sway has none to give) and the focused window
-// (class, title, geometry), and AT-SPI's focused element in that window names what typing went
-// into; a password text is masked. Keyframes (grim) mark the click or cursor, at most one a
+// (class, title, geometry). AT-SPI's focused element in that window names what typing went
+// into (a password text is masked), and its element under the click, asked in the window's
+// coordinates, names the click; an app that isn't on the accessibility bus marks its events
+// context none. Keyframes (grim) mark the click or cursor, at most one a
 // second, with a crop around it, for a vision model to make sense of the clicks. GNOME and KDE
 // (no screencopy, no compositor IPC) refuse for now. Decision 2026-10-20-desktop-recording-wayland.
 // Platform-free so the tests run everywhere; record_linux.go wires the real system.
@@ -46,21 +49,30 @@ type wlSystem struct {
 	Devices func() ([]evdev.Device, error)
 	Open    func(devs []evdev.Device, send func(evdev.Event)) (stop func(), err error)
 	Layout  func(context.Context) *xkb.Layout
-	// Access says whether AT-SPI can be reached (atspi.Available); Focused is its focused
-	// element in a process's active window (atspi.Focused).
-	Access  func(context.Context) error
-	Focused func(pid int) (*computeruse.Element, error)
+	// Access turns the session's accessibility on and says whether AT-SPI can be reached
+	// (atspi.Enable); Focused is its focused element in a process's active window
+	// (atspi.Focused), ElementAt its element at a point from that window's corner
+	// (atspi.ElementAtWindow).
+	Access    func(context.Context) atspi.State
+	Focused   func(pid int) (*computeruse.Element, error)
+	ElementAt func(pid, x, y int) (*computeruse.Element, error)
 	// Shot captures the screen for a keyframe (the focused monitor); nil: no keyframes.
 	Shot func(context.Context) (screen.Shot, error)
 }
 
 // wlKeyframeEvery is the shortest gap between a Wayland recording's keyframes: they carry the
-// clicks, which have no element to name them.
+// clicks AT-SPI can't name.
 const wlKeyframeEvery = time.Second
 
 func newWaylandSource(dir string, sys wlSystem, log *slog.Logger) *DesktopSource {
-	p := &wlPlatform{sys: sys}
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	p := &wlPlatform{sys: sys, log: log}
 	plat := DeskPlatform{Focused: p.focused, Window: p.window, KeyframeEvery: wlKeyframeEvery, Context: p.context}
+	if sys.ElementAt != nil {
+		plat.ElementAt = p.elementAt
+	}
 	if sys.Shot != nil {
 		plat.Frame = p.frame
 	}
@@ -69,7 +81,11 @@ func newWaylandSource(dir string, sys wlSystem, log *slog.Logger) *DesktopSource
 
 type wlPlatform struct {
 	sys  wlSystem
+	log  *slog.Logger
 	a11y atomic.Bool // AT-SPI answered at the last start
+
+	mu     sync.Mutex
+	logged map[string]bool // apps whose AT-SPI failure this recording logged
 
 	// The last cursor position asked for (a scroll's ticks reuse it); only the tap's
 	// callback uses them, under its lock.
@@ -85,9 +101,17 @@ func wlCtx() (context.Context, context.CancelFunc) {
 func (p *wlPlatform) context() string {
 	ctx, cancel := wlCtx()
 	defer cancel()
-	ok := p.sys.Access != nil && p.sys.Access(ctx) == nil
-	p.a11y.Store(ok)
-	if !ok {
+	st := atspi.State{Err: errors.New("no AT-SPI")}
+	if p.sys.Access != nil {
+		st = p.sys.Access(ctx)
+	}
+	p.log.Info("desktop recording: accessibility", "session_bus", st.SessionBus, "address_from", st.From,
+		"enabled", st.Enabled, "turned_on", st.TurnedOn, "screen_reader", st.ScreenReader, "err", st.Err)
+	p.mu.Lock()
+	p.logged = nil
+	p.mu.Unlock()
+	p.a11y.Store(st.Err == nil)
+	if st.Err != nil {
 		return ContextNone
 	}
 	return ""
@@ -153,13 +177,52 @@ func (p *wlPlatform) focused() (*ax.Recorded, error) {
 	if err != nil || w == nil {
 		return nil, err
 	}
-	rec := &ax.Recorded{App: w.Class, PID: w.PID}
-	if p.a11y.Load() && w.PID > 0 && p.sys.Focused != nil {
-		if el, err := p.sys.Focused(w.PID); err == nil && el != nil {
-			rec.Role, rec.Name, rec.Secure = el.Role, el.Name, el.Secure
-		}
+	return p.element(w, p.sys.Focused != nil, func() (*computeruse.Element, error) { return p.sys.Focused(w.PID) }), nil
+}
+
+// elementAt is AT-SPI's element under a click at (x, y), asked in the focused window's
+// coordinates (the click focused the window under it); none outside that window (a popup).
+func (p *wlPlatform) elementAt(x, y float64) (*ax.Recorded, error) {
+	ctx, cancel := wlCtx()
+	w, err := p.sys.Windows.FocusedWindow(ctx)
+	cancel()
+	if err != nil || w == nil {
+		return nil, err
 	}
-	return rec, nil
+	in := x >= float64(w.X) && y >= float64(w.Y) && x < float64(w.X+w.W) && y < float64(w.Y+w.H)
+	return p.element(w, in, func() (*computeruse.Element, error) {
+		return p.sys.ElementAt(w.PID, int(x)-w.X, int(y)-w.Y)
+	}), nil
+}
+
+// element is window w's app with the element find gives (its role and name; Secure for a
+// password text) when AT-SPI answers. An app that isn't on the bus (foot; a Qt app without
+// accessibility) has no context; a failure is logged once per app and recording.
+func (p *wlPlatform) element(w *dictate.FocusedWindow, ask bool, find func() (*computeruse.Element, error)) *ax.Recorded {
+	rec := &ax.Recorded{App: w.Class, PID: w.PID}
+	if !ask || !p.a11y.Load() || w.PID <= 0 {
+		return rec
+	}
+	el, err := find()
+	if err != nil {
+		var ae *atspi.Error
+		rec.NoContext = errors.As(err, &ae) && ae.Code == atspi.CodeNotFound
+		p.mu.Lock()
+		first := !p.logged[w.Class]
+		if p.logged == nil {
+			p.logged = map[string]bool{}
+		}
+		p.logged[w.Class] = true
+		p.mu.Unlock()
+		if first {
+			p.log.Info("desktop recording: no accessibility for an app", "app", w.Class, "err", err)
+		}
+		return rec
+	}
+	if el != nil {
+		rec.Role, rec.Name, rec.Secure = el.Role, el.Name, el.Secure
+	}
+	return rec
 }
 
 func (p *wlPlatform) window() *EventWindow {

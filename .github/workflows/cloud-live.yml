@@ -1,0 +1,69 @@
+name: cloud-live
+
+# The live cloud-model checks, against every provider whose secret is set (ANTHROPIC_API_KEY,
+# OPENAI_API_KEY, GEMINI_API_KEY; models from the JARVIS_TEST_<NAME>_MODEL variables, else
+# internal/modules/llm/livetest's defaults):
+#   - TestRemoteLive (llm): chat, thinking off, a tool round trip, a tool call in the history
+#     from another model, streamed text and a streamed tool call.
+#   - TestCloudLive (cc): real voice turns through the Cloud prompt with a real node's tool
+#     set: a client tool round trip on the blocking routes, then one on the streaming routes.
+# Runs on pull requests from this repository that touch the model or command-center code (so a
+# provider's refusal is found before merge), on push to main, weekly and on demand. Never on
+# fork PRs: they get no secrets. Without any secret it warns and passes.
+on:
+  pull_request:
+    paths:
+      - "internal/modules/llm/**"
+      - "internal/modules/cc/**"
+      - "fixtures/golden/prompts/**"
+      - ".github/workflows/cloud-live.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-live-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  live:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      JARVIS_TEST_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      JARVIS_TEST_ANTHROPIC_MODEL: ${{ vars.JARVIS_TEST_ANTHROPIC_MODEL }}
+      JARVIS_TEST_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+      JARVIS_TEST_OPENAI_MODEL: ${{ vars.JARVIS_TEST_OPENAI_MODEL }}
+      JARVIS_TEST_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+      JARVIS_TEST_GEMINI_MODEL: ${{ vars.JARVIS_TEST_GEMINI_MODEL }}
+    steps:
+      - name: Check for the secrets
+        id: key
+        run: |
+          present=false
+          for p in ANTHROPIC OPENAI GEMINI; do
+            v="JARVIS_TEST_${p}_KEY"
+            if [ -n "${!v}" ]; then present=true; else echo "::warning::${p}_API_KEY secret is not set; skipping ${p,,}"; fi
+          done
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+      - uses: actions/setup-go@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs
+        if: steps.key.outputs.present == 'true'
+        run: scripts/fetch-sherpa-libs.sh linux-amd64
+      - name: Live cloud tests
+        if: steps.key.outputs.present == 'true'
+        run: go test ./internal/modules/llm ./internal/modules/cc -run '^(TestRemoteLive|TestCloudLive)$' -count=1 -v

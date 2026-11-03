@@ -40,12 +40,26 @@ const (
 	chatMessageMax        = 5000
 )
 
+// Beyond legacy (#575): a sixth round of tools ended the chat in a red "Too many tool
+// iterations". Now its calls answer toolBudgetOutput and the model replies from what it found;
+// one that calls a tool again gets toolBudgetFallback.
+const (
+	toolBudgetOutput = `{"success": false, "error": "Not run: this request's tool budget is used up. Answer the user ` +
+		`now with what you found so far; if the task needs more steps, offer to finish it as an errand."}`
+	toolBudgetFallback = "I ran out of steps before finishing that. Ask me to run it as an errand and I'll keep going."
+)
+
 // chatWordPause is the fake-streaming pause per word (D32; a var for tests).
 var chatWordPause = 20 * time.Millisecond
 
-// chatToolWait bounds one headless node tool call (dispatch_node_command's 10 s; a var for
-// tests).
-var chatToolWait = 10 * time.Second
+// chatToolWait bounds one headless node tool call (a var for tests). It is longer than a node
+// tool's own budget (the desktop agent's browser_fill and browser_click: 10 s), so a slow tool
+// answers with its own error and error_code rather than racing this wait (#587).
+var chatToolWait = 15 * time.Second
+
+// chatTimeoutError is the synthetic timeout's error: the command may still be running on the node.
+const chatTimeoutError = "the node didn't respond in time; the command may still have run. " +
+	"For a browser task, read the task tab (browser_read_page, browser_list_tabs) before retrying, and don't open another tab"
 
 func (m *Module) registerMobileChat(mux *http.ServeMux) {
 	const v0 = "/api/v0"
@@ -424,7 +438,7 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 	res := out.res
 
 	var st chatState
-	for iter := 0; iter < chatMaxToolIterations; iter++ {
+	for iter := 0; ; iter++ {
 		if res.Reasoning != "" {
 			st.reasoning = res.Reasoning
 		}
@@ -467,6 +481,23 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 		case stopToolCalls:
 			if len(res.ToolCalls) == 0 {
 				break
+			}
+			if iter > chatMaxToolIterations {
+				res = engineResult{Stop: stopComplete, Message: toolBudgetFallback}
+				continue
+			}
+			if iter == chatMaxToolIterations {
+				results := make([]toolResult, len(res.ToolCalls))
+				for i, c := range res.ToolCalls {
+					results[i] = toolResult{ToolCallID: c.ID, Output: toolBudgetOutput}
+				}
+				end := tr.measure("continue_conversation", "cc", nil)
+				res, _, err = m.continueBlocking(llmCtx, cid, results)
+				end(err)
+				if err != nil {
+					res = engineResult{Stop: stopComplete, Message: toolBudgetFallback}
+				}
+				continue
 			}
 			if intermediate := parse.PyStrip(res.Message); intermediate != "" {
 				sse.send(servertools.Obj("type", "delta", "text", intermediate+" "))
@@ -572,7 +603,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 		var output *pyjson.Object
 		var imgs []chatImage
 		if !online {
-			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true)
+			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true, "error_code", "offline")
 		} else {
 			meta := map[string]any{"command": c.Function.Name}
 			end := tr.measure("mqtt_tool_"+c.Function.Name, "node", meta)
@@ -596,7 +627,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c parse.ToolCall, imgs imageArgs,
 	userID int64, message string) (*pyjson.Object, []chatImage) {
 	if !m.bus.Available() {
-		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error()), nil
+		return servertools.Obj("success", false, "error", "could not dispatch to node: "+ErrNoBroker.Error(), "error_code", "no_broker"), nil
 	}
 	rid := uuid4()
 	args := wireArguments(c.Function.Arguments, imgs) // a JSON string (the node decodes it), or an object with photos
@@ -612,11 +643,11 @@ func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c 
 	defer cancel()
 	raw, err := m.bus.Await(wctx, rid)
 	if err != nil {
-		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true), nil
+		return servertools.Obj("success", false, "error", chatTimeoutError, "timeout", true, "error_code", "timeout"), nil
 	}
 	v, err := pyjson.Loads(string(raw))
 	if err != nil {
-		return servertools.Obj("success", false, "error", "malformed node result"), nil
+		return servertools.Obj("success", false, "error", "malformed node result", "error_code", "malformed"), nil
 	}
 	output := v
 	if o, ok := v.(*pyjson.Object); ok {

@@ -2,11 +2,11 @@
   "name": "notes_wlroots",
   "about": "A desktop task in the fixture notes app (tools/ccsites/notesapp) under headless sway (Xwayland). Flipped by piece 35.",
   "phase": "desktop-wlroots",
-  "status": "pending",
+  "status": "required",
   "say": "In the Jarvis Test Notes app, make a new note titled Groceries with milk, eggs and bread in it, and save it.",
   "target": "desktop",
   "setup": {"login": [], "notes_layout": "default"},
-  "answers": [{"when": "confirm", "tap": "approve"}],
+  "answers": [{"when": "plan", "tap": "approve"}, {"when": "confirm", "tap": "approve"}],
   "checks": [
     {"kind": "note_exists", "title": "Groceries", "body": "eggs"}
   ],

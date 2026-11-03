@@ -71,11 +71,14 @@ type record struct {
 }
 
 type settingsFile struct {
-	NodeID   string                       `json:"node_id"`
-	Secrets  []secret                     `json:"secrets"`
-	Disabled []string                     `json:"disabled_commands"`
-	Data     map[string]map[string]record `json:"command_data"`
-	NextSeq  int64                        `json:"next_seq,omitempty"`
+	NodeID   string   `json:"node_id"`
+	Secrets  []secret `json:"secrets"`
+	Disabled []string `json:"disabled_commands"`
+	// DisabledFastPaths are the fast-path patterns turned off (the fast_path_registry push),
+	// as "command/pattern_id": sparse, enabled is the default (N:'s disabled_fast_paths table).
+	DisabledFastPaths []string                     `json:"disabled_fast_paths,omitempty"`
+	Data              map[string]map[string]record `json:"command_data"`
+	NextSeq           int64                        `json:"next_seq,omitempty"`
 }
 
 // OpenStore loads the store for nodeID from dir. Files written for another node (an earlier sign-in)
@@ -291,6 +294,26 @@ func (st *Store) SetEnabled(command string, on bool) error {
 		out = append(out, command)
 	}
 	st.s.Disabled = out
+	return st.saveLocked()
+}
+
+// FastPathEnabled says whether a command's fast-path pattern is on.
+func (st *Store) FastPathEnabled(command, patternID string) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return !slices.Contains(st.s.DisabledFastPaths, command+"/"+patternID)
+}
+
+// SetFastPathEnabled turns a command's fast-path pattern on or off.
+func (st *Store) SetFastPathEnabled(command, patternID string, on bool) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	key := command + "/" + patternID
+	out := slices.DeleteFunc(slices.Clone(st.s.DisabledFastPaths), func(k string) bool { return k == key })
+	if !on {
+		out = append(out, key)
+	}
+	st.s.DisabledFastPaths = out
 	return st.saveLocked()
 }
 

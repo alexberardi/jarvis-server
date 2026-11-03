@@ -237,6 +237,10 @@ type round struct {
 	resume bool
 	// clipboard is what the last batch read from the clipboard, for the next prompt only.
 	clipboard string
+	// lastClicks are the coordinates a desktop batch clicked: a batch that only clicks the same
+	// spots again is missing its target (a missed click gives no error) and gets nudged to the
+	// button's shortcut or menu.
+	lastClicks [][2]int
 	// downloadsBefore are the files in Downloads when this Run call began (nil: not a browser task), so
 	// done can name the ones the task downloaded.
 	downloadsBefore map[string]bool
@@ -456,7 +460,38 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if len(actions) == 0 {
 		return Outcome{}, false
 	}
+	if r.task.Target.Kind == "desktop" {
+		if a, b := blindSecondType(actions); b != nil {
+			// The house model plans "type the title, then the body" and sends two types with
+			// nothing moving the focus between them: both land in the focused field (#528).
+			r.feedback = fmt.Sprintf(`%q and %q both type into the same field: everything typed goes to the focused field, and nothing between them moves the focus. Click the field each text is for, right before typing it.`,
+				a.Intent, b.Intent)
+			return Outcome{}, false
+		}
+	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// blindSecondType finds a pair of type actions into the same focus: nothing between them (a
+// click, a press, keys, an element's own set) moves it, so both texts land in one field.
+func blindSecondType(actions []computeruse.Action) (a, b *computeruse.Action) {
+	var last *computeruse.Action
+	for i := range actions {
+		switch actions[i].Kind {
+		case "type":
+			if actions[i].Ref != "" {
+				last = nil // typed into a named element: the focus is explicit
+				continue
+			}
+			if last != nil {
+				return last, &actions[i]
+			}
+			last = &actions[i]
+		case "click", "double_click", "triple_click", "press", "keypress", "navigate", "set_value", "select":
+			last = nil
+		}
+	}
+	return nil, nil
 }
 
 // look observes for the model: new page text that reads like instructions to it ends the call
@@ -786,7 +821,72 @@ func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []d
 	if len(failed) > 0 {
 		r.feedback = "these actions failed, so the rest of the batch didn't run: " + strings.Join(failed, "; ")
 	}
+	if tgt.Kind == "desktop" {
+		pts, only := clicksOf(ds)
+		if len(failed) == 0 && only && allNear(pts, r.lastClicks, r.clickTolerance()) {
+			r.feedback = `you clicked the same spot last turn: a click that changes nothing is missing its target, and a missed click gives no error. Press the button through its keyboard shortcut or menu instead, e.g. {"kind": "keypress", "keys": ["ctrl", "s"], "intent": "Save"}.`
+		}
+		r.lastClicks = pts
+	}
 	return Outcome{}, false
+}
+
+// clicksOf are the batch's click coordinates, and whether clicking is all the batch did (waits,
+// moves and screenshots aside): typing or a keypress is progress, re-clicking alone may not be.
+func clicksOf(ds []decision) (pts [][2]int, only bool) {
+	only = true
+	for _, d := range ds {
+		switch d.action.Kind {
+		case "click", "double_click":
+			if d.action.X != nil && d.action.Y != nil {
+				pts = append(pts, [2]int{*d.action.X, *d.action.Y})
+			}
+		case "move", "wait", "screenshot":
+		default:
+			only = false
+		}
+	}
+	return pts, only && len(pts) > 0
+}
+
+// allNear: every point of pts lands within tol (per axis) of one of last.
+func allNear(pts, last [][2]int, tol int) bool {
+	if len(pts) == 0 || len(last) == 0 {
+		return false
+	}
+	for _, p := range pts {
+		near := false
+		for _, q := range last {
+			if absInt(p[0]-q[0]) <= tol && absInt(p[1]-q[1]) <= tol {
+				near = true
+				break
+			}
+		}
+		if !near {
+			return false
+		}
+	}
+	return true
+}
+
+// clickTolerance is how far apart two clicks still count as the same spot: 3% of the screenshot's
+// larger side (coordinates are image pixels by the time they are acted on), at least 40.
+func (r *round) clickTolerance() int {
+	tol := 40
+	if len(r.shots) > 0 {
+		im := r.shots[len(r.shots)-1]
+		if t := max(im.Width, im.Height) * 3 / 100; t > tol {
+			tol = t
+		}
+	}
+	return tol
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // decide resolves one action: the built-in deny list, then the household's rules for the site or

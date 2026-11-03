@@ -105,7 +105,13 @@ internal/agent/
   host/               Backend interface + Host (gate, clamp, validate) + linux/darwin/windows backends
                       -- read host.go first
   desktop/            the client tools over Host (desktop_window: one tool for the window verbs,
-                      its actions computed per call; window.go), and the open policy
+                      its actions computed per call; window.go), the open policy, and
+                      desktop_views/desktop_view: tabs and sheets by spoken name, matched by
+                      sound, a choice when unsure (views.go; VOICE-FLOWS.md Q26); Direct
+                      (direct.go) is funnel stage 1 (Q27): "switch to X" done on the node with
+                      no model, before command-center (voice: Pipeline.direct)
+  views/              desktop's view source on Linux: the front window's page tabs from AT-SPI
+                      (atspi.Tabs/SelectTab) by the window's pid; macOS/Windows not yet
   apps/               installed-app catalogue (per-OS scanners), name resolution, apps.json
   macax/              macOS Accessibility trust check + prompt (purego, no cgo)
   node/               reusable node core: creds, discovery, CC client, enroll, MQTT runner, dispatch
@@ -305,7 +311,7 @@ the agent (+~4.5 MB), the price of one verification path.
     response. Each call is bounded by `Config.ToolTimeout` and a panic is a failure result.
 21. **Follow-up is the Python node's, widened by command-center's gate** (go-pi-node.md §3.9,
     §3.10): a window after every reply not marked `end_of_exchange` / `not_for_me`, 8 s then 6,
-    then 5 (Python: 4 then 3), ≤ 5, answers end after 1.2 s of silence (Python 0.5) and may run
+    then 5 (Python: 4 then 3), ≤ 5 (silent desktop steps don't count and get an 8 s window, so a process can be said step by step; ≤ 30 turns in all), answers end after 1.2 s of silence (Python 0.5) and may run
     10 s; sent as blocking `/voice/command` follow_up turns of the same conversation with
     `level_vs_wake_db`. A `not_for_me` with `keep_listening` is ignored silently and the window
     listens again (same iteration, no flush: nothing was said), at most `MaxIgnored`, for only

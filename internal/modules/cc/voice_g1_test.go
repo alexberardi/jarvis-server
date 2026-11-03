@@ -74,7 +74,7 @@ func realNodeRequest(t *testing.T, fx *pyjson.Object, clientTools []any) string 
 func TestG1ThroughWarmup(t *testing.T) {
 	inputs := goldenPrompts(t, "_inputs.json")
 	nodeDev := og2(og2(inputs, "tool_sets").(*pyjson.Object), "node_dev").([]any)
-	for _, provider := range []string{prompts.Qwen3_14B, prompts.Qwen3_8B, prompts.Qwen3_5_9B, prompts.ChatGPT} {
+	for _, provider := range []string{prompts.Qwen3_14B, prompts.Qwen3_8B, prompts.Qwen3_5_9B, "ChatGPTOpenAI"} { // the goldens keep the legacy name (Cloud's alias)
 		fx := goldenPrompts(t, provider+"__real_node.json")
 		var keys []string
 		for _, k := range og2(og2(og2(fx, "inputs").(*pyjson.Object), "node_context").(*pyjson.Object), "date_keys").([]any) {

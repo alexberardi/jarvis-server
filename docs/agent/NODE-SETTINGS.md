@@ -55,7 +55,8 @@ Common voice controls in admin and desktop Settings:
 
 Additional desktop-local controls use existing settings where supported:
 
-- Listen for the wake word, microphone and speaker selection/configuration.
+- Listen for the wake word; microphone and speaker names on Linux. macOS and
+  Windows use their system default devices, selected in the OS settings.
 - Show the on-screen indicator and status icon.
 - Browser integration, dictation confirmation, and time to answer an on-screen
   list of choices.

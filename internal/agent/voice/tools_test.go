@@ -433,7 +433,7 @@ func TestClampChoiceListen(t *testing.T) {
 }
 
 // Voice test, 2026-10-24: "maximize Firefox… restore it" needs one wake word. A silent desktop
-// command keeps listening like a spoken reply, starting at once.
+// command keeps listening, starting at once, for 8 s: time to say the next step (2026-10-25).
 func TestIslandOnlySuccessKeepsListening(t *testing.T) {
 	os := &fakeOS{}
 	srv := newServer()
@@ -450,8 +450,8 @@ func TestIslandOnlySuccessKeepsListening(t *testing.T) {
 	if tr.Outcome != OutcomeSilent || tr.FollowUpEnd != EndTimeout {
 		t.Fatalf("turn %+v", tr)
 	}
-	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{3 * time.Second}) {
-		t.Fatalf("windows %v, want one 3 s follow-up", got)
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want one 8 s window for the next step", got)
 	}
 }
 
@@ -484,5 +484,155 @@ func TestChoiceAnswerIsActedOnByTheNode(t *testing.T) {
 	}
 	if !strings.Contains(hint, "The second one") {
 		t.Fatalf("transcribe hint %q", hint)
+	}
+}
+
+// Funnel stage 1 (VOICE-FLOWS.md Q27): "switch to the terminal" is done on the node, with no
+// command-center turn, and the next window waits 8 s for the next step.
+func TestDirectCommandSkipsCommandCenter(t *testing.T) {
+	os := &fakeOS{}
+	srv := newServer()
+	srv.text = "Switch to the terminal."
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(os)
+	ind := &recIndicator{}
+	r.p.Indicator = ind
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSilent || !slices.Contains(os.did(), "focus 0x2") {
+		t.Fatalf("turn %+v, did %v", tr, os.did())
+	}
+	if slices.Contains(srv.callList(), "stream") || slices.Contains(srv.callList(), "command") {
+		t.Fatalf("command-center was asked: %v", srv.callList())
+	}
+	if got := followUpWindows(ind); !slices.Equal(got, []time.Duration{8 * time.Second}) {
+		t.Fatalf("windows %v, want the 8 s next-step window", got)
+	}
+}
+
+// speakingDirector runs "good night" itself and asks for its message to be spoken (a routine's
+// trigger phrase), seeing who spoke.
+type speakingDirector struct{ speaker *int64 }
+
+func (d *speakingDirector) Available(context.Context) []node.ToolDef { return nil }
+func (d *speakingDirector) Call(context.Context, string, map[string]any, node.Request) (map[string]any, bool) {
+	return nil, false
+}
+func (d *speakingDirector) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	if !strings.Contains(strings.ToLower(said), "good night") {
+		return nil, false
+	}
+	d.speaker = node.Speaker(ctx)
+	return map[string]any{"success": true, "message": "Sleep well.", node.SignalsKey: node.Signals{Speak: true}}, true
+}
+
+// A routine's trigger phrase is run on the node and its reply spoken, with no command-center
+// turn.
+func TestDirectResultCanBeSpoken(t *testing.T) {
+	srv := newServer()
+	srv.text, srv.speakPCM = "Good night.", pcmOf(300)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	d := &speakingDirector{}
+	r.p.Tools = d
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.Outcome != OutcomeSpoken || tr.Message != "Sleep well." {
+		t.Fatalf("turn %+v", tr)
+	}
+	srv.mu.Lock()
+	said := slices.Clone(srv.said)
+	srv.mu.Unlock()
+	if !slices.Contains(said, "Sleep well.") {
+		t.Fatalf("said %q", said)
+	}
+	if slices.Contains(srv.callList(), "stream") || slices.Contains(srv.callList(), "command") {
+		t.Fatalf("command-center was asked: %v", srv.callList())
+	}
+}
+
+// volumeDirector is control_node's shortcut: any "volume" phrase runs on the node and is spoken.
+type volumeDirector struct {
+	mu   sync.Mutex
+	said []string
+}
+
+func (d *volumeDirector) Available(context.Context) []node.ToolDef { return nil }
+func (d *volumeDirector) Call(context.Context, string, map[string]any, node.Request) (map[string]any, bool) {
+	return nil, false
+}
+func (d *volumeDirector) Direct(_ context.Context, said string) (map[string]any, bool) {
+	if !strings.Contains(strings.ToLower(said), "volume") && !strings.Contains(strings.ToLower(said), "mute") {
+		return nil, false
+	}
+	d.mu.Lock()
+	d.said = append(d.said, said)
+	d.mu.Unlock()
+	return map[string]any{"success": true, "message": "Volume 70 percent.", node.SignalsKey: node.Signals{Speak: true}}, true
+}
+
+// Right after the node said "Volume 70 percent.", the mic half-hearing it as "Volume 1." must
+// not run the shortcut (it set the volume to 10% on the lab Pi): it goes to command-center,
+// whose follow-up gate tells the node's voice from the user's. A follow-up sharing no word with
+// the reply still takes the shortcut.
+func TestShortcutsSkipFollowUpsLikeOurReply(t *testing.T) {
+	for _, c := range []struct {
+		followUp  string
+		shortcuts int
+		toCC      int
+	}{{"Volume 1.", 1, 1}, {"Mute.", 2, 0}} {
+		srv := newServer()
+		srv.text, srv.speakPCM = "Volume up.", pcmOf(300)
+		srv.texts = []string{c.followUp}
+		mic := oneWake()
+		r := newRig(t, mic, srv)
+		d := &volumeDirector{}
+		r.p.Tools = d
+		answer(r, mic, utterance)
+		stop := r.run(t)
+		r.turn(t)
+		_ = stop()
+		d.mu.Lock()
+		got := len(d.said)
+		d.mu.Unlock()
+		srv.mu.Lock()
+		cc := len(srv.commands)
+		srv.mu.Unlock()
+		if got != c.shortcuts || cc != c.toCC {
+			t.Errorf("%q: shortcuts %d (%v), command-center turns %d; want %d and %d", c.followUp, got, d.said, cc, c.shortcuts, c.toCC)
+		}
+	}
+}
+
+// endingDirector's spoken result ends the exchange (control_node's ClearHistory).
+type endingDirector struct{ volumeDirector }
+
+func (d *endingDirector) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	out, ok := d.volumeDirector.Direct(ctx, said)
+	if ok {
+		out[node.SignalsKey] = node.Signals{Speak: true, ClearHistory: true}
+	}
+	return out, ok
+}
+
+// A volume change says its level and ends the exchange: no follow-up window to hear the reply
+// as the next volume command.
+func TestSpokenShortcutCanEndTheExchange(t *testing.T) {
+	srv := newServer()
+	srv.text, srv.speakPCM = "Volume up.", pcmOf(300)
+	srv.texts = []string{"Volume 1."}
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	d := &endingDirector{}
+	r.p.Tools = d
+	answer(r, mic, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if tr.FollowUpEnd != EndClearHistory || len(tr.FollowUps) != 0 || tr.Message != "Volume 70 percent." {
+		t.Fatalf("turn %+v", tr)
 	}
 }

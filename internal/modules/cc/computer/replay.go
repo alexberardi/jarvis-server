@@ -92,8 +92,19 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 		}
 		st := steps[i]
 		r.wstep, r.task.Target, r.heal, r.hint = i+1, st.target(), nil, ""
+		if newApp(steps, i) {
+			// The recording opened the app through a launcher, which isn't a step: the agent
+			// opens it (from its catalogue) and gives it the focus, so keys go to it (#581).
+			if _, err := l.Exec.Observe(ctx, Observe{RunID: run.ID, Target: r.task.Target, Snapshot: true}); err != nil {
+				return l.end(ctx, run, Outcome{State: StateFailed,
+					Summary: fmt.Sprintf("Step %d (%s): I couldn't open %s: %s.", i+1, oneLine(st.Intent), st.App, strings.TrimSuffix(err.Error(), "."))})
+			}
+		}
 		out, done := l.replayStep(ctx, r, st, i)
 		if done {
+			if out.State == StateFailed {
+				out.Summary = fmt.Sprintf("Step %d (%s) failed: %s", i+1, oneLine(st.Intent), out.Summary)
+			}
 			return l.end(ctx, run, out)
 		}
 		markDone(run, st, i+1, r.heal)
@@ -165,6 +176,10 @@ func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int
 		if st.Action.Kind == "type" || st.Action.Kind == "set_value" || st.Action.Kind == "select" {
 			r.hint += fmt.Sprintf(" The value is %q.", st.Action.Text)
 		}
+	}
+	if w := st.Window; w != nil && w.Point != nil {
+		r.hint = strings.TrimSpace(r.hint + fmt.Sprintf(" It was a click %d,%d from the top-left of the window, which was %d×%d then.",
+			w.Point.X, w.Point.Y, w.Point.W, w.Point.H))
 	}
 	defer func() { r.hint, r.feedback = "", "" }()
 	unsure := func(why string) (Outcome, bool) {
@@ -252,6 +267,12 @@ func (l *Loop) replayDone(ctx context.Context, r *round, wf *Workflow, steps []W
 	}
 	return Outcome{State: StateDone, Summary: did + " Checked: " + res.Checked + ".", Checked: res.Checked,
 		Verify: &check, Healed: heals}
+}
+
+// newApp reports a desktop step in another app than the step before it (or the first step).
+func newApp(steps []WorkflowStep, i int) bool {
+	st := steps[i]
+	return st.Target == "desktop" && st.App != "" && (i == 0 || steps[i-1].Target != "desktop" || steps[i-1].App != st.App)
 }
 
 // stepsDone is how many of a replay's steps its history finished (they finish in order).

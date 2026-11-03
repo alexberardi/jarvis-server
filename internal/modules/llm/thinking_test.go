@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // An engine that refuses reasoning_budget (transformers serve: 422 for any field outside
@@ -97,10 +98,10 @@ func TestPayloadRemoteReasoningModelSendsNoSampling(t *testing.T) {
 }
 
 // Gemini counts thinking against the cap and 2.5 Pro / 3.x can't turn thinking off, so a
-// remote Gemini gets no cap and "minimal" effort for thinking off; sampling is kept.
+// remote Gemini gets no cap and "low" effort for thinking off; sampling is kept.
 func TestPayloadRemoteGemini(t *testing.T) {
 	s := NewService(ServiceConfig{Log: quietLog()})
-	for budget, effort := range map[int]string{0: `"reasoning_effort":"minimal"`, -1: ""} {
+	for budget, effort := range map[int]string{0: `"reasoning_effort":"low"`, -1: ""} {
 		req := &ChatRequest{Messages: []Message{msg("user", "hi")}, Temperature: ptr(0.4), MaxTokens: ptr(256), ReasoningBudget: ptr(budget)}
 		b, err := json.Marshal(s.payload(context.Background(), Endpoint{Model: "models/gemini-2.5-flash", Remote: true}, LabelLive, req, req.Messages, false))
 		if err != nil {
@@ -123,5 +124,87 @@ func TestEndpointURLKeepsGooglesBase(t *testing.T) {
 		if got := endpointURL(base, "/chat/completions"); got != want {
 			t.Errorf("%s → %s", base, got)
 		}
+	}
+}
+
+// Gemini 3 refuses a history tool call without a thought signature: one it sent is kept,
+// any other gets Google's stand-in, and the caller's messages are left alone.
+func TestPayloadGeminiThoughtSignatures(t *testing.T) {
+	s := NewService(ServiceConfig{Log: quietLog()})
+	real := json.RawMessage(`{"google":{"thought_signature":"abc"}}`)
+	msgs := []Message{msg("user", "add milk"),
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "1", Type: "function", Function: FunctionCall{Name: "remember", Arguments: "{}"}},
+			{ID: "2", Type: "function", Function: FunctionCall{Name: "todo", Arguments: "{}"}, ExtraContent: real}}},
+		{Role: "tool", ToolCallID: "1", Content: TextContent("ok")}}
+	req := &ChatRequest{Messages: msgs}
+	b, _ := json.Marshal(s.payload(context.Background(), Endpoint{Model: "gemini-3.1-flash-lite", Remote: true}, LabelLive, req, msgs, false))
+	if !strings.Contains(string(b), `"extra_content":{"google":{"thought_signature":"skip_thought_signature_validator"}}`) ||
+		!strings.Contains(string(b), `"thought_signature":"abc"`) {
+		t.Fatalf("%s", b)
+	}
+	if msgs[1].ToolCalls[0].ExtraContent != nil {
+		t.Fatal("caller's history was changed")
+	}
+	b, _ = json.Marshal(s.payload(context.Background(), Endpoint{Model: "gpt-4o", Remote: true}, LabelLive, req, msgs, false))
+	if strings.Contains(string(b), "skip_thought_signature_validator") {
+		t.Fatalf("non-Gemini got a signature: %s", b)
+	}
+}
+
+// A remote's transient refusal (Gemini's 503 "experiencing high demand", a 429) is retried;
+// a local engine's and a 400 are not.
+func TestRemoteTransientErrorsRetry(t *testing.T) {
+	old := remoteRetryDelays
+	remoteRetryDelays = []time.Duration{0, 0}
+	t.Cleanup(func() { remoteRetryDelays = old })
+	ok := canned{body: `{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}]}`}
+	busy := canned{status: 503, body: `{"error":{"message":"This model is currently experiencing high demand."}}`}
+	chat := func(rec *recorder, remote bool) error {
+		ep := Endpoint{BaseURL: rec.srv.URL, Model: "gemini-3.1-flash-lite", Remote: remote}
+		s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}}, Log: quietLog()})
+		_, err := s.Chat(context.Background(), ChatRequest{Messages: []Message{msg("user", "hi")}})
+		return err
+	}
+	if rec := newRecorder(t, busy, canned{status: 429}, ok); chat(rec, true) != nil || rec.count() != 3 {
+		t.Fatalf("remote: %d requests", rec.count())
+	}
+	if rec := newRecorder(t, busy, busy, busy, ok); chat(rec, true) == nil || rec.count() != 3 {
+		t.Fatalf("remote gives up after 2 retries: %d requests", rec.count())
+	}
+	if rec := newRecorder(t, canned{status: 400}, ok); chat(rec, true) == nil || rec.count() != 1 {
+		t.Fatalf("a 400 is not retried: %d requests", rec.count())
+	}
+	if rec := newRecorder(t, busy, ok); chat(rec, false) == nil || rec.count() != 1 {
+		t.Fatalf("a local engine is not retried: %d requests", rec.count())
+	}
+}
+
+// Gemini's thought signature on a returned tool call is kept, so it goes back as sent.
+func TestToolCallKeepsExtraContent(t *testing.T) {
+	rec := newRecorder(t, canned{body: `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function",` +
+		`"function":{"name":"get_weather","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig"}}}]},"finish_reason":"tool_calls"}]}`})
+	ep := Endpoint{BaseURL: rec.srv.URL, Model: "gemini-3.1-flash-lite", Remote: true}
+	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}}, Log: quietLog()})
+	r, err := s.Chat(context.Background(), ChatRequest{Messages: []Message{msg("user", "weather?")}})
+	if err != nil || len(r.ToolCalls) != 1 || string(r.ToolCalls[0].ExtraContent) != `{"google":{"thought_signature":"sig"}}` {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+// Gemini's OpenAI layer ends a tool-call reply with finish_reason "stop"; callers read
+// "tool_calls", as OpenAI sends.
+func TestToolCallsFinishReason(t *testing.T) {
+	sse := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	res, err := parseStream(strings.NewReader(sse), func(string) bool { return true })
+	if err != nil || res.FinishReason != "tool_calls" {
+		t.Fatalf("stream: %+v %v", res, err)
+	}
+	rec := newRecorder(t, canned{body: `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":"stop"}]}`})
+	ep := Endpoint{BaseURL: rec.srv.URL, Model: "gemini-3.1-flash-lite", Remote: true}
+	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}}, Log: quietLog()})
+	r, err := s.Chat(context.Background(), ChatRequest{Messages: []Message{msg("user", "weather?")}})
+	if err != nil || r.FinishReason != "tool_calls" {
+		t.Fatalf("chat: %+v %v", r, err)
 	}
 }

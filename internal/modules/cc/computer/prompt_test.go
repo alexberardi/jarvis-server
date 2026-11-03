@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,5 +44,26 @@ func TestPromptGolden(t *testing.T) {
 	}
 	if got != string(want) {
 		t.Fatalf("prompt differs from %s (run with -update after checking):\n%s", path, got)
+	}
+}
+
+// A desktop app that lists no elements (Tk: screenshots only) must send the model to the
+// screenshot and coordinate actions, or it loops press-by-name → stale_ref forever (#528).
+func TestPromptNoElementsPointsAtScreenshot(t *testing.T) {
+	got := renderPrompt(promptInput{
+		Goal: "Make a note", Obs: Observation{Title: "Jarvis Test Notes", App: "Tk"},
+		Desktop: true, Images: 1,
+		Coordinates: "Coordinates are pixels of the newest screenshot (1280x800).",
+	})
+	if !strings.Contains(got, "coordinate actions") || !strings.Contains(got, "newest screenshot") {
+		t.Errorf("no-elements desktop prompt does not point at the screenshot:\n%s", got)
+	}
+	if strings.Contains(got, "(no elements found)") {
+		t.Errorf("no-elements desktop prompt keeps the bare line:\n%s", got)
+	}
+	// A page (browser) without elements keeps the plain line: refs come back with the DOM.
+	got = renderPrompt(promptInput{Goal: "g", Obs: Observation{Title: "t"}})
+	if !strings.Contains(got, "(no elements found)") {
+		t.Errorf("pageless render lost the plain line:\n%s", got)
 	}
 }

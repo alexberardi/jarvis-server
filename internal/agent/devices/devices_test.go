@@ -171,19 +171,19 @@ func TestVerbsInvalidateAndRemove(t *testing.T) {
 	api := &fakeAPI{gets: map[string]string{"/api/v0/node/devices": `[{"entity_id":"light.lamp","domain":"light","name":"Lamp","source":"direct","protocol":"lifx"}]`}}
 	n := newNode(fam)
 	ctx := context.Background()
-	if _, err := n.Registry.Refresh(ctx, api); err != nil || len(n.Registry.cached()) != 1 {
-		t.Fatalf("refresh: %v %v", n.Registry.cached(), err)
+	if _, err := n.Registry.Refresh(ctx, api); err != nil || len(n.Registry.Cached()) != 1 {
+		t.Fatalf("refresh: %v %v", n.Registry.Cached(), err)
 	}
 	verbs := n.Verbs()
 	verbs[VerbInvalidate](ctx, api, map[string]any{})
-	if len(n.Registry.cached()) != 0 {
+	if len(n.Registry.Cached()) != 0 {
 		t.Fatal("invalidate left the cache")
 	}
 	_, _ = n.Registry.Refresh(ctx, api)
 	det := map[string]any{"entity_id": "light.lamp", "protocol": "lifx"}
 	verbs[VerbRemoved](ctx, api, det)
-	if !reflect.DeepEqual(fam.params["device_removed"], map[string]any{"details": det}) || len(n.Registry.cached()) != 0 {
-		t.Fatalf("removed: params %v, cache %v", fam.params, n.Registry.cached())
+	if !reflect.DeepEqual(fam.params["device_removed"], map[string]any{"details": det}) || len(n.Registry.Cached()) != 0 {
+		t.Fatalf("removed: params %v, cache %v", fam.params, n.Registry.Cached())
 	}
 }
 

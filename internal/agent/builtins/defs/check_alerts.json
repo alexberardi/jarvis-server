@@ -1,0 +1,103 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "examples": [
+      {
+        "expected_parameters": {},
+        "is_primary": true,
+        "voice_command": "What's up?"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Any alerts?"
+      },
+      {
+        "expected_parameters": {
+          "dismiss": true
+        },
+        "is_primary": false,
+        "voice_command": "Clear my alerts."
+      }
+    ],
+    "function": {
+      "description": "Read out or dismiss pending alerts (news, calendar).",
+      "name": "check_alerts",
+      "parameters": {
+        "properties": {
+          "alerts_json": {
+            "description": "Set by the system, not the user",
+            "type": "string"
+          },
+          "dismiss": {
+            "description": "Clear them without reading",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "alerts",
+      "updates",
+      "what's up",
+      "what's new",
+      "notifications"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "command_name": "check_alerts",
+    "description": "Read out or dismiss pending alerts (news, calendar).",
+    "examples": [
+      {
+        "expected_parameters": {},
+        "is_primary": true,
+        "voice_command": "What's up?"
+      },
+      {
+        "expected_parameters": {},
+        "is_primary": false,
+        "voice_command": "Any alerts?"
+      },
+      {
+        "expected_parameters": {
+          "dismiss": true
+        },
+        "is_primary": false,
+        "voice_command": "Clear my alerts."
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "alerts",
+      "updates",
+      "what's up",
+      "what's new",
+      "notifications"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": "Set by the system, not the user",
+        "enum_values": null,
+        "name": "alerts_json",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Clear them without reading",
+        "enum_values": null,
+        "name": "dismiss",
+        "options_source": null,
+        "required": false,
+        "type": "boolean"
+      }
+    ]
+  }
+}

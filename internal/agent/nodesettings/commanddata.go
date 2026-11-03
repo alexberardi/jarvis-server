@@ -53,6 +53,13 @@ type DataCommands interface {
 	Create(ctx context.Context, command string, values Object, uid json.Number) (string, json.RawMessage, error)
 }
 
+// RecordUpdater is DataCommands whose edits need more than an overlay (the Pi's
+// command-specific update paths: the reminder's update_reminder). handled is false for a
+// command it leaves to the overlay; a refusal is *ErrRejected. visible is the requester's view.
+type RecordUpdater interface {
+	UpdateRecord(command, key string, patch Object, visible func(Object) bool) (record Object, handled bool, err error)
+}
+
 // CommandData answers the browser's requests for one node.
 type CommandData struct {
 	Store    *Store
@@ -337,6 +344,20 @@ func (cd *CommandData) update(_ context.Context, p cdPayload) map[string]any {
 	who := requester(p)
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
+	if u, ok := cd.Commands.(RecordUpdater); ok {
+		rec, handled, err := u.UpdateRecord(c.Name, key, patch, func(r Object) bool { return canSee(r, who) })
+		var rej *ErrRejected
+		switch {
+		case !handled:
+		case errors.As(err, &rej):
+			return fail(rej.Message)
+		case err != nil:
+			return handlerError(err)
+		default:
+			cd.Log.Info("command-data: record updated", "command", c.Name, "key", key, "fields", patch.Keys(), "user", who)
+			return map[string]any{"ok": true, "record": rec}
+		}
+	}
 	// Unlike the Pi's generic path, the record keeps its expiry.
 	merged, found, err := cd.Store.UpdateData(c.StorageName, key, patch, cd.now(), func(r Object) bool { return canSee(r, who) })
 	if err != nil {

@@ -28,6 +28,7 @@ const (
 	nullPath     = dbus.ObjectPath("/org/a11y/atspi/null")
 
 	coordScreen = uint32(0) // ATSPI_COORD_TYPE_SCREEN
+	coordWindow = uint32(1) // ATSPI_COORD_TYPE_WINDOW: from the toplevel's corner (Wayland)
 	callTimeout = 5 * time.Second
 )
 
@@ -444,8 +445,8 @@ func element(gen int, ref string) (*computeruse.Element, error) {
 }
 
 // elementAt descends GetAccessibleAtPoint from the active window to the deepest element under
-// (x, y). Its role is "" when it isn't one the snapshot keeps.
-func elementAt(pid int, x, y int) (*computeruse.Element, error) {
+// (x, y) in coord's coordinates. Its role is "" when it isn't one the snapshot keeps.
+func elementAt(pid int, x, y int, coord uint32) (*computeruse.Element, error) {
 	ctx := context.Background()
 	cur, err := activeWindow(ctx, pid)
 	if err != nil {
@@ -454,7 +455,7 @@ func elementAt(pid int, x, y int) (*computeruse.Element, error) {
 	hit := false
 	for range maxDepth {
 		var r objRef
-		if err := cur.call(ctx, ifComponent+".GetAccessibleAtPoint", int32(x), int32(y), coordScreen).Store(&r); err != nil || r.null() || r == cur.ref {
+		if err := cur.call(ctx, ifComponent+".GetAccessibleAtPoint", int32(x), int32(y), coord).Store(&r); err != nil || r.null() || r == cur.ref {
 			break
 		}
 		cur, hit = obj{cur.c, r}, true
@@ -530,7 +531,31 @@ func focusedElement(ctx context.Context, o obj, role uint32) *computeruse.Elemen
 	return &computeruse.Element{Role: roleNames[role], Name: o.name(ctx), Secure: role == rolePasswordText}
 }
 
-func available(ctx context.Context) error {
-	_, err := bus(ctx)
-	return err
+// enable reads org.a11y.Status on the session bus and switches IsEnabled on when it is off.
+func enable(ctx context.Context) State {
+	st := State{SessionBus: os.Getenv("DBUS_SESSION_BUS_ADDRESS") != "", From: "AT_SPI_BUS_ADDRESS"}
+	if os.Getenv("AT_SPI_BUS_ADDRESS") == "" {
+		st.From = "org.a11y.Bus"
+	}
+	if s, err := dbus.ConnectSessionBus(); err == nil {
+		defer s.Close()
+		cctx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		o := s.Object("org.a11y.Bus", "/org/a11y/bus")
+		get := func(name string) bool {
+			var v dbus.Variant
+			if o.CallWithContext(cctx, "org.freedesktop.DBus.Properties.Get", 0, "org.a11y.Status", name).Store(&v) != nil {
+				return false
+			}
+			b, _ := v.Value().(bool)
+			return b
+		}
+		st.Enabled, st.ScreenReader = get("IsEnabled"), get("ScreenReaderEnabled")
+		if !st.Enabled && o.CallWithContext(cctx, "org.freedesktop.DBus.Properties.Set", 0,
+			"org.a11y.Status", "IsEnabled", dbus.MakeVariant(true)).Err == nil {
+			st.Enabled, st.TurnedOn = true, true
+		}
+	}
+	_, st.Err = bus(ctx)
+	return st
 }

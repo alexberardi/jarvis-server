@@ -151,7 +151,7 @@ const computerOnHint = "[computer control: on. Do this with run_errand, with the
 
 // needsComputer is whether a request (an utterance, an errand's goal) asks Jarvis to act on a
 // website or app: buy, order, check out, fill in a form (or a web page), download (a statement).
-// A phone call ("call Joe's and order …"), a reminder ("remind me to buy milk"), a list item and
+// "Use the computer to …" asks for it outright (#575). A phone call ("call Joe's and order …"), a reminder ("remind me to buy milk"), a list item and
 // research don't, nor do the words after "type" or "write" ("type buy more coffee filters into
 // omawrite"): they are the text to type. "Type of" is the noun ("the right type of phone case").
 func needsComputer(s string) bool {
@@ -188,6 +188,15 @@ func needsComputer(s string) bool {
 			if orderObjects[next] && (i == 0 || !orderNotVerb[ws[i-1]]) {
 				return true
 			}
+		case "use":
+			// "use the computer to find …" (#575): the user asks for the computer itself.
+			obj := next
+			if (next == "the" || next == "my" || next == "your") && i+2 < len(ws) {
+				obj = ws[i+2]
+			}
+			if computerWords[obj] {
+				return true
+			}
 		case "check":
 			if next == "out" {
 				return true
@@ -200,6 +209,9 @@ func needsComputer(s string) bool {
 	}
 	return false
 }
+
+// computerWords name the computer after "use (the|my|your)".
+var computerWords = map[string]bool{"computer": true, "pc": true, "laptop": true, "desktop": true, "mac": true}
 
 // orderObjects follow "order" used as a verb; orderNotVerb precede "order" when it isn't one.
 var (

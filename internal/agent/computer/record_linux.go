@@ -22,13 +22,14 @@ import (
 func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Source {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		return newWaylandSource(dir, wlSystem{
-			Windows: &dictate.LinuxWindows{X: dictate.OSExec{}},
-			Devices: func() ([]evdev.Device, error) { return evdev.Devices(evdev.SysRoot, evdev.DevRoot) },
-			Open:    evdev.Open,
-			Layout:  (&vkbd.Keyboard{}).Layout,
-			Access:  atspi.Available,
-			Focused: atspi.Focused,
-			Shot:    shooter(shots),
+			Windows:   &dictate.LinuxWindows{X: dictate.OSExec{}},
+			Devices:   func() ([]evdev.Device, error) { return evdev.Devices(evdev.SysRoot, evdev.DevRoot) },
+			Open:      evdev.Open,
+			Layout:    (&vkbd.Keyboard{}).Layout,
+			Access:    atspi.Enable,
+			Focused:   atspi.Focused,
+			ElementAt: atspi.ElementAtWindow,
+			Shot:      shooter(shots),
 		}, log)
 	}
 	return newX11Source(dir, &x11.Display{}, x11Access{ElementAt: atspi.ElementAt, Focused: atspi.Focused}, keyframer(shots), log)

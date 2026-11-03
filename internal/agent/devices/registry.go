@@ -75,7 +75,8 @@ func (r *Registry) Invalidate() {
 	r.mu.Unlock()
 }
 
-func (r *Registry) cached() []Device {
+// Cached are the devices in the cache, without a fetch.
+func (r *Registry) Cached() []Device {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Device, 0, len(r.devices))
@@ -96,7 +97,7 @@ func (r *Registry) Devices(ctx context.Context, api API) []Device {
 	if !r.isLoaded() {
 		_, _ = r.Refresh(ctx, api)
 	}
-	return r.cached()
+	return r.Cached()
 }
 
 // Get is one device by entity_id. One not in the cache is looked for once more (a device just

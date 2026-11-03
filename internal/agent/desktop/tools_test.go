@@ -160,6 +160,11 @@ func TestOpenLaunchesInstalledAppsByName(t *testing.T) {
 	if strings.Join(b.launched, ";") != "/Applications/Steam.app" || len(b.opened) != 0 {
 		t.Fatalf("launched %v opened %v", b.launched, b.opened)
 	}
+	// The result steers work inside the app to run_errand, and the errand goal must keep the
+	// app's name, or the errand planner has no app to route the job to (#528).
+	if note, _ := out["note"].(string); !strings.Contains(note, "run_errand") || !strings.Contains(note, `"in Steam, …"`) {
+		t.Fatalf("note %q, want it steering to run_errand with the app named", note)
+	}
 	out = call(t, ts, ToolOpen, map[string]any{"target": "microsoft"})
 	if out["error_code"] != "ambiguous" || len(out["candidates"].([]string)) != 2 {
 		t.Fatalf("ambiguous: %v", out)
@@ -173,6 +178,18 @@ func TestOpenLaunchesInstalledAppsByName(t *testing.T) {
 	}
 	if out := call(t, New(host.New(b), OpenPolicy{}, nil), ToolOpen, map[string]any{"target": "steam"}); out["error_code"] != "app_not_found" {
 		t.Fatalf("no catalogue: %v", out)
+	}
+}
+
+func TestOpenBareDomainOpensTheSite(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	out := call(t, ts, ToolOpen, map[string]any{"target": "google.com"})
+	if out["success"] != true || strings.Join(b.opened, ";") != "https://google.com" || len(b.launched) != 0 {
+		t.Fatalf("out %v opened %v launched %v", out, b.opened, b.launched)
+	}
+	if out := call(t, ts, ToolOpen, map[string]any{"target": "Photoshop"}); out["error_code"] != "app_not_found" {
+		t.Fatalf("an app name stays an app: %v", out)
 	}
 }
 

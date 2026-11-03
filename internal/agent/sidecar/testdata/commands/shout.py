@@ -33,6 +33,12 @@ class ShoutCommand(IJarvisCommand):
     def generate_adapter_examples(self) -> List[CommandExample]:
         return self.generate_prompt_examples()
 
+    def post_process_tool_call(self, args, voice_command):
+        # A model that sends the phrase as a list of words.
+        if isinstance(args.get("text"), list):
+            args["text"] = " ".join(args["text"])
+        return args
+
     def run(self, request_info, **kwargs) -> CommandResponse:
         print("this print must not corrupt the protocol")
         return CommandResponse.success_response(context_data={"message": kwargs["text"].upper(), "user_id": request_info.user_id})

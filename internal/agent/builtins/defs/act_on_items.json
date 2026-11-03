@@ -1,0 +1,122 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "mark_read",
+          "ref_ids": [
+            "eml_a1b2",
+            "eml_c3d4"
+          ]
+        },
+        "is_primary": true,
+        "voice_command": "mark those as read"
+      },
+      {
+        "expected_parameters": {
+          "action": "send_full_article",
+          "ref_ids": [
+            "art_c9"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "send me the full article for 3"
+      },
+      {
+        "expected_parameters": {
+          "action": "draft_reply",
+          "ref_ids": [
+            "eml_a1b2"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "draft a reply to the one from ABC"
+      }
+    ],
+    "function": {
+      "description": "Act on items from the RECENTLY SHOWN list when the user refers back to them ('those', 'the first one'). Use only ids and actions shown there.",
+      "name": "act_on_items",
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "A verb listed as valid for those items",
+            "type": "string"
+          },
+          "ref_ids": {
+            "description": "Ids from the [id] tags; all for 'all of them'",
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "ref_ids"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "command_name": "act_on_items",
+    "description": "Act on items from the RECENTLY SHOWN list when the user refers back to them ('those', 'the first one'). Use only ids and actions shown there.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "mark_read",
+          "ref_ids": [
+            "eml_a1b2",
+            "eml_c3d4"
+          ]
+        },
+        "is_primary": true,
+        "voice_command": "mark those as read"
+      },
+      {
+        "expected_parameters": {
+          "action": "send_full_article",
+          "ref_ids": [
+            "art_c9"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "send me the full article for 3"
+      },
+      {
+        "expected_parameters": {
+          "action": "draft_reply",
+          "ref_ids": [
+            "eml_a1b2"
+          ]
+        },
+        "is_primary": false,
+        "voice_command": "draft a reply to the one from ABC"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": "A verb listed as valid for those items",
+        "enum_values": null,
+        "name": "action",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "Ids from the [id] tags; all for 'all of them'",
+        "enum_values": null,
+        "name": "ref_ids",
+        "options_source": null,
+        "required": true,
+        "type": "array\u003cstring\u003e"
+      }
+    ]
+  }
+}

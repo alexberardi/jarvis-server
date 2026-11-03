@@ -1,0 +1,218 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "get_weather",
+        "description": "Weather queries mentioning 'metric units', 'imperial units', 'Celsius', or 'Fahrenheit' as a display preference. These are weather requests, not unit conversions."
+      }
+    ],
+    "examples": [
+      {
+        "expected_parameters": {
+          "from_unit": "miles",
+          "to_unit": "inches",
+          "value": 1
+        },
+        "is_primary": true,
+        "voice_command": "How many inches in a mile?"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "miles",
+          "to_unit": "kilometers",
+          "value": 5
+        },
+        "is_primary": false,
+        "voice_command": "Convert 5 miles to kilometers"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "gallons",
+          "to_unit": "cups",
+          "value": 1
+        },
+        "is_primary": false,
+        "voice_command": "How many cups in a gallon?"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "pounds",
+          "to_unit": "kilograms",
+          "value": 10
+        },
+        "is_primary": false,
+        "voice_command": "Convert 10 pounds to kilograms"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "fahrenheit",
+          "to_unit": "celsius",
+          "value": 350
+        },
+        "is_primary": false,
+        "voice_command": "What's 350 Fahrenheit in Celsius?"
+      }
+    ],
+    "function": {
+      "description": "Convert units (distance, volume, weight, temperature). Always use it; don't convert in your head.",
+      "name": "convert_measurement",
+      "parameters": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "from_unit": {
+            "type": "string"
+          },
+          "to_unit": {
+            "type": "string"
+          },
+          "value": {
+            "description": "Default 1",
+            "type": "number"
+          }
+        },
+        "required": [
+          "from_unit",
+          "to_unit"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "convert",
+      "conversion",
+      "how many",
+      "in a",
+      "equals",
+      "to",
+      "miles",
+      "kilometers",
+      "gallons",
+      "liters",
+      "pounds",
+      "kilograms",
+      "celsius",
+      "fahrenheit"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "antipatterns": [
+      {
+        "command_name": "get_weather",
+        "description": "Weather queries mentioning 'metric units', 'imperial units', 'Celsius', or 'Fahrenheit' as a display preference. These are weather requests, not unit conversions."
+      }
+    ],
+    "command_name": "convert_measurement",
+    "critical_rules": [
+      "NOT for weather display preferences ('weather in metric'). That's get_weather."
+    ],
+    "description": "Convert units (distance, volume, weight, temperature). Always use it; don't convert in your head.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "from_unit": "miles",
+          "to_unit": "inches",
+          "value": 1
+        },
+        "is_primary": true,
+        "voice_command": "How many inches in a mile?"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "miles",
+          "to_unit": "kilometers",
+          "value": 5
+        },
+        "is_primary": false,
+        "voice_command": "Convert 5 miles to kilometers"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "gallons",
+          "to_unit": "cups",
+          "value": 1
+        },
+        "is_primary": false,
+        "voice_command": "How many cups in a gallon?"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "pounds",
+          "to_unit": "kilograms",
+          "value": 10
+        },
+        "is_primary": false,
+        "voice_command": "Convert 10 pounds to kilograms"
+      },
+      {
+        "expected_parameters": {
+          "from_unit": "fahrenheit",
+          "to_unit": "celsius",
+          "value": 350
+        },
+        "is_primary": false,
+        "voice_command": "What's 350 Fahrenheit in Celsius?"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "convert",
+      "conversion",
+      "how many",
+      "in a",
+      "equals",
+      "to",
+      "miles",
+      "kilometers",
+      "gallons",
+      "liters",
+      "pounds",
+      "kilograms",
+      "celsius",
+      "fahrenheit"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": "Default 1",
+        "enum_values": null,
+        "name": "value",
+        "options_source": null,
+        "required": false,
+        "type": "float"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": null,
+        "name": "from_unit",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": null,
+        "name": "to_unit",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": null,
+        "name": "category",
+        "options_source": null,
+        "required": false,
+        "type": "string"
+      }
+    ]
+  }
+}

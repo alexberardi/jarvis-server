@@ -177,7 +177,7 @@ func TestChatImagesValidation(t *testing.T) {
 // TestChatImagePartsReachLLM: the user message goes to the live slot as image_url parts plus
 // the text, and stays that way through the tool loop's continue.
 func TestChatImagePartsReachLLM(t *testing.T) {
-	ce, jobs := newImageChatEnv(t, prompts.ChatGPT)
+	ce, jobs := newImageChatEnv(t, prompts.Cloud)
 	ce.pub.toolReply = `{"output": {"success": true, "message": "Sunny, 20 degrees."}}`
 	cid := ce.warm("tok-7")
 	before := len(ce.eng.requests())

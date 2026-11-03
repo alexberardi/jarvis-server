@@ -30,6 +30,8 @@ import (
 //	HELPER_CRASH_AFTER      exit 3 after this duration
 //	HELPER_ERROR_LINE       print this line (as a traceback's root cause)
 //	HELPER_ERROR_AFTER      wait this long before printing HELPER_ERROR_LINE
+//	HELPER_EARLY_LINE       print this line at once (an exception vLLM only warns about at load)
+//	HELPER_ERROR_ON         wait for this file to exist before printing HELPER_ERROR_LINE
 //	HELPER_ENV_FILE         write the environment here
 //	HELPER_CHILD_PID_FILE   spawn a sleeping grandchild and write its pid here
 //	HELPER_IGNORE_TERM      ignore SIGTERM
@@ -72,6 +74,9 @@ func runHelper() {
 	}
 	fmt.Println("hello stdout")
 	fmt.Fprintln(os.Stderr, "hello stderr")
+	if v := os.Getenv("HELPER_EARLY_LINE"); v != "" {
+		fmt.Fprintln(os.Stderr, v)
+	}
 	if v := os.Getenv("HELPER_ERROR_LINE"); v != "" {
 		if d := os.Getenv("HELPER_ERROR_AFTER"); d != "" {
 			wait, err := time.ParseDuration(d)
@@ -79,6 +84,11 @@ func runHelper() {
 				panic(err)
 			}
 			time.Sleep(wait)
+		}
+		if f := os.Getenv("HELPER_ERROR_ON"); f != "" {
+			for _, err := os.Stat(f); err != nil; _, err = os.Stat(f) {
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 		// A Python traceback: the root cause, then lines that push it out of the tail.
 		fmt.Fprintln(os.Stderr, "(EngineCore pid=123) ERROR 10-20 04:40:09 [core.py:1510] "+v)
@@ -303,6 +313,41 @@ func TestErrorLineExplainsExit(t *testing.T) {
 	if out := s.Status().Output; slices.ContainsFunc(out, func(l string) bool { return strings.HasPrefix(l, "ValueError") }) {
 		t.Fatal("the test's root cause is still in the tail: it proves nothing")
 	}
+}
+
+// An engine that served, then lost its EngineCore mid-request (#582): health fails, and the
+// cause names the child's exception printed since it served, not a warning from its load. A
+// longer OutputTail keeps the traceback.
+func TestErrorLineExplainsDeathAfterServing(t *testing.T) {
+	t.Parallel()
+	f := newFake(t)
+	f.health.set(false)
+	request := filepath.Join(f.dir, "request")
+	spec := f.spec(map[string]string{"HELPER_EARLY_LINE": "ModuleNotFoundError: No module named 'flashinfer_cubin'",
+		"HELPER_ERROR_ON": request, "HELPER_ERROR_LINE": "RuntimeError: Could not find nvcc"})
+	spec.Restart.MaxRestarts = 1
+	spec.OutputTail = 100
+	spec.ErrorLine = regexp.MustCompile(`(?:^|\] )((?:\w+\.)*\w*(?:Error|Exception): .*)`)
+	s := start(t, spec)
+	eventually(t, "the load warning", func() bool {
+		return slices.ContainsFunc(s.Status().Output, func(l string) bool { return strings.HasPrefix(l, "ModuleNotFoundError") })
+	})
+	f.health.set(true)
+	waitHealthy(t, s)
+	if err := os.WriteFile(request, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the traceback", func() bool {
+		return slices.Contains(s.Status().Output, "RuntimeError: Engine core initialization failed. See root cause above.")
+	})
+	if out := s.Status().Output; !slices.ContainsFunc(out, func(l string) bool { return strings.HasSuffix(l, "Could not find nvcc") }) {
+		t.Fatalf("the tail lost the root cause: %q", out)
+	}
+	f.health.set(false)
+	eventually(t, "the health failure explained", func() bool {
+		e := s.Status().LastError
+		return strings.Contains(e, "consecutive failed health checks") && strings.HasSuffix(e, ": RuntimeError: Could not find nvcc")
+	})
 }
 
 // A Fatal line (the GPU is out of memory) means restarting can't help: the engine fails at

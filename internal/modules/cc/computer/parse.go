@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -52,7 +53,15 @@ func parseReply(s string) (Reply, error) {
 	}
 	var r Reply
 	if err := json.Unmarshal([]byte(s[i:j+1]), &r); err != nil {
-		return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
+		// The loop runs at temperature 0, so a retry reproduces the model's slip byte for byte
+		// (#528): the two deterministic ones seen — a dropped "y" key in a coordinate pair and
+		// an answer missing only its closing braces — are repaired instead of killing the run.
+		if json.Unmarshal([]byte(droppedY.ReplaceAllString(s[i:j+1], `$1,"y":$2`)), &r) != nil {
+			fixed, ok := closeTruncated(droppedY.ReplaceAllString(strings.TrimRight(s[i:], " \t\r\n"), `$1,"y":$2`))
+			if !ok || json.Unmarshal([]byte(fixed), &r) != nil {
+				return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
+			}
+		}
 	}
 	switch {
 	case r.Done:
@@ -92,4 +101,53 @@ func parseReply(s string) (Reply, error) {
 		}
 	}
 	return r, nil
+}
+
+// droppedY is a coordinate pair whose "y" key the model dropped: "x":170,777. The bare second
+// number can only be the y, so the key is put back.
+var droppedY = regexp.MustCompile(`("x"\s*:\s*-?\d+)\s*,\s*(-?\d+)`)
+
+// closeTruncated appends the closers a truncated JSON object is missing. Only unclosed objects
+// and arrays are repaired: an answer cut mid-string stays broken, rather than guessing at its
+// lost content.
+func closeTruncated(s string) (string, bool) {
+	var stack []byte
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{', '[':
+			stack = append(stack, c)
+		case '}', ']':
+			if n := len(stack); n == 0 || (c == '}') != (stack[n-1] == '{') {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+	if inStr || len(stack) == 0 {
+		return "", false
+	}
+	b := []byte(s)
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			b = append(b, '}')
+		} else {
+			b = append(b, ']')
+		}
+	}
+	return string(b), true
 }

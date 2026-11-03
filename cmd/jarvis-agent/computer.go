@@ -35,8 +35,8 @@ const computerUsage = "usage: jarvis-agent computer stop|status|on|off|record st
 // stop what Jarvis is doing with this computer (a computer task, a recording), as the status
 // icon's "Stop Jarvis" does, say what it is doing, turn computer control on or off, as its
 // "Computer control" does, or record what the user does in the browser, as its "Record a
-// macro…" does (or on the desktop, with --desktop). All ask the running agent over its control
-// socket. (`computer snapshot`, `computer record --browser` and `computer download` are
+// macro…" does (or on the desktop, with --desktop, as its "Record the desktop…" does). All ask
+// the running agent over its control socket. (`computer snapshot`, `computer record --browser` and `computer download` are
 // computerSnapshotCmd, computerRecordCmd and computerDownloadCmd, which main dispatches before
 // this.) `click X Y` is a debug command: a left click at global logical X, Y through this
 // desktop's input backend.

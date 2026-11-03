@@ -1,0 +1,38 @@
+{
+  "command_name": "todo_list",
+  "mode": "enabled",
+  "storage_name": "todo_list",
+  "supports_create": false,
+  "fields": [
+    {
+      "name": "task",
+      "type": "string",
+      "label": "Task",
+      "editable": false,
+      "required": true
+    },
+    {
+      "name": "completed",
+      "type": "bool",
+      "label": "Completed"
+    },
+    {
+      "name": "added_by",
+      "type": "user_ref",
+      "label": "Added by",
+      "editable": false
+    },
+    {
+      "name": "added_at",
+      "type": "datetime",
+      "label": "Added",
+      "editable": false
+    },
+    {
+      "name": "completed_at",
+      "type": "datetime",
+      "label": "Completed",
+      "editable": false
+    }
+  ]
+}

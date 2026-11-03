@@ -16,6 +16,7 @@ import {
   Workflow,
   Video,
   Phone,
+  Store,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useUnreadCount } from '@/hooks/useInbox'
@@ -44,6 +45,7 @@ const memberNav: NavItem[] = [
 /** The Admin group: superusers only, and the server refuses these routes to anyone else (G1). */
 const adminNav: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/admin/dashboard' },
+  { label: 'Store', icon: Store, path: '/admin/store' },
   { label: 'Models', icon: Box, path: '/admin/models' },
   { label: 'Settings', icon: Settings, path: '/admin/settings' },
   { label: 'Connections', icon: Link2, path: '/admin/connections' },

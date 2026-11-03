@@ -17,7 +17,7 @@ import (
 func TestWireDevicesSubscribesAndReports(t *testing.T) {
 	r := &node.Runner{Topics: map[string]func(context.Context, *node.CC, []byte){"k2/provision": nil},
 		Verbs: map[string]func(context.Context, *node.CC, map[string]any){"enroll_voice": nil}}
-	wireDevices(r, &sidecar.Live{}, slog.New(slog.DiscardHandler))
+	wireDevices(r, &sidecar.Live{}, &devices.Registry{}, slog.New(slog.DiscardHandler))
 
 	var topics, verbs []string
 	for k := range r.Topics {

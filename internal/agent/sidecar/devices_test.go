@@ -146,6 +146,15 @@ func TestSidecarScansDevices(t *testing.T) {
 	if p := sc.Protocols(); !reflect.DeepEqual(p, []string{"cloudy", "fakelight"}) {
 		t.Fatalf("protocols after auth = %v", p)
 	}
+	// A family whose get_state takes the device (jarvis-node-setup's example) gets it.
+	res, err = sc.DeviceCall("device_state", map[string]any{"details": map[string]any{
+		"entity_id": "light.lamp_cloudy", "protocol": "cloudy", "source": "direct", "domain": "light", "cloud_id": "c-1"}})
+	if err != nil || res["error"] != nil {
+		t.Fatalf("device-style get_state = %v, %v", res, err)
+	}
+	if s, _ := res["state"].(map[string]any); s == nil || s["state"] != "off" {
+		t.Fatalf("device-style state = %v", res["state"])
+	}
 	res, err = sc.DeviceCall("device_scan", nil)
 	if err != nil {
 		t.Fatal(err)

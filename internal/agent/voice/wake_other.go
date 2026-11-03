@@ -1,11 +1,11 @@
-//go:build !linux && !darwin
+//go:build !linux && !darwin && !windows
 
 package voice
 
 import "errors"
 
-// Supported reports whether this build can run the voice pipeline. Windows comes later
-// (WASAPI capture, go-pi-node.md §7 phase 3); until then the agent runs without voice.
+// Supported reports whether this build can run the voice pipeline: not on this OS, which has
+// no audio backend (internal/audio/device) or embedded onnxruntime.
 const Supported = false
 
 // ErrUnsupported is LoadDetector's answer where voice isn't built in.

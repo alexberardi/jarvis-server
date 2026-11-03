@@ -120,9 +120,14 @@ func (s *Server) provisioned() bool { return s.o.Provisioned != nil && s.o.Provi
 
 func (s *Server) info(w http.ResponseWriter, _ *http.Request) {
 	id := s.o.Identity()
+	mode := "hotspot"
+	if s.o.APSSID == "" {
+		mode = "lan"
+	}
 	writeJSON(w, http.StatusOK, NodeInfo{
 		NodeID: id.NodeID, FirmwareVersion: s.o.FirmwareVersion, Hardware: id.Hardware, MACAddress: id.MAC,
 		Capabilities: []string{"voice", "speaker"}, State: s.sm.State(), PreviouslyProvisioned: s.provisioned(),
+		SetupMode: mode,
 	})
 }
 

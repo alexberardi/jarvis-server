@@ -176,7 +176,8 @@ func voiceDefinitions(defaultPersona string) []settings.Definition {
 		{Key: settingPromptProvider, Category: "llm", Type: settings.String, Default: "", RequiresReload: false,
 			Description: "Default built-in prompt for households without their own (docs/cc/prompt-contract.md; " +
 				"D11: renamed from llm.interface; set at install time from the model catalog). One of " +
-				"Qwen3_14B_Compressed, Qwen3_8B_Compressed, Qwen3_5_9B_Compressed, ChatGPTOpenAI. An unknown name " +
+				"Qwen3_14B_Compressed, Qwen3_8B_Compressed, Qwen3_5_9B_Compressed, Cloud (a remote live model's default; " +
+				"ChatGPTOpenAI is its old name). An unknown name " +
 				"fails /conversation/start."},
 		{Key: settingToolCalling, Category: "llm", Type: settings.String, Default: modeAuto,
 			Options:  []any{modeAuto, string(prompts.ToolsNative), string(prompts.ToolsText)},

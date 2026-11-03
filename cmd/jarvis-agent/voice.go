@@ -70,7 +70,7 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 	ep, fu := voice.DefaultEndpointing(), voice.DefaultFollowUp()
 	fs.Float64Var(&v.silenceThreshold, "silence-threshold", ep.SilenceThreshold,
 		"RMS below which a command counts as silence, when the room's level before the wake word isn't known (the Python node's silence_threshold)")
-	fs.Float64Var(&v.listenSilence, "listen-silence", ep.SilenceSecs, "seconds of silence that end a command (the Python node's silence_duration)")
+	fs.Float64Var(&v.listenSilence, "listen-silence", defaultListenSilence, "seconds of silence that end a command (the Python node's silence_duration is 0.8)")
 	fs.Float64Var(&v.followMinAfterOnset, "follow-up-min-after-onset", fu.MinAfterOnsetSecs,
 		"a follow-up answer records at least this many seconds after speech starts (the Python node's follow_up_min_record_after_onset_secs)")
 	fs.Float64Var(&v.followMinSpeech, "follow-up-min-speech", fu.MinSpeechSecs,
@@ -79,7 +79,7 @@ func addVoiceFlags(fs *flag.FlagSet) *voiceFlags {
 		"stop a reply when \"hey Jarvis\" is said over it (-barge-in=false: off; the Python node's barge_in_enabled)")
 	fs.DurationVar(&v.debounce, "wake-debounce", voice.DefaultConfig().Debounce,
 		"no second wake this soon after one (at least 500ms)")
-	fs.DurationVar(&v.onsetWait, "listen-onset-wait", 0,
+	fs.DurationVar(&v.onsetWait, "listen-onset-wait", defaultOnsetWait,
 		"after the wake word, wait up to this long for speech before silence can end the recording (0: silence counts from the start, as the Python node)")
 	fs.DurationVar(&v.preRoll, "listen-preroll", defaultPreRoll,
 		"keep up to this much of what the microphone heard while the wake chime played, in front of the command (0: drop it, as the Python node)")
@@ -99,6 +99,14 @@ func (v *voiceFlags) clampFollowUp(log *slog.Logger) {
 // Pi: a command said right after "hey Jarvis" starts under the chime (#229). The queue holds
 // at most 1.28 s anyway.
 const defaultPreRoll = time.Second
+
+// defaultListenSilence and defaultOnsetWait let a command pause mid-sentence ("open… Firefox and
+// YouTube") or start a beat after the chime: the Python node's 0.8 s from the first chunk cut
+// people off after two words (2026-10-25). 1.2 s is what a follow-up answer already gets.
+const (
+	defaultListenSilence = 1.2
+	defaultOnsetWait     = 1500 * time.Millisecond
+)
 
 // voiceStack is a loaded wake word detector plus the pipeline settings.
 type voiceStack struct {

@@ -57,6 +57,12 @@ func TestSidecarLoadsACommandAndAnswersACall(t *testing.T) {
 	if out["message"] != "AGAIN" {
 		t.Fatalf("second call = %v", out)
 	}
+	// The command's post_process_tool_call fixes the model's arguments before execute, as N:
+	// does: a list where it takes a string.
+	out, _ = sc.Call(ctx, "shout", map[string]any{"text": []any{"hello", "there"}}, node.Request{})
+	if out["message"] != "HELLO THERE" {
+		t.Fatalf("post-processed call = %v", out)
+	}
 	// A bad call is an output, and the process survives it.
 	out, _ = sc.Call(ctx, "shout", map[string]any{}, node.Request{})
 	if out["success"] != false {

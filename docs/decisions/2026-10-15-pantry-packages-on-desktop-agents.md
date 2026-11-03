@@ -15,7 +15,8 @@ the app as a Pi does, into a uv-managed Python under its data directory
 - **Pi-only parts are refused or skipped, never half-run.** A package that needs `apt_packages`,
   `apt_sources` or `post_install` is refused (a computer installs no system packages). Agents,
   device protocols and the other non-command components are skipped and listed in the result's
-  `skipped_components`; only commands run in the sidecar.
+  `skipped_components`; only commands run in the sidecar. *(Device protocols and managers run on computers since
+  [2026-10-26-devices-on-desktop-agents](2026-10-26-devices-on-desktop-agents.md).)*
 - **No restart.** A Pi restarts its node after every package change; the agent starts a fresh
   sidecar on the new package list instead, and keeps the old one serving if the new list doesn't
   load.

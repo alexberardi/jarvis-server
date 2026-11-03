@@ -600,3 +600,25 @@ func TestValidationAnswerBeepIsStripped(t *testing.T) {
 		t.Fatalf("validations %+v", tr.Validations)
 	}
 }
+
+// A process said step by step ("switch to the Claude tab… maximize it… …"): silent desktop steps
+// don't use up the five follow-ups, so seven steps all run on one wake word (2026-10-25).
+func TestSilentStepsChainPastFiveIterations(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"one", "two", "three", "four", "five", "six", "seven"}
+	srv.followUp = func(req StreamRequest) (*Control, error) {
+		return &Control{StopReason: "tool_calls", ToolCalls: []ToolCall{call("c1", desktop.ToolWindow, `{"action":"maximize","window":"firefox"}`)}}, nil
+	}
+	srv.cont = func([]ToolResult) (*Control, error) { return complete(""), nil }
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = desktopTools(&fakeOS{})
+	l := answer(r, mic, utterance, utterance, utterance, utterance, utterance, utterance, utterance)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 7 || tr.FollowUpEnd != EndTimeout || len(l.list()) != 8 {
+		t.Fatalf("window %s after %d follow-ups, %d listens", tr.FollowUpEnd, len(tr.FollowUps), len(l.list()))
+	}
+}

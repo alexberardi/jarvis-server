@@ -127,10 +127,13 @@ type Spec struct {
 	// PIDDir, if set, holds a pid file for the running engine so Sweep can kill it after
 	// jarvisd dies without stopping it (macOS has no Pdeathsig). Names must be unique in it.
 	PIDDir string
-	// ErrorLine, if set, finds the engine's own reason for exiting in its output: the first
-	// line since the start that matches (its first group, if it has one) is added to the
-	// exit's error, e.g. the root cause of a Python traceback the last lines no longer show.
+	// ErrorLine, if set, finds the engine's own reason for going down in its output: the first
+	// line that matches (its last group, if it has one) since the start, or since it first
+	// passed its health check once it has, is added to the exit's or the health failure's
+	// error, e.g. the root cause of a Python traceback the last lines no longer show.
 	ErrorLine *regexp.Regexp
+	// OutputTail is how many output lines Status keeps (0 = 20). A Python traceback needs more.
+	OutputTail int
 	// Fatal, if set, matches an output line that means restarting can't help (the GPU is out
 	// of memory at load): once the process exits after printing one at load, before the engine
 	// first passes its health check, it fails at once, with the line in LastError and
@@ -275,7 +278,7 @@ type Supervisor struct {
 	restarts int
 	lastErr  string
 	tail     []string
-	reason   string // ErrorLine's match since the start
+	reason   string // ErrorLine's match since the start, or since it served
 	fatal    string // Fatal's first matching line since the start, before it first served
 	served   bool   // the current process has passed its health check
 
@@ -554,7 +557,8 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 				healthy = true
 				startup.Stop()
 				s.mu.Lock()
-				s.served, s.fatal = true, ""
+				// A warning's exception at load says nothing about a later death mid-request.
+				s.served, s.fatal, s.reason = true, "", ""
 				s.mu.Unlock()
 				s.log.Info("engine healthy", "pid", p.cmd.Process.Pid)
 				if s.spec.OnHealthy != nil {
@@ -568,7 +572,7 @@ func (s *Supervisor) watch(r *run, p *proc) (stop bool, cause error) {
 			fails++
 			s.log.Warn("engine health check failed", "err", err, "consecutive", fails)
 			if fails >= hc.FailureThreshold {
-				cause := fmt.Errorf("%d consecutive failed health checks: %w", fails, err)
+				cause := s.explain(fmt.Errorf("%d consecutive failed health checks: %w", fails, err))
 				if hc.DrainGrace <= 0 {
 					return false, cause
 				}
@@ -738,8 +742,12 @@ func (w *lineWriter) emit(line []byte) {
 		w.s.fatal = l
 	}
 	w.s.tail = append(w.s.tail, l)
-	if len(w.s.tail) > outputTail {
-		w.s.tail = slices.Delete(w.s.tail, 0, len(w.s.tail)-outputTail)
+	n := w.s.spec.OutputTail
+	if n <= 0 {
+		n = outputTail
+	}
+	if len(w.s.tail) > n {
+		w.s.tail = slices.Delete(w.s.tail, 0, len(w.s.tail)-n)
 	}
 	w.s.mu.Unlock()
 }

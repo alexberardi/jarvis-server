@@ -61,10 +61,19 @@ type WorkflowStep struct {
 }
 
 // StepWindow is the window a desktop step was recorded in: its class (the app id on Wayland)
-// and title.
+// and title, and where in it a click was.
 type StepWindow struct {
-	Class string `json:"class,omitempty"`
-	Title string `json:"title,omitempty"`
+	Class string       `json:"class,omitempty"`
+	Title string       `json:"title,omitempty"`
+	Point *WindowPoint `json:"point,omitempty"`
+}
+
+// WindowPoint is a click's point from its window's top-left, with the window's size W×H then.
+type WindowPoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	W int `json:"w"`
+	H int `json:"h"`
 }
 
 // RecordedElement is what the recorder saw of the element a step acted on.

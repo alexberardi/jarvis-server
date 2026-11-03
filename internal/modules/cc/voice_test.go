@@ -529,7 +529,7 @@ func TestVoiceAcknowledgeAndWakeResponse(t *testing.T) {
 		t.Fatalf("fallback %v", r)
 	}
 
-	remote := newVoiceEnv(t, prompts.ChatGPT)
+	remote := newVoiceEnv(t, prompts.Cloud)
 	remote.eng.say("Right here.")
 	remote.do("POST", "/api/v0/wake-response", nil, remote.node.h()).want(200)
 	if msgs := messagesOf(remote.eng.last()); msgs[len(msgs)-1]["content"] != "Hello Jarvis" {
@@ -577,7 +577,7 @@ func TestVoiceResponseFormatByMode(t *testing.T) {
 	}{
 		{prompts.Qwen3_8B, &llm.ResponseFormat{Type: "text"}},
 		{prompts.Qwen3_5_9B, nil},
-		{prompts.ChatGPT, nil},
+		{prompts.Cloud, nil},
 	} {
 		rec := &recLLM{}
 		ve := newVoiceEnv(t, c.provider, func(m *Module) {

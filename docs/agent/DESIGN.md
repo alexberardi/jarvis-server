@@ -269,8 +269,11 @@ Install, Update, Revert and Uninstall work on a computer as on a Pi:
 - **Manifest.** `jarvis_package.yaml` or `jarvis_command.yaml`. Undeclared components are found
   by the Pi's conventions (`command.py`, `commands/*/command.py`, `agents/*/agent.py`, ...).
   Refused: another OS in `platforms`, `targets` without `desktop`, any `apt_packages`,
-  `apt_sources` or `post_install`, no command, or a pip requirement that isn't a plain name and
-  version specifier. Non-command components are skipped and reported in `skipped_components`.
+  `apt_sources` or `post_install`, neither a command nor a device family/manager, or a pip
+  requirement that isn't a plain name and version specifier. Device families and managers load
+  in the sidecar and answer the app's device requests as on a Pi
+  ([decision](../decisions/2026-10-26-devices-on-desktop-agents.md)); the other non-command
+  components (agents) are skipped and reported in `skipped_components`.
 - **Python.** `uv` 0.12.24, downloaded on first install and checked against pinned SHA-256s
   (`JARVIS_AGENT_UV` names another), makes `venv/` on uv's own CPython 3.12 (`python/`), and
   `uv pip install`s the pinned jarvis-command-sdk commit plus the manifest's `packages`
@@ -783,8 +786,9 @@ per call, like the capture above:
 - **Verified** (`TestDesktopNotesLive`, `JARVIS_DESKTOP_LIVE=1`, a headless session only): the
   fixture notes app under Xvfb with no window manager and under headless sway (Xwayland): the
   window found by its title, captured, a move, the title typed, a click in the body, its text
-  and Ctrl+S, and the note saved. The suite's `notes_x11` and `notes_wlroots` stay pending: the
-  model routes "in the notes app, make a note" to `desktop_open`, not to a computer task.
+  and Ctrl+S, and the note saved. The suite's `notes_x11` and `notes_wlroots` are required (#528):
+  the fixture's `.desktop` entry is installed in the agent's `XDG_DATA_HOME`, so `desktop_open`
+  resolves it, and the open result steers the job inside the app to `run_errand`.
 
 
 ## 13. Install and pairing without a terminal (plan, 2026-10-12)

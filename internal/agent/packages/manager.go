@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -192,13 +193,13 @@ func (m *Manager) Boot(ctx context.Context) error {
 	return nil
 }
 
-// runs are the component types beyond commands this node's sidecar loads: on a Pi (the one
-// with built-ins) device families and managers, which only its device topics use, and agents.
+// runs are the component types beyond commands this node's sidecar loads: device families and
+// managers on every node, and on a Pi (the one with built-ins) agents too.
 func (m *Manager) runs() []string {
 	if m.Builtins != nil {
 		return PiTypes
 	}
-	return nil
+	return DeviceTypes
 }
 
 func (m *Manager) builtinsStamp() string { return filepath.Join(m.Root, "builtins.txt") }
@@ -232,14 +233,14 @@ func (m *Manager) writeList() (int, error) {
 		Agents   []string `json:"agents,omitempty"`
 	}
 	list := []entry{}
-	pi := len(m.runs()) > 0
+	agents := slices.Contains(m.runs(), Agent)
 	for _, in := range m.List() {
 		e := entry{Name: in.Manifest.Name, Root: in.Dir}
 		for _, c := range in.Manifest.Commands() {
 			e.Commands = append(e.Commands, c.Path)
 		}
-		if pi {
-			e.Families, e.Managers = in.Manifest.Paths("device_protocol"), in.Manifest.Paths("device_manager")
+		e.Families, e.Managers = in.Manifest.Paths("device_protocol"), in.Manifest.Paths("device_manager")
+		if agents {
 			e.Agents = in.Manifest.Paths(Agent)
 		}
 		list = append(list, e)

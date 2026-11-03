@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"slices"
@@ -167,6 +168,29 @@ func (r *recorder) add(chunk []int16) bool {
 		r.done, r.hitMax = true, true
 	}
 	return r.done
+}
+
+// levelSummary describes a recording against its silence threshold, for the recording's log
+// line: the 80 ms chunk RMS median, 90th percentile and peak, and how long it was at or above
+// the threshold. A recording cut off mid-sentence shows speech mostly under the threshold.
+func levelSummary(pcm []int16, threshold float64) []any {
+	var rms []float64
+	for i := 0; i+ChunkSamples <= len(pcm); i += ChunkSamples {
+		rms = append(rms, RMS(pcm[i:i+ChunkSamples]))
+	}
+	if len(rms) == 0 {
+		return []any{"threshold", fmt.Sprintf("%.0f", threshold)}
+	}
+	loud := 0
+	for _, r := range rms {
+		if r >= threshold {
+			loud++
+		}
+	}
+	slices.Sort(rms)
+	at := func(q float64) string { return fmt.Sprintf("%.0f", rms[int(q*float64(len(rms)-1))]) }
+	return []any{"threshold", fmt.Sprintf("%.0f", threshold), "loud_s", fmt.Sprintf("%.2f", float64(loud)*chunkSecs),
+		"rms_p50", at(0.5), "rms_p90", at(0.9), "rms_max", at(1)}
 }
 
 // Normalize is _normalize_frames_to_target_rms with the node's defaults (-18 dBFS target,

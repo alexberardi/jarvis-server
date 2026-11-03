@@ -1,0 +1,172 @@
+{
+  "client_tool": {
+    "allow_direct_answer": false,
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "volume_up"
+        },
+        "is_primary": true,
+        "voice_command": "Turn the volume up"
+      },
+      {
+        "expected_parameters": {
+          "action": "volume_down"
+        },
+        "is_primary": false,
+        "voice_command": "Volume down"
+      },
+      {
+        "expected_parameters": {
+          "action": "set_volume",
+          "target_percent": 50
+        },
+        "is_primary": false,
+        "voice_command": "Set the volume to 50%"
+      },
+      {
+        "expected_parameters": {
+          "action": "set_volume",
+          "target_percent": 50
+        },
+        "is_primary": false,
+        "voice_command": "Set the volume to 5"
+      },
+      {
+        "expected_parameters": {
+          "action": "mute"
+        },
+        "is_primary": false,
+        "voice_command": "Mute"
+      }
+    ],
+    "function": {
+      "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+      "name": "control_node",
+      "parameters": {
+        "properties": {
+          "action": {
+            "enum": [
+              "volume_up",
+              "volume_down",
+              "set_volume",
+              "mute",
+              "unmute"
+            ],
+            "type": "string"
+          },
+          "target_percent": {
+            "description": "For set_volume, 0-100 (a 0-10 number x10)",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    "is_risky": false,
+    "keywords": [
+      "volume",
+      "louder",
+      "quieter",
+      "softer",
+      "mute",
+      "unmute",
+      "turn up",
+      "turn down",
+      "turn it up",
+      "turn it down"
+    ],
+    "type": "function"
+  },
+  "command": {
+    "allow_direct_answer": false,
+    "command_name": "control_node",
+    "critical_rules": [
+      "target_percent must be 0-100 when action='set_volume'.",
+      "Treat 'volume up/down/louder/quieter' as relative — pick volume_up or volume_down, NOT set_volume.",
+      "Map 'mute/silence the speaker' → action='mute'; 'unmute' → action='unmute'."
+    ],
+    "description": "This speaker's own volume or mute. Smart-home devices: control_device.",
+    "examples": [
+      {
+        "expected_parameters": {
+          "action": "volume_up"
+        },
+        "is_primary": true,
+        "voice_command": "Turn the volume up"
+      },
+      {
+        "expected_parameters": {
+          "action": "volume_down"
+        },
+        "is_primary": false,
+        "voice_command": "Volume down"
+      },
+      {
+        "expected_parameters": {
+          "action": "set_volume",
+          "target_percent": 50
+        },
+        "is_primary": false,
+        "voice_command": "Set the volume to 50%"
+      },
+      {
+        "expected_parameters": {
+          "action": "set_volume",
+          "target_percent": 50
+        },
+        "is_primary": false,
+        "voice_command": "Set the volume to 5"
+      },
+      {
+        "expected_parameters": {
+          "action": "mute"
+        },
+        "is_primary": false,
+        "voice_command": "Mute"
+      }
+    ],
+    "is_risky": false,
+    "keywords": [
+      "volume",
+      "louder",
+      "quieter",
+      "softer",
+      "mute",
+      "unmute",
+      "turn up",
+      "turn down",
+      "turn it up",
+      "turn it down"
+    ],
+    "parameters": [
+      {
+        "default_value": null,
+        "description": null,
+        "enum_values": [
+          "volume_up",
+          "volume_down",
+          "set_volume",
+          "mute",
+          "unmute"
+        ],
+        "name": "action",
+        "options_source": null,
+        "required": true,
+        "type": "string"
+      },
+      {
+        "default_value": null,
+        "description": "For set_volume, 0-100 (a 0-10 number x10)",
+        "enum_values": null,
+        "name": "target_percent",
+        "options_source": null,
+        "required": false,
+        "type": "int"
+      }
+    ]
+  }
+}

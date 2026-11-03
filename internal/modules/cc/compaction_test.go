@@ -13,7 +13,7 @@ import (
 )
 
 func TestCompactionSettingsValidation(t *testing.T) {
-	ce := newChatEnv(t, prompts.ChatGPT)
+	ce := newChatEnv(t, prompts.Cloud)
 	s := ce.m.Settings()
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -34,7 +34,7 @@ func TestCompactionSettingsValidation(t *testing.T) {
 		}
 	}
 	// Defaults.
-	ce2 := newChatEnv(t, prompts.ChatGPT)
+	ce2 := newChatEnv(t, prompts.Cloud)
 	if a, h := ce2.m.compactThresholds(ctx); a != 0.75 || h != 0.90 {
 		t.Fatalf("defaults %v %v", a, h)
 	}
@@ -49,7 +49,7 @@ func TestCompactionSettingsValidation(t *testing.T) {
 // compactEnv is a chat env with a 1000-token live context and captured jobs.
 func compactEnv(t *testing.T) (*chatEnv, *jobLog, string) {
 	t.Helper()
-	ce := newChatEnv(t, prompts.ChatGPT)
+	ce := newChatEnv(t, prompts.Cloud)
 	ce.eng.mu.Lock()
 	ce.eng.ctxLen = 1000
 	ce.eng.mu.Unlock()

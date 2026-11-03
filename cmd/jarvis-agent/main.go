@@ -36,12 +36,15 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
 	"github.com/alexberardi/jarvis-server/internal/agent/clock"
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
 	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/desktop"
 	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
+	"github.com/alexberardi/jarvis-server/internal/agent/devices"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
+	displaynode "github.com/alexberardi/jarvis-server/internal/agent/display"
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
@@ -57,8 +60,11 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
+	"github.com/alexberardi/jarvis-server/internal/platform/logging"
+	adminui "github.com/alexberardi/jarvis-server/web/admin"
 )
 
 var version = "dev"
@@ -163,6 +169,8 @@ func main() {
 	switch os.Args[1] {
 	case "enroll":
 		err = enroll(ctx, os.Args[2:])
+	case "display-player":
+		err = displaynode.RunReceiverPlayer(ctx, os.Args[2:])
 	case "run":
 		redirectLaunchdOutput()
 		err = run(ctx, os.Args[2:])
@@ -284,7 +292,7 @@ func usage(w io.Writer) {
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";
            off by default, and off stops a task going on)
   computer record start [--desktop] | stop   record what you do in the browser (the menu's
-           "Record a macro…"), or on the desktop (macOS), and send it to Jarvis when you stop
+           "Record a macro…"), or on the desktop ("Record the desktop…"), and send it to Jarvis when you stop
   computer click X Y       debug: a left click at X, Y (global logical coordinates) through
            this desktop's input backend
   restart  restart the running agent (through systemd or launchd when they run it), so it
@@ -317,13 +325,20 @@ func credsPath(p string) (string, error) {
 	return node.DefaultCredsPath()
 }
 
+// agentLogs, set by runAgent, also ships what logger()s log to jarvisd's Logs page
+// (logSink, once connected); nil: stderr only.
+var (
+	agentLogs *logging.Shipper
+	logSink   node.LogSink
+)
+
 // logger logs at info, or at debug with JARVIS_AGENT_LOG=debug.
 func logger() *slog.Logger {
 	lvl := slog.LevelInfo
 	if strings.EqualFold(os.Getenv("JARVIS_AGENT_LOG"), "debug") {
 		lvl = slog.LevelDebug
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
+	return logging.New(os.Stderr, lvl, agentLogs)
 }
 
 // appCatalogue is the installed-apps lister: platform defaults plus apps.json, re-read on every
@@ -562,6 +577,7 @@ type runFlags struct {
 	voiceOn, noOverlay *bool
 	computerOn         *bool
 	noTray             *bool
+	displayOn          *bool
 	noAutoUpdate       *bool
 	profile            *string
 	vf                 *voiceFlags
@@ -577,10 +593,11 @@ const voiceByDefault = true
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
-		cp:      fs.String("creds", "", "credentials file"),
-		config:  fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
-		tf:      addToolFlags(fs),
-		voiceOn: fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		displayOn: fs.Bool("display", false, "offer the local touch display, configured by the server; needs a Linux graphical session with a screen"),
+		cp:        fs.String("creds", "", "credentials file"),
+		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
+		tf:        addToolFlags(fs),
+		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
 		computerOn: fs.Bool("computer-control", false, `let Jarvis use this computer (computer tasks, recording); `+
 			`off by default, the menu's "Computer control" sets it`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
@@ -611,6 +628,7 @@ func runAgent(ctx context.Context, args []string) error {
 	if err := noStrayArgs(fs); err != nil {
 		return err
 	}
+	agentLogs = logging.NewShipper(&logSink, 1000, 100, 2*time.Second)
 	log := logger()
 	if crashForTest != "" {
 		return errors.New("crashForTest: this build fails on purpose (the agent-upgrade e2e's broken release)")
@@ -765,12 +783,16 @@ func runAgent(ctx context.Context, args []string) error {
 	if p.desktop {
 		// Computer tasks in the browser and on the desktop (plan P3 pieces 8 and 22): build
 		// adds the executor's tools after the browser's.
-		tf.computer = func(bt *browser.Tools, apps computer.Apps) node.Toolset {
+		tf.computer = func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset {
 			var b computer.Browser
 			if bt != nil {
 				b = computer.BrowserOf(bt)
 			}
-			return &computer.Tools{Browser: b, Desktop: computer.NativeDesktop(apps), Switch: computerSw, Activity: activity,
+			d := computer.NativeDesktop(apps)
+			if d != nil {
+				d.Focus = func(ctx context.Context, id string) error { return h.WindowDo(ctx, host.ActionFocus, id) }
+			}
+			return &computer.Tools{Browser: b, Desktop: d, Switch: computerSw, Activity: activity,
 				CC: func() computer.Approver {
 					if cc := liveCC.Load(); cc != nil {
 						return cc
@@ -779,6 +801,7 @@ func runAgent(ctx context.Context, args []string) error {
 				}}
 		}
 	}
+	tf.cc = liveCC.Load
 	h, tools, closeTools, err := tf.build(ctx, log, true, st)
 	if err != nil {
 		return err
@@ -803,7 +826,25 @@ func runAgent(ctx context.Context, args []string) error {
 	caps, _ := h.Capabilities(ctx)
 	log.Info("jarvis-agent starting", "version", version, "creds", c, "platform", h.Platform(), "capabilities", caps)
 	// Commands the household turned off in the app's node settings are neither offered nor run.
-	served := nodesettings.Gate{Tools: tools, Store: st}
+	var displayEngine *displaynode.Engine
+	if *f.displayOn {
+		if runtime.GOOS != "linux" {
+			return errors.New("touch display requires Linux")
+		}
+		ui, _ := adminui.UI()
+		displayEngine, err = displaynode.StartDisplay(ctx, filepath.Dir(path), ui)
+		if err != nil {
+			return err
+		}
+		displayEngine.Host = h
+		defer displayEngine.Close()
+	}
+	var servedTools node.Toolset = tools
+	if displayEngine != nil {
+		servedTools = node.Multi{displayEngine, tools}
+	}
+	served := nodesettings.Gate{Tools: servedTools, Store: st}
+	tf.routine.Tools = served // a step the household turned off doesn't run
 	r := &node.Runner{Creds: c, Tools: served, Version: version, InstallMode: p.installMode, NodeKind: p.nodeKind, DeviceID: deviceid.Get(), Log: log}
 	runner.Store(r)
 	if p.desktop {
@@ -825,7 +866,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
 	if tf.host != nil {
-		alerts := startAlerts(ctx, tf.host, mic, tf.live, log)
+		alerts := startAlerts(ctx, tf.host, mic, tf.reminder, log)
 		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
 	}
 	hd := openHat(hf, press, log)
@@ -854,15 +895,19 @@ func runAgent(ctx context.Context, args []string) error {
 			configReady.Store(&desktopSettings{node: pn, path: sp, startup: desktopValues(fs), running: true, locked: overriddenDesktop(explicitFlags)})
 		} else {
 			startMaintenance(ctx, state, quit, log)
+			if hd != nil && hd.leds != nil {
+				// The admin's Nodes page shows and sets this node's LED mode.
+				r.Capabilities = func() map[string]any { return map[string]any{"led_mode": state().LEDMode()} }
+			}
 		}
 	}
-	// A Pi's device families (Pantry packages in the sidecar) answer the app's device requests
-	// and are in its settings snapshot; a computer has none.
+	// The device families (Pantry packages in the sidecar) answer the app's device requests and
+	// are in the settings snapshot, on a Pi and a computer alike.
 	// A secrets push can configure a family (an API key): it joins the heartbeat's protocols.
 	var devs func(context.Context) nodesettings.Devices
 	var secrets func()
 	sc := liveSidecar(tools)
-	if !p.desktop && sc != nil {
+	if sc != nil {
 		devs = sc.Devices
 		secrets = func() {
 			if err := sc.RefreshDevices(); err != nil {
@@ -875,12 +920,13 @@ func runAgent(ctx context.Context, args []string) error {
 	wirePackages(r, tf.pkgs, log)
 	// action, callback and toggle_command: the app's device control, a command's buttons and
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
-	wireActions(r, sc, st, sayNow(mic), log)
+	wireActions(r, sc, tools, st, sayNow(mic), log)
+	if sc != nil {
+		wireDevices(r, sc, tf.registry, log)
+		wireRoutineVerb(r, served, log)
+	}
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
-		if sc != nil {
-			wireDevices(r, sc, log)
-		}
 		wirePiTasks(r, st, filepath.Dir(path), tools, tf.pkgs, tf.host.Timers, quit, log)
 	}
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
@@ -917,14 +963,56 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	if onConnected := r.OnConnected; p.desktop {
 		r.OnConnected = func(ctx context.Context, cc *node.CC) {
-			liveCC.Store(cc)
-			defer liveCC.CompareAndSwap(cc, nil)
 			go uploads.serve(ctx, cc) // the recordings not sent yet
 			if onConnected != nil {
 				onConnected(ctx, cc)
 			} else {
 				<-ctx.Done()
 			}
+		}
+	}
+	if displayEngine != nil {
+		sw.addIndicator(displayEngine)
+		previousCaps := r.Capabilities
+		r.Capabilities = func() map[string]any {
+			caps := map[string]any{}
+			if previousCaps != nil {
+				caps = previousCaps()
+			}
+			for k, v := range displayEngine.Capabilities() {
+				caps[k] = v
+			}
+			return caps
+		}
+		previousConnect := r.OnConnected
+		r.OnConnected = func(ctx context.Context, cc *node.CC) {
+			go displayEngine.Watch(ctx, cc)
+			if previousConnect != nil {
+				previousConnect(ctx, cc)
+			} else {
+				<-ctx.Done()
+			}
+		}
+		previousMQTT := r.OnMQTTConnect
+		r.OnMQTTConnect = func(ctx context.Context, cc *node.CC) {
+			if previousMQTT != nil {
+				previousMQTT(ctx, cc)
+			}
+			_ = displayEngine.Synchronise(ctx, cc)
+		}
+		if r.Topics == nil {
+			r.Topics = map[string]func(context.Context, *node.CC, []byte){}
+		}
+		r.Topics["display/config"] = func(ctx context.Context, cc *node.CC, _ []byte) { _ = displayEngine.Synchronise(ctx, cc); r.BeatNow() }
+	}
+	connectCC(r, &liveCC)
+	inner := r.OnConnected
+	r.OnConnected = func(ctx context.Context, cc *node.CC) {
+		logSink.Connect(cc)
+		if inner != nil {
+			inner(ctx, cc)
+		} else {
+			<-ctx.Done()
 		}
 	}
 	connectHost(r, tf.host)
@@ -1055,10 +1143,18 @@ type toolFlags struct {
 	host *sdkhost.Host
 	// live is the sidecar in service once build ran (the Pi's reminders are polled from it).
 	live *sidecar.Live
+	// cc, when the caller sets it, is jarvisd's client while connected, for the Go built-ins;
+	// registry is the household's direct devices, which build makes (wireDevices keeps it fresh)
+	// and routine the routine built-in, whose steps run on the served toolset.
+	cc       func() *node.CC
+	registry *devices.Registry
+	routine  *builtins.Routine
+	// reminder is the reminder built-in (with a store), whose due reminders a Pi's poller fires.
+	reminder *builtins.Reminder
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
-	// desktop_open's catalogue: build adds them after the browser tools.
-	computer func(bt *browser.Tools, apps computer.Apps) node.Toolset
+	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
+	computer func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -1078,7 +1174,7 @@ func addToolFlags(fs *flag.FlagSet) *toolFlags {
 // long-running `run` does; `listen`, a test command often started over SSH, doesn't).
 //
 // st, when set, is the node's settings store: the sidecar's packages read their secrets and
-// keep their data there (DESIGN §16). The Pi profile (f.pi) has only the sidecar and the clock.
+// keep their data there (DESIGN §16). The Pi profile (f.pi) has only the sidecar and the Go built-ins.
 func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, st *nodesettings.Store) (*host.Host, node.Multi, func(), error) {
 	h, err := nativeHost()
 	if err != nil {
@@ -1107,6 +1203,9 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	guard := &jarvispage.Guard{Origins: f.origins}
 	dt.JarvisPage = guard.InFront
 	opener := openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *f.anyOpen}, appCatalogue(log)), dt)
+	// Tabs and sheets by name (VOICE-FLOWS.md Q26), and their names for speech-to-text.
+	opener.Views = views.Native(h)
+	dt.HearFirst = opener.ViewVocabulary
 	tools := node.Multi{opener, &screen.Tools{C: screen.Native(), Log: log}, dt}
 	closeAll := func() {}
 	var bt *browser.Tools
@@ -1127,7 +1226,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	if f.computer != nil {
 		// A desktop task's app that isn't running opens from desktop_open's catalogue, by name
 		// only: never a link or a path, whatever --allow-open-any says.
-		tools = append(tools, f.computer(bt, opener))
+		tools = append(tools, f.computer(bt, opener, h))
 	}
 	tools, closeAll, err = f.addCommon(ctx, log, st, tools, closeAll)
 	return h, tools, closeAll, err
@@ -1178,7 +1277,34 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 	stopBrowser := closeAll
 	closeAll = func() { _ = live.Close(); stopBrowser() }
 	tools = append(tools, live)
-	// Last, so a sidecar's own get_current_time (Python's, with its city table) wins when present.
+	// After the sidecar, so a package's command of the same name (Python's get_current_time with
+	// its city table, Home Assistant's control_device) wins when present.
+	cc := f.cc
+	if cc == nil {
+		cc = func() *node.CC { return nil }
+	}
+	f.registry = &devices.Registry{}
+	f.routine = &builtins.Routine{Store: st, Pantry: pantryRoutineDefs(f.pkgs, log), CC: cc, Log: log}
+	tools = append(tools, &builtins.ControlDevice{Devices: f.registry, Families: live, CC: cc},
+		&builtins.SendLink{CC: cc}, f.routine, &builtins.Calculate{Store: st}, &builtins.Convert{Store: st},
+		&builtins.Joke{CC: cc, Store: st})
+	if st != nil {
+		// The household's lists, in the node's store as the Python commands kept them.
+		tools = append(tools, &builtins.Shopping{Store: st}, &builtins.Todo{Store: st},
+			&builtins.ExportTodo{Store: st, CC: cc, Log: log}, &builtins.ExportShopping{Store: st, CC: cc, Log: log})
+		f.reminder = &builtins.Reminder{Store: st, CC: cc, Log: log}
+		tools = append(tools, f.reminder)
+	}
+	if f.host != nil && f.host.Timers != nil {
+		// A Pi's timers, volume and alerts: the host's services, on its speaker.
+		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st},
+			&builtins.ControlNode{Audio: f.host.Audio, Store: st},
+			&builtins.CheckAlerts{Alerts: f.host.Alerts, CC: cc, Store: st})
+	}
+	if f.pi {
+		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.
+		tools = append(tools, builtins.Talk{}, builtins.ActOnItems{})
+	}
 	tools = append(tools, &clock.Tool{})
 	return tools, closeAll, nil
 }
@@ -1386,7 +1512,9 @@ func try(ctx context.Context, args []string) error {
 	origins := tryOrigins(ctx, *server)
 	guard := &jarvispage.Guard{Origins: origins}
 	dt.JarvisPage = guard.InFront
-	ts := node.Multi{openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt), &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
+	opener := openThenType(desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil)), dt)
+	opener.Views = views.Native(h)
+	ts := node.Multi{opener, &screen.Tools{C: screen.Native()}, dt, &clock.Tool{}}
 	if fs.NArg() == 0 || strings.HasPrefix(fs.Arg(0), "browser_") {
 		// Serve the extension for this one call (fails over to "not connected" when a running
 		// agent holds the socket: stop it, or use that agent).

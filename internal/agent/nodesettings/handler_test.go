@@ -441,6 +441,29 @@ func TestSnapshotCarriesTheNodeConfig(t *testing.T) {
 	}
 }
 
+// A command's parameters go in the snapshot, so the app's routine editor builds a step's fields
+// (and its device pickers) from them; a command without any has no "parameters" key, as on N:.
+func TestSnapshotCarriesCommandParameters(t *testing.T) {
+	h, f, _ := newHandler(t, "n1")
+	params := []any{map[string]any{"name": "device_name", "type": "string", "required": true, "options_source": "devices"}}
+	h.Commands = func(context.Context) []Command {
+		return []Command{{Name: "control_device", Parameters: params}, {Name: "tell_joke"}}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1"}`))
+	cmds := decryptUpload(t, f, h, "r1")["commands"].([]any)
+	cd, joke := cmds[0].(map[string]any), cmds[1].(map[string]any)
+	got, _ := cd["parameters"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["options_source"] != "devices" {
+		t.Fatalf("control_device parameters = %v", cd["parameters"])
+	}
+	if _, ok := joke["parameters"]; ok {
+		t.Fatalf("tell_joke has parameters %v", joke["parameters"])
+	}
+}
+
 // The sidecar's device families and managers go in the snapshot as N: builds them, their
 // secrets read from this store: a family's sensitive value only with include_values, a
 // manager's never (N:'s honor_include_values=False).
@@ -506,5 +529,79 @@ func TestSealedStoreNeverWrites(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
 			t.Fatalf("%s written after Seal", f)
 		}
+	}
+}
+
+// directTools also carries out commands itself and answers lists (funnel stage 1).
+type directTools struct{ fakeTools }
+
+func (directTools) Direct(ctx context.Context, _ string) (map[string]any, bool) {
+	if !node.Enabled(ctx, "desktop_view") {
+		return nil, false
+	}
+	return map[string]any{"success": true, "direct": true}, true
+}
+func (directTools) AnswerChoice(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, "answered": true}, true
+}
+
+// The gate wraps the voice loop's tools: stage 1 and list answers must reach them (2026-10-25:
+// they didn't, and every "switch to X" and "the second one" went to the model).
+func TestGatePassesDirectAndChoiceAnswers(t *testing.T) {
+	st, _ := OpenStore(t.TempDir(), "n1")
+	var ts node.Toolset = Gate{Tools: directTools{fakeTools{"desktop_view", "desktop_window"}}, Store: st}
+	ctx := context.Background()
+	if out, ok := ts.(node.Director).Direct(ctx, "switch to the Claude tab"); !ok || out["direct"] != true {
+		t.Fatalf("direct = %v %v", out, ok)
+	}
+	if out, ok := ts.(node.ChoiceAnswerer).AnswerChoice(ctx, "the second one"); !ok || out["answered"] != true {
+		t.Fatalf("answer = %v %v", out, ok)
+	}
+	_ = st.SetEnabled("desktop_view", false)
+	if _, ok := ts.(node.Director).Direct(ctx, "switch to the Claude tab"); ok {
+		t.Fatal("stage 1 didn't see the command turned off")
+	}
+}
+
+// The app's Inspect fast-paths screen switches one pattern: the push is kept (sparse, on by
+// default), survives a reopen, and the snapshot reports each pattern's state.
+func TestFastPathSwitches(t *testing.T) {
+	h, f, dir := newHandler(t, "n1")
+	if err := h.apply("fast_path_registry", map[string]any{"command_name": "routine", "pattern_id": "routine.good_night", "enabled": "false"}); err != nil {
+		t.Fatal(err)
+	}
+	if h.Store.FastPathEnabled("routine", "routine.good_night") || !h.Store.FastPathEnabled("routine", "routine.good_morning") {
+		t.Fatal("switch not applied to just that pattern")
+	}
+	again, err := OpenStore(dir, "n1")
+	if err != nil || again.FastPathEnabled("routine", "routine.good_night") {
+		t.Fatalf("switch not kept: %v", err)
+	}
+	// A push without a pattern changes nothing.
+	if err := h.apply("fast_path_registry", map[string]any{"command_name": "routine"}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.Commands = func(context.Context) []Command {
+		return []Command{{Name: "routine", FastPaths: []FastPath{
+			{ID: "routine.good_morning", Description: "m", Example: "good morning"},
+			{ID: "routine.good_night", Description: "n", Example: "good night"},
+		}}}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1"}`))
+	fps := decryptUpload(t, f, h, "r1")["commands"].([]any)[0].(map[string]any)["fast_paths"].([]any)
+	if len(fps) != 2 || fps[0].(map[string]any)["enabled"] != true || fps[1].(map[string]any)["enabled"] != false ||
+		fps[1].(map[string]any)["example"] != "good night" {
+		t.Fatalf("fast_paths = %v", fps)
+	}
+
+	if err := h.apply("fast_path_registry", map[string]any{"command_name": "routine", "pattern_id": "routine.good_night", "enabled": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if !h.Store.FastPathEnabled("routine", "routine.good_night") {
+		t.Fatal("switched back on: still off")
 	}
 }

@@ -336,3 +336,18 @@ func TestAnimatedPatternsKeepRendering(t *testing.T) {
 		return len(seen) >= 3 // 1, 2 and 3 LEDs lit
 	})
 }
+
+func TestIdleDarkLightsOnlyWhileResponding(t *testing.T) {
+	s := &fakeStrip{}
+	l := NewLEDs(s, quiet)
+	defer l.Close()
+	waitFor(t, "normal at start", shows(s, Normal, 100))
+	l.SetIdleDark(true)
+	waitFor(t, "idle is dark", shows(s, Off, 0))
+	l.SetTransient(Listening)
+	waitFor(t, "listening still lights", shows(s, Listening, 100))
+	l.SetTransient("")
+	waitFor(t, "dark again after the turn", shows(s, Off, 0))
+	l.SetIdleDark(false)
+	waitFor(t, "idle glow back", shows(s, Normal, 100))
+}

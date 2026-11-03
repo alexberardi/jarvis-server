@@ -1,0 +1,40 @@
+package browser
+
+import (
+	"context"
+	"regexp"
+	"strings"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
+)
+
+// Funnel stage 1 for the page (VOICE-FLOWS.md Q27): "scroll down", "scroll down a bit more",
+// "scroll to the top" scroll the current tab with no model. The model answered "scroll down a
+// bit more" with "already scrolled" and did nothing.
+var (
+	reScroll = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?scroll\s+(?:the\s+page\s+)?(up|down)((?:\s+(?:a|bit|little|some|more|again|please|the\s+page))*)[\s.!?]*$`)
+	reEdge   = regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,.]?\s+)?(?:please\s+)?(?:scroll|go|jump)\s+(?:back\s+)?(?:up\s+|down\s+)?to\s+the\s+(top|bottom)(?:\s+of\s+the\s+page)?[\s.!?]*$`)
+)
+
+// Direct scrolls the page itself (funnel stage 1); ok false passes it on.
+func (t *Tools) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	var dir string
+	if m := reScroll.FindStringSubmatch(said); m != nil {
+		dir = strings.ToLower(m[1])
+	} else if m := reEdge.FindStringSubmatch(said); m != nil {
+		dir = strings.ToLower(m[1])
+	} else {
+		return nil, false
+	}
+	if !node.Enabled(ctx, ToolScroll) || len(t.Hub.Browsers()) == 0 {
+		return nil, false
+	}
+	out, ok := t.Call(ctx, ToolScroll, map[string]any{"direction": dir}, node.Request{VoiceCommand: said})
+	if !ok || out["success"] != true {
+		return nil, false // the model can say why, or scroll some other way
+	}
+	out[node.IslandOnlyKey] = true
+	return out, true
+}
+
+var _ node.Director = (*Tools)(nil)

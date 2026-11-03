@@ -69,7 +69,10 @@ func parseTake(det map[string]any, defaultSecs float64) (profileTake, bool) {
 	return profileTake{userID: int64(uid), householdID: hh, rid: rid, secs: min(secs, maxTakeSecs)}, true
 }
 
-// record makes the take, or returns the V9 failure to post.
+// record makes the take, or returns the V9 failure to post. Enroll and Verify upload it
+// normalised, as a voice turn's command audio is: jarvisd counts a frame as speech only above
+// -45 dBFS, and a quiet HAT microphone (the lab Pi 4's room floor is -56 dBFS) left an 8 s
+// reading with 1.8 s of "speech", failing low_quality. Unlike N:, which sent the raw take.
 func (v *VoiceProfiles) record(ctx context.Context, verb string, t profileTake) ([]int16, map[string]any) {
 	v.Log.Info(verb+": recording", "request_id", t.rid, "user_id", t.userID, "secs", t.secs)
 	pcm, err := v.Mic.Record(ctx, Take{Cue: takeCue, Preroll: takePreroll, Secs: t.secs})
@@ -101,7 +104,7 @@ func (v *VoiceProfiles) Enroll(ctx context.Context, srv ProfileServer, det map[s
 	defer cancel()
 	pcm, res := v.record(ctx, "enroll_voice", t)
 	if res == nil {
-		resp, err := srv.EnrollVoice(ctx, t.userID, wavBytes(pcm))
+		resp, err := srv.EnrollVoice(ctx, t.userID, wavBytes(Normalize(pcm)))
 		if err != nil {
 			// jarvisd's V9 relays an upload_failed after a 422 as "low_quality": keep the prefix.
 			res = fail("upload_failed: " + err.Error())
@@ -124,7 +127,7 @@ func (v *VoiceProfiles) Verify(ctx context.Context, srv ProfileServer, det map[s
 	defer cancel()
 	pcm, res := v.record(ctx, "verify_voice", t)
 	if res == nil {
-		r, err := srv.VerifyVoice(ctx, t.userID, t.householdID, wavBytes(pcm))
+		r, err := srv.VerifyVoice(ctx, t.userID, t.householdID, wavBytes(Normalize(pcm)))
 		if err != nil {
 			res = fail("verify_failed: " + err.Error())
 		} else {

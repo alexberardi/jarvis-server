@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
 	"github.com/alexberardi/jarvis-server/internal/agent/hat"
 	"github.com/alexberardi/jarvis-server/internal/agent/music"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/reminders"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
-	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 	"github.com/alexberardi/jarvis-server/internal/agent/timers"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/audio/device"
@@ -67,22 +67,14 @@ func newPiHost(ctx context.Context, stateDir string, mic *voice.Mic, log *slog.L
 }
 
 // startAlerts runs the Pi's alerts: the announcer, which says the queue's announceable alerts
-// between turns, and the reminders, polled from the sidecar's reminder service into the queue
+// between turns, and the reminders, polled from the reminder built-in into the queue
 // (go-pi-node.md §7 4.5). It stops when ctx ends.
-func startAlerts(ctx context.Context, h *sdkhost.Host, mic *voice.Mic, live *sidecar.Live, log *slog.Logger) *sdkhost.Announcer {
+func startAlerts(ctx context.Context, h *sdkhost.Host, mic *voice.Mic, rem *builtins.Reminder, log *slog.Logger) *sdkhost.Announcer {
 	a := &sdkhost.Announcer{Alerts: h.Alerts, Say: sayNow(mic), Log: log}
 	tick := time.NewTicker(sdkhost.SweepEvery)
 	go func() { defer tick.Stop(); a.Run(ctx, tick.C) }()
-	if live != nil {
-		p := &reminders.Poller{Alerts: h.Alerts, Log: log, Check: func(ctx context.Context) ([]reminders.Due, int, error) {
-			due, pending, err := live.RemindersDue(ctx)
-			out := make([]reminders.Due, len(due))
-			for i, d := range due {
-				out[i] = reminders.Due(d)
-			}
-			return out, pending, err
-		}}
-		go p.Run(ctx)
+	if rem != nil {
+		go (&reminders.Poller{Alerts: h.Alerts, Log: log, Check: rem.Due}).Run(ctx)
 	}
 	return a
 }

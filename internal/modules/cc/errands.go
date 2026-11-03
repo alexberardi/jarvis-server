@@ -215,11 +215,11 @@ func (n errandNodes) RunToolImages(ctx context.Context, nodeID, command string, 
 // failure dict, when nothing answered (no MQTT, node offline, timeout).
 func (n errandNodes) dispatch(ctx context.Context, nodeID, command string, args *pyjson.Object, userID *int64, voice string, timeout time.Duration) (*pyjson.Object, error) {
 	if n.m.bus == nil || !n.m.bus.Available() {
-		return servertools.Obj("success", false, "error", "could not dispatch to node: MQTT is unavailable"), errors.New("MQTT is unavailable")
+		return servertools.Obj("success", false, "error", "could not dispatch to node: MQTT is unavailable", "error_code", "no_broker"), errors.New("MQTT is unavailable")
 	}
 	if up, known := n.m.bus.NodeSession(nodeID); known && !up {
 		// Nothing would answer: fail the step now rather than after the 30 s wait.
-		return servertools.Obj("success", false, "error", "the node is offline"), errors.New("the node is offline")
+		return servertools.Obj("success", false, "error", "the node is offline", "error_code", "offline"), errors.New("the node is offline")
 	}
 	if args == nil {
 		args = pyjson.NewObject()
@@ -236,7 +236,7 @@ func (n errandNodes) dispatch(ctx context.Context, nodeID, command string, args 
 	defer cancel()
 	_, res, err := n.m.bus.CommandAwait(wctx, nodeID, "tool_call", details, key)
 	if err != nil {
-		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true), errors.New("the node didn't respond in time")
+		return servertools.Obj("success", false, "error", "the node didn't respond in time", "timeout", true, "error_code", "timeout"), errors.New("the node didn't respond in time")
 	}
 	v, err := pyjson.Loads(string(res))
 	if err != nil {

@@ -41,6 +41,52 @@ type ChoiceAnswerer interface {
 	AnswerChoice(ctx context.Context, said string) (out map[string]any, ok bool)
 }
 
+// Director is a Toolset that can carry out a clear one-step command itself, with no model
+// (VOICE-FLOWS.md Q27, funnel stage 1): said is the transcript; ok is false to pass it on to
+// command-center.
+type Director interface {
+	Direct(ctx context.Context, said string) (out map[string]any, ok bool)
+}
+
+type enabledKey struct{}
+
+// WithEnabled carries which commands are on (a settings gate's) to a Director, whose own calls
+// don't pass back through the gate.
+func WithEnabled(ctx context.Context, enabled func(name string) bool) context.Context {
+	return context.WithValue(ctx, enabledKey{}, enabled)
+}
+
+// Enabled reports whether the command is on for a Director (true without a gate).
+func Enabled(ctx context.Context, name string) bool {
+	f, _ := ctx.Value(enabledKey{}).(func(string) bool)
+	return f == nil || f(name)
+}
+
+type speakerKey struct{}
+
+// WithSpeaker carries the recognised speaker (nil: unknown) to a Director.
+func WithSpeaker(ctx context.Context, userID *int64) context.Context {
+	return context.WithValue(ctx, speakerKey{}, userID)
+}
+
+// Speaker is the recognised speaker WithSpeaker set, or nil.
+func Speaker(ctx context.Context) *int64 {
+	u, _ := ctx.Value(speakerKey{}).(*int64)
+	return u
+}
+
+// Direct asks each Toolset that can carry out a command itself.
+func (m Multi) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	for _, t := range m {
+		if d, ok := t.(Director); ok {
+			if out, ok := d.Direct(ctx, said); ok {
+				return out, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // AnswerChoice asks each Toolset that can answer a choice.
 func (m Multi) AnswerChoice(ctx context.Context, said string) (map[string]any, bool) {
 	for _, t := range m {
@@ -85,6 +131,9 @@ type Param struct {
 	Description string
 	Required    bool
 	Enum        []string
+	// OptionsSource names the live list the app's routine editor offers for this parameter
+	// ("devices", "entities"): jarvis-command-sdk's JarvisParameter.options_source.
+	OptionsSource string
 }
 
 // Example is one prompt example.
@@ -132,8 +181,12 @@ func (s Spec) Render() ToolDef {
 		if p.Required {
 			required = append(required, p.Name)
 		}
+		var source any
+		if p.OptionsSource != "" {
+			source = p.OptionsSource
+		}
 		params = append(params, map[string]any{"name": p.Name, "type": p.Type, "description": p.Description,
-			"required": p.Required, "default_value": nil, "enum_values": enum, "options_source": nil})
+			"required": p.Required, "default_value": nil, "enum_values": enum, "options_source": source})
 	}
 	examples := []any{}
 	for _, e := range s.Examples {
@@ -211,6 +264,9 @@ type Signals struct {
 	// OnResponseComplete is the command's deferred step (a media command starting playback),
 	// to run once the spoken reply and the follow-up window are over.
 	OnResponseComplete func() error
+	// Speak: a Director's result whose "message" is said aloud (a routine run by its trigger
+	// phrase) rather than shown and left silent like a desktop command.
+	Speak bool
 }
 
 // TakeSignals removes the Signals from out (if any) and returns them.

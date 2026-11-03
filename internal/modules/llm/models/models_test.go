@@ -398,7 +398,7 @@ func TestCatalogLint(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"qwen3-4b", "qwen3-8b", "qwen3-14b", "qwen3.5-9b", "qwen3.8-27b", "all-minilm-l6-v2", "whisper-large-v3-turbo",
+	for _, want := range []string{"qwen3-1.7b", "qwen3-4b", "qwen3-8b", "qwen3-14b", "qwen3.5-9b", "qwen3.8-27b", "all-minilm-l6-v2", "whisper-large-v3-turbo",
 		"kokoro-multi-lang-v1_0", "eres2net-voxceleb-16k"} {
 		if !ids[want] {
 			t.Errorf("catalog lacks %s", want)
@@ -439,6 +439,10 @@ func TestFitAndRecommend(t *testing.T) {
 	}
 	if r := Recommend(card(8192), nil, nil); r["live"] != "qwen3-4b" {
 		t.Errorf("8 GB: %v", r)
+	}
+	// 6 GB: the 4B is only tight; the 1.7B fits, and a fitting model wins over a tight one.
+	if r := Recommend(card(6144), nil, nil); r["live"] != "qwen3-1.7b" {
+		t.Errorf("6 GB: %v", r)
 	}
 	cpu := engine.Hardware{Flavour: engine.FlavourCPU}
 	if r := Recommend(cpu, nil, nil); r["live"] != "qwen3-4b" || r["stt"] != "whisper-small.en" {
@@ -1062,6 +1066,36 @@ func TestAssignDeleteRegister(t *testing.T) {
 	}
 	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: "relative.gguf"}); err == nil {
 		t.Fatal("relative path accepted")
+	}
+}
+
+// A model path the system unit hides (ProtectHome, PrivateTmp) says so, not "no file" (#582).
+func TestMissingPathUnderSystemUnit(t *testing.T) {
+	e := newEnv(t)
+	e.start()
+	path := "/home/someone/models/Qwen3-0.6B.gguf"
+	msg := func(err error) string {
+		t.Helper()
+		if re, ok := err.(*RequestError); !ok || re.Status != http.StatusUnprocessableEntity {
+			t.Fatalf("err %v", err)
+		}
+		return err.Error()
+	}
+	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: path}); !strings.Contains(msg(err), "no file at "+path) {
+		t.Fatalf("outside the unit: %v", err)
+	}
+	old := systemUnit
+	systemUnit = func() bool { return true }
+	t.Cleanup(func() { systemUnit = old })
+	want := "jarvisd runs as a system service and can't see " + path + " (the service hides /home); put the model under /var/lib/jarvisd"
+	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: path}); !strings.Contains(msg(err), want) {
+		t.Fatalf("register: %v", err)
+	}
+	if err := e.mgr.UpdateLabels(e.ctx, map[string]map[string]any{"live": {"model": path}}); !strings.Contains(msg(err), want) {
+		t.Fatalf("label: %v", err)
+	}
+	if _, err := e.mgr.Register(e.ctx, RegisterRequest{Path: "/var/lib/jarvisd/models/x.gguf"}); !strings.Contains(msg(err), "no file at") {
+		t.Fatalf("a path the unit sees: %v", err)
 	}
 }
 
