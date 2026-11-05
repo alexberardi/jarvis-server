@@ -427,14 +427,14 @@ func TestUnansweredEscalationCarriesOn(t *testing.T) {
 	if got := *msgs[len(msgs)-1].Content.Text; !strings.HasPrefix(got, "[Alex did not answer in time") {
 		t.Fatalf("note: %q", got)
 	}
-	sim.untilMark("t1")
+	// The hold line plays under the same turn's mark, so wait for the reply itself.
+	waitFor(t, "the reply after no answer", func() bool {
+		return slices.ContainsFunc(e.tts.spoken(), func(s string) bool { return strings.Contains(s, "all set") })
+	})
 	for _, said := range e.tts.spoken() {
 		if strings.Contains(said, "call you back") {
 			t.Fatalf("said the fallback goodbye: %q", e.tts.spoken())
 		}
-	}
-	if !slices.ContainsFunc(e.tts.spoken(), func(s string) bool { return strings.Contains(s, "all set") }) {
-		t.Fatalf("spoken: %q", e.tts.spoken())
 	}
 }
 
@@ -479,10 +479,8 @@ func TestAnsweredQuestionIsNotAskedTwice(t *testing.T) {
 		Data: map[string]any{"session_id": id, "answer": "7:30"}}); !r.Success {
 		t.Fatalf("answer: %+v", r)
 	}
-	sim.untilMark("t1")
-	if !slices.Contains(e.tts.spoken(), "7:30 works for us.") {
-		t.Fatalf("spoken: %q", e.tts.spoken())
-	}
+	// The hold line plays under the same turn's mark, so wait for the reply itself.
+	waitFor(t, "the reply with the answer", func() bool { return slices.Contains(e.tts.spoken(), "7:30 works for us.") })
 	if n := len(e.notify.titled("📞 The call needs your input")); n != 1 {
 		t.Fatalf("asked the caller %d times", n)
 	}
