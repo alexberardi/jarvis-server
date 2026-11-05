@@ -38,6 +38,12 @@ type CallScenario struct {
 	Answers []string `json:"answers,omitempty"`
 	// Expect is what must hold for the scenario to pass.
 	Expect CallExpect `json:"expect"`
+	// Contact, when set, is put in the household's phonebook first (a business the web
+	// lookup can't find): {"name": ..., "number": ...}.
+	Contact map[string]string `json:"contact,omitempty"`
+	// NodeContext, when set, is what the household's commands share with the plan, answered
+	// by a stand-in node (callnode.go).
+	NodeContext *NodeContext `json:"node_context,omitempty"`
 }
 
 // CallExpect is a call scenario's checks. Text checks ignore case; Says and Never also match
@@ -78,9 +84,17 @@ func (e CallExpect) check(card inboxItem, said string) []string {
 }
 
 func contains(text, want string) bool {
-	squash := strings.NewReplacer(" ", "", "-", "", ",", "", ".", "")
 	t, w := strings.ToLower(text), strings.ToLower(want)
-	return strings.Contains(t, w) || strings.Contains(squash.Replace(t), squash.Replace(w))
+	return strings.Contains(t, w) || strings.Contains(squash(t), squash(w))
+}
+
+// spokenDigits are the words the voice path reads digits as ("seven, seven, one").
+var spokenDigits = strings.NewReplacer("zero", "0", "oh", "0", "one", "1", "two", "2", "three", "3", "four", "4",
+	"five", "5", "six", "6", "seven", "7", "eight", "8", "nine", "9", "dash", "")
+
+// squash drops separators and reads spoken digits, so "D, X, dash, seven, seven" is "dx77".
+func squash(s string) string {
+	return strings.NewReplacer(" ", "", "-", "", ",", "", ".", "").Replace(spokenDigits.Replace(s))
 }
 
 // calleeRules frame every persona: they are a person on a phone line, saying lines aloud.
@@ -178,6 +192,27 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 	if err := api.put(env["SBX_CC"]+"/settings/phone_calls.call_context?user_id="+env["SBX_USER_ID"],
 		map[string]any{"value": string(ctxJSON)}); err != nil {
 		return fmt.Errorf("call context: %w", err)
+	}
+	if sc.Contact != nil {
+		var hhs struct {
+			Households []struct {
+				ID string `json:"id"`
+			} `json:"households"`
+		}
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, env["SBX_CC"]+"/api/v0/nodes/pairings", nil)
+		if err := api.do(req, &hhs); err != nil || len(hhs.Households) == 0 {
+			return fmt.Errorf("household: %v", err)
+		}
+		// A second add of the same contact is refused; the first is what counts.
+		_ = api.send(http.MethodPost, env["SBX_CC"]+"/api/v0/mobile/household/"+hhs.Households[0].ID+"/phone-contacts",
+			map[string]any{"name": sc.Contact["name"], "number": sc.Contact["number"]}, nil)
+	}
+	if sc.NodeContext != nil {
+		stop, err := contextNode(ctx, env, *sc.NodeContext)
+		if err != nil {
+			return fmt.Errorf("stand-in node: %w", err)
+		}
+		defer stop()
 	}
 	since := time.Now().UTC().Add(-2 * time.Second)
 
