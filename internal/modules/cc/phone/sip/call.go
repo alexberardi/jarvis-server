@@ -538,6 +538,10 @@ func (c *Call) pace(med *diago.DialogMedia) {
 	marker := true
 	var ev *dtmfEvent
 	gap := 0
+	// No DTMF before the first audio frame: diago v0.41's WriteRTP returns with its RTCP lock
+	// held when a new stream's first packet has a payload type outside the negotiated codecs
+	// (telephone-event), which wedges every later read, write and the hang-up.
+	audioSent := false
 	for {
 		select {
 		case <-c.done:
@@ -547,7 +551,7 @@ func (c *Call) pace(med *diago.DialogMedia) {
 		c.mu.Lock()
 		if ev == nil && gap > 0 {
 			gap--
-		} else if ev == nil && len(c.dtmf) > 0 {
+		} else if ev == nil && len(c.dtmf) > 0 && audioSent {
 			ev = &dtmfEvent{digit: c.dtmf[0], pt: uint8(c.dtmfPT)}
 			c.dtmf = c.dtmf[1:]
 		}
@@ -575,7 +579,7 @@ func (c *Call) pace(med *diago.DialogMedia) {
 			payload[i] = enc(s)
 		}
 		_, _ = w.WriteSamples(payload, FrameSamples, marker, codec.PayloadType)
-		marker = false
+		marker, audioSent = false, true
 	}
 }
 

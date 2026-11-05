@@ -442,16 +442,21 @@ func TestDTMFUsesThePayloadTypeFromTheAnswer(t *testing.T) {
 	if err := c.SendDTMF("1#"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(600 * time.Millisecond)
 	var ev []rtp.Packet
-	for _, p := range far.packets() {
-		switch p.PayloadType {
-		case 96:
-			ev = append(ev, p)
-		case 101:
-			t.Fatal("DTMF on 101, which the far end did not offer")
+	events := func() []rtp.Packet {
+		var out []rtp.Packet
+		for _, p := range far.packets() {
+			switch p.PayloadType {
+			case 96:
+				out = append(out, p)
+			case 101:
+				t.Fatal("DTMF on 101, which the far end did not offer")
+			}
 		}
+		return out
 	}
+	// Both digits, then the quiet gap's audio: no more event packets can follow.
+	eventually(t, 5*time.Second, "both digits", func() bool { ev = events(); return len(ev) >= 2*(dtmfTone+dtmfEnd) })
 	if len(ev) != 2*(dtmfTone+dtmfEnd) {
 		t.Fatalf("%d event packets, want %d", len(ev), 2*(dtmfTone+dtmfEnd))
 	}
@@ -534,5 +539,35 @@ func sameMedia(t *testing.T, what string, body []byte, ours *remoteSDP) {
 	}
 	if !got.ip.Equal(ours.ip) || got.port != ours.port {
 		t.Fatalf("%s answered with %s:%d, want our %s:%d", what, got.ip, got.port, ours.ip, ours.port)
+	}
+}
+
+// A digit pressed before the call has sent any audio waits for the first audio frame: as the
+// stream's first packet, diago would take it for an unknown codec and keep its RTCP lock,
+// wedging the call (reads, writes and the hang-up).
+func TestDTMFBeforeAnyAudioLeavesTheCallWorking(t *testing.T) {
+	_, _, c, far, _ := answered(t, 96)
+	if err := c.SendDTMF("1"); err != nil {
+		t.Fatal(err)
+	}
+	far.stream(func(int) []int16 { return make([]int16, FrameSamples) })
+	drain(c)
+	eventually(t, 5*time.Second, "the digit", func() bool {
+		for _, p := range far.packets() {
+			if p.PayloadType == 96 {
+				return true
+			}
+		}
+		return false
+	})
+	if pkts := far.packets(); pkts[0].PayloadType == 96 {
+		t.Fatal("a DTMF event was the stream's first packet")
+	}
+	done := make(chan struct{})
+	go func() { c.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hang-up wedged")
 	}
 }
