@@ -70,6 +70,11 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 	p.DB, p.Log, p.Settings, p.Roles = m.deps.DB, m.deps.Log, m.settings, m.Auth
 	p.LLM, p.STT, p.Notify, p.Names, p.Blobs = m.LLM, m.STT, m.Notify, m.Names, m.deps.Blobs
 	p.Provider, p.Search, p.Calendar, p.Errands = m.Phone.Provider, search, m.Phone.Calendar, m.Phone.Errands
+	// The household's nodes answer the plan's availability and call_context (plan time only).
+	if p.Calendar == nil {
+		p.Calendar = nodeContext{m}
+	}
+	p.NodeContext = nodeContext{m}
 	p.Twilio, p.EnvCredentials, p.NewTwilio = m.Phone.Twilio, m.Phone.EnvCredentials, m.Phone.NewTwilio
 	p.Options, p.Now, p.Go = m.Phone.Options, m.now, m.tasks.Go
 	if m.TTS != nil {

@@ -72,6 +72,9 @@ type ContextField struct {
 	Value    string `json:"value"`
 	Category string `json:"category"`
 	Tier     string `json:"tier"`
+	// Source is the command a node's call_context answer came from ("" for the user's own
+	// saved details).
+	Source string `json:"source,omitempty"`
 }
 
 // pyStr is Python's str(raw.get(k) or ""): falsy values become "", others their str().

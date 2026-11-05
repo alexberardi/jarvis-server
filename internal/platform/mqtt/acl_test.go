@@ -46,7 +46,9 @@ func TestCanPublish(t *testing.T) {
 		{"jarvis/nodes/n1/command-data/delete/response/c1", true},
 		{"jarvis/nodes/n1/context/query/response/c1", true},
 		{"jarvis/nodes/n1/command-data/bogus/response/c1", false},
-		{"jarvis/nodes/n1/context/operations/response/c1", false},
+		// A call plan lists each node's call_context providers (2026-11-05-call-plan-node-context).
+		{"jarvis/nodes/n1/context/operations/response/c1", true},
+		{"jarvis/nodes/n1/context/bogus/response/c1", false},
 		{"jarvis/nodes/n1/command-data/get/response/", false},
 		{"jarvis/nodes/n1/command-data/get/response/c1/x", false},
 		{"jarvis/nodes/n1/command-data/get", false},

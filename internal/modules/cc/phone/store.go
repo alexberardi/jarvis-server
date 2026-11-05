@@ -76,6 +76,9 @@ type Session struct {
 	InCallAt    time.Time
 	ExpiresAt   time.Time
 	EndedAt     time.Time
+	// NodeContextJSON is the give-if-asked call_context fields the plan gathered from the
+	// household's commands (a JSON list of ContextField), for the call's spoken-output guard.
+	NodeContextJSON string
 }
 
 // Contact is one phonebook row.
@@ -98,17 +101,17 @@ type Contact struct {
 const sessionCols = `id, household_id, user_id, confirmed_by, contact_id, contact_name, contact_address, goal,
 	details, resolved_number, dialed_number, number_edited, line_type, state, error_message, transcript_json,
 	outcome_json, audio_object_key, heartbeat_at, twilio_call_sid, duration_seconds, errand_id, errand_step,
-	created_at, confirmed_at, in_call_at, expires_at, ended_at`
+	created_at, confirmed_at, in_call_at, expires_at, ended_at, node_context_json`
 
 type scanner interface{ Scan(dest ...any) error }
 
 func scanSession(r scanner) (*Session, error) {
 	var s Session
 	var uid, cby, dur, step sql.NullInt64
-	var cid, cname, caddr, det, res, dial, lt, em, tj, oj, ak, hb, sid, eid, ca, cf, ic, ex, en sql.NullString
+	var cid, cname, caddr, det, res, dial, lt, em, tj, oj, ak, hb, sid, eid, ca, cf, ic, ex, en, nc sql.NullString
 	var edited int
 	if err := r.Scan(&s.ID, &s.HouseholdID, &uid, &cby, &cid, &cname, &caddr, &s.Goal, &det, &res, &dial, &edited,
-		&lt, &s.State, &em, &tj, &oj, &ak, &hb, &sid, &dur, &eid, &step, &ca, &cf, &ic, &ex, &en); err != nil {
+		&lt, &s.State, &em, &tj, &oj, &ak, &hb, &sid, &dur, &eid, &step, &ca, &cf, &ic, &ex, &en, &nc); err != nil {
 		return nil, err
 	}
 	if uid.Valid {
@@ -126,7 +129,7 @@ func scanSession(r scanner) (*Session, error) {
 	s.ContactID, s.ContactName, s.ContactAddress = cid.String, cname.String, caddr.String
 	s.Details, s.ResolvedNumber, s.DialedNumber, s.LineType = det.String, res.String, dial.String, lt.String
 	s.ErrorMessage, s.TranscriptJSON, s.OutcomeJSON, s.AudioKey = em.String, tj.String, oj.String, ak.String
-	s.CallID, s.ErrandID = sid.String, eid.String
+	s.CallID, s.ErrandID, s.NodeContextJSON = sid.String, eid.String, nc.String
 	s.NumberEdited = edited != 0
 	s.HeartbeatAt, s.CreatedAt, s.ConfirmedAt = parseTS(hb.String), parseTS(ca.String), parseTS(cf.String)
 	s.InCallAt, s.ExpiresAt, s.EndedAt = parseTS(ic.String), parseTS(ex.String), parseTS(en.String)

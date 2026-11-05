@@ -79,6 +79,15 @@ type AvailabilityAnswer struct {
 	Error string
 	Free  []string
 	Busy  []string
+	// Source is the command that answered (the calendar's), for the plan card.
+	Source string
+}
+
+// NodeContext is what the household's commands contribute to a call plan, asked once at plan
+// time (docs/decisions/2026-11-05-call-plan-node-context.md): each command's call_context
+// fields for this business and goal. Never asked during a call.
+type NodeContext interface {
+	CallContext(ctx context.Context, householdID string, userID *int64, business, goal string) []ContextField
 }
 
 // ErrandHook is the 09 workflow engine's resume entry point (deliver_signal(run, step,
@@ -145,7 +154,9 @@ type Service struct {
 	Search   servertools.WebSearcher
 	Fetch    *servertools.Fetcher
 	Calendar Availability
-	Errands  ErrandHook
+	// NodeContext is the household's commands' call_context; nil: none.
+	NodeContext NodeContext
+	Errands     ErrandHook
 	// Go runs fire-and-forget work (an errand resume) on the owner's task group, so shutdown
 	// waits for it; it reports false when the group has drained. Nil runs a bare goroutine.
 	Go      func(fn func()) bool

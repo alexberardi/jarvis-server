@@ -3,7 +3,9 @@ package phone
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -344,8 +346,19 @@ func (s *Service) wrapup(ctx context.Context, rt *callRuntime, sess *Session) {
 // selection the brief used, so the guard's denylist covers exactly what the brief loaded.
 func (s *Service) restrictedFor(ctx context.Context, sess *Session) []live.RestrictedField {
 	var out []live.RestrictedField
+	seen := map[string]bool{}
 	for _, f := range RestrictedFields(SelectForCall(s.loadCallContext(ctx, sess.UserID))) {
+		seen[f.Key] = true
 		out = append(out, live.RestrictedField{Key: f.Key, Label: f.Label, Value: f.Value})
+	}
+	// The commands' fields the plan gathered, those still in the confirmed details (the user
+	// may have deleted one on the card).
+	var node []ContextField
+	_ = json.Unmarshal([]byte(sess.NodeContextJSON), &node)
+	for _, f := range node {
+		if !seen[f.Key] && f.Value != "" && strings.Contains(sess.Details, f.Value) {
+			out = append(out, live.RestrictedField{Key: f.Key, Label: f.Label, Value: f.Value})
+		}
 	}
 	return out
 }
