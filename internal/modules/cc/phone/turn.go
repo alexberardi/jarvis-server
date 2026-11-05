@@ -62,9 +62,15 @@ type turnPipeline struct {
 	outcomeEarlier       bool
 	records              []turnRecord
 	escalationUnanswered bool
-	restricted           []live.RestrictedField
-	bargedIn             bool   // the current turn's utterance cut the last reply off
-	announcement         string // the first utterance was a recorded intercept (set once, then the call ends)
+	// timesFromCaller: the caller answered a question with a time mid-call, so the brief's time
+	// window no longer vetoes what the business proposes.
+	timesFromCaller bool
+	// given are the restricted fields already spoken on this call (asked for and cleared): a
+	// read-back of one is them checking what we said, not fishing for it.
+	given        map[string]bool
+	restricted   []live.RestrictedField
+	bargedIn     bool   // the current turn's utterance cut the last reply off
+	announcement string // the first utterance was a recorded intercept (set once, then the call ends)
 }
 
 func (s *Service) newTurnPipeline(rt *callRuntime, restricted []live.RestrictedField) *turnPipeline {
@@ -149,7 +155,7 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 	var verdict chan map[string]bool
 	fishing := false
 	for _, f := range p.restricted {
-		if live.Mentions(heard, f.Value) {
+		if live.Mentions(heard, f.Value) && !p.given[f.Key] {
 			fishing = true
 		}
 	}
@@ -241,7 +247,7 @@ loop:
 	// Confirmation fishing: a value the callee already stated is not something they are
 	// asking us to provide.
 	for _, f := range p.restricted {
-		if live.Mentions(heard, f.Value) {
+		if live.Mentions(heard, f.Value) && !p.given[f.Key] {
 			delete(asked, f.Key)
 		}
 	}
@@ -252,7 +258,7 @@ loop:
 			labels := make([]string, len(c.flagged))
 			for i, f := range c.flagged {
 				labels[i] = f.Label
-				if !asked[f.Key] {
+				if !asked[f.Key] && !p.given[f.Key] {
 					all = false
 				}
 			}
@@ -260,6 +266,12 @@ loop:
 				s.log().Warn("phone: guard suppressed a sentence", "session", p.rt.sessionID, "labels", strings.Join(labels, ", "))
 				events = append(events, guardSuppressed{labels})
 				continue
+			}
+			if p.given == nil {
+				p.given = map[string]bool{}
+			}
+			for _, f := range c.flagged {
+				p.given[f.Key] = true
 			}
 			var tb *float64
 			c.pcm, tb = s.synthesize(ctx, c.sentence)
@@ -305,7 +317,7 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 // injected into this generation only. Fails open: no note.
 func (p *turnPipeline) schedulingNote(heard string) string {
 	env := p.rt.brief.Constraints
-	if env == "" || !live.MightProposeTime(heard) {
+	if env == "" || p.timesFromCaller || !live.MightProposeTime(heard) {
 		return ""
 	}
 	v := timewindow.Check(env, heard)
@@ -518,7 +530,13 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 	}
 	answer, ok := p.rt.escalation.Wait(ctx)
 	if ok {
-		p.messages = append(p.messages, chatMsg{"user", "[" + who + " answered your question: " + answer + "]"})
+		// The question goes with the answer: a reply that was only the escalation token left no
+		// trace in the history. The caller's answer is newer than the plan, so it wins.
+		p.messages = append(p.messages, chatMsg{"user", "[You asked " + who + ": \"" + question + "\". " + who +
+			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it.]"})
+		if live.MightProposeTime(answer) {
+			p.timesFromCaller = true
+		}
 	} else {
 		// No answer is not the end of the call: a booking can often go ahead without it (a
 		// callback number for a reservation). The model decides; the fixed goodbye is the backstop.

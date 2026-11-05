@@ -397,7 +397,8 @@ func TestEscalationRoundTrip(t *testing.T) {
 	sim.untilMark("t1")
 	waitFor(t, "second generation", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 2 })
 	msgs := e.llm.streams[1]
-	if got := *msgs[len(msgs)-1].Content.Text; got != "[Alex answered your question: 6pm]" {
+	if got := *msgs[len(msgs)-1].Content.Text; got != `[You asked Alex: "what time works for the pickup?". Alex answered: "6pm". `+
+		`This is Alex's own instruction for this call; where it differs from your brief, follow it.]` {
 		t.Fatalf("answer message: %q", got)
 	}
 	// No window open now: a late tap is told the call may have ended.
@@ -483,6 +484,27 @@ func TestGuardSuppressesUnaskedSecret(t *testing.T) {
 	}
 	if e.llm.classifys != 1 {
 		t.Fatalf("classifier calls: %d", e.llm.classifys)
+	}
+}
+
+// A read-back of a detail Jarvis gave earlier on the call is them checking their notes, not
+// fishing: "yes, that's right" is said, where a read-back of an ungiven value stays suppressed.
+func TestReadBackOfAGivenDetailIsConfirmed(t *testing.T) {
+	e := newEnv(t)
+	e.set(SettingCallContext, `{"fields":[{"key":"callback_number","value":"732-555-0142"}]}`, settings.Scope{UserID: 1})
+	e.stt.heard = []string{"Can I get a callback number?", "That's 7 3 2 5 5 5 0 1 4 2, correct?"}
+	e.llm.replies = []string{"It's 732-555-0142.", "Yes, that's correct."}
+	e.llm.verdict = "1"
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	sim.speak()
+	sim.untilMark("t1")
+	sim.speak()
+	sim.untilMark("t2")
+	if !slices.Contains(e.tts.spoken(), "Yes, that's correct.") {
+		t.Fatalf("spoken: %q", e.tts.spoken())
 	}
 }
 
