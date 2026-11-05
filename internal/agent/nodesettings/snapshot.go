@@ -40,6 +40,10 @@ type Command struct {
 	// FastPaths are the command's patterns the node runs without the model (a routine's trigger
 	// phrases), each switchable in the app's Inspect fast-paths screen.
 	FastPaths []FastPath
+	// SharesContext: the command declares context operations, so the app shows its "Share with
+	// phone calls" switch with CallContextDescription (what it shares, for the user).
+	SharesContext          bool
+	CallContextDescription string
 }
 
 // FastPath is one fast-path pattern (jarvis_command_sdk's FastPathPattern).
@@ -142,6 +146,9 @@ func (st *Store) Snapshot(cmds []Command, dev Devices, nodeConfig map[string]any
 					"enabled": st.FastPathEnabled(c.Name, f.ID)})
 			}
 			e["fast_paths"] = fps
+		}
+		if c.SharesContext {
+			e["call_context"] = map[string]any{"enabled": st.ContextShared(c.Name), "description": c.CallContextDescription}
 		}
 		entries = append(entries, e)
 	}

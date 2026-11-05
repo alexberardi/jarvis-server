@@ -654,6 +654,7 @@ def describe(commands: dict) -> dict:
                           "associated_service": _optional(cmd, "associated_service"),
                           "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name),
                           "context_operations": _context_ops(cmd),
+                          "call_context_description": _optional(cmd, "call_context_description"),
                           "takes_over_playback_binary": _takeover(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
