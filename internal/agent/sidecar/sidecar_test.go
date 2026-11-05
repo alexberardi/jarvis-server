@@ -265,3 +265,18 @@ func TestSidecarTakeoverHook(t *testing.T) {
 		t.Fatalf("hook calls %q, want %q", h.calls, want)
 	}
 }
+
+// What a command shares with call plans, for the user: its own call_context_description,
+// else its first operation's description.
+func TestContextDescription(t *testing.T) {
+	ops := []json.RawMessage{json.RawMessage(`{"name":"availability","description":"Free/busy windows"}`)}
+	if got := contextDescription("  Your free and busy times  ", ops); got != "Your free and busy times" {
+		t.Fatalf("own: %q", got)
+	}
+	if got := contextDescription("", ops); got != "Free/busy windows" {
+		t.Fatalf("fallback: %q", got)
+	}
+	if got := contextDescription("", nil); got != "" {
+		t.Fatalf("none: %q", got)
+	}
+}

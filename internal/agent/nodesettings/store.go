@@ -76,9 +76,13 @@ type settingsFile struct {
 	Disabled []string `json:"disabled_commands"`
 	// DisabledFastPaths are the fast-path patterns turned off (the fast_path_registry push),
 	// as "command/pattern_id": sparse, enabled is the default (N:'s disabled_fast_paths table).
-	DisabledFastPaths []string                     `json:"disabled_fast_paths,omitempty"`
-	Data              map[string]map[string]record `json:"command_data"`
-	NextSeq           int64                        `json:"next_seq,omitempty"`
+	DisabledFastPaths []string `json:"disabled_fast_paths,omitempty"`
+	// NoContextSharing are the commands switched out of sharing with call plans (the
+	// context_sharing push, "Share with phone calls"): sparse, sharing is the default
+	// (docs/decisions/2026-11-05-call-plan-node-context.md).
+	NoContextSharing []string                     `json:"context_sharing_disabled,omitempty"`
+	Data             map[string]map[string]record `json:"command_data"`
+	NextSeq          int64                        `json:"next_seq,omitempty"`
 }
 
 // OpenStore loads the store for nodeID from dir. Files written for another node (an earlier sign-in)
@@ -305,6 +309,26 @@ func (st *Store) FastPathEnabled(command, patternID string) bool {
 }
 
 // SetFastPathEnabled turns a command's fast-path pattern on or off.
+// ContextShared reports whether command answers context queries (call plans): on unless the
+// household switched it off.
+func (st *Store) ContextShared(command string) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return !slices.Contains(st.s.NoContextSharing, command)
+}
+
+// SetContextShared switches command's sharing with call plans on or off.
+func (st *Store) SetContextShared(command string, on bool) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := slices.DeleteFunc(slices.Clone(st.s.NoContextSharing), func(c string) bool { return c == command })
+	if !on {
+		out = append(out, command)
+	}
+	st.s.NoContextSharing = out
+	return st.saveLocked()
+}
+
 func (st *Store) SetFastPathEnabled(command, patternID string, on bool) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()

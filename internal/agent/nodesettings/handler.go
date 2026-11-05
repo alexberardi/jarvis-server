@@ -324,6 +324,20 @@ func (h *Handler) apply(configType string, data map[string]any) error {
 		}
 		h.Log.Info("config: fast path switched", "command", name, "pattern", id, "enabled", on)
 		return h.Store.SetFastPathEnabled(name, id, on)
+	case configType == "context_sharing":
+		// A command's "Share with phone calls" switch: whether it answers call plans' context
+		// queries (docs/decisions/2026-11-05-call-plan-node-context.md).
+		name := text(data["command_name"])
+		if data["command_name"] == nil || name == "" {
+			h.Log.Warn("config: context_sharing push without command_name")
+			return nil
+		}
+		on := true
+		if v, ok := data["enabled"]; ok {
+			on = truthy(text(v))
+		}
+		h.Log.Info("config: context sharing switched", "command", name, "enabled", on)
+		return h.Store.SetContextShared(name, on)
 	case configType == "node_config", configType == "agent_registry",
 		strings.HasPrefix(configType, "auth:"):
 		// node_config is the Pi's update/egress consent (the agent updates itself differently);

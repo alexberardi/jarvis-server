@@ -1,0 +1,50 @@
+[
+  {
+    "name": "dentist-fits-calendar",
+    "request": "Call Bright Smiles Dental and book me a cleaning next week that fits my calendar",
+    "contact": {
+      "name": "Bright Smiles Dental",
+      "number": "+17325550199"
+    },
+    "node_context": {
+      "availability": {
+        "free": [
+          "Mon 5-8pm",
+          "Tue 5-8pm",
+          "Wed 1-5pm",
+          "Thu 2-5pm"
+        ],
+        "busy": [
+          "Mon 9am-5pm (Work)",
+          "Tue 9am-5pm (Work)"
+        ]
+      },
+      "call_context": {
+        "dental_plan": [
+          {
+            "key": "dental_member_id",
+            "label": "Dental insurance member ID",
+            "value": "DX-77120",
+            "tier": "if_asked"
+          }
+        ]
+      }
+    },
+    "callee": "You are Dana, the receptionist at Bright Smiles Dental. Greet with \"Bright Smiles Dental, this is Dana.\" For a cleaning next week, first offer Tuesday at 10 AM. If that doesn't work, offer Wednesday at 2 PM. Once a time is agreed, ask for the patient's name and their dental insurance member ID, read the appointment back, and say goodbye.",
+    "expect": {
+      "achieved": true,
+      "card": [
+        "Wednesday"
+      ],
+      "says": [
+        "DX77120"
+      ]
+    },
+    "call_context": [
+      {
+        "key": "full_name",
+        "value": "Jordan Avery"
+      }
+    ]
+  }
+]

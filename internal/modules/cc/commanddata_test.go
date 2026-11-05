@@ -21,12 +21,16 @@ type fakeDataNode struct {
 	ops   []string
 }
 
-func (e *env) dataNode(n testNode) *fakeDataNode {
+func (e *env) dataNode(n testNode) *fakeDataNode { return e.respondingNode(n, "command-data") }
+
+// respondingNode is a node that answers its jarvis/nodes/{id}/{sub}/{op} requests (command
+// data, context queries) as dataNode describes.
+func (e *env) respondingNode(n testNode, sub string) *fakeDataNode {
 	e.t.Helper()
 	f := &fakeDataNode{}
 	c := e.dialNode(n)
-	c.subscribe("jarvis/nodes/" + n.id + "/command-data/+")
-	prefix := "jarvis/nodes/" + n.id + "/command-data/"
+	c.subscribe("jarvis/nodes/" + n.id + "/" + sub + "/+")
+	prefix := "jarvis/nodes/" + n.id + "/" + sub + "/"
 	go func() {
 		for pk := range c.in {
 			if pk.FixedHeader.Type != packets.Publish || !strings.HasPrefix(pk.TopicName, prefix) {

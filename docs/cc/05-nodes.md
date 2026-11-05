@@ -141,7 +141,7 @@ The broker is the URL from discovery or `JARVIS_MQTT_BROKER_URL`, default `mqtt:
 | 18 | `jarvis/nodes/{nid}/package-revert` | CC→node | `{request_id,command_name,package_name}` | POST `…/package-revert/{rid}/results` | 12 |
 | 19 | `jarvis/nodes/{nid}/test-install` | CC→node | `{request_id}` | GET `…/test-install/{rid}/verify`, POST `…/results` | 12 |
 | 20 | `jarvis/nodes/{nid}/command-data/{op}` op∈`commands,schema,list,get,create,update,delete` | CC→node | JSON incl. `correlation_id` | node publishes **`…/command-data/{op}/response/{correlation_id}`** (QoS 1); CC waits 10 s → 504 | 12 |
-| 21 | `jarvis/nodes/{nid}/context/query` (node also accepts `context/operations`; CC never sends it) | CC→node | JSON incl. `correlation_id`, `operation`, `params`, `user_id` | **`…/context/query/response/{correlation_id}`**; 8 s per node, tries nodes in liveness order | 10 |
+| 21 | `jarvis/nodes/{nid}/context/query` and `context/operations` (the call plan lists each node's `call_context` providers, then queries each by `command`) | CC→node | JSON incl. `correlation_id`, `operation`, `params`, `user_id`, optional `command` | **`…/context/{query,operations}/response/{correlation_id}`**; a call plan asks every live node in parallel within 5 s (`cc/nodecontext.go`) | 10 |
 | 22 | `jarvis/auth/{provider}/ready` | CC→**all nodes** | `{provider,node_id,session_id,user_id}` | node filters on `node_id`, pulls creds over HTTP | 07 |
 
 Nodes publish **only** response topics (rows 20 and 21). Every other node→CC message goes over HTTP.

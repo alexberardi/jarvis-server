@@ -194,3 +194,20 @@ func TestContextNoProviders(t *testing.T) {
 		t.Fatalf("query = %v", got)
 	}
 }
+
+// A command switched out of sharing with call plans is invisible to them: not listed, and
+// not answerable even when named.
+func TestContextSharingSwitch(t *testing.T) {
+	c, f, st := newContext(t)
+	if err := st.SetContextShared("calendar", false); err != nil {
+		t.Fatal(err)
+	}
+	_, b := c.Handle(context.Background(), ctxTopic+"operations", []byte(`{"correlation_id":"c1"}`))
+	if strings.Contains(string(b), `"command_name":"calendar"`) || !strings.Contains(string(b), "other_calendar") {
+		t.Fatalf("operations = %s", b)
+	}
+	got := askContext(t, c, "query", `{"correlation_id":"c1","command":"calendar","operation":"availability","params":{"start":"9","end":"17"}}`)
+	if got["ok"] != false || len(f.calls) != 0 {
+		t.Fatalf("query = %v, calls %v", got, f.calls)
+	}
+}

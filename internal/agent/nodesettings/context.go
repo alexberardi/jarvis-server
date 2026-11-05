@@ -29,6 +29,9 @@ const MaxContextResponse = 128 << 10
 type ContextCommand struct {
 	Name       string            `json:"command_name"`
 	Operations []json.RawMessage `json:"operations"`
+	// Description says, for the user, what the command shares with call plans (its
+	// call_context_description); shown in the app, not sent with the operations.
+	Description string `json:"-"`
 }
 
 // ContextProviders are the commands that can answer context queries (the sidecar's).
@@ -53,8 +56,9 @@ func (c *Context) commands() []ContextCommand {
 	}
 	var out []ContextCommand
 	for _, cmd := range c.Providers.ContextCommands() {
-		// A command the household turned off is not installed as far as the planner knows.
-		if c.Store == nil || c.Store.Enabled(cmd.Name) {
+		// A command the household turned off, or switched out of sharing with call plans, is not
+		// installed as far as the planner knows.
+		if c.Store == nil || (c.Store.Enabled(cmd.Name) && c.Store.ContextShared(cmd.Name)) {
 			out = append(out, cmd)
 		}
 	}
@@ -264,6 +268,10 @@ func (c *Context) query(ctx context.Context, p cdPayload) map[string]any {
 		out[k] = raw
 	}
 	out["command_name"], out["operation"] = cmd.Name, operation
+	if cmd.Description != "" {
+		// What the command shares, for the plan card (its call_context_description).
+		out["description"] = cmd.Description
+	}
 	return out
 }
 

@@ -653,3 +653,34 @@ func TestFastPathSwitches(t *testing.T) {
 		t.Fatal("switched back on: still off")
 	}
 }
+
+// "Share with phone calls": the context_sharing push switches it, the store keeps it, and the
+// snapshot shows it with what the command shares, for commands that share anything.
+func TestContextSharingPushAndSnapshot(t *testing.T) {
+	h, f, dir := newHandler(t, "n1")
+	if err := h.apply("context_sharing", map[string]any{"command_name": "calendar", "enabled": "false"}); err != nil {
+		t.Fatal(err)
+	}
+	if h.Store.ContextShared("calendar") || !h.Store.ContextShared("shoprite") {
+		t.Fatal("switch not applied to just that command")
+	}
+	if again, err := OpenStore(dir, "n1"); err != nil || again.ContextShared("calendar") {
+		t.Fatalf("switch not kept: %v", err)
+	}
+	h.Commands = func(context.Context) []Command {
+		return []Command{{Name: "calendar", SharesContext: true, CallContextDescription: "Your free and busy times"},
+			{Name: "tell_joke"}}
+	}
+	if err := h.Store.SaveK2(testKey, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	h.Handle(context.Background(), TopicSettingsRequest, []byte(`{"request_id":"r1","node_id":"n1"}`))
+	cmds := decryptUpload(t, f, h, "r1")["commands"].([]any)
+	cc, _ := cmds[0].(map[string]any)["call_context"].(map[string]any)
+	if cc["enabled"] != false || cc["description"] != "Your free and busy times" {
+		t.Fatalf("calendar call_context = %v", cc)
+	}
+	if _, ok := cmds[1].(map[string]any)["call_context"]; ok {
+		t.Fatal("a command that shares nothing got a switch")
+	}
+}

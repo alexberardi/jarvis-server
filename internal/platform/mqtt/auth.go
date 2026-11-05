@@ -61,10 +61,12 @@ func CanSubscribe(nodeID, filter string) bool {
 }
 
 // CanPublish reports whether a node may publish to topic (D4): only responses under its own
-// subtree, i.e. the two request/response shapes in doc 05 §2.4 rows 20 and 21:
+// subtree, i.e. the request/response shapes in doc 05 §2.4 rows 20 and 21, and the context
+// handler's operations listing (a call plan asks which commands offer call_context,
+// docs/decisions/2026-11-05-call-plan-node-context.md):
 //
 //	jarvis/nodes/{id}/command-data/{op}/response/{correlation_id}
-//	jarvis/nodes/{id}/context/query/response/{correlation_id}
+//	jarvis/nodes/{id}/context/{query,operations}/response/{correlation_id}
 func CanPublish(nodeID, topic string) bool {
 	rest, ok := strings.CutPrefix(topic, "jarvis/nodes/"+nodeID+"/")
 	if !ok {
@@ -74,7 +76,7 @@ func CanPublish(nodeID, topic string) bool {
 	if len(l) != 4 || l[2] != "response" || l[3] == "" || strings.ContainsAny(l[3], "+#") {
 		return false
 	}
-	return (l[0] == "command-data" && commandDataOps[l[1]]) || (l[0] == "context" && l[1] == "query")
+	return (l[0] == "command-data" && commandDataOps[l[1]]) || (l[0] == "context" && (l[1] == "query" || l[1] == "operations"))
 }
 
 // validNodeID rejects IDs that would let a node's subtree overlap another's or a wildcard.

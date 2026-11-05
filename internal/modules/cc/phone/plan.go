@@ -2,10 +2,12 @@ package phone
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -181,10 +183,16 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 
 	initiator := s.initiatorName(ctx, req.UserID)
 	details := s.draftDetails(ctx, req.Business, req.Goal, initiator)
-	details = s.applyAvailability(ctx, hh, req.Goal, details, req.UserID)
-	if block := BuildContextBlock(SelectForCall(s.loadCallContext(ctx, req.UserID))); block != "" {
+	details, calendarSource := s.applyAvailability(ctx, hh, req.Goal, details, req.UserID)
+	var nodeFields []ContextField
+	if s.NodeContext != nil {
+		nodeFields = s.NodeContext.CallContext(ctx, hh, req.UserID, req.Business, req.Goal)
+	}
+	fields := mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields)
+	if block := BuildContextBlock(fields); block != "" {
 		details = strings.TrimRight(details, " \t\n\r\v\f") + "\n\n" + block
 	}
+	contextNote := sharedByNote(calendarSource, fields)
 	if req.PriorContext != "" {
 		details = strings.TrimRight(details, " \t\n\r\v\f") + "\n\n" + req.PriorContext
 	}
@@ -196,6 +204,7 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 		Details: details, ResolvedNumber: resolved, LineType: lineType, State: StateDraft,
 		ErrandID: req.ErrandID, ErrandStep: req.ErrandStep, CreatedAt: now,
 		ExpiresAt: now.Add(time.Duration(ttl) * time.Minute), ContactAddress: searchAddress,
+		NodeContextJSON: guardedNodeFields(fields),
 	}
 	if contact != nil {
 		sess.ContactID, sess.ContactName = contact.ID, contact.Name
@@ -205,11 +214,11 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 	}
 	if _, err := s.DB.Write.ExecContext(ctx, `INSERT INTO cc_phone_call_sessions
 		(id, household_id, user_id, contact_id, contact_name, contact_address, goal, details, resolved_number,
-		 line_type, state, errand_id, errand_step, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
+		 line_type, state, errand_id, errand_step, created_at, expires_at, node_context_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
 		sess.ID, hh, nullInt(req.UserID), nullStr(sess.ContactID), sess.ContactName, nullStr(sess.ContactAddress),
 		sess.Goal, sess.Details, nullStr(resolved), lineType, nullStr(req.ErrandID), nullInt(req.ErrandStep),
-		dbTime(now), dbTime(sess.ExpiresAt)); err != nil {
+		dbTime(now), dbTime(sess.ExpiresAt), nullStr(sess.NodeContextJSON)); err != nil {
 		return "", err
 	}
 
@@ -247,7 +256,7 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 		Title:   "📞 Call plan: " + sess.ContactName,
 		Summary: req.Goal + mobileNote,
 		Body: warningLine + "Review the number and details, then tap **Call now**. " +
-			resolutionNote + sourceLine + " The call will open with an AI + recording disclosure." + mobileNote,
+			resolutionNote + sourceLine + contextNote + " The call will open with an AI + recording disclosure." + mobileNote,
 		Metadata: meta,
 	})
 	return sess.ID, nil
@@ -507,11 +516,18 @@ func formatAvailability(free, busy []string) string {
 	return strings.Join(parts, "\n")
 }
 
+// availabilityPlaceholderRE is a drafted line that only asks for times ("If asked: (provide your
+// availability for next week)"): misleading once the calendar's real times are in the brief.
+var availabilityPlaceholderRE = regexp.MustCompile(`(?i)^[^:()]*:\s*\([^)]*(availability|fill in)[^)]*\)\s*$`)
+
 func stripTimesPlaceholder(details string) string {
 	var kept []string
 	for _, line := range splitLines(details) {
 		l := strings.ToLower(line)
 		if strings.HasPrefix(l, "acceptable times:") && (strings.Contains(l, "fill in") || strings.Contains(l, "unavailable")) {
+			continue
+		}
+		if availabilityPlaceholderRE.MatchString(strings.TrimSpace(line)) {
 			continue
 		}
 		kept = append(kept, line)
@@ -523,13 +539,13 @@ var errNoCalendar = errors.New("no availability provider")
 
 // applyAvailability bakes real calendar availability into a scheduling brief at plan time
 // (the call itself never gets a calendar). Degrades to the placeholder in every direction.
-func (s *Service) applyAvailability(ctx context.Context, hh, goal, details string, uid *int64) string {
+func (s *Service) applyAvailability(ctx context.Context, hh, goal, details string, uid *int64) (string, string) {
 	if !isSchedulingGoal(goal, details) {
-		return details
+		return details, ""
 	}
 	l := strings.ToLower(details)
 	if strings.Contains(l, "acceptable times") && !strings.Contains(l, "(fill in") {
-		return details
+		return details, ""
 	}
 	var ans AvailabilityAnswer
 	err := errNoCalendar
@@ -538,15 +554,89 @@ func (s *Service) applyAvailability(ctx context.Context, hh, goal, details strin
 		ans, err = s.Calendar.Availability(ctx, hh, uid, day, day.AddDate(0, 0, 7))
 	}
 	if err != nil {
-		return ensureTimesSection(goal, details)
+		return ensureTimesSection(goal, details), ""
 	}
 	if !ans.OK {
 		return strings.TrimRight(stripTimesPlaceholder(details), " \t\n\r\v\f") +
-			"\nAcceptable times: (calendar unavailable — fill in your availability)"
+			"\nAcceptable times: (calendar unavailable — fill in your availability)", ""
 	}
 	env := formatAvailability(ans.Free, ans.Busy)
 	if env == "" {
-		return ensureTimesSection(goal, details)
+		return ensureTimesSection(goal, details), ""
 	}
-	return strings.TrimRight(stripTimesPlaceholder(details), " \t\n\r\v\f") + "\n" + env
+	return strings.TrimRight(stripTimesPlaceholder(details), " \t\n\r\v\f") + "\n" + env,
+		sharedBy(ans.Source, ans.SourceDescription)
+}
+
+// mergeContext is the user's saved details plus what the household's commands contributed;
+// the user's own entry wins a key both have.
+func mergeContext(user, node []ContextField) []ContextField {
+	have := map[string]bool{}
+	for _, f := range user {
+		have[f.Key] = true
+	}
+	out := append([]ContextField(nil), user...)
+	for _, f := range node {
+		if !have[f.Key] {
+			have[f.Key] = true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// guardedNodeFields is the commands' give-if-asked fields as the session keeps them for the
+// call's guard ("" when none).
+func guardedNodeFields(fields []ContextField) string {
+	var keep []ContextField
+	for _, f := range RestrictedFields(fields) {
+		if f.Source != "" {
+			keep = append(keep, f)
+		}
+	}
+	if len(keep) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(keep)
+	return string(b)
+}
+
+// sharedBy is one command's entry on the plan card: its name, and what it says it shares.
+func sharedBy(cmd, description string) string {
+	n := commandLabel(cmd)
+	if n == "" {
+		return ""
+	}
+	if d := strings.TrimRight(strings.TrimSpace(description), "."); d != "" {
+		n += " (" + strings.ToLower(d[:1]) + d[1:] + ")"
+	}
+	return n
+}
+
+// sharedByNote lists, on the plan card, the commands whose context is in the details.
+func sharedByNote(calendar string, fields []ContextField) string {
+	var names []string
+	add := func(n string) {
+		if n != "" && !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	add(calendar)
+	for _, f := range fields {
+		add(sharedBy(f.Source, f.SourceDescription))
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return " Shared with this plan by your commands: " + strings.Join(names, "; ") + ". Edit the details above to leave anything out."
+}
+
+// commandLabel is a command's name for people: get_calendar_events → "Calendar events".
+func commandLabel(cmd string) string {
+	cmd = strings.TrimPrefix(strings.TrimSpace(cmd), "get_")
+	if cmd == "" {
+		return ""
+	}
+	w := strings.ReplaceAll(cmd, "_", " ")
+	return strings.ToUpper(w[:1]) + w[1:]
 }

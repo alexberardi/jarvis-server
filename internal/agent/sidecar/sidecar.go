@@ -188,6 +188,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			DataBrowser *nodesettings.DataCommand `json:"data_browser"`
 			Package     string                    `json:"package"`
 			ContextOps  []json.RawMessage         `json:"context_operations"`
+			ContextDesc string                    `json:"call_context_description"`
 			Player      string                    `json:"takes_over_playback_binary"`
 			extras
 		} `json:"tools"`
@@ -211,7 +212,8 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		if t.Package != "" {
 			s.pkgOf[t.Name] = t.Package
 		}
-		s.context = append(s.context, nodesettings.ContextCommand{Name: t.Name, Operations: t.ContextOps})
+		s.context = append(s.context, nodesettings.ContextCommand{Name: t.Name, Operations: t.ContextOps,
+			Description: contextDescription(t.ContextDesc, t.ContextOps)})
 		if t.Player != "" {
 			s.player[t.Name] = t.Player
 		}
@@ -241,8 +243,14 @@ func (s *Sidecar) Commands() []nodesettings.Command {
 	for _, t := range s.tools {
 		desc, _ := t.Command["description"].(string)
 		x := s.extras[t.Name]
-		out = append(out, nodesettings.Command{Name: t.Name, Description: desc, Secrets: s.secrets[t.Name],
-			AssociatedService: x.AssociatedService, SetupGuide: x.SetupGuide})
+		c := nodesettings.Command{Name: t.Name, Description: desc, Secrets: s.secrets[t.Name],
+			AssociatedService: x.AssociatedService, SetupGuide: x.SetupGuide}
+		for _, cc := range s.context {
+			if cc.Name == t.Name && len(cc.Operations) > 0 {
+				c.SharesContext, c.CallContextDescription = true, cc.Description
+			}
+		}
+		out = append(out, c)
 	}
 	return out
 }
@@ -599,4 +607,21 @@ func (s *Sidecar) storage(method string, raw json.RawMessage) (any, error) {
 		return s.store.DeleteAllData(p.Command)
 	}
 	return nil, fmt.Errorf("unknown storage method %q", method)
+}
+
+// contextDescription is what a command shares with call plans, for the user: its
+// call_context_description, else its first operation's description.
+func contextDescription(own string, ops []json.RawMessage) string {
+	if strings.TrimSpace(own) != "" {
+		return strings.TrimSpace(own)
+	}
+	for _, raw := range ops {
+		var op struct {
+			Description string `json:"description"`
+		}
+		if json.Unmarshal(raw, &op) == nil && op.Description != "" {
+			return op.Description
+		}
+	}
+	return ""
 }
