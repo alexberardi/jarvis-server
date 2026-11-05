@@ -1023,6 +1023,14 @@ jobs:
           Write-Host ($old | ConvertTo-Json)
           if (-not $old.definition_stale) { throw 'the rc4 definition is not reported stale' }
           $up = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl "$env:BASE/next" -Yes | Out-String
+          # rc4's upgrader predates the Windows rename retry (#129): Defender scanning the running
+          # exe fails its swap ("being used by another process") before anything changes. Retry
+          # once, only from that clean state; a failure after the swap still fails.
+          if ($LASTEXITCODE -ne 0 -and (& $exe version) -eq $env:V0) {
+            Write-Host "rc4's upgrade failed before its swap; retrying once: $up"
+            Start-Sleep -Seconds 10
+            $up = & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -BaseUrl "$env:BASE/next" -Yes | Out-String
+          }
           if ($LASTEXITCODE -ne 0) { throw "upgrade from rc4 failed: $up" }
           Write-Host $up
           if ($up -notmatch "jarvisd $env:V2 is up and healthy") { throw 'no healthy upgrade reported' }

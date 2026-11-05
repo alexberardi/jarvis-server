@@ -8,8 +8,9 @@ name: cloud-live
 #   - TestCloudLive (cc): real voice turns through the Cloud prompt with a real node's tool
 #     set: a client tool round trip on the blocking routes, then one on the streaming routes.
 # Runs on pull requests from this repository that touch the model or command-center code (so a
-# provider's refusal is found before merge), on push to main, weekly and on demand. Never on
-# fork PRs: they get no secrets. Without any secret it warns and passes.
+# provider's refusal is found before merge), daily and on demand. Not on push to main: what
+# merged already passed it on its PR, and a provider timeout there only turned main red. Never
+# on fork PRs: they get no secrets. Without any secret it warns and passes.
 on:
   pull_request:
     paths:
@@ -17,10 +18,8 @@ on:
       - "internal/modules/cc/**"
       - "fixtures/golden/prompts/**"
       - ".github/workflows/cloud-live.yml"
-  push:
-    branches: [main]
   schedule:
-    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+    - cron: "17 6 * * *" # daily 06:17 UTC
   workflow_dispatch:
 
 permissions:
