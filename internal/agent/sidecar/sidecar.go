@@ -247,6 +247,20 @@ func (s *Sidecar) Commands() []nodesettings.Command {
 	return out
 }
 
+// UserSecrets are the commands' declared secrets as uid sees them (required_secrets read with
+// that user set), for that user's settings snapshot: Commands' lists were read at start with no
+// user, so a package whose fields follow a user-scoped setting (email's IMAP fields once that
+// user's EMAIL_PROVIDER is not gmail) shows only its defaults there.
+func (s *Sidecar) UserSecrets(_ context.Context, uid int64) (map[string][]nodesettings.SecretSpec, error) {
+	var res struct {
+		Secrets map[string][]nodesettings.SecretSpec `json:"secrets"`
+	}
+	if err := s.roundTrip("user_secrets", map[string]any{"user_id": uid}, &res); err != nil {
+		return nil, err
+	}
+	return res.Secrets, nil
+}
+
 // DataCommands are the commands' mobile data-browser settings, read once at start.
 func (s *Sidecar) DataCommands() []nodesettings.DataCommand { return s.browser }
 

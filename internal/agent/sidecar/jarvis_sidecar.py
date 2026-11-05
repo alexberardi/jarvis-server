@@ -21,6 +21,8 @@ JSON-lines requests on stdin:
     <- {"id": 6, "result": {"due": [{"id", "text", "user_id"}, ...], "pending": N}}
     -> {"id": 7, "method": "agent_run", "params": {"name": "comfyui_jobs"}}
     <- {"id": 7, "result": {"alerts": [{Alert.to_dict()}, ...]} | {"error": "..."}}
+    -> {"id": 8, "method": "user_secrets", "params": {"user_id": 7}}
+    <- {"id": 8, "result": {"secrets": {"command_name": [{secret}, ...]}}}   as that user
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
 A Pi's packages may also have background agents (the listing's "agents": IJarvisAgent
@@ -1177,6 +1179,18 @@ def _secrets_of(obj, name: str) -> list:
     return out
 
 
+def user_secrets(commands: dict, params: dict) -> dict:
+    """Every command's required_secrets as the requesting user, for that user's settings
+    snapshot (N:'s build_snapshot sets the user too): a package whose fields follow a user-scoped
+    setting (email's IMAP fields once EMAIL_PROVIDER is "proton") lists them. describe's list
+    was read with no user, so it shows only the defaults."""
+    set_current_user_id(params.get("user_id"))
+    try:
+        return {"secrets": {name: _secrets(cmd) for name, cmd in commands.items()}}
+    finally:
+        set_current_user_id(None)
+
+
 def context_query(commands: dict, params: dict) -> dict:
     """Run one declared context operation (the agent has checked it is declared and its required
     params are there) as the requesting user, as on a voice turn. A raise comes back as
@@ -1423,6 +1437,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": DEVICE_METHODS[method](msg.get("params") or {})}
             elif method == "store_auth":
                 reply = {"id": msg_id, "result": store_auth(commands, msg.get("params") or {})}
+            elif method == "user_secrets":
+                reply = {"id": msg_id, "result": user_secrets(commands, msg.get("params") or {})}
             elif method == "context_query":
                 reply = {"id": msg_id, "result": context_query(commands, msg.get("params") or {})}
             elif method == "agent_run":

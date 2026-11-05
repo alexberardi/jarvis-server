@@ -154,6 +154,50 @@ func TestSidecarStorageReachesTheAgentsSettings(t *testing.T) {
 	}
 }
 
+// A command's fields can follow a user-scoped setting (email's IMAP fields once that user's
+// provider isn't gmail): describe reads them with no user, so only the defaults; UserSecrets
+// reads them as the user asking, and leaves no user set behind.
+func TestSidecarUserSecretsFollowTheUsersSettings(t *testing.T) {
+	py := python(t)
+	ctx := context.Background()
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seven, eight := int64(7), int64(8)
+	_ = st.SetSecret("MAIL_PROVIDER", "proton", "user", "", &seven)
+	sc, err := Start(ctx, py, "testdata/usersecrets", slog.New(slog.NewTextHandler(io.Discard, nil)), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+
+	keys := func(specs []nodesettings.SecretSpec) []string {
+		var out []string
+		for _, s := range specs {
+			out = append(out, s.Key)
+		}
+		return out
+	}
+	if cmds := sc.Commands(); len(cmds) != 1 || !slices.Equal(keys(cmds[0].Secrets), []string{"MAIL_PROVIDER"}) {
+		t.Fatalf("describe (no user) = %+v", cmds)
+	}
+	per, err := sc.UserSecrets(ctx, seven)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keys(per["mailbox"]); !slices.Equal(got, []string{"MAIL_PROVIDER", "MAIL_IMAP_HOST"}) {
+		t.Fatalf("user 7 (proton) = %v", got)
+	}
+	if s := per["mailbox"][0]; s.Scope != "user" || !slices.Equal(s.EnumValues, []string{"gmail", "proton"}) {
+		t.Errorf("spec = %+v", s)
+	}
+	per, _ = sc.UserSecrets(ctx, eight)
+	if got := keys(per["mailbox"]); !slices.Equal(got, []string{"MAIL_PROVIDER"}) {
+		t.Fatalf("user 8 (unset) = %v", got)
+	}
+}
+
 // describe carries each command's data-browser settings (a command whose settings fail stays
 // out), and get_all hands a command each record's key and expiry, as the Pi's repository does.
 func TestSidecarDataBrowserSettingsAndGetAll(t *testing.T) {

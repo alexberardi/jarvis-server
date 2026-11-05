@@ -33,6 +33,11 @@ type Handler struct {
 	Store  *Store
 	// Commands lists what the snapshot shows, enabled or not.
 	Commands func(ctx context.Context) []Command
+	// UserSecrets, if set, are the commands' secrets as one user sees them (the sidecar's
+	// required_secrets read as that user): a snapshot for a user shows these in place of
+	// Commands' own, so fields that follow a user-scoped setting appear (N:'s build_snapshot
+	// sets the user too). A command missing from the map keeps its own.
+	UserSecrets func(ctx context.Context, uid int64) (map[string][]SecretSpec, error)
 	// Devices, if set, are the snapshot's device families and managers (a Pi's sidecar).
 	Devices func(ctx context.Context) Devices
 	// NodeConfig, if set, is the snapshot's node_config (a Pi's hardware and voice settings);
@@ -169,6 +174,17 @@ func (h *Handler) snapshot(ctx context.Context, rid string, include bool, uid *i
 	var cmds []Command
 	if h.Commands != nil {
 		cmds = h.Commands(ctx)
+	}
+	if uid != nil && h.UserSecrets != nil {
+		if per, err := h.UserSecrets(ctx, *uid); err != nil {
+			h.Log.Warn("settings: the user's secret fields", "err", err) // the defaults still go out
+		} else {
+			for i := range cmds {
+				if s, ok := per[cmds[i].Name]; ok {
+					cmds[i].Secrets = s
+				}
+			}
+		}
 	}
 	var dev Devices
 	if h.Devices != nil {
