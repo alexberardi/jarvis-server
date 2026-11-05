@@ -22,3 +22,6 @@ the household scope), so the guide needs no commands at all.
 
 **Not done.** Letting the admin add a household's own value for any household-scoped key (a
 multi-household install with one account per household still needs it per household).
+
+**Follow-up:** the [2026-11-04 household settings decision](2026-11-04-phone-inbound-household-settings.md)
+completes this UI path while retaining the default and ownership rules above.

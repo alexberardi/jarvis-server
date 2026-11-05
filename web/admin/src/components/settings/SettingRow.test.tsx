@@ -67,7 +67,7 @@ describe('SettingRow household values', () => {
     expect(within(home).getByText('true')).toBeInTheDocument()
     expect(within(screen.getByTestId('household-value-hh-cabin')).getByText('false')).toBeInTheDocument()
     expect(screen.getByText('1 household uses the default')).toBeInTheDocument()
-    expect(screen.queryByText('Households can change this in the app')).toBeNull()
+    expect(screen.queryByText('No household overrides.')).toBeNull()
   })
 
   it('"Use default" removes that household\'s value', async () => {
@@ -102,9 +102,10 @@ describe('SettingRow household values', () => {
     await waitFor(() => expect(m.updateSetting).toHaveBeenCalledWith('cc', 'pantry.enabled', false, undefined))
   })
 
-  it('notes that households can change it when none has', () => {
+  it('offers to create the first household override', () => {
     renderRow(setting({ household_scoped: true, household_values: [], households_using_default: 3 }))
-    expect(screen.getByText('Households can change this in the app')).toBeInTheDocument()
+    expect(screen.getByText('No household overrides.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Set for a household' })).toBeInTheDocument()
     expect(screen.getByText('Default for all households')).toBeInTheDocument()
   })
 
@@ -126,7 +127,7 @@ describe('SettingRow household values', () => {
   it('leaves a system-only setting as it was', () => {
     renderRow(setting({ key: 'llm.prompt_provider', value_type: 'string', value: 'x' }))
     expect(screen.queryByText('Default for all households')).toBeNull()
-    expect(screen.queryByText('Households can change this in the app')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set for a household' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument()
   })
 })

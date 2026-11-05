@@ -33,8 +33,8 @@ import (
 // the household's concurrent cap or its daily cap is refused 486, so the PBX sends it to
 // voicemail; a call no household takes is refused 480, as before inbound existed.
 
-// Inbound setting keys (cc settings; household scope for enabled; not in the mobile household
-// settings yet).
+// Inbound setting keys support household overrides in the superuser settings UI. They are
+// deliberately outside the mobile household allowlist: enabling a shared line is install-wide.
 const (
 	SettingInboundEnabled       = "phone.inbound.enabled"
 	SettingInboundAnswerDelay   = "phone.inbound.answer_delay_seconds"
@@ -62,7 +62,7 @@ const (
 
 func intBetween(lo, hi int64) func(any) error {
 	return func(v any) error {
-		n, ok := v.(int64)
+		n, ok := wholeNumber(v)
 		if !ok || n < lo || n > hi {
 			return fmt.Errorf("a whole number from %d to %d", lo, hi)
 		}
@@ -72,24 +72,24 @@ func intBetween(lo, hi int64) func(any) error {
 
 func inboundDefinitions() []settings.Definition {
 	return []settings.Definition{
-		{Key: SettingInboundEnabled, Category: "phone_calls", Type: settings.Bool, Default: false,
+		{Key: SettingInboundEnabled, Category: "phone_calls", Type: settings.Bool, Default: false, Household: true,
 			Description: "Inbound calls: Jarvis answers the calls the PBX routes to the household's SIP extension as a " +
 				"receptionist (says it is an AI, asks who is calling and why, takes a message or hangs up on spam). " +
 				"Default off; a household's own value wins over this default, which on a one-household install is all it takes. " +
 				"Two households on one SIP account with inbound on get no calls. phone_calls.enabled must be on too. " +
 				"Callers get nothing of the household's."},
-		{Key: SettingInboundAnswerDelay, Category: "phone_calls", Type: settings.Int, Default: int64(0), Validate: intBetween(0, 60),
+		{Key: SettingInboundAnswerDelay, Category: "phone_calls", Type: settings.Int, Default: int64(0), Household: true, Validate: intBetween(0, 60),
 			Description: "Inbound calls: seconds an incoming call rings before Jarvis answers, so people in a ring group " +
 				"can pick up first (0 answers at once; for a direct route)."},
-		{Key: SettingInboundMaxSeconds, Category: "phone_calls", Type: settings.Int, Default: int64(defaultInboundMaxSeconds),
+		{Key: SettingInboundMaxSeconds, Category: "phone_calls", Type: settings.Int, Default: int64(defaultInboundMaxSeconds), Household: true,
 			Validate:    intBetween(30, 600),
 			Description: "Inbound calls: the longest an answered call may last; Jarvis then says goodbye and hangs up."},
-		{Key: SettingInboundCallsPerDay, Category: "phone_calls", Type: settings.Int, Default: int64(defaultInboundPerDay),
+		{Key: SettingInboundCallsPerDay, Category: "phone_calls", Type: settings.Int, Default: int64(defaultInboundPerDay), Household: true,
 			Validate:    intBetween(1, 500),
 			Description: "Inbound calls: how many Jarvis answers per household per day (UTC); later calls get busy (voicemail)."},
-		{Key: SettingInboundMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1), Validate: intBetween(1, 5),
+		{Key: SettingInboundMaxConcurrent, Category: "phone_calls", Type: settings.Int, Default: int64(1), Household: true, Validate: intBetween(1, 5),
 			Description: "Inbound calls: how many Jarvis answers at once per household; another gets busy (voicemail)."},
-		{Key: SettingInboundTransfers, Category: "phone_calls", Type: settings.JSON, Default: []any{},
+		{Key: SettingInboundTransfers, Category: "phone_calls", Type: settings.JSON, Default: []any{}, Household: true,
 			Validate: func(v any) error { _, err := parseTransferTargets(v); return err },
 			Description: "Inbound calls: who Jarvis may put a caller through to, and when, as a list of up to 5 " +
 				`{"label": "Alex", "number": "101", "when": "the caller is from Alex's school or says it is urgent"}` +

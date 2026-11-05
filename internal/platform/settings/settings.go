@@ -57,10 +57,9 @@ type Definition struct {
 	// Validate, when set, checks a value before Set stores it. nil (which clears the scope's
 	// value) is never validated. The error's text is shown to whoever wrote the value.
 	Validate func(v any) error
-	// Household says a household may set its own value, overriding the system one for that
-	// household only (the household scope of the cascade). The owning module marks the keys
-	// its household-facing routes allow (cc: the mobile household settings allowlist); the
-	// admin lists and edits each household's value of these keys.
+	// Household allows the superuser settings UI to manage household overrides of the system
+	// value. It does not grant household users write access; the owning module's household
+	// routes enforce their own allowlist (cc: the mobile household settings allowlist).
 	Household bool
 }
 
