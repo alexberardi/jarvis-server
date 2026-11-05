@@ -89,6 +89,7 @@ type fakeLLM struct {
 	streams   [][]llm.Message
 	drafts    []llm.ChatRequest
 	classifys int
+	assessed  []llm.ChatRequest // outcome assessments, in order
 }
 
 func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -109,6 +110,7 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 		f.classifys++
 		return &llm.ChatResponse{Content: f.verdict}, nil
 	default:
+		f.assessed = append(f.assessed, req)
 		return &llm.ChatResponse{Content: f.assess}, nil
 	}
 }

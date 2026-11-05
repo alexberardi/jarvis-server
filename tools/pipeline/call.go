@@ -36,6 +36,51 @@ type CallScenario struct {
 	// Answers are what the caller answers Jarvis's mid-call questions with ("The call needs your
 	// input"), in order; a question past the last goes unanswered.
 	Answers []string `json:"answers,omitempty"`
+	// Expect is what must hold for the scenario to pass.
+	Expect CallExpect `json:"expect"`
+}
+
+// CallExpect is a call scenario's checks. Text checks ignore case; Says and Never also match
+// with spaces, dashes and commas removed, so a number Jarvis reads digit by digit still counts.
+type CallExpect struct {
+	// Achieved is the result card's verdict (✅ true, ⚠️ false); nil accepts either.
+	Achieved *bool `json:"achieved,omitempty"`
+	// Card is text the result card must contain.
+	Card []string `json:"card,omitempty"`
+	// Says is text Jarvis must say during the call; Never is text it must not.
+	Says  []string `json:"says,omitempty"`
+	Never []string `json:"never,omitempty"`
+}
+
+// check reports what failed: the result card and everything Jarvis said.
+func (e CallExpect) check(card inboxItem, said string) []string {
+	var fails []string
+	achieved := strings.Contains(card.Title, "✅")
+	if e.Achieved != nil && achieved != *e.Achieved {
+		fails = append(fails, fmt.Sprintf("card verdict %v, want %v", achieved, *e.Achieved))
+	}
+	for _, t := range e.Card {
+		if !contains(card.Title+" "+card.Summary+" "+card.Body, t) {
+			fails = append(fails, fmt.Sprintf("card lacks %q", t))
+		}
+	}
+	for _, t := range e.Says {
+		if !contains(said, t) {
+			fails = append(fails, fmt.Sprintf("never said %q", t))
+		}
+	}
+	for _, t := range e.Never {
+		if contains(said, t) {
+			fails = append(fails, fmt.Sprintf("said %q", t))
+		}
+	}
+	return fails
+}
+
+func contains(text, want string) bool {
+	squash := strings.NewReplacer(" ", "", "-", "", ",", "", ".", "")
+	t, w := strings.ToLower(text), strings.ToLower(want)
+	return strings.Contains(t, w) || strings.Contains(squash.Replace(t), squash.Replace(w))
 }
 
 // calleeRules frame every persona: they are a person on a phone line, saying lines aloud.
@@ -52,6 +97,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	sandbox := fs.String("sandbox", "", "sandbox name (scripts/sandbox up --phone-sim)")
 	model := fs.String("model", "live", "model label the callee is played by (through the sandbox's tap)")
 	only := fs.String("only", "", "run only these scenarios (comma-separated names)")
+	repeat := fs.Int("repeat", 1, "run each scenario this many times and report its pass rate")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -100,11 +146,21 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	case <-time.After(200 * time.Millisecond):
 	}
 	failed := 0
-	for _, sc := range scs {
-		if err := runCall(ctx, d, env, cl, sc, stdout); err != nil {
-			failed++
-			fmt.Fprintf(stdout, "  ✗ %s: %v\n\n", sc.Name, err)
+	passes := make([]int, len(scs))
+	for i, sc := range scs {
+		for n := 0; n < *repeat; n++ {
+			if err := runCall(ctx, d, env, cl, sc, stdout); err != nil {
+				failed++
+				fmt.Fprintf(stdout, "  ✗ %s: %v\n\n", sc.Name, err)
+				continue
+			}
+			passes[i]++
+			fmt.Fprintf(stdout, "  ✓ %s\n\n", sc.Name)
 		}
+	}
+	fmt.Fprintln(stdout, "── pass rate")
+	for i, sc := range scs {
+		fmt.Fprintf(stdout, "  %d/%d  %s\n", passes[i], *repeat, sc.Name)
 	}
 	if failed > 0 {
 		return errFailed{failed}
@@ -184,6 +240,9 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 		return fmt.Errorf("no result card: %w", err)
 	}
 	fmt.Fprintf(stdout, "\n📬 %s\n%s\n\n", result.Title, indent(result.Body))
+	if fails := sc.Expect.check(result, cl.saidSoFar()); len(fails) > 0 {
+		return errors.New(strings.Join(fails, "; "))
+	}
 	return nil
 }
 
@@ -195,7 +254,14 @@ type callee struct {
 	mu       sync.Mutex
 	persona  string
 	messages []map[string]string
+	said     []string // everything Jarvis said on this call
 	ended    chan struct{}
+}
+
+func (c *callee) saidSoFar() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.Join(c.said, " ")
 }
 
 // expect readies the callee for the next call and returns a channel closed when it ends.
@@ -204,6 +270,7 @@ func (c *callee) expect(persona string) <-chan struct{} {
 	defer c.mu.Unlock()
 	c.persona = persona
 	c.messages = nil
+	c.said = nil
 	c.ended = make(chan struct{})
 	return c.ended
 }
@@ -219,6 +286,7 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(c.out, "   🤖 %s\n", said)
 	}
 	c.mu.Lock()
+	c.said = append(c.said, t.Said...)
 	ended := c.ended
 	persona := c.persona
 	switch {

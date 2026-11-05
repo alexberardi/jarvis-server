@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/timewindow"
@@ -67,7 +68,13 @@ type turnPipeline struct {
 	timesFromCaller bool
 	// given are the restricted fields already spoken on this call (asked for and cleared): a
 	// read-back of one is them checking what we said, not fishing for it.
-	given        map[string]bool
+	given map[string]bool
+	// answers are the caller's mid-call decisions ("asked Q, answered A"), which update the
+	// goal for the outcome assessment.
+	answers []string
+	// answered maps each question the caller answered (normalized) to the answer, so the same
+	// question is never put to them twice on one call.
+	answered     map[string]string
 	restricted   []live.RestrictedField
 	bargedIn     bool   // the current turn's utterance cut the last reply off
 	announcement string // the first utterance was a recorded intercept (set once, then the call ends)
@@ -509,6 +516,16 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int
 // feeds the answer back to the model or falls back to "I'll call you back" and ends.
 func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms callLine, modelSpoke bool) ([]int16, string) {
 	s := p.s
+	who := p.rt.brief.InitiatorName
+	if who == "" {
+		who = "The user"
+	}
+	if prior, done := p.answered[normQuestion(question)]; done {
+		// Already answered on this call: hand the model the answer instead of asking again.
+		p.messages = append(p.messages, chatMsg{"user", "[" + who + " already answered that: \"" + prior +
+			"\". Do not ask " + who + " again; use the answer with the business now.]"})
+		return p.replyAfterEscalation(ctx, ms, question, "")
+	}
 	if !p.rt.escalation.Open() {
 		pcm, _ := s.synthesize(ctx, live.EscalationFallbackLine)
 		ms.requestHangup()
@@ -524,10 +541,6 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		holdSaid = live.HoldLine
 		ms.speak(hold)
 	}
-	who := p.rt.brief.InitiatorName
-	if who == "" {
-		who = "The user"
-	}
 	answer, ok := p.rt.escalation.Wait(ctx)
 	if ok {
 		// The question goes with the answer: a reply that was only the escalation token left no
@@ -537,6 +550,11 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		if live.MightProposeTime(answer) {
 			p.timesFromCaller = true
 		}
+		p.answers = append(p.answers, "asked \""+question+"\", answered \""+answer+"\"")
+		if p.answered == nil {
+			p.answered = map[string]string{}
+		}
+		p.answered[normQuestion(question)] = answer
 	} else {
 		// No answer is not the end of the call: a booking can often go ahead without it (a
 		// callback number for a reservation). The model decides; the fixed goodbye is the backstop.
@@ -547,18 +565,45 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 			"they can go ahead without it and carry on if they can; if they need it, say you'll follow up, say goodbye and emit [HANGUP]. " +
 			"Do not escalate this question again.]"})
 	}
+	if !ok {
+		pcm, said, events, _, _, err := p.generateReply(ctx, question, "")
+		if err != nil || strings.TrimSpace(said) == "" {
+			pcm, _ = s.synthesize(ctx, live.EscalationFallbackLine)
+			ms.requestHangup()
+			return pcm, strings.TrimSpace(holdSaid + " " + live.EscalationFallbackLine)
+		}
+		p.messages = append(p.messages, chatMsg{"assistant", said})
+		p.applyEvents(events, ms)
+		return pcm, strings.TrimSpace(holdSaid + " " + said)
+	}
+	pcm, said := p.replyAfterEscalation(ctx, ms, question, answer)
+	return pcm, strings.TrimSpace(holdSaid + " " + said)
+}
+
+// replyAfterEscalation is the reply once the caller has answered. A model that asks again
+// instead of using the answer (it copies its own question back) gets one nudge and a retry.
+func (p *turnPipeline) replyAfterEscalation(ctx context.Context, ms callLine, question, answer string) ([]int16, string) {
 	pcm, said, events, _, _, err := p.generateReply(ctx, question, "")
-	if !ok && (err != nil || strings.TrimSpace(said) == "") {
-		pcm, _ = s.synthesize(ctx, live.EscalationFallbackLine)
-		ms.requestHangup()
-		return pcm, strings.TrimSpace(holdSaid + " " + live.EscalationFallbackLine)
+	if err == nil && strings.TrimSpace(said) == "" && hasEscalation(events) {
+		p.s.log().Warn("phone: model re-asked an answered question — nudging", "session", p.rt.sessionID)
+		nudge := "[You already have the answer"
+		if answer != "" {
+			nudge += ": \"" + answer + "\""
+		}
+		p.messages = append(p.messages, chatMsg{"user", nudge + ". Do not ask again; say it to the business now.]"})
+		pcm, said, events, _, _, err = p.generateReply(ctx, question, "")
 	}
 	if err != nil {
-		return nil, holdSaid
+		return nil, ""
 	}
 	if said != "" {
 		p.messages = append(p.messages, chatMsg{"assistant", said})
 	}
+	p.applyEvents(events, ms)
+	return pcm, said
+}
+
+func (p *turnPipeline) applyEvents(events []any, ms callLine) {
 	for _, ev := range events {
 		switch e := ev.(type) {
 		case live.Hangup:
@@ -567,7 +612,22 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 			p.outcomeFacts = append(p.outcomeFacts, e.Facts)
 		}
 	}
-	return pcm, strings.TrimSpace(holdSaid + " " + said)
+}
+
+func hasEscalation(events []any) bool {
+	for _, ev := range events {
+		if _, ok := ev.(live.Escalate); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// normQuestion keys a question by its words, so a re-ask with other punctuation matches.
+func normQuestion(q string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(q), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}), " ")
 }
 
 // record stores the turn and reports it (the transcript append doubles as the heartbeat).
@@ -609,8 +669,16 @@ func (s *Service) assess(ctx context.Context, p *turnPipeline, goal string) (str
 	}
 	goal = strings.TrimSpace(goal)
 	instr := live.SummaryInstruction
+	if len(p.answers) > 0 {
+		who := p.rt.brief.InitiatorName
+		if who == "" {
+			who = "the person"
+		}
+		instr = "During the call the assistant checked with " + who + ", who decided: " + strings.Join(p.answers, "; ") +
+			". Those decisions update the goal: an outcome that matches what " + who + " approved counts as achieved.\n\n" + instr
+	}
 	if goal != "" {
-		instr = "The stated goal of this call (from the caller's brief) was: " + goal + "\n\n" + live.SummaryInstruction
+		instr = "The stated goal of this call (from the caller's brief) was: " + goal + "\n\n" + instr
 	}
 	msgs := append(tr, chatMsg{"user", instr})
 	fallback := func() (string, *bool) {

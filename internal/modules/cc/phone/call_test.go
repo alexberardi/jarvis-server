@@ -459,6 +459,35 @@ func TestLastWordsBeforeHangupCount(t *testing.T) {
 	}
 }
 
+// A model that copies its question back after the caller answered gets nudged into using the
+// answer; the caller is asked once.
+func TestAnsweredQuestionIsNotAskedTwice(t *testing.T) {
+	e := newEnv(t)
+	e.stt.heard = []string{"We're full at 7. I can do 6:15 or 7:30."}
+	e.llm.replies = []string{
+		"[ESCALATE: 7 is full; 6:15 or 7:30. Which works?]",
+		"[ESCALATE: 7 is full; 6:15 or 7:30. Which works?]",
+		"7:30 works for us.",
+	}
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	sim.speak()
+	waitFor(t, "escalation card", func() bool { return len(e.notify.titled("📞 The call needs your input")) == 1 })
+	if r := e.s.AnswerEscalation(context.Background(), CallbackContext{HouseholdID: hh, UserID: 1,
+		Data: map[string]any{"session_id": id, "answer": "7:30"}}); !r.Success {
+		t.Fatalf("answer: %+v", r)
+	}
+	sim.untilMark("t1")
+	if !slices.Contains(e.tts.spoken(), "7:30 works for us.") {
+		t.Fatalf("spoken: %q", e.tts.spoken())
+	}
+	if n := len(e.notify.titled("📞 The call needs your input")); n != 1 {
+		t.Fatalf("asked the caller %d times", n)
+	}
+}
+
 func TestGuardSuppressesUnaskedSecret(t *testing.T) {
 	e := newEnv(t)
 	e.set(SettingCallContext, `{"fields":[{"key":"insurance_member_id","value":"XZ-9912345"}]}`, settings.Scope{UserID: 1})
