@@ -46,7 +46,8 @@ func TestSidecarAnswersContextRequests(t *testing.T) {
 
 	_, got = ask("query", `{"correlation_id":"c2","operation":"availability","params":{"start":"09:00","end":"10:00"},"user_id":7}`)
 	b, _ = json.Marshal(got)
-	if want := `{"command_name":"agenda","data":{"busy":[["09:00","10:00"]],"user":7},"error":null,"ok":true,"operation":"availability"}`; string(b) != want {
+	// The answer names what the command shares (no call_context_description: its operation's).
+	if want := `{"command_name":"agenda","data":{"busy":[["09:00","10:00"]],"user":7},"description":"Free/busy between two times","error":null,"ok":true,"operation":"availability"}`; string(b) != want {
 		t.Fatalf("query = %s\nwant %s", b, want)
 	}
 
