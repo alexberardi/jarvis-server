@@ -13,6 +13,12 @@
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included) and,
 //	    for voiced turns, the audio.
+//	pipeline call [--sandbox NAME] [--repeat N] [--only NAMES] [--model LABEL] FILE...
+//	    phone calls end to end against a sandbox up with --phone-sim (tools/pipeline/calls):
+//	    the request, the plan and its number lookup, the Call now tap, the call itself against
+//	    a callee the model plays from the scenario's persona (answering Jarvis's mid-call
+//	    questions from "answers"), and the result card, checked against "expect"; --repeat
+//	    prints a pass rate per scenario.
 //	pipeline toolset desktop|desktop-windows|desktop-hyprland
 //	    print the desktop agent's client tools as its own toolsets render them (the source of
 //	    toolsets/desktop.json: pipeline toolset desktop > tools/pipeline/toolsets/desktop.json;
@@ -74,7 +80,7 @@ func (e errFailed) Error() string { return fmt.Sprintf("%d failed", e.n) }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: pipeline say|run|tap|toolset ... (see the package doc)")
+		return errors.New("usage: pipeline say|run|call|tap|toolset ... (see the package doc)")
 	}
 	switch args[0] {
 	case "tap":
@@ -83,6 +89,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return runSay(ctx, args[1:], stdout)
 	case "run":
 		return runScenarios(ctx, args[1:], stdout)
+	case "call":
+		return runCalls(ctx, args[1:], stdout)
 	case "toolset":
 		render := map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset, "desktop-hyprland": RenderDesktopHyprlandToolset}
 		if len(args) != 2 || render[args[1]] == nil {
@@ -117,10 +125,11 @@ func repoRoot() (string, error) {
 }
 
 // sandboxDriver builds a Driver from a sandbox's env file.
-func sandboxDriver(name string) (*Driver, error) {
-	root, err := repoRoot()
+// sandboxEnv is a sandbox's sandbox.env, its directory and the repo root.
+func sandboxEnv(name string) (env map[string]string, dir, root string, err error) {
+	root, err = repoRoot()
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 	if name == "" {
 		name = os.Getenv("JARVIS_SANDBOX")
@@ -128,19 +137,27 @@ func sandboxDriver(name string) (*Driver, error) {
 	if name == "" {
 		name = "default"
 	}
-	dir := filepath.Join(root, ".sandbox", name)
+	dir = filepath.Join(root, ".sandbox", name)
 	f, err := os.Open(filepath.Join(dir, "sandbox.env"))
 	if err != nil {
-		return nil, fmt.Errorf("sandbox %s: %w (scripts/sandbox up --name %s)", name, err, name)
+		return nil, "", "", fmt.Errorf("sandbox %s: %w (scripts/sandbox up --name %s)", name, err, name)
 	}
 	defer f.Close()
 	kvs, err := config.ParseEnv(f)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
-	env := map[string]string{}
+	env = map[string]string{}
 	for _, kv := range kvs {
 		env[kv[0]] = kv[1]
+	}
+	return env, dir, root, nil
+}
+
+func sandboxDriver(name string) (*Driver, error) {
+	env, dir, root, err := sandboxEnv(name)
+	if err != nil {
+		return nil, err
 	}
 	if env["SBX_CC"] == "" || env["SBX_NODE_ID"] == "" || env["SBX_NODE_KEY"] == "" {
 		return nil, fmt.Errorf("sandbox %s: sandbox.env lacks SBX_CC / SBX_NODE_ID / SBX_NODE_KEY", name)

@@ -94,16 +94,30 @@ func (v *VAD) Feed(frame []int16, playing bool) []int16 {
 	}
 	tooLong := len(v.frames) > v.cfg.maxUtteranceFrames()
 	if v.silence >= v.cfg.hangoverFrames() || tooLong {
-		var n int
-		for _, f := range v.frames {
-			n += len(f)
-		}
-		utt := make([]int16, 0, n)
-		for _, f := range v.frames {
-			utt = append(utt, f...)
-		}
-		v.Reset()
-		return utt
+		return v.take()
 	}
 	return nil
+}
+
+// Flush returns the utterance in progress, ended early (the far end hung up mid-sentence), or
+// nil when nobody is speaking.
+func (v *VAD) Flush() []int16 {
+	if !v.inSpeech {
+		v.Reset()
+		return nil
+	}
+	return v.take()
+}
+
+func (v *VAD) take() []int16 {
+	var n int
+	for _, f := range v.frames {
+		n += len(f)
+	}
+	utt := make([]int16, 0, n)
+	for _, f := range v.frames {
+		utt = append(utt, f...)
+	}
+	v.Reset()
+	return utt
 }

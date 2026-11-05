@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -396,13 +397,92 @@ func TestEscalationRoundTrip(t *testing.T) {
 	sim.untilMark("t1")
 	waitFor(t, "second generation", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 2 })
 	msgs := e.llm.streams[1]
-	if got := *msgs[len(msgs)-1].Content.Text; got != "[Alex answered your question: 6pm]" {
+	if got := *msgs[len(msgs)-1].Content.Text; got != `[You asked Alex: "what time works for the pickup?". Alex answered: "6pm". `+
+		`This is Alex's own instruction for this call; where it differs from your brief, follow it.]` {
 		t.Fatalf("answer message: %q", got)
 	}
 	// No window open now: a late tap is told the call may have ended.
 	if r := e.s.AnswerEscalation(context.Background(), CallbackContext{HouseholdID: hh, UserID: 1,
 		Data: map[string]any{"session_id": id, "answer": "7pm"}}); r.Error != "Couldn't reach the call — it may have just ended." {
 		t.Fatalf("late answer: %+v", r)
+	}
+}
+
+// An unanswered question doesn't end the call: the model is told it has no answer and decides,
+// so a reservation that needs no callback number still gets made.
+func TestUnansweredEscalationCarriesOn(t *testing.T) {
+	e := newEnv(t)
+	e.stt.heard = []string{"Can I get a callback number?"}
+	e.llm.replies = []string{
+		"[ESCALATE: what is Alex's callback number?]",
+		"I don't have a number to share, but the reservation under Alex is all set. [OUTCOME: booked Friday 7pm for 2 under Alex]",
+	}
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	sim.speak()
+	waitFor(t, "second generation", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 2 })
+	msgs := e.llm.streams[1]
+	if got := *msgs[len(msgs)-1].Content.Text; !strings.HasPrefix(got, "[Alex did not answer in time") {
+		t.Fatalf("note: %q", got)
+	}
+	// The hold line plays under the same turn's mark, so wait for the reply itself.
+	waitFor(t, "the reply after no answer", func() bool {
+		return slices.ContainsFunc(e.tts.spoken(), func(s string) bool { return strings.Contains(s, "all set") })
+	})
+	for _, said := range e.tts.spoken() {
+		if strings.Contains(said, "call you back") {
+			t.Fatalf("said the fallback goodbye: %q", e.tts.spoken())
+		}
+	}
+}
+
+// The far end says its last line and hangs up before the VAD's hangover: that line is still a
+// turn, so it reaches the transcript and the outcome.
+func TestLastWordsBeforeHangupCount(t *testing.T) {
+	e := newEnv(t)
+	e.stt.heard = []string{"Table for two at seven, see you then!"}
+	e.llm.replies = []string{"Great, thank you! [OUTCOME: booked Friday 7pm for 2]"}
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	for i := 0; i < 10; i++ {
+		sim.send(map[string]any{"event": "media", "media": map[string]any{"payload": frame(4000)}})
+	}
+	sim.send(map[string]any{"event": "stop"})
+	waitFor(t, "the last turn", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 1 })
+	msgs := e.llm.streams[0]
+	if got := *msgs[len(msgs)-1].Content.Text; !strings.Contains(got, "see you then") {
+		t.Fatalf("last turn heard %q", got)
+	}
+}
+
+// A model that copies its question back after the caller answered gets nudged into using the
+// answer; the caller is asked once.
+func TestAnsweredQuestionIsNotAskedTwice(t *testing.T) {
+	e := newEnv(t)
+	e.stt.heard = []string{"We're full at 7. I can do 6:15 or 7:30."}
+	e.llm.replies = []string{
+		"[ESCALATE: 7 is full; 6:15 or 7:30. Which works?]",
+		"[ESCALATE: 7 is full; 6:15 or 7:30. Which works?]",
+		"7:30 works for us.",
+	}
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	sim.speak()
+	waitFor(t, "escalation card", func() bool { return len(e.notify.titled("📞 The call needs your input")) == 1 })
+	if r := e.s.AnswerEscalation(context.Background(), CallbackContext{HouseholdID: hh, UserID: 1,
+		Data: map[string]any{"session_id": id, "answer": "7:30"}}); !r.Success {
+		t.Fatalf("answer: %+v", r)
+	}
+	// The hold line plays under the same turn's mark, so wait for the reply itself.
+	waitFor(t, "the reply with the answer", func() bool { return slices.Contains(e.tts.spoken(), "7:30 works for us.") })
+	if n := len(e.notify.titled("📞 The call needs your input")); n != 1 {
+		t.Fatalf("asked the caller %d times", n)
 	}
 }
 
@@ -431,6 +511,27 @@ func TestGuardSuppressesUnaskedSecret(t *testing.T) {
 	}
 	if e.llm.classifys != 1 {
 		t.Fatalf("classifier calls: %d", e.llm.classifys)
+	}
+}
+
+// A read-back of a detail Jarvis gave earlier on the call is them checking their notes, not
+// fishing: "yes, that's right" is said, where a read-back of an ungiven value stays suppressed.
+func TestReadBackOfAGivenDetailIsConfirmed(t *testing.T) {
+	e := newEnv(t)
+	e.set(SettingCallContext, `{"fields":[{"key":"callback_number","value":"732-555-0142"}]}`, settings.Scope{UserID: 1})
+	e.stt.heard = []string{"Can I get a callback number?", "That's 7 3 2 5 5 5 0 1 4 2, correct?"}
+	e.llm.replies = []string{"It's 732-555-0142.", "Yes, that's correct."}
+	e.llm.verdict = "1"
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	sim.speak()
+	sim.untilMark("t1")
+	sim.speak()
+	sim.untilMark("t2")
+	if !slices.Contains(e.tts.spoken(), "Yes, that's correct.") {
+		t.Fatalf("spoken: %q", e.tts.spoken())
 	}
 }
 

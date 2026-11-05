@@ -42,6 +42,10 @@ type PhoneConfig struct {
 	Calendar phone.Availability
 	// Errands is the 09 workflow engine's resume hook; nil until errands land.
 	Errands phone.ErrandHook
+	// STT and TTS, when set, replace the module's speech for calls (the dev sandbox's simulated
+	// line, JARVIS_DEV_PHONE_SIM, which is also Provider).
+	STT phone.STT
+	TTS phone.TTS
 }
 
 const phoneReaperJob = "cc.phone_reaper"
@@ -70,6 +74,12 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 	p.Options, p.Now, p.Go = m.Phone.Options, m.now, m.tasks.Go
 	if m.TTS != nil {
 		p.TTS = phoneTTS{m.TTS}
+	}
+	if m.Phone.STT != nil {
+		p.STT = m.Phone.STT
+	}
+	if m.Phone.TTS != nil {
+		p.TTS = m.Phone.TTS
 	}
 	p.Mount(mux, func(h phone.UserHandler) http.HandlerFunc {
 		return m.user(func(w http.ResponseWriter, r *http.Request, u authn.User) { h(w, r, u) })

@@ -574,3 +574,23 @@ func TestVADBargeIn(t *testing.T) {
 		t.Fatal("no barge-in configured, yet speech over playback started an utterance")
 	}
 }
+
+// Flush hands over the utterance in progress (the far end hung up mid-sentence), and nothing
+// when nobody is speaking.
+func TestVADFlush(t *testing.T) {
+	loud, quiet := frame(3000), frame(50)
+	v := NewVAD(vadCfg)
+	for range 5 {
+		v.Feed(quiet, false)
+	}
+	if v.Flush() != nil {
+		t.Fatal("flushed silence")
+	}
+	for range 10 {
+		v.Feed(loud, false)
+	}
+	utt := v.Flush()
+	if len(utt) < 10*160 || v.InSpeech() {
+		t.Fatalf("flush: %d samples, in speech %v", len(utt), v.InSpeech())
+	}
+}

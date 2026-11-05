@@ -39,6 +39,8 @@
 #   --llm scripted   a deterministic model for UI tests: tools/scriptllm (port 7798 + offset, behind
 #                    the tap) answers from e2e/llm/default.json; needs no installed jarvisd. Tests
 #                    switch scripts at $SBX_SCRIPTLLM/control/script (docs/decisions/2026-10-17-scripted-llm.md)
+#   --phone-sim      phone calls go to a simulated line (JARVIS_DEV_PHONE_SIM) whose far end is
+#                    tools/pipeline call (port 7794 + offset), instead of Twilio or SIP
 #   --ui             build the admin SPA first (npm, with the /dev/ui gallery) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
 #   --voice          real TTS and STT, for voice pipeline runs (pipeline say --voice): Kokoro,
@@ -113,7 +115,7 @@ die() { say "$*"; exit 1; }
 CMD=${1:-}
 [ -n "$CMD" ] || { sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
-NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0
+NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0 PHONE_SIM=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local SPEECH_API=openai
 NODE_PROFILE=pi
 while [ $# -gt 0 ]; do
@@ -123,6 +125,7 @@ while [ $# -gt 0 ]; do
     --profile) PROFILE=$2; shift 2 ;;
     --llm) LLM=$2; shift 2 ;;
     --ui) UI=1; shift ;;
+    --phone-sim) PHONE_SIM=1; shift ;;
     --voice) VOICE=1; shift ;;
     --sip) SIP=1; shift ;;
     --speech) SPEECH=$2; shift 2 ;;
@@ -284,9 +287,10 @@ point_llm() {
   read -r alias ctx vision <<<"$model"
   # Through the tap (tools/pipeline), which logs every call to llm.jsonl and adds the app
   # credentials, to the installed jarvisd's own LLM API: its $INSTALLED_LLM_LABEL label, its GPU engine, its
-  # chat template and system-message folding (so folding is off here).
+  # chat template and system-message folding (so folding is off here). Its OpenAI-compatible API
+  # (/openai/v1): /v1 streams Jarvis's own frames, which remote_api=openai reads as empty replies.
   set_setting "$llm" llm.live.engine '"remote"'
-  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/v1\""
+  set_setting "$llm" llm.live.remote_url "\"http://127.0.0.1:$(port 7799)/openai/v1\""
   set_setting "$llm" llm.live.remote_api '"openai"'
   set_setting "$llm" llm.live.remote_model "\"$INSTALLED_LLM_LABEL\""
   set_setting "$llm" llm.live.context "$ctx"
@@ -547,6 +551,7 @@ write_env() {
     echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
     if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
     if [ "$SIP" = 1 ]; then echo "export SBX_SIP_LANE=$DIR/sip/lane.env"; fi
+    if [ "$PHONE_SIM" = 1 ]; then echo "export SBX_PHONE_SIM=127.0.0.1:$(port 7794)"; fi
     if [ "$PROFILE" = empty ]; then
       # Nobody to sign in as: first-run setup is still to do, with this one-time token
       # (the wizard's link is $SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN).
@@ -619,7 +624,9 @@ cmd_up() {
   # Every harness URL assumes the legacy ports unless --single-port asks for a fresh install's.
   local legacy=1
   [ "$SINGLE_PORT" = 0 ] || legacy=0
-  RELAY_URL=$relay_url JARVIS_LEGACY_PORTS=$legacy JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
+  local phone_sim=
+  [ "$PHONE_SIM" = 0 ] || phone_sim=http://127.0.0.1:$(port 7794)
+  JARVIS_DEV_PHONE_SIM=$phone_sim RELAY_URL=$relay_url JARVIS_LEGACY_PORTS=$legacy JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     detach "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
