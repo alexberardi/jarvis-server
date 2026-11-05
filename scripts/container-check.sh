@@ -36,7 +36,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARCHIVE="jarvisd-$VERSION-linux-$ARCH.tar.gz"
 IMAGE=jarvisd:check
 NAME=jc
-API= ADMIN= # set by run: the host ports docker published for :7700 and :7710
+# API and ADMIN are set by run: the host ports docker published for :7700 and :7710.
+API=''
+ADMIN=''
 
 [ -f "$DIST/$ARCHIVE" ] || {
 	echo "no $DIST/$ARCHIVE" >&2
