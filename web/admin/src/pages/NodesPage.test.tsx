@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import NodesPage from './NodesPage'
@@ -188,5 +188,42 @@ describe('NodesPage', () => {
         restart: false,
       }),
     )
+  })
+
+  it('removes an offline node after a confirmation, and offers no Remove for online nodes', async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/households') return { data: [{ id: 'hh1', name: 'Home' }] }
+      if (url === '/api/admin/nodes')
+        return {
+          data: [
+            { node_id: 'pi1', name: 'Kitchen', household_id: 'hh1', is_active: true, services: [] },
+            { node_id: 'pi2', name: 'Kitchen-old', household_id: 'hh1', is_active: true, services: [] },
+          ],
+        }
+      if (url === '/api/cc/api/v0/admin/nodes')
+        return {
+          data: [
+            { node_id: 'pi1', room: 'kitchen', household_id: 'hh1', online: true, last_seen: null, last_seen_version: null, is_busy: false, node_kind: null, capabilities: {} },
+            { node_id: 'pi2', room: 'kitchen', household_id: 'hh1', online: false, last_seen: null, last_seen_version: null, is_busy: false, node_kind: null, capabilities: {} },
+          ],
+        }
+      if (url === '/api/cc/api/v0/nodes/pairings') return { data: { waiting: 0, households: [] } }
+      throw new Error(`unexpected GET ${url}`)
+    })
+    post.mockResolvedValue({ data: { message: 'Signed out' } })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NodesPage />
+      </QueryClientProvider>,
+    )
+    await screen.findByTestId('node-pi2')
+    const remove = screen.getAllByRole('button', { name: 'Remove' })
+    expect(remove).toHaveLength(1) // the online node has none
+    fireEvent.click(remove[0])
+    const confirm = await screen.findByRole('group', { name: 'Remove Kitchen-old' })
+    expect(post).not.toHaveBeenCalled()
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/cc/api/v0/nodes/pi2/sign-out'))
   })
 })

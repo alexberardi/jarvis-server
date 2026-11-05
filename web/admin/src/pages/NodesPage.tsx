@@ -1,15 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Cpu, Laptop, RefreshCw } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Cpu, Laptop, RefreshCw, Trash2 } from 'lucide-react'
 import NodeSettings from '@/components/nodes/NodeSettings'
 import DisplaySettings from '@/components/display/DisplaySettings'
 import PendingPairings from '@/components/nodes/PendingPairings'
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, toast } from '@/components/ui'
+import { Badge, Banner, Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, toast } from '@/components/ui'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
 import { formatVersion } from '@/lib/format'
 import { timeAgo } from '@/lib/time'
 import type { AdminNode } from '@/api/admin'
-import { computerControlState, extensionState, ledModeState, setLedMode, websiteAccessState } from '@/api/nodes'
+import { computerControlState, extensionState, ledModeState, setLedMode, signOutDevice, websiteAccessState } from '@/api/nodes'
 import type { LedMode, NodeLiveness } from '@/api/nodes'
 
 const extensionText = { connected: 'connected', disconnected: 'not connected', disabled: 'off' } as const
@@ -64,6 +65,59 @@ function LedModeField({ nodeId, reported, online }: { nodeId: string; reported: 
   )
 }
 
+/**
+ * RemoveNode removes an offline node through cc's sign-out (the owner or a household admin; cc
+ * checks): its key stops working and its record goes, so the phone app stops listing it. A Pi
+ * that comes back is told to factory-reset; a computer goes back to its setup page.
+ */
+function RemoveNode({ nodeId, name, desktop }: { nodeId: string; name: string; desktop: boolean }) {
+  const qc = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => signOutDevice(nodeId),
+    onSuccess: () => {
+      setConfirming(false)
+      toast.success(`Removed ${name}`)
+      void qc.invalidateQueries({ queryKey: ['admin-nodes-view'] })
+      void qc.invalidateQueries({ queryKey: ['node-liveness'] })
+    },
+    onError: (e) => toast.error(errorMessage(e, `Couldn't remove ${name}`)),
+  })
+  if (!confirming) {
+    return (
+      <Button size="sm" variant="ghost" icon={<Trash2 size={14} aria-hidden="true" />} onClick={() => setConfirming(true)}>
+        Remove
+      </Button>
+    )
+  }
+  return (
+    <Banner
+      role="group"
+      aria-label={`Remove ${name}`}
+      tone="danger"
+      className="basis-full"
+      icon={<Trash2 size={16} />}
+      actions={
+        <>
+          <Button size="sm" variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+            Remove
+          </Button>
+          <Button size="sm" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+        </>
+      }
+    >
+      <p>
+        Remove {name} from Jarvis Automation? Its key stops working and it disappears from the phone app.{' '}
+        {desktop
+          ? 'If it comes back online it returns to its setup page.'
+          : 'If it comes back online it resets itself and has to be set up again.'}
+      </p>
+    </Banner>
+  )
+}
+
 function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const desktop = live?.node_kind === 'desktop'
   const ext = extensionState(live)
@@ -72,6 +126,8 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
   const computerControl = computerControlState(live)
   const ledMode = ledModeState(live)
   const Icon = desktop ? Laptop : Cpu
+  // Only offline nodes cc still lists: an online Pi would reset itself at once.
+  const removable = live !== undefined && !live.online
   return (
     <Card as="article" data-testid={`node-${node.node_id}`}>
       {/* The badges drop below the name when both don't fit, rather than squeezing the name. */}
@@ -128,7 +184,12 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
           <code className="font-mono break-all text-text-muted">{node.node_id}</code>
         </Detail>
       </div>
-      {node.is_active && <div className="mt-4"><NodeSettings nodeId={node.node_id} name={node.name} online={live?.online === true} desktop={desktop} /></div>}
+      {(node.is_active || removable) && (
+        <div className="mt-4 flex flex-wrap items-start gap-2">
+          {node.is_active && <NodeSettings nodeId={node.node_id} name={node.name} online={live?.online === true} desktop={desktop} />}
+          {removable && <RemoveNode nodeId={node.node_id} name={node.name} desktop={desktop} />}
+        </div>
+      )}
     </Card>
   )
 }
