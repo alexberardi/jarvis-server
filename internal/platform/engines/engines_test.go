@@ -682,9 +682,11 @@ func TestDrainGraceDelaysHealthRestart(t *testing.T) {
 	if st := s.State(); st != Draining || f.startCount() != 1 {
 		t.Fatalf("state %s after %d starts; want draining, not restarted, before the grace ran out", st, f.startCount())
 	}
-	f.health.set(true)
+	// Fire while still failing: a passing check before the grace runs out would call the restart off
+	// (TestDrainCalledOffWhenEngineRecovers).
 	grace.fire <- time.Now()
 	f.awaitStarts(t, 2)
+	f.health.set(true)
 	waitHealthy(t, s)
 	if st := s.Status(); st.Restarts != 1 || !strings.Contains(st.LastError, "consecutive failed health checks") {
 		t.Fatalf("status = %+v", st)
