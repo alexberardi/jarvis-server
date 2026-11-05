@@ -512,20 +512,29 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		holdSaid = live.HoldLine
 		ms.speak(hold)
 	}
-	answer, ok := p.rt.escalation.Wait(ctx)
-	if !ok {
-		p.escalationUnanswered = true
-		p.outcomeFacts = append(p.outcomeFacts, "escalation unanswered: "+question)
-		pcm, _ := s.synthesize(ctx, live.EscalationFallbackLine)
-		ms.requestHangup()
-		return pcm, strings.TrimSpace(holdSaid + " " + live.EscalationFallbackLine)
-	}
 	who := p.rt.brief.InitiatorName
 	if who == "" {
 		who = "The user"
 	}
-	p.messages = append(p.messages, chatMsg{"user", "[" + who + " answered your question: " + answer + "]"})
+	answer, ok := p.rt.escalation.Wait(ctx)
+	if ok {
+		p.messages = append(p.messages, chatMsg{"user", "[" + who + " answered your question: " + answer + "]"})
+	} else {
+		// No answer is not the end of the call: a booking can often go ahead without it (a
+		// callback number for a reservation). The model decides; the fixed goodbye is the backstop.
+		p.escalationUnanswered = true
+		p.outcomeFacts = append(p.outcomeFacts, "escalation unanswered: "+question)
+		p.messages = append(p.messages, chatMsg{"user", "[" + who + " did not answer in time, so you do not have the answer to: " +
+			question + ". Tell the other person briefly that you don't have that to give. If it is an extra they can do without, ask whether " +
+			"they can go ahead without it and carry on if they can; if they need it, say you'll follow up, say goodbye and emit [HANGUP]. " +
+			"Do not escalate this question again.]"})
+	}
 	pcm, said, events, _, _, err := p.generateReply(ctx, question, "")
+	if !ok && (err != nil || strings.TrimSpace(said) == "") {
+		pcm, _ = s.synthesize(ctx, live.EscalationFallbackLine)
+		ms.requestHangup()
+		return pcm, strings.TrimSpace(holdSaid + " " + live.EscalationFallbackLine)
+	}
 	if err != nil {
 		return nil, holdSaid
 	}

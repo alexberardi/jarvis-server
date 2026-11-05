@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -403,6 +404,57 @@ func TestEscalationRoundTrip(t *testing.T) {
 	if r := e.s.AnswerEscalation(context.Background(), CallbackContext{HouseholdID: hh, UserID: 1,
 		Data: map[string]any{"session_id": id, "answer": "7pm"}}); r.Error != "Couldn't reach the call — it may have just ended." {
 		t.Fatalf("late answer: %+v", r)
+	}
+}
+
+// An unanswered question doesn't end the call: the model is told it has no answer and decides,
+// so a reservation that needs no callback number still gets made.
+func TestUnansweredEscalationCarriesOn(t *testing.T) {
+	e := newEnv(t)
+	e.stt.heard = []string{"Can I get a callback number?"}
+	e.llm.replies = []string{
+		"[ESCALATE: what is Alex's callback number?]",
+		"I don't have a number to share, but the reservation under Alex is all set. [OUTCOME: booked Friday 7pm for 2 under Alex]",
+	}
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	sim.speak()
+	waitFor(t, "second generation", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 2 })
+	msgs := e.llm.streams[1]
+	if got := *msgs[len(msgs)-1].Content.Text; !strings.HasPrefix(got, "[Alex did not answer in time") {
+		t.Fatalf("note: %q", got)
+	}
+	sim.untilMark("t1")
+	for _, said := range e.tts.spoken() {
+		if strings.Contains(said, "call you back") {
+			t.Fatalf("said the fallback goodbye: %q", e.tts.spoken())
+		}
+	}
+	if !slices.ContainsFunc(e.tts.spoken(), func(s string) bool { return strings.Contains(s, "all set") }) {
+		t.Fatalf("spoken: %q", e.tts.spoken())
+	}
+}
+
+// The far end says its last line and hangs up before the VAD's hangover: that line is still a
+// turn, so it reaches the transcript and the outcome.
+func TestLastWordsBeforeHangupCount(t *testing.T) {
+	e := newEnv(t)
+	e.stt.heard = []string{"Table for two at seven, see you then!"}
+	e.llm.replies = []string{"Great, thank you! [OUTCOME: booked Friday 7pm for 2]"}
+	id := e.confirmed(t)
+	sim := e.answer(t, id)
+	sim.untilMark("t0")
+	e.waitState(t, id, StateInCall)
+	for i := 0; i < 10; i++ {
+		sim.send(map[string]any{"event": "media", "media": map[string]any{"payload": frame(4000)}})
+	}
+	sim.send(map[string]any{"event": "stop"})
+	waitFor(t, "the last turn", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 1 })
+	msgs := e.llm.streams[0]
+	if got := *msgs[len(msgs)-1].Content.Text; !strings.Contains(got, "see you then") {
+		t.Fatalf("last turn heard %q", got)
 	}
 }
 

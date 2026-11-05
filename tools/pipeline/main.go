@@ -74,7 +74,7 @@ func (e errFailed) Error() string { return fmt.Sprintf("%d failed", e.n) }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: pipeline say|run|tap|toolset ... (see the package doc)")
+		return errors.New("usage: pipeline say|run|call|tap|toolset ... (see the package doc)")
 	}
 	switch args[0] {
 	case "tap":
@@ -83,6 +83,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return runSay(ctx, args[1:], stdout)
 	case "run":
 		return runScenarios(ctx, args[1:], stdout)
+	case "call":
+		return runCalls(ctx, args[1:], stdout)
 	case "toolset":
 		render := map[string]func() ([]byte, error){"desktop": RenderDesktopToolset, "desktop-windows": RenderDesktopWindowsToolset, "desktop-hyprland": RenderDesktopHyprlandToolset}
 		if len(args) != 2 || render[args[1]] == nil {
@@ -117,10 +119,11 @@ func repoRoot() (string, error) {
 }
 
 // sandboxDriver builds a Driver from a sandbox's env file.
-func sandboxDriver(name string) (*Driver, error) {
-	root, err := repoRoot()
+// sandboxEnv is a sandbox's sandbox.env, its directory and the repo root.
+func sandboxEnv(name string) (env map[string]string, dir, root string, err error) {
+	root, err = repoRoot()
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 	if name == "" {
 		name = os.Getenv("JARVIS_SANDBOX")
@@ -128,19 +131,27 @@ func sandboxDriver(name string) (*Driver, error) {
 	if name == "" {
 		name = "default"
 	}
-	dir := filepath.Join(root, ".sandbox", name)
+	dir = filepath.Join(root, ".sandbox", name)
 	f, err := os.Open(filepath.Join(dir, "sandbox.env"))
 	if err != nil {
-		return nil, fmt.Errorf("sandbox %s: %w (scripts/sandbox up --name %s)", name, err, name)
+		return nil, "", "", fmt.Errorf("sandbox %s: %w (scripts/sandbox up --name %s)", name, err, name)
 	}
 	defer f.Close()
 	kvs, err := config.ParseEnv(f)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
-	env := map[string]string{}
+	env = map[string]string{}
 	for _, kv := range kvs {
 		env[kv[0]] = kv[1]
+	}
+	return env, dir, root, nil
+}
+
+func sandboxDriver(name string) (*Driver, error) {
+	env, dir, root, err := sandboxEnv(name)
+	if err != nil {
+		return nil, err
 	}
 	if env["SBX_CC"] == "" || env["SBX_NODE_ID"] == "" || env["SBX_NODE_KEY"] == "" {
 		return nil, fmt.Errorf("sandbox %s: sandbox.env lacks SBX_CC / SBX_NODE_ID / SBX_NODE_KEY", name)

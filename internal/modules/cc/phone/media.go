@@ -135,6 +135,11 @@ func (m *callSession) run() {
 			}
 		}
 	}
+	// The far end hung up mid-sentence ("…see you then!" and the click): what it said still
+	// belongs in the transcript and the outcome, though nobody hears the reply.
+	if utt := m.vad.Flush(); utt != nil {
+		m.runTurn(utt)
+	}
 }
 
 func (m *callSession) runTurn(utt []int16) {

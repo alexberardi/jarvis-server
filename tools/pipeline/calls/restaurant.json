@@ -1,0 +1,8 @@
+[
+  {
+    "name": "papa-vs-easy",
+    "request": "Call Papa V's Pizza and make a reservation for 2 on Friday at 7pm",
+    "number": "+17324580500",
+    "callee": "You are Gina, the host at Papa V's Pizza in Brick, New Jersey. Answer with \"Papa V's, this is Gina.\" if the caller hasn't heard your greeting yet. Friday at 7:00 PM has a table for two available. Take the reservation: ask for the name, and a callback number if they offer one. Confirm the details back, then say goodbye."
+  }
+]
