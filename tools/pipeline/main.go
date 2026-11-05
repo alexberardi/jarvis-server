@@ -13,6 +13,12 @@
 //	    play scenario files (default tools/pipeline/scenarios) and check their expectations;
 //	    exits 1 when any fails. --out writes each run's full log (model calls included) and,
 //	    for voiced turns, the audio.
+//	pipeline call [--sandbox NAME] [--repeat N] [--only NAMES] [--model LABEL] FILE...
+//	    phone calls end to end against a sandbox up with --phone-sim (tools/pipeline/calls):
+//	    the request, the plan and its number lookup, the Call now tap, the call itself against
+//	    a callee the model plays from the scenario's persona (answering Jarvis's mid-call
+//	    questions from "answers"), and the result card, checked against "expect"; --repeat
+//	    prints a pass rate per scenario.
 //	pipeline toolset desktop|desktop-windows|desktop-hyprland
 //	    print the desktop agent's client tools as its own toolsets render them (the source of
 //	    toolsets/desktop.json: pipeline toolset desktop > tools/pipeline/toolsets/desktop.json;
