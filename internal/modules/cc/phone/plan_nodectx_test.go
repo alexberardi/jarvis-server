@@ -26,7 +26,8 @@ func TestPlanCarriesNodeContext(t *testing.T) {
 	e := newEnv(t)
 	e.addContact("Bright Smiles Dental", "+17325550199", false)
 	e.s.Calendar = fakeCalendar{AvailabilityAnswer{OK: true, Free: []string{"Thu Nov 12 2-5pm"},
-		Busy: []string{"Tue Nov 10 9am-5pm (Work)"}, Source: "get_calendar_events"}}
+		Busy: []string{"Tue Nov 10 9am-5pm (Work)"}, Source: "get_calendar_events",
+		SourceDescription: "Your free and busy times for the next week."}}
 	e.s.NodeContext = fakeNodeContext{[]ContextField{
 		{Key: "dental_member_id", Label: "Dental member ID", Value: "DX-77120", Tier: TierIfAsked, Source: "dental_plan"},
 		{Key: "hygienist", Label: "Preferred hygienist", Value: "Maria", Tier: TierState, Source: "dental_plan"},
@@ -40,7 +41,8 @@ func TestPlanCarriesNodeContext(t *testing.T) {
 			t.Fatalf("details lack %q:\n%s", want, sess.Details)
 		}
 	}
-	if body := e.notify.all()[0].Body; !strings.Contains(body, "Details shared by your Calendar events, Dental plan") {
+	if body := e.notify.all()[0].Body; !strings.Contains(body,
+		"Shared with this plan by your commands: Calendar events (your free and busy times for the next week); Dental plan.") {
 		t.Fatalf("card: %q", body)
 	}
 	if !strings.Contains(sess.NodeContextJSON, "DX-77120") || strings.Contains(sess.NodeContextJSON, "Maria") {
@@ -60,5 +62,13 @@ func TestPlanCarriesNodeContext(t *testing.T) {
 	sess.Details = strings.ReplaceAll(sess.Details, "Dental member ID: DX-77120", "")
 	if guarded() {
 		t.Fatal("a field deleted from the card is still guarded")
+	}
+}
+
+// The calendar's times replace a drafted line that only asked for them.
+func TestCalendarTimesReplaceAnAvailabilityPlaceholder(t *testing.T) {
+	got := stripTimesPlaceholder("Book a cleaning for Jordan.\nIf asked: (provide your availability for next week)\nIf asked: name is Jordan.")
+	if got != "Book a cleaning for Jordan.\nIf asked: name is Jordan." {
+		t.Fatalf("got %q", got)
 	}
 }

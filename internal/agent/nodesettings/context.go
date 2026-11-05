@@ -268,6 +268,10 @@ func (c *Context) query(ctx context.Context, p cdPayload) map[string]any {
 		out[k] = raw
 	}
 	out["command_name"], out["operation"] = cmd.Name, operation
+	if cmd.Description != "" {
+		// What the command shares, for the plan card (its call_context_description).
+		out["description"] = cmd.Description
+	}
 	return out
 }
 

@@ -79,8 +79,9 @@ type AvailabilityAnswer struct {
 	Error string
 	Free  []string
 	Busy  []string
-	// Source is the command that answered (the calendar's), for the plan card.
-	Source string
+	// Source is the command that answered (the calendar's) and SourceDescription what it says
+	// it shares, for the plan card.
+	Source, SourceDescription string
 }
 
 // NodeContext is what the household's commands contribute to a call plan, asked once at plan

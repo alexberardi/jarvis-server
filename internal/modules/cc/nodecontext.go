@@ -37,6 +37,7 @@ type contextAnswer struct {
 	Error       string          `json:"error"`
 	Data        json.RawMessage `json:"data"`
 	CommandName string          `json:"command_name"`
+	Description string          `json:"description"`
 	Providers   []struct {
 		CommandName string `json:"command_name"`
 		Operations  []struct {
@@ -133,7 +134,8 @@ func (n nodeContext) Availability(ctx context.Context, hh string, uid *int64, st
 			if json.Unmarshal(a.Data, &d) != nil {
 				return
 			}
-			answers[i] = &phone.AvailabilityAnswer{OK: true, Free: d.Free, Busy: d.Busy, Source: a.CommandName}
+			answers[i] = &phone.AvailabilityAnswer{OK: true, Free: d.Free, Busy: d.Busy, Source: a.CommandName,
+				SourceDescription: a.Description}
 		}()
 	}
 	wg.Wait()
@@ -179,7 +181,7 @@ func (n nodeContext) CallContext(ctx context.Context, hh string, uid *int64, bus
 					}
 					fields := phone.ParseCallContext(data)
 					for k := range fields {
-						fields[k].Source = cmd
+						fields[k].Source, fields[k].SourceDescription = cmd, a.Description
 					}
 					perCmd[j] = fields
 				}()

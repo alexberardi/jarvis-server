@@ -516,11 +516,18 @@ func formatAvailability(free, busy []string) string {
 	return strings.Join(parts, "\n")
 }
 
+// availabilityPlaceholderRE is a drafted line that only asks for times ("If asked: (provide your
+// availability for next week)"): misleading once the calendar's real times are in the brief.
+var availabilityPlaceholderRE = regexp.MustCompile(`(?i)^[^:()]*:\s*\([^)]*(availability|fill in)[^)]*\)\s*$`)
+
 func stripTimesPlaceholder(details string) string {
 	var kept []string
 	for _, line := range splitLines(details) {
 		l := strings.ToLower(line)
 		if strings.HasPrefix(l, "acceptable times:") && (strings.Contains(l, "fill in") || strings.Contains(l, "unavailable")) {
+			continue
+		}
+		if availabilityPlaceholderRE.MatchString(strings.TrimSpace(line)) {
 			continue
 		}
 		kept = append(kept, line)
@@ -557,7 +564,8 @@ func (s *Service) applyAvailability(ctx context.Context, hh, goal, details strin
 	if env == "" {
 		return ensureTimesSection(goal, details), ""
 	}
-	return strings.TrimRight(stripTimesPlaceholder(details), " \t\n\r\v\f") + "\n" + env, ans.Source
+	return strings.TrimRight(stripTimesPlaceholder(details), " \t\n\r\v\f") + "\n" + env,
+		sharedBy(ans.Source, ans.SourceDescription)
 }
 
 // mergeContext is the user's saved details plus what the household's commands contributed;
@@ -593,22 +601,34 @@ func guardedNodeFields(fields []ContextField) string {
 	return string(b)
 }
 
-// sharedByNote names, on the plan card, the commands whose context is in the details.
+// sharedBy is one command's entry on the plan card: its name, and what it says it shares.
+func sharedBy(cmd, description string) string {
+	n := commandLabel(cmd)
+	if n == "" {
+		return ""
+	}
+	if d := strings.TrimRight(strings.TrimSpace(description), "."); d != "" {
+		n += " (" + strings.ToLower(d[:1]) + d[1:] + ")"
+	}
+	return n
+}
+
+// sharedByNote lists, on the plan card, the commands whose context is in the details.
 func sharedByNote(calendar string, fields []ContextField) string {
 	var names []string
-	add := func(cmd string) {
-		if n := commandLabel(cmd); n != "" && !slices.Contains(names, n) {
+	add := func(n string) {
+		if n != "" && !slices.Contains(names, n) {
 			names = append(names, n)
 		}
 	}
 	add(calendar)
 	for _, f := range fields {
-		add(f.Source)
+		add(sharedBy(f.Source, f.SourceDescription))
 	}
 	if len(names) == 0 {
 		return ""
 	}
-	return " Details shared by your " + strings.Join(names, ", ") + " (edit them out above if you'd rather not)."
+	return " Shared with this plan by your commands: " + strings.Join(names, "; ") + ". Edit the details above to leave anything out."
 }
 
 // commandLabel is a command's name for people: get_calendar_events → "Calendar events".
