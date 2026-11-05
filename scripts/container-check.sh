@@ -3,8 +3,9 @@
 # Usage: scripts/container-check.sh DIST VERSION [ARCH]
 #   DIST/jarvisd-VERSION-linux-ARCH.tar.gz is the archive, packed as the release packs it. ARCH is
 #   amd64 or arm64, by default this machine's: the image is run, so it must be the machine's.
-# Runs the image as jarvisd:check, container jc, on host ports 37700/37710/31884 and a temp data
-# dir; exits 1 naming the first check that fails. Needs docker and curl.
+# Runs the image as jarvisd:check, container jc, on free host ports docker picks (a fixed port can
+# be taken on a shared CI runner) and a temp data dir; exits 1 naming the first check that fails.
+# Needs docker and curl.
 set -euo pipefail
 
 if [ $# -lt 2 ] || [ $# -gt 3 ]; then
@@ -35,7 +36,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARCHIVE="jarvisd-$VERSION-linux-$ARCH.tar.gz"
 IMAGE=jarvisd:check
 NAME=jc
-API=http://localhost:37700
+API= ADMIN= # set by run: the host ports docker published for :7700 and :7710
 
 [ -f "$DIST/$ARCHIVE" ] || {
 	echo "no $DIST/$ARCHIVE" >&2
@@ -67,9 +68,18 @@ fail() {
 	exit 1
 }
 
+# hostport PORT: the host address docker published the container's PORT/tcp on.
+hostport() {
+	local hp
+	hp=$(docker port "$NAME" "$1/tcp" | head -1) || fail "docker port $1"
+	echo "127.0.0.1:${hp##*:}"
+}
+
 run() {
-	docker run -d --name "$NAME" -p 37700:7700 -p 37710:7710 -p 31884:1884 \
+	docker run -d --name "$NAME" -p 127.0.0.1::7700 -p 127.0.0.1::7710 -p 127.0.0.1::1884 \
 		-v "$data:/data" -e JARVIS_MDNS=0 "$IMAGE" >/dev/null || fail "docker run"
+	API=http://$(hostport 7700)
+	ADMIN=http://$(hostport 7710)
 }
 
 # wait_health: /health answers within 60 s.
@@ -145,9 +155,9 @@ logs=$(docker logs "$NAME" 2>&1)
 grep -q "Setup token:" <<<"$logs" || fail "docker logs has no 'Setup token:'"
 ok "docker logs shows the setup token"
 
-code=$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:37710/) || fail "GET :37710/"
-[ "$code" = 200 ] || fail "GET :37710/ answered $code, want 200"
-ok "admin :37710/ answers 200"
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$ADMIN/") || fail "GET admin /"
+[ "$code" = 200 ] || fail "GET admin / answered $code, want 200"
+ok "admin :7710/ answers 200"
 
 # --- the data survives the container
 docker exec "$NAME" touch /data/keep || fail "write /data/keep"
