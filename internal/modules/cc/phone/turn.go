@@ -240,7 +240,11 @@ loop:
 	for _, e := range evs {
 		events = append(events, e)
 	}
-	tail += parser.Flush()
+	if rest := parser.Flush(); live.ParseUnclosed(rest) != nil {
+		events = append(events, live.ParseUnclosed(rest))
+	} else {
+		tail += rest
+	}
 	if tail != "" {
 		feed(tail)
 	}

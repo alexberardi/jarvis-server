@@ -594,3 +594,16 @@ func TestVADFlush(t *testing.T) {
 		t.Fatalf("flush: %d samples, in speech %v", len(utt), v.InSpeech())
 	}
 }
+
+func TestUnclosedTokenAtReplyEnd(t *testing.T) {
+	// Qwen3.5-9B, verbatim: the reply ended before the closing bracket.
+	var p TokenParser
+	text, _ := p.Feed("That is not acceptable. [ESCALATE: Friday 7:00 PM is our only available time. Can you confirm that slot?")
+	ev, ok := ParseUnclosed(p.Flush()).(Escalate)
+	if text != "That is not acceptable. " || !ok || ev.Question != "Friday 7:00 PM is our only available time. Can you confirm that slot?" {
+		t.Fatalf("text %q, event %+v", text, ev)
+	}
+	if ParseUnclosed("[sic") != nil || ParseUnclosed("plain") != nil {
+		t.Fatal("parsed a non-token")
+	}
+}
