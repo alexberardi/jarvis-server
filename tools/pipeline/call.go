@@ -108,6 +108,7 @@ const calleeRules = `You are playing a person who just answered a phone call at 
 Stay in character. Reply with only the words you say aloud on the phone: one or two short spoken sentences, no stage directions, no lists, no markdown.
 Only when the conversation is over, in the same reply as your goodbye, end it with [HANGUP]. Never hang up in a reply that asks a question, and never in your first reply.
 If the line is silent, react as a person would ("Hello? Are you still there?").
+Follow your character's instructions exactly: don't invent requirements, demands or problems they don't mention.
 
 Your character:
 `
@@ -190,7 +191,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 
 func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, sc CallScenario, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "══ %s\n", sc.Name)
-	api := &userAPI{token: env["SBX_TOKEN"]}
+	api := &userAPI{token: env["SBX_TOKEN"], authURL: env["SBX_AUTH"], email: env["SBX_EMAIL"], password: env["SBX_PASSWORD"]}
 	ctxJSON, _ := json.Marshal(sc.CallContext)
 	if sc.CallContext == nil {
 		ctxJSON = []byte("[]")
@@ -412,8 +413,29 @@ func (c *callee) chat(ctx context.Context, msgs []map[string]string) (string, er
 	return out.Choices[0].Message.Content, nil
 }
 
-// userAPI calls the sandbox as the primary (the seeded superuser's token).
-type userAPI struct{ token string }
+// userAPI calls the sandbox as the primary (the seeded superuser's token). A long run outlives
+// the token, so a 401 logs in again (authURL, email, password) and retries once.
+type userAPI struct {
+	token                    string
+	authURL, email, password string
+}
+
+func (a *userAPI) relogin() error {
+	b, _ := json.Marshal(map[string]string{"email": a.email, "password": a.password})
+	resp, err := http.Post(a.authURL+"/auth/login", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&out) != nil || out.AccessToken == "" {
+		return fmt.Errorf("login: %s", resp.Status)
+	}
+	a.token = out.AccessToken
+	return nil
+}
 
 type inboxItem struct {
 	ID        string         `json:"id"`
@@ -440,6 +462,19 @@ func (a *userAPI) do(req *http.Request, out any) error {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && a.email != "" && a.relogin() == nil {
+		resp.Body.Close()
+		retry := req.Clone(req.Context())
+		if req.GetBody != nil {
+			if retry.Body, err = req.GetBody(); err != nil {
+				return err
+			}
+		}
+		retry.Header.Set("Authorization", "Bearer "+a.token)
+		if resp, err = http.DefaultClient.Do(retry); err != nil {
+			return err
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {

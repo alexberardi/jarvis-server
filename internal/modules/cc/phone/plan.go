@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/fuzzy"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 )
@@ -188,7 +189,8 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 	if s.NodeContext != nil {
 		nodeFields = s.NodeContext.CallContext(ctx, hh, req.UserID, req.Business, req.Goal)
 	}
-	fields := mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields)
+	fields := SelectForCategories(mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields),
+		s.callCategories(ctx, req.Business, req.Goal))
 	if block := BuildContextBlock(fields); block != "" {
 		details = strings.TrimRight(details, " \t\n\r\v\f") + "\n\n" + block
 	}
@@ -403,6 +405,43 @@ const draftSystemPrompt = "You draft briefs for an assistant that places phone "
 
 // draftDetails drafts the brief on the background slot with reasoning off; it degrades to
 // the raw goal.
+// categorySystemPrompt asks which kinds of saved details a call can need.
+const categorySystemPrompt = "You decide which kinds of personal details an assistant may need on a phone " +
+	"call it makes for someone. Kinds: medical (date of birth, insurance, pharmacy: doctors, dentists, " +
+	"pharmacies, clinics, insurers), auto (vehicle, license plate: mechanics, dealers, car services), home " +
+	"(home address, home details: plumbers, electricians, contractors, deliveries, utilities, home services), " +
+	"dining (restaurants, reservations, food orders). Answer with ONLY the kinds that fit this call, comma " +
+	"separated, or NONE. A restaurant reservation is dining only; it never needs medical or home details."
+
+// callCategories is the call's kinds of details (medical, auto, home, dining), by the model;
+// none on any failure, so the brief falls back to General details only.
+func (s *Service) callCategories(ctx context.Context, business, goal string) []string {
+	if s.LLM == nil {
+		return nil
+	}
+	temp, maxTok, budget := 0.0, 20, 0
+	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
+		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
+		Messages: []llm.Message{
+			{Role: "system", Content: llm.TextContent(categorySystemPrompt)},
+			{Role: "user", Content: llm.TextContent("Business: " + business + "\nGoal: " + goal)},
+		},
+	})
+	if err != nil || resp == nil {
+		s.log().Warn("phone: call categories failed, general details only", "err", err)
+		return nil
+	}
+	var out []string
+	for _, w := range strings.FieldsFunc(strings.ToLower(live.StripThinkText(resp.Content)), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	}) {
+		if w != CatGeneral && isCategory(w) && !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 func (s *Service) draftDetails(ctx context.Context, business, goal, initiator string) string {
 	if s.LLM == nil {
 		return ensureTimesSection(goal, goal)
