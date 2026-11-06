@@ -150,6 +150,32 @@ go run ./tools/pipeline run --sandbox voice --out /tmp/runs tools/pipeline/scena
   (`apps.Vocabulary`: open windows' apps, then the catalogue). To change the default, edit
   the app list in `tools/pipeline/toolsets/desktop.apps.json`.
 
+## 6. Phone calls
+
+`pipeline call` runs whole outbound calls: the request, the plan card, **Call now** (tapped
+through the inbox API), the conversation and the result card. Scenarios live in
+`tools/pipeline/calls/*.json`: `request`, the `callee` persona a model plays, the saved
+`call_context`, a phonebook `contact`, a stand-in node's `node_context` (calendar, command
+fields), the caller's `answers` to mid-call questions, and `expect` (`achieved`, `card` and
+`says` substrings, `never` strings Jarvis must not speak).
+
+```bash
+scripts/sandbox up --name calls --phone-sim        # the simulated line (JARVIS_DEV_PHONE_SIM)
+go run ./tools/pipeline call --sandbox calls --repeat 3 tools/pipeline/calls/*.json
+```
+
+- `--only a,b` picks scenarios; `--repeat N` prints a pass rate per scenario.
+- `--callee-tap URL` plays the business through another sandbox's tap, so two models' runs
+  face the same business (a small model playing the host invents demands).
+- Prod splits calls across labels: `live` talks, `background` drafts the plan, picks the
+  details' categories and writes the summary. `INSTALLED_LLM_BACKGROUND_LABEL=background` (with
+  `JARVIS_HARNESS_ENV` naming the installed server) points the sandbox's background there too.
+- `--you` makes you the business (type its lines; answer Jarvis's questions with `>`). On a
+  `--voice` sandbox without `--phone-sim`, registered to the FreePBX VM as extension 100, the call
+  goes out over SIP: `--you --dial 2125550101` rings Linphone on extension 101 and you talk;
+  typed lines are your answers to Jarvis's questions. `--stt-gpu` keeps whisper off the CPU
+  (~2 s a turn there).
+
 ## Why a turn fails in the sandbox but not at home
 
 - **Tools the sandbox doesn't offer:** memory tools (`remember`, `recall`, `forget`) need a known
