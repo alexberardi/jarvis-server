@@ -12,11 +12,15 @@ import { formatSettingValue, restartAction } from '@/lib/settings'
 interface SettingRowProps {
   setting: SettingResponse
   serviceName: string
+  /** A plain name shown above the key, for pages that group settings by task (Phone). */
+  label?: string
+  /** Replaces the server's description. */
+  help?: string
 }
 
 const RELOAD_MESSAGE = 'Applies after jarvisd restarts'
 
-export default function SettingRow({ setting, serviceName }: SettingRowProps) {
+export default function SettingRow({ setting, serviceName, label, help }: SettingRowProps) {
   const [editing, setEditing] = useState(false)
   const mutation = useUpdateSetting()
 
@@ -50,8 +54,12 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
       <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-x-6">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <code className="font-mono text-small font-medium break-all text-text">{setting.key}</code>
-            <Badge>{setting.value_type}</Badge>
+            {label ? (
+              <span className="text-small font-medium text-text">{label}</span>
+            ) : (
+              <code className="font-mono text-small font-medium break-all text-text">{setting.key}</code>
+            )}
+            {!label && <Badge>{setting.value_type}</Badge>}
             {setting.is_secret && (
               <Badge title="Write-only: the value is never shown">
                 <Lock size={12} aria-hidden />
@@ -70,7 +78,10 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
               </span>
             )}
           </div>
-          {setting.description && <p className="mt-0.5 max-w-prose text-small text-text-muted">{setting.description}</p>}
+          {label && <code className="font-mono text-caption break-all text-text-muted">{setting.key}</code>}
+          {(help ?? setting.description) && (
+            <p className="mt-0.5 max-w-prose text-small text-text-muted">{help ?? setting.description}</p>
+          )}
           {setting.household_scoped && <p className="mt-0.5 text-caption text-text-muted">Default for all households</p>}
         </div>
 
@@ -81,6 +92,7 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
               onSave={handleSave}
               onCancel={() => setEditing(false)}
               isSaving={mutation.isPending}
+              label={label}
             />
           ) : value ? (
             <p className="font-mono text-small break-all text-text">{value}</p>
@@ -98,7 +110,7 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
           className="-my-1.5 -mr-2"
           onClick={() => setEditing(true)}
           title={setting.household_scoped ? 'Edit the default' : 'Edit'}
-          aria-label={setting.household_scoped ? 'Edit the default' : 'Edit'}
+          aria-label={`${setting.household_scoped ? 'Edit the default' : 'Edit'}${label ? `: ${label}` : ''}`}
         >
           <Pencil size={16} aria-hidden />
         </Button>
