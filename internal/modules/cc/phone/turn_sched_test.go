@@ -122,3 +122,11 @@ func TestOnlyOffersOutsideTheWindowMeansCallBack(t *testing.T) {
 		t.Fatalf("7:15 note: %q", note)
 	}
 }
+
+func TestDedupeFacts(t *testing.T) {
+	got := dedupeFacts([]string{"offered Tuesday at 1, outside your acceptable times", "booked Wednesday at 3pm",
+		"booked cleaning for Jordan Avery on Wednesday at 3pm", "booked Wednesday at 3pm"})
+	if len(got) != 2 || got[1] != "booked cleaning for Jordan Avery on Wednesday at 3pm" {
+		t.Fatalf("facts: %q", got)
+	}
+}

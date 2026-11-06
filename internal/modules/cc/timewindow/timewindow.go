@@ -349,7 +349,7 @@ func Check(envelope, utterance string) Result {
 // day when it names only one. Only times with a verdict are returned (none when nothing can
 // be judged).
 func CheckAll(envelope, utterance string) []Result {
-	text := strings.TrimSpace(utterance)
+	text := midnightRE.ReplaceAllString(noonRE.ReplaceAllString(strings.TrimSpace(utterance), "12 pm"), "12 am")
 	ws := ParseWindows(envelope)
 	dm := dayRE.FindStringSubmatch(text)
 	var day int

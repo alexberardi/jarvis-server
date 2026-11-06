@@ -330,7 +330,7 @@ func (s *Service) wrapup(ctx context.Context, rt *callRuntime, sess *Session) {
 		ga = *achieved
 	}
 	facts := make([]any, 0, len(p.outcomeFacts))
-	for _, f := range p.outcomeFacts {
+	for _, f := range dedupeFacts(p.outcomeFacts) {
 		facts = append(facts, f)
 	}
 	outcome := map[string]any{
@@ -340,6 +340,41 @@ func (s *Service) wrapup(ctx context.Context, rt *callRuntime, sess *Session) {
 	if err := s.recordOutcome(ctx, rt.sessionID, outcome, audioKey); err != nil {
 		s.log().Error("phone: outcome report failed", "session", rt.sessionID, "err", err)
 	}
+}
+
+// dedupeFacts drops a fact whose every word is in a later or longer one: a model that records
+// "booked Wednesday at 3pm" and then "booked cleaning for Jordan on Wednesday at 3pm" said it once.
+func dedupeFacts(facts []string) []string {
+	words := func(f string) map[string]bool {
+		m := map[string]bool{}
+		for _, w := range strings.Fields(normQuestion(f)) {
+			m[w] = true
+		}
+		return m
+	}
+	covered := func(a, b map[string]bool) bool {
+		for w := range a {
+			if !b[w] {
+				return false
+			}
+		}
+		return true
+	}
+	var out []string
+	for i, f := range facts {
+		wi, dup := words(f), false
+		for j, g := range facts {
+			wj := words(g)
+			if i != j && covered(wi, wj) && (len(wi) < len(wj) || (len(wi) == len(wj) && j > i)) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // restrictedFor recomputes the give-if-asked fields from the stored context with the same

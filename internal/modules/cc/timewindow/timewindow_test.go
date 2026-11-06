@@ -154,3 +154,10 @@ func TestCheckAllJudgesEveryOfferedTime(t *testing.T) {
 		t.Fatal("picked a day for an envelope with two")
 	}
 }
+
+func TestCheckAllReadsNoon(t *testing.T) {
+	r := CheckAll("Acceptable times: Mon 5-8pm", "Maybe I could do Monday at noon")
+	if len(r) != 1 || *r[0].ProposedLabel != "Monday at 12 pm" || *r[0].Available {
+		t.Fatalf("noon: %+v", r)
+	}
+}
