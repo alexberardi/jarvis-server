@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -324,7 +325,8 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 // injected into this generation only. Fails open: no note.
 func (p *turnPipeline) schedulingNote(heard string) string {
 	env := p.rt.brief.Constraints
-	if env == "" || p.timesFromCaller || !live.MightProposeTime(heard) {
+	heard = spokenClock(heard)
+	if env == "" || p.timesFromCaller || !mightBeTime(heard) {
 		return ""
 	}
 	// Every time they mention is judged ("7 is booked; we have 6:15 or 7:30"), not only the
@@ -359,6 +361,35 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[len(closed) == 1] +
 		" yourself. Their acceptable times — " + summary + ". If the business can't do an acceptable " +
 		"time, ask " + who + " which of the business's offers works with [ESCALATE: …], naming the offers.]"
+}
+
+var (
+	clockRE      = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
+	hourWords    = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
+	minuteWords  = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
+	spokenTimeRE = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
+)
+
+// spokenClock writes "six fifteen" as 6:15 and "seven o'clock" as 7 for the time checks: a
+// transcript can spell times out. A lone hour word ("a table for two") is left alone.
+func spokenClock(s string) string {
+	return spokenTimeRE.ReplaceAllStringFunc(s, func(m string) string {
+		g := spokenTimeRE.FindStringSubmatch(m)
+		h, rest := hourWords[strings.ToLower(g[1])], strings.ToLower(strings.ReplaceAll(g[2], "-", " "))
+		switch {
+		case strings.HasSuffix(rest, "clock"):
+			return h + " o'clock"
+		case rest[0] == 'a' || rest[0] == 'p':
+			return h + " " + g[2]
+		}
+		return h + ":" + minuteWords[strings.Join(strings.Fields(rest), " ")]
+	})
+}
+
+// mightBeTime widens live.MightProposeTime (Python parity) to "7:30" and spelled-out times.
+func mightBeTime(s string) bool {
+	s = spokenClock(s)
+	return live.MightProposeTime(s) || clockRE.MatchString(s)
 }
 
 func (p *turnPipeline) stuckInLoop(heard string) bool {
@@ -558,7 +589,7 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		// trace in the history. The caller's answer is newer than the plan, so it wins.
 		p.messages = append(p.messages, chatMsg{"user", "[You asked " + who + ": \"" + question + "\". " + who +
 			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it.]"})
-		if live.MightProposeTime(answer) {
+		if mightBeTime(answer) {
 			p.timesFromCaller = true
 		}
 		p.answers = append(p.answers, "asked \""+question+"\", answered \""+answer+"\"")

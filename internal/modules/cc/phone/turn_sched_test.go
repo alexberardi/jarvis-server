@@ -53,3 +53,31 @@ func TestOfferedAlternativesOutsideTheBriefAreFlagged(t *testing.T) {
 		t.Fatalf("called a refused slot open: %q", note)
 	}
 }
+
+func TestSpokenOffersWithNoDayAreFlagged(t *testing.T) {
+	// Qwen3.5-9B's host, verbatim: no weekday, times spelled out.
+	rt := &callRuntime{brief: live.Brief{Goal: "book a table", InitiatorName: "Alex",
+		Constraints: "Acceptable times: Friday at 7 PM."}}
+	p := (&Service{}).newTurnPipeline(rt, nil)
+	note := p.schedulingNote("Hi Jordan, can I put you down for a table for two? We're fully booked for seven, but we have seats at six fifteen or seven thirty.")
+	if !strings.Contains(note, "Friday at 6:15, Friday at 7:30 are NOT open") {
+		t.Fatalf("note: %q", note)
+	}
+}
+
+func TestSpokenClock(t *testing.T) {
+	for in, want := range map[string]string{
+		"six fifteen or seven-thirty": "6:15 or 7:30",
+		"seven o'clock":               "7 o'clock",
+		"seven forty five":            "7:45",
+		"eight pm":                    "8 pm",
+		"a table for two":             "a table for two",
+	} {
+		if got := spokenClock(in); got != want {
+			t.Errorf("spokenClock(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if !mightBeTime("7:30 works, book that") || !mightBeTime("six fifteen is fine") || mightBeTime("a table for two") {
+		t.Fatal("mightBeTime")
+	}
+}

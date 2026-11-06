@@ -141,7 +141,15 @@ func TestCheckAllJudgesEveryOfferedTime(t *testing.T) {
 			t.Fatalf("%s: %v (all %v)", k, got[k], got)
 		}
 	}
-	if CheckAll(env, "We do have 6:15 PM or 7:30 PM.") != nil {
-		t.Fatal("judged times with no weekday")
+	// No weekday: the brief's one day, clock times only ("for 2" is the party).
+	got = map[string]bool{}
+	for _, r := range CheckAll(env, "Table for 2? We have 6:15 or 7:30.") {
+		got[*r.ProposedLabel] = *r.Available
+	}
+	if len(got) != 2 || got["Friday at 6:15"] || got["Friday at 7:30"] {
+		t.Fatalf("no-weekday verdicts: %v", got)
+	}
+	if CheckAll("Acceptable times: Friday at 7pm; Saturday at 7pm", "We do have 6:15 PM.") != nil {
+		t.Fatal("picked a day for an envelope with two")
 	}
 }

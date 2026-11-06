@@ -117,6 +117,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("call", flag.ContinueOnError)
 	sandbox := fs.String("sandbox", "", "sandbox name (scripts/sandbox up --phone-sim)")
 	model := fs.String("model", "live", "model label the callee is played by (through the sandbox's tap)")
+	calleeTap := fs.String("callee-tap", "", "tap the callee is played through instead of the sandbox's (another sandbox's, to hold the business's model fixed)")
 	only := fs.String("only", "", "run only these scenarios (comma-separated names)")
 	repeat := fs.Int("repeat", 1, "run each scenario this many times and report its pass rate")
 	if err := fs.Parse(args); err != nil {
@@ -157,6 +158,9 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 	}
 	cl := &callee{tap: env["SBX_LLM_TAP"], model: *model, out: stdout}
+	if *calleeTap != "" {
+		cl.tap = *calleeTap
+	}
 	srv := &http.Server{Addr: env["SBX_PHONE_SIM"], Handler: cl, ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -369,7 +373,7 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Unlock()
 	// The persona model sometimes ends the call on its greeting or mid-question; a person doesn't.
-	if hangup && (replies < 2 || strings.HasSuffix(reply, "?")) {
+	if hangup && (replies < 2 || strings.Contains(reply, "?")) {
 		hangup = false
 	}
 	if reply != "" {

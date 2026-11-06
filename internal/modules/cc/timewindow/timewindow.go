@@ -341,18 +341,27 @@ func Check(envelope, utterance string) Result {
 
 // CheckAll judges every time the utterance mentions, on its first weekday ("Friday at 7 is
 // booked; we have 6:15 or 7:30" is three proposals for Friday), where Check judges only the
-// first. Only times with a verdict are returned (none when nothing can be judged).
+// first. With no weekday ("we have 6:15 or 7:30"), clock times are judged on the envelope's
+// day when it names only one. Only times with a verdict are returned (none when nothing can
+// be judged).
 func CheckAll(envelope, utterance string) []Result {
 	text := strings.TrimSpace(utterance)
+	ws := ParseWindows(envelope)
 	dm := dayRE.FindStringSubmatch(text)
-	if dm == nil {
+	var day int
+	if dm != nil {
+		day = days[strings.ToLower(dm[1])]
+	} else if d, ok := soleDay(ws.Acceptable); ok {
+		day = d
+	} else {
 		return nil
 	}
-	day := days[strings.ToLower(dm[1])]
-	ws := ParseWindows(envelope)
 	summary := acceptableSummary(envelope)
 	var out []Result
 	for _, m := range timeRE.FindAllStringSubmatch(text, -1) {
+		if dm == nil && m[2] == "" && m[3] == "" {
+			continue // a bare number with no day is a party size or an ID, not a time
+		}
 		hour, _ := strconv.Atoi(m[1])
 		minute := 0
 		if m[2] != "" {
@@ -388,4 +397,17 @@ func CheckAll(envelope, utterance string) []Result {
 		out = append(out, res)
 	}
 	return out
+}
+
+// soleDay is the one day every interval is on.
+func soleDay(ivs []Interval) (int, bool) {
+	if len(ivs) == 0 {
+		return 0, false
+	}
+	for _, iv := range ivs[1:] {
+		if iv.Day != ivs[0].Day {
+			return 0, false
+		}
+	}
+	return ivs[0].Day, true
 }
