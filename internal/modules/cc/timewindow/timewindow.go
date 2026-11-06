@@ -123,6 +123,8 @@ var (
 	dayRE      = regexp.MustCompile(`(?i)\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b`)
 	faceRE     = regexp.MustCompile(`(?i)^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$`)
 	labelRE    = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
+	// leadRE is the filler a drafted entry can start with before its day ("this Friday at 7pm").
+	leadRE = regexp.MustCompile(`(?i)^(?:this|next|on|coming)\s+`)
 	// A time RANGE anywhere in an entry ("Tue Aug 5 4-8pm", "Tuesday 4pm to 8pm"), with -, an
 	// en or em dash, or "to" between.
 	rangeRE = regexp.MustCompile(`(?i)(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\s*(?:-|–|—|to)\s*` +
@@ -244,6 +246,7 @@ func parseEntries(body string) []Interval {
 		}
 		// Strip a trailing "(Work)"-style label that Do-not-book lines carry.
 		chunk = strings.TrimSpace(labelRE.ReplaceAllString(chunk, ""))
+		chunk = leadRE.ReplaceAllString(chunk, "")
 		loc := dayRE.FindStringSubmatchIndex(chunk)
 		if loc == nil || loc[0] != 0 {
 			continue
@@ -251,6 +254,18 @@ func parseEntries(body string) []Interval {
 		day := days[strings.ToLower(chunk[loc[2]:loc[3]])]
 		rm := rangeRE.FindStringSubmatch(chunk[loc[1]:])
 		if rm == nil {
+			// One time, not a range ("Friday at 7pm", a drafted brief's exact slot): that minute
+			// only, each plausible reading of a bare hour.
+			if tm := timeRE.FindStringSubmatch(chunk[loc[1]:]); tm != nil {
+				hour, _ := strconv.Atoi(tm[1])
+				minute := 0
+				if tm[2] != "" {
+					minute, _ = strconv.Atoi(tm[2])
+				}
+				for _, m := range candidateMinutes(hour, minute, meridiemOf(tm[3])) {
+					out = append(out, Interval{day, m, m + 1})
+				}
+			}
 			continue
 		}
 		start, end, ok := parseRange(strings.TrimSpace(rm[1]) + "-" + strings.TrimSpace(rm[2]))
@@ -322,4 +337,55 @@ func Check(envelope, utterance string) Result {
 	}
 	res.Available = &open
 	return res
+}
+
+// CheckAll judges every time the utterance mentions, on its first weekday ("Friday at 7 is
+// booked; we have 6:15 or 7:30" is three proposals for Friday), where Check judges only the
+// first. Only times with a verdict are returned (none when nothing can be judged).
+func CheckAll(envelope, utterance string) []Result {
+	text := strings.TrimSpace(utterance)
+	dm := dayRE.FindStringSubmatch(text)
+	if dm == nil {
+		return nil
+	}
+	day := days[strings.ToLower(dm[1])]
+	ws := ParseWindows(envelope)
+	summary := acceptableSummary(envelope)
+	var out []Result
+	for _, m := range timeRE.FindAllStringSubmatch(text, -1) {
+		hour, _ := strconv.Atoi(m[1])
+		minute := 0
+		if m[2] != "" {
+			minute, _ = strconv.Atoi(m[2])
+		}
+		mer := meridiemOf(m[3])
+		cands := candidateMinutes(hour, minute, mer)
+		if len(cands) == 0 {
+			continue
+		}
+		label := formatLabel(day, hour, minute, mer)
+		res := Result{TimeDetected: true, ProposedLabel: &label, AcceptableSummary: summary}
+		blocked := false
+		for _, c := range cands {
+			if anyContains(ws.Blocked, day, c) {
+				blocked = true
+			}
+		}
+		switch {
+		case blocked:
+			res.Available = new(bool)
+		case len(ws.Acceptable) > 0:
+			open := false
+			for _, c := range cands {
+				if ws.isOpen(day, c) {
+					open = true
+				}
+			}
+			res.Available = &open
+		default:
+			continue
+		}
+		out = append(out, res)
+	}
+	return out
 }

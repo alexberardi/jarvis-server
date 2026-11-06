@@ -120,3 +120,28 @@ func TestSummary(t *testing.T) {
 		t.Fatalf("summary %v", r.AcceptableSummary)
 	}
 }
+
+// A drafted brief's exact slot parses ("this Friday at 7pm"), and every time an offer mentions
+// is judged: the booked 7 is open on the calendar, the alternatives are not.
+func TestCheckAllJudgesEveryOfferedTime(t *testing.T) {
+	env := "Acceptable times: this Friday at 7pm"
+	if ws := ParseWindows(env); len(ws.Acceptable) != 1 || ws.Acceptable[0].Start != 19*60 {
+		t.Fatalf("windows: %+v", ws)
+	}
+	got := map[string]bool{}
+	for _, r := range CheckAll(env, "Sorry, Friday at 7:00 PM is fully booked. We do have 6:15 PM or 7:30 PM available for two.") {
+		got[*r.ProposedLabel] = *r.Available
+	}
+	want := map[string]bool{"Friday at 7 pm": true, "Friday at 6:15 pm": false, "Friday at 7:30 pm": false}
+	if len(got) != len(want) {
+		t.Fatalf("verdicts: %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%s: %v (all %v)", k, got[k], got)
+		}
+	}
+	if CheckAll(env, "We do have 6:15 PM or 7:30 PM.") != nil {
+		t.Fatal("judged times with no weekday")
+	}
+}

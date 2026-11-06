@@ -38,3 +38,18 @@ func TestAssessmentHearsTheCallersDecisions(t *testing.T) {
 		t.Fatalf("instruction: %q", got)
 	}
 }
+
+// "7 is booked; we have 6:15 or 7:30" against a brief for Friday at 7: the alternatives are
+// flagged and the caller is to be asked, instead of the refused 7 being called open.
+func TestOfferedAlternativesOutsideTheBriefAreFlagged(t *testing.T) {
+	rt := &callRuntime{brief: live.Brief{Goal: "book a table", InitiatorName: "Alex",
+		Constraints: "Acceptable times: Friday at 7pm"}}
+	p := (&Service{}).newTurnPipeline(rt, nil)
+	note := p.schedulingNote("Sorry, Friday at 7:00 PM is fully booked. We do have 6:15 PM or 7:30 PM available for two.")
+	if !strings.Contains(note, "Friday at 6:15 pm, Friday at 7:30 pm are NOT open") || !strings.Contains(note, "ask Alex") {
+		t.Fatalf("note: %q", note)
+	}
+	if strings.Contains(note, "OPEN on the caller's calendar. Treat it as available") {
+		t.Fatalf("called a refused slot open: %q", note)
+	}
+}

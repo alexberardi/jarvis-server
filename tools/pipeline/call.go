@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -92,8 +93,13 @@ func contains(text, want string) bool {
 var spokenDigits = strings.NewReplacer("zero", "0", "oh", "0", "one", "1", "two", "2", "three", "3", "four", "4",
 	"five", "5", "six", "6", "seven", "7", "eight", "8", "nine", "9", "dash", "")
 
-// squash drops separators and reads spoken digits, so "D, X, dash, seven, seven" is "dx77".
+// phonetic is a spelled letter ("D as in Dog", "X as in X-ray").
+var phonetic = regexp.MustCompile(`(?i)\b([a-z]) as in [a-z]+(?:-[a-z]+)?`)
+
+// squash drops separators and reads spoken digits and spelled letters, so "D as in Dog, X,
+// dash, seven, seven" is "dx77".
 func squash(s string) string {
+	s = phonetic.ReplaceAllString(s, "$1")
 	return strings.NewReplacer(" ", "", "-", "", ",", "", ".", "").Replace(spokenDigits.Replace(s))
 }
 

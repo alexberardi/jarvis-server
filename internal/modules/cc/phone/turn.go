@@ -327,27 +327,38 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 	if env == "" || p.timesFromCaller || !live.MightProposeTime(heard) {
 		return ""
 	}
-	v := timewindow.Check(env, heard)
-	if !v.TimeDetected || v.Available == nil {
+	// Every time they mention is judged ("7 is booked; we have 6:15 or 7:30"), not only the
+	// first: the first can be the one they just refused.
+	verdicts := timewindow.CheckAll(env, heard)
+	if len(verdicts) == 0 {
 		return ""
 	}
-	label := "that time"
-	if v.ProposedLabel != nil && *v.ProposedLabel != "" {
-		label = *v.ProposedLabel
+	var closed []string
+	for _, v := range verdicts {
+		if !*v.Available {
+			closed = append(closed, *v.ProposedLabel)
+		}
 	}
-	if *v.Available {
+	if len(closed) == 0 {
+		label := *verdicts[0].ProposedLabel
 		return "[Scheduling check — ground truth, do not recompute: " + label + " " +
 			"is confirmed OPEN on the caller's calendar. Treat it as " +
 			"available: offer that slot to the business, and do not tell " +
 			"them it is unavailable.]"
 	}
 	summary := "the times in your brief"
-	if v.AcceptableSummary != nil && *v.AcceptableSummary != "" {
-		summary = *v.AcceptableSummary
+	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
+		summary = *s
 	}
-	return "[Scheduling check — ground truth, do not recompute: " + label + " is " +
-		"NOT open on the caller's calendar. Do not agree to it. Offer a " +
-		"time from — " + summary + "]"
+	who := p.rt.brief.InitiatorName
+	if who == "" {
+		who = "the person you are calling for"
+	}
+	return "[Scheduling check — ground truth, do not recompute: " + strings.Join(closed, ", ") + " " +
+		map[bool]string{true: "is", false: "are"}[len(closed) == 1] + " NOT open on the caller's calendar. " +
+		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[len(closed) == 1] +
+		" yourself. Their acceptable times — " + summary + ". If the business can't do an acceptable " +
+		"time, ask " + who + " which of the business's offers works with [ESCALATE: …], naming the offers.]"
 }
 
 func (p *turnPipeline) stuckInLoop(heard string) bool {
