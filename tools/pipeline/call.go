@@ -121,6 +121,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	calleeTap := fs.String("callee-tap", "", "tap the callee is played through instead of the sandbox's (another sandbox's, to hold the business's model fixed)")
 	only := fs.String("only", "", "run only these scenarios (comma-separated names)")
 	repeat := fs.Int("repeat", 1, "run each scenario this many times and report its pass rate")
+	dial := fs.String("dial", "", "call this number instead of the plan's, as if edited on its card (the SIP demo's softphone)")
 	you := fs.Bool("you", false, "you play the business (type its lines on stdin) and answer Jarvis's questions (lines starting with >)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -132,8 +133,11 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if env["SBX_PHONE_SIM"] == "" {
-		return errors.New("call: this sandbox has no simulated phone line (scripts/sandbox up --phone-sim)")
+	// Without the simulated line the call goes out over the sandbox's real phone provider
+	// (--sip to the FreePBX VM), and a person answers it.
+	sip := env["SBX_PHONE_SIM"] == ""
+	if sip && !*you {
+		return errors.New("call: this sandbox has no simulated phone line (scripts/sandbox up --phone-sim); over SIP, pass --you")
 	}
 	d, err := sandboxDriver(*sandbox)
 	if err != nil {
@@ -164,23 +168,27 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 		cl.tap = *calleeTap
 	}
 	if *you {
-		cl.you = readHuman(os.Stdin)
+		cl.you = readHuman(os.Stdin, sip)
 		fmt.Fprintln(stdout, "You are the business: type its lines (end one with /hangup to hang up). Answer Jarvis's questions to you with a leading >.")
 	}
-	srv := &http.Server{Addr: env["SBX_PHONE_SIM"], Handler: cl, ReadHeaderTimeout: 10 * time.Second}
-	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
-	defer srv.Close()
-	select {
-	case err := <-errc:
-		return fmt.Errorf("call: callee server: %w", err)
-	case <-time.After(200 * time.Millisecond):
+	if sip {
+		fmt.Fprintln(stdout, "Over SIP: answer the softphone and speak as the business; type only your answers to Jarvis's questions (>).")
+	} else {
+		srv := &http.Server{Addr: env["SBX_PHONE_SIM"], Handler: cl, ReadHeaderTimeout: 10 * time.Second}
+		errc := make(chan error, 1)
+		go func() { errc <- srv.ListenAndServe() }()
+		defer srv.Close()
+		select {
+		case err := <-errc:
+			return fmt.Errorf("call: callee server: %w", err)
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 	failed := 0
 	passes := make([]int, len(scs))
 	for i, sc := range scs {
 		for n := 0; n < *repeat; n++ {
-			if err := runCall(ctx, d, env, cl, sc, stdout); err != nil {
+			if err := runCall(ctx, d, env, cl, sc, *dial, sip, stdout); err != nil {
 				failed++
 				fmt.Fprintf(stdout, "  ✗ %s: %v\n\n", sc.Name, err)
 				continue
@@ -199,7 +207,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
-func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, sc CallScenario, stdout io.Writer) error {
+func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, sc CallScenario, dial string, sip bool, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "══ %s\n", sc.Name)
 	api := &userAPI{token: env["SBX_TOKEN"], authURL: env["SBX_AUTH"], email: env["SBX_EMAIL"], password: env["SBX_PASSWORD"]}
 	ctxJSON, _ := json.Marshal(sc.CallContext)
@@ -263,7 +271,9 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 		}
 	}
 	fmt.Fprintf(stdout, "   number: %s\n   details:\n%s\n", orDash(number), indent(details))
-	if sc.Number != "" && number != sc.Number {
+	if dial != "" {
+		number = dial
+	} else if sc.Number != "" && number != sc.Number {
 		return fmt.Errorf("the plan's number is %q, want %q", number, sc.Number)
 	}
 	if number == "" {
@@ -280,18 +290,26 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 	watch, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go api.answerQuestions(watch, env, confirmAt, sc.Answers, cl.you, stdout)
-	select {
-	case <-ended:
-	case <-time.After(12 * time.Minute):
-		return errors.New("the call did not end within 12 minutes")
-	case <-ctx.Done():
-		return ctx.Err()
+	resultWithin := 3 * time.Minute
+	if sip {
+		resultWithin = 15 * time.Minute // a person on a real line: the result card says when it's over
+	} else {
+		select {
+		case <-ended:
+		case <-time.After(12 * time.Minute):
+			return errors.New("the call did not end within 12 minutes")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	result, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], confirmAt, "Call finished", 3*time.Minute)
+	result, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], confirmAt, "Call finished", resultWithin)
 	if err != nil {
 		return fmt.Errorf("no result card: %w", err)
 	}
 	fmt.Fprintf(stdout, "\n📬 %s\n%s\n\n", result.Title, indent(result.Body))
+	if cl.you != nil {
+		return nil // a person played the business: the scenario's expectations are theirs to judge
+	}
 	if fails := sc.Expect.check(result, cl.saidSoFar()); len(fails) > 0 {
 		return errors.New(strings.Join(fails, "; "))
 	}
@@ -685,10 +703,11 @@ func orDash(s string) string {
 }
 
 // human is a person at the terminal: lines starting with ">" answer Jarvis's questions to the
-// caller, every other line is the business speaking.
+// caller, every other line is the business speaking (over SIP the business speaks on the
+// softphone, so every line is an answer).
 type human struct{ business, answers chan string }
 
-func readHuman(r io.Reader) *human {
+func readHuman(r io.Reader, answersOnly bool) *human {
 	h := &human{business: make(chan string, 8), answers: make(chan string, 8)}
 	go func() {
 		sc := bufio.NewScanner(r)
@@ -696,8 +715,8 @@ func readHuman(r io.Reader) *human {
 			line := strings.TrimSpace(sc.Text())
 			switch {
 			case line == "":
-			case strings.HasPrefix(line, ">"):
-				h.answers <- strings.TrimSpace(line[1:])
+			case answersOnly || strings.HasPrefix(line, ">"):
+				h.answers <- strings.TrimSpace(strings.TrimPrefix(line, ">"))
 			default:
 				h.business <- line
 			}
