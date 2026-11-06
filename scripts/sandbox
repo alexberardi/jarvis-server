@@ -51,6 +51,8 @@
 #                    ~/.cache/jarvis-harness/models ($JARVIS_HARNESS_CACHE) and used in place;
 #                    whisper-server runs on the CPU (stt.gpu_backend cpu, gpu_layers 0), never
 #                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
+#   --stt-gpu        with --voice: whisper-server on the GPU instead of the CPU (live phone calls:
+#                    ~2 s of CPU transcription per turn); check the GPU has room first
 #   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
 #                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
 #   --speech local   (default) STT on the local whisper-server (--voice) or off
@@ -118,7 +120,7 @@ die() { say "$*"; exit 1; }
 CMD=${1:-}
 [ -n "$CMD" ] || { sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
-NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0 PHONE_SIM=0
+NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0 PHONE_SIM=0 STT_GPU=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local SPEECH_API=openai
 NODE_PROFILE=pi
 while [ $# -gt 0 ]; do
@@ -131,6 +133,7 @@ while [ $# -gt 0 ]; do
     --phone-sim) PHONE_SIM=1; shift ;;
     --voice) VOICE=1; shift ;;
     --sip) SIP=1; shift ;;
+    --stt-gpu) STT_GPU=1; shift ;;
     --speech) SPEECH=$2; shift 2 ;;
     --speech-api) SPEECH_API=$2; shift 2 ;;
     --stt-model) STT_MODEL=$2; shift 2 ;;
@@ -485,8 +488,13 @@ setup_voice() {
   set_setting "$llm" tts.model "\"$CACHE/kokoro-multi-lang-v1_0\""
   set_setting "$llm" speaker.model "\"$CACHE/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx\""
   set_setting "$llm" stt.model "\"$STT_FILE\""
-  set_setting "$llm" stt.gpu_backend '"cpu"'
-  set_setting "$llm" stt.gpu_layers 0
+  if [ "$STT_GPU" = 1 ]; then
+    set_setting "$llm" stt.gpu_backend '"auto"'
+    set_setting "$llm" stt.gpu_layers 999
+  else
+    set_setting "$llm" stt.gpu_backend '"cpu"'
+    set_setting "$llm" stt.gpu_layers 0
+  fi
   # whisper-server's default is 4 threads: half the cores, at most 8, is ~1.5x faster on a
   # short command without taking the whole box.
   local threads=$(( $(getconf _NPROCESSORS_ONLN) / 2 ))
@@ -494,7 +502,7 @@ setup_voice() {
   [ "$threads" -lt 1 ] && threads=1
   set_setting "$llm" stt.extra_args "\"-t $threads\""
   [ "$SPEECH" != local ] || set_setting "$llm" stt.engine '"local"'
-  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code stt_desc="$STT_MODEL on the CPU; the first start fetches whisper-server"
+  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code stt_desc="$STT_MODEL on the $([ "$STT_GPU" = 1 ] && echo GPU || echo CPU); the first start fetches whisper-server"
   case $SPEECH in
     fake) stt_desc="remote: tools/fakespeech ($SPEECH_API)" ;;
     speaches) stt_desc="remote: speaches, $SPEACHES_STT_MODEL" ;;
