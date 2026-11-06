@@ -81,3 +81,17 @@ func TestSpokenClock(t *testing.T) {
 		t.Fatal("mightBeTime")
 	}
 }
+
+func TestCopiedPromptExampleIsNotAsked(t *testing.T) {
+	// Qwen3.5-9B on a pizza booking, after hearing "Um...".
+	evs := dropCopiedExample([]any{live.Escalate{Question: "what is the patient's date of birth?"}, live.Hangup{}}, "Um...")
+	if len(evs) != 1 {
+		t.Fatalf("events: %v", evs)
+	}
+	if evs := dropCopiedExample([]any{live.Escalate{Question: "What is the patient's date of birth?"}}, "And the date of birth?"); len(evs) != 1 {
+		t.Fatal("dropped a real question the business asked")
+	}
+	if !mightBeTime("I could do 7.30. Does that work?") || mightBeTime("a large pie is $12.50") {
+		t.Fatal("dotted clock")
+	}
+}

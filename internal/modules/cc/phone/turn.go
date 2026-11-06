@@ -297,7 +297,22 @@ loop:
 		spoken = append(spoken, c.sentence)
 		pcm = append(pcm, c.pcm...)
 	}
-	return pcm, strings.Join(spoken, " "), events, ttft, ttfb, nil
+	return pcm, strings.Join(spoken, " "), dropCopiedExample(events, heard), ttft, ttfb, nil
+}
+
+// dropCopiedExample removes an escalation that is the prompt's own example, word for word,
+// when the business said nothing about it: Qwen3.5-9B asked the caller "what is the patient's
+// date of birth?" on a pizza booking after hearing "Um...", and held the line for the answer.
+func dropCopiedExample(events []any, heard string) []any {
+	out := events[:0:0]
+	for _, ev := range events {
+		if e, ok := ev.(live.Escalate); ok && normQuestion(e.Question) == normQuestion(live.EscalateExample) &&
+			!strings.Contains(strings.ToLower(heard), "birth") {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // askedKeys is SpokenOutputGuard.asked_keys: which restricted fields the callee asked for,
@@ -368,15 +383,18 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 }
 
 var (
-	clockRE      = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
-	hourWords    = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
-	minuteWords  = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
-	spokenTimeRE = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
+	// "7.30" is how whisper often writes 7:30; "$12.50" stays a price.
+	dottedClockRE = regexp.MustCompile(`(^|[^$\d.])(\d{1,2})\.(\d{2})\b`)
+	clockRE       = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
+	hourWords     = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
+	minuteWords   = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
+	spokenTimeRE  = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
 )
 
 // spokenClock writes "six fifteen" as 6:15 and "seven o'clock" as 7 for the time checks: a
 // transcript can spell times out. A lone hour word ("a table for two") is left alone.
 func spokenClock(s string) string {
+	s = dottedClockRE.ReplaceAllString(s, "$1$2:$3")
 	return spokenTimeRE.ReplaceAllStringFunc(s, func(m string) string {
 		g := spokenTimeRE.FindStringSubmatch(m)
 		h, rest := hourWords[strings.ToLower(g[1])], strings.ToLower(strings.ReplaceAll(g[2], "-", " "))

@@ -607,3 +607,9 @@ func TestUnclosedTokenAtReplyEnd(t *testing.T) {
 		t.Fatal("parsed a non-token")
 	}
 }
+
+func TestEscalateExampleIsThePrompts(t *testing.T) {
+	if !strings.Contains(strings.Join(promptSections, "\n"), "[ESCALATE: "+EscalateExample+"]") {
+		t.Fatal("EscalateExample no longer matches the prompt's example")
+	}
+}
