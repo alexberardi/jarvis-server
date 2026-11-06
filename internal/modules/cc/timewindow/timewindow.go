@@ -29,6 +29,10 @@ const (
 )
 
 // Interval is a window on one weekday, in minutes past midnight (end exclusive).
+// Grace is how far either side of a single acceptable time ("Friday at 7pm") still counts as
+// it, in minutes; a range ("5-8pm") is exact (decision 2026-11-06-call-time-grace).
+const Grace = 30
+
 type Interval struct {
 	Day, Start, End int
 }
@@ -254,8 +258,8 @@ func parseEntries(body string) []Interval {
 		day := days[strings.ToLower(chunk[loc[2]:loc[3]])]
 		rm := rangeRE.FindStringSubmatch(chunk[loc[1]:])
 		if rm == nil {
-			// One time, not a range ("Friday at 7pm", a drafted brief's exact slot): that minute
-			// only, each plausible reading of a bare hour.
+			// One time, not a range ("Friday at 7pm", a drafted brief's exact slot): Grace either
+			// side of it (7:15 for a 7pm table is fine), each plausible reading of a bare hour.
 			if tm := timeRE.FindStringSubmatch(chunk[loc[1]:]); tm != nil {
 				hour, _ := strconv.Atoi(tm[1])
 				minute := 0
@@ -263,7 +267,7 @@ func parseEntries(body string) []Interval {
 					minute, _ = strconv.Atoi(tm[2])
 				}
 				for _, m := range candidateMinutes(hour, minute, meridiemOf(tm[3])) {
-					out = append(out, Interval{day, m, m + 1})
+					out = append(out, Interval{day, m - Grace, m + Grace + 1})
 				}
 			}
 			continue

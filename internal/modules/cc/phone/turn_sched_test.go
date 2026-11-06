@@ -46,7 +46,9 @@ func TestOfferedAlternativesOutsideTheBriefAreFlagged(t *testing.T) {
 		Constraints: "Acceptable times: Friday at 7pm"}}
 	p := (&Service{}).newTurnPipeline(rt, nil)
 	note := p.schedulingNote("Sorry, Friday at 7:00 PM is fully booked. We do have 6:15 PM or 7:30 PM available for two.")
-	if !strings.Contains(note, "Friday at 6:15 pm, Friday at 7:30 pm are NOT open") || !strings.Contains(note, "ask Alex") {
+	// 7:30 is within the grace of a 7pm slot: take it, no question to the caller.
+	if !strings.Contains(note, "Friday at 6:15 pm is outside") || !strings.Contains(note, "Acceptable: Friday at 7 pm, Friday at 7:30 pm") ||
+		strings.Contains(note, "ESCALATE: …") {
 		t.Fatalf("note: %q", note)
 	}
 	if strings.Contains(note, "OPEN on the caller's calendar. Treat it as available") {
@@ -60,7 +62,7 @@ func TestSpokenOffersWithNoDayAreFlagged(t *testing.T) {
 		Constraints: "Acceptable times: Friday at 7 PM."}}
 	p := (&Service{}).newTurnPipeline(rt, nil)
 	note := p.schedulingNote("Hi Jordan, can I put you down for a table for two? We're fully booked for seven, but we have seats at six fifteen or seven thirty.")
-	if !strings.Contains(note, "Friday at 6:15, Friday at 7:30 are NOT open") {
+	if !strings.Contains(note, "Friday at 6:15 is outside") || !strings.Contains(note, "Acceptable: Friday at 7:30") {
 		t.Fatalf("note: %q", note)
 	}
 }
@@ -100,5 +102,23 @@ func TestCopiedPromptExampleIsNotAsked(t *testing.T) {
 	}
 	if !mightBeTime("I could do 7.30. Does that work?") || mightBeTime("a large pie is $12.50") {
 		t.Fatal("dotted clock")
+	}
+}
+
+func TestOnlyOffersOutsideTheWindowMeansCallBack(t *testing.T) {
+	rt := &callRuntime{brief: live.Brief{Goal: "book a table", InitiatorName: "Alex",
+		Constraints: "Acceptable times: Friday at 7 PM."}}
+	p := (&Service{}).newTurnPipeline(rt, nil)
+	note := p.schedulingNote("We're full until 9. I could do 9:15?")
+	if !strings.Contains(note, "check with Alex and call back") || !strings.Contains(note, "do not use [ESCALATE]") {
+		t.Fatalf("note: %q", note)
+	}
+	p.schedulingNote("Really, 9:15 is all I have.")
+	if len(p.outcomeFacts) != 1 || p.outcomeFacts[0] != "offered Friday at 9:15, outside your acceptable times" {
+		t.Fatalf("facts: %v", p.outcomeFacts)
+	}
+	// 7:15 for a 7pm table is fine.
+	if note := p.schedulingNote("I can do 715 if that works."); !strings.Contains(note, "OPEN on the caller's calendar") {
+		t.Fatalf("7:15 note: %q", note)
 	}
 }

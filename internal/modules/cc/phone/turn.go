@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -354,9 +355,11 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 	if len(verdicts) == 0 {
 		return ""
 	}
-	var closed []string
+	var open, closed []string
 	for _, v := range verdicts {
-		if !*v.Available {
+		if *v.Available {
+			open = append(open, *v.ProposedLabel)
+		} else {
 			closed = append(closed, *v.ProposedLabel)
 		}
 	}
@@ -367,19 +370,39 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 			"available: offer that slot to the business, and do not tell " +
 			"them it is unavailable.]"
 	}
+	p.noteOffered(closed)
 	summary := "the times in your brief"
 	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
-		summary = *s
+		summary = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(*s, "Acceptable times:"), "acceptable times:"))
 	}
 	who := p.rt.brief.InitiatorName
 	if who == "" {
 		who = "the person you are calling for"
 	}
-	return "[Scheduling check — ground truth, do not recompute: " + strings.Join(closed, ", ") + " " +
-		map[bool]string{true: "is", false: "are"}[len(closed) == 1] + " NOT open on the caller's calendar. " +
-		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[len(closed) == 1] +
-		" yourself. Their acceptable times — " + summary + ". If the business can't do an acceptable " +
-		"time, ask " + who + " which of the business's offers works with [ESCALATE: …], naming the offers.]"
+	one := len(closed) == 1
+	note := "[Scheduling check — ground truth, do not recompute: " + strings.Join(closed, ", ") + " " +
+		map[bool]string{true: "is", false: "are"}[one] + " outside the caller's acceptable times (" + summary + "). " +
+		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[one] + "."
+	if len(open) > 0 {
+		note += " Acceptable: " + strings.Join(open, ", ") + " — take that if the business can do it."
+	} else {
+		// Decided 2026-11-06: no mid-call question for a time outside the window; call back.
+		note += " Ask whether they have anything within the acceptable times. If they don't, do not agree " +
+			"to another time and do not use [ESCALATE]: tell them you'll check with " + who + " and call back, " +
+			"thank them, say goodbye and emit [HANGUP]."
+	}
+	return note + "]"
+}
+
+// noteOffered records times the business offered outside the window as call facts, so the
+// result card tells the caller what they could have had.
+func (p *turnPipeline) noteOffered(labels []string) {
+	for _, l := range labels {
+		fact := "offered " + l + ", outside your acceptable times"
+		if !slices.Contains(p.outcomeFacts, fact) {
+			p.outcomeFacts = append(p.outcomeFacts, fact)
+		}
+	}
 }
 
 var (

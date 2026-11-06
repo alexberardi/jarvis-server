@@ -125,14 +125,15 @@ func TestSummary(t *testing.T) {
 // is judged: the booked 7 is open on the calendar, the alternatives are not.
 func TestCheckAllJudgesEveryOfferedTime(t *testing.T) {
 	env := "Acceptable times: this Friday at 7pm"
-	if ws := ParseWindows(env); len(ws.Acceptable) != 1 || ws.Acceptable[0].Start != 19*60 {
+	if ws := ParseWindows(env); len(ws.Acceptable) != 1 || ws.Acceptable[0].Start != 19*60-Grace || ws.Acceptable[0].End != 19*60+Grace+1 {
 		t.Fatalf("windows: %+v", ws)
 	}
 	got := map[string]bool{}
 	for _, r := range CheckAll(env, "Sorry, Friday at 7:00 PM is fully booked. We do have 6:15 PM or 7:30 PM available for two.") {
 		got[*r.ProposedLabel] = *r.Available
 	}
-	want := map[string]bool{"Friday at 7 pm": true, "Friday at 6:15 pm": false, "Friday at 7:30 pm": false}
+	// 7:30 is within the grace of a 7pm slot; 6:15 isn't.
+	want := map[string]bool{"Friday at 7 pm": true, "Friday at 6:15 pm": false, "Friday at 7:30 pm": true}
 	if len(got) != len(want) {
 		t.Fatalf("verdicts: %v", got)
 	}
@@ -146,7 +147,7 @@ func TestCheckAllJudgesEveryOfferedTime(t *testing.T) {
 	for _, r := range CheckAll(env, "Table for 2? We have 6:15 or 7:30.") {
 		got[*r.ProposedLabel] = *r.Available
 	}
-	if len(got) != 2 || got["Friday at 6:15"] || got["Friday at 7:30"] {
+	if len(got) != 2 || got["Friday at 6:15"] || !got["Friday at 7:30"] {
 		t.Fatalf("no-weekday verdicts: %v", got)
 	}
 	if CheckAll("Acceptable times: Friday at 7pm; Saturday at 7pm", "We do have 6:15 PM.") != nil {
