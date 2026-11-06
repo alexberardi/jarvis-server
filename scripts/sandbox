@@ -219,6 +219,8 @@ json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 #   INSTALLED_LLM_URL=http://127.0.0.1:7704     (optional; the default)
 #   INSTALLED_LLM_LABEL=live                    (optional; live or background: which of its
 #                                                chat labels the sandbox's live label calls)
+#   INSTALLED_LLM_BACKGROUND_LABEL=background   (optional, env or file; the label the sandbox's
+#                                                background calls; unset, it shares live's)
 #   INSTALLED_APP_ID=claude-harness
 #   INSTALLED_APP_KEY=...
 CREDS=${JARVIS_HARNESS_ENV:-$HOME/.config/jarvis-harness/installed.env}
@@ -227,6 +229,7 @@ load_creds() {
   # shellcheck disable=SC1090
   [ -f "$CREDS" ] && . "$CREDS"
   case $INSTALLED_LLM_LABEL in live | background) ;; *) die "INSTALLED_LLM_LABEL must be live or background, not '$INSTALLED_LLM_LABEL'" ;; esac
+  case ${INSTALLED_LLM_BACKGROUND_LABEL:-} in '' | live | background) ;; *) die "INSTALLED_LLM_BACKGROUND_LABEL must be live or background" ;; esac
   [ -n "$INSTALLED_APP_ID" ] && [ -n "$INSTALLED_APP_KEY" ]
 }
 
@@ -306,7 +309,18 @@ point_llm() {
   set_setting "$llm" llm.live.context "$ctx"
   set_setting "$llm" llm.live.remote_vision "$vision"
   set_setting "$llm" llm.live.fold_system_messages '"off"'
-  set_setting "$llm" llm.background.engine '"shared"'
+  if [ -n "${INSTALLED_LLM_BACKGROUND_LABEL:-}" ]; then
+    set_setting "$llm" llm.background.engine '"remote"'
+    set_setting "$llm" llm.background.remote_url "\"http://127.0.0.1:$(port 7799)/openai/v1\""
+    set_setting "$llm" llm.background.remote_api '"openai"'
+    set_setting "$llm" llm.background.context "$ctx"
+    set_setting "$llm" llm.background.remote_vision "$vision"
+    set_setting "$llm" llm.background.fold_system_messages '"off"'
+    set_setting "$llm" llm.background.remote_model "\"$INSTALLED_LLM_BACKGROUND_LABEL\""
+    say "llm: background → installed jarvisd's $INSTALLED_LLM_BACKGROUND_LABEL label"
+  else
+    set_setting "$llm" llm.background.engine '"shared"'
+  fi
   set_setting "$llm" llm.embeddings.engine '"off"'
   # A household with voice ID: the memory tools are offered (D3/D21) and refuse an unknown
   # speaker when called; pipeline turns name the speaker through dev speaker hints.
