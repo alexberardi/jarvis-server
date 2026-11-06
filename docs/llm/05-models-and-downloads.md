@@ -290,7 +290,7 @@ Asked from QUESTIONS.md (LQ3, LQ5, LQ6). Resolved here without a question:
   - `id`, `display`, `hf_repo`, `file`, `sha256`, `size`
   - optional `mmproj {repo, file, sha256, size}`
   - `context_default`, `min_vram_mb` (per card, not summed)
-  - `prompt_provider`, `thinking` (bool)
+  - `prompt_provider`, `thinking` (bool: the model takes Qwen's `/think` suffix; false for Gemma 4)
   - `tags` (live/background suitability)
 - Seed it per D12: Qwen3-8B, Qwen3-14B, Qwen3.5-9B, prod's 27B with its mmproj, and Qwen3-4B with its provider fixed.
 - The admin catalog in `models.ts` is replaced by `GET /api/v0/llm/catalog` (Phase 6).

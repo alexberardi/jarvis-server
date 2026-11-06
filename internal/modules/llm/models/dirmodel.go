@@ -86,7 +86,8 @@ func dirQuant(repo string) string {
 // DirTraits is what a directory model's config.json and name say about the settings a
 // catalog entry would give it.
 type DirTraits struct {
-	// Family is "qwen3.5" (Qwen 3.5 and 3.8: hybrid, strict chat template), "qwen3" or "".
+	// Family is "qwen3.5" (Qwen 3.5 and 3.8: hybrid, strict chat template), "qwen3", "gemma4"
+	// or "".
 	Family string `json:"family,omitempty"`
 	// ParamsB is the parameter count in billions (from the name, else the config; 0 = unknown).
 	ParamsB float64 `json:"params_b,omitempty"`
@@ -104,6 +105,9 @@ var (
 	qwen35Name = regexp.MustCompile(`(?i)qwen[-_ ]?3\.[58](?:[^0-9]|$)`)
 	qwen3Type  = regexp.MustCompile(`(?i)^qwen3(?:_?moe)?(?:_|for|$)`)
 	qwen3Name  = regexp.MustCompile(`(?i)qwen[-_ ]?3(?:[^0-9.]|$)`)
+	// Gemma 4: "gemma4", "gemma4_text", "Gemma4ForConditionalGeneration"; "gemma-4-31B-it".
+	gemma4Type = regexp.MustCompile(`(?i)^gemma4(?:_|for|$)`)
+	gemma4Name = regexp.MustCompile(`(?i)gemma[-_ ]?4(?:[-_ ]|$)`)
 	paramsRe   = regexp.MustCompile(`(?i)(?:^|[-_ ])(\d+(?:\.\d+)?)b(?:[-_ ]|$)`)
 )
 
@@ -127,6 +131,8 @@ func InferDirModel(name string, config []byte) DirTraits {
 			tr.Family = "qwen3.5"
 		case qwen3Type.MatchString(t):
 			tr.Family = "qwen3"
+		case gemma4Type.MatchString(t):
+			tr.Family = "gemma4"
 		}
 	}
 	if tr.Family == "" && cfg.ModelType == "" && len(cfg.Architectures) == 0 {
@@ -136,6 +142,8 @@ func InferDirModel(name string, config []byte) DirTraits {
 			tr.Family = "qwen3.5"
 		case qwen3Name.MatchString(name):
 			tr.Family = "qwen3"
+		case gemma4Name.MatchString(name):
+			tr.Family = "gemma4"
 		}
 	}
 	if m := paramsRe.FindStringSubmatch(name); m != nil {
@@ -155,6 +163,9 @@ func InferDirModel(name string, config []byte) DirTraits {
 		if tr.ParamsB > 10 {
 			tr.PromptProvider = "Qwen3_14B_Compressed"
 		}
+	case "gemma4":
+		// Its template takes any message order: no fold.
+		tr.PromptProvider = "Gemma4"
 	}
 	return tr
 }

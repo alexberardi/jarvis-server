@@ -398,7 +398,7 @@ func TestCatalogLint(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"qwen3-1.7b", "qwen3-4b", "qwen3-8b", "qwen3-14b", "qwen3.5-9b", "qwen3.8-27b", "all-minilm-l6-v2", "whisper-large-v3-turbo",
+	for _, want := range []string{"qwen3-1.7b", "qwen3-4b", "qwen3-8b", "qwen3-14b", "qwen3.5-9b", "qwen3.8-27b", "gemma-4-26b-a4b", "gemma-4-31b", "all-minilm-l6-v2", "whisper-large-v3-turbo",
 		"kokoro-multi-lang-v1_0", "eres2net-voxceleb-16k"} {
 		if !ids[want] {
 			t.Errorf("catalog lacks %s", want)
@@ -427,12 +427,44 @@ func TestFitAndRecommend(t *testing.T) {
 	if f := FitFor(two3090, "llm", e27.Size, e27.KVBytesPerTok, 131072); f.Verdict != "split" {
 		t.Errorf("27B @131k: %+v", f)
 	}
+	// Gemma 4 with its sliding-window KV counted right: the 26B-A4B fits a 3090 at 32768 tokens
+	// (prod measured about 18.9 GB), the 31B only tightly at 16384.
+	g26, _ := CatalogEntry("gemma-4-26b-a4b")
+	if f := EntryFit(two3090, g26); f.Verdict != "fits" || f.KVEstimate || f.NeededMB > 19500 {
+		t.Errorf("Gemma 26B-A4B on a 3090: %+v", f)
+	}
+	g31, _ := CatalogEntry("gemma-4-31b")
+	if f := EntryFit(two3090, g31); f.Verdict != "tight" || f.KVEstimate {
+		t.Errorf("Gemma 31B on a 3090: %+v", f)
+	}
 	r := Recommend(two3090, nil, nil)
-	if r["live"] != "qwen3.8-27b" || r["stt"] != "whisper-large-v3-turbo" || r["embeddings"] != "all-minilm-l6-v2" {
+	if r["live"] != "gemma-4-26b-a4b" || r["background"] != "gemma-4-26b-a4b" || r["stt"] != "whisper-large-v3-turbo" || r["embeddings"] != "all-minilm-l6-v2" {
 		t.Errorf("recommend %v", r)
 	}
-	card := func(mbs int64) engine.Hardware {
-		return engine.Hardware{Flavour: engine.FlavourCUDA, Devices: []engine.Device{{Backend: engine.FlavourCUDA, Name: "GPU", TotalMB: mbs}}}
+	card := func(mbs ...int64) engine.Hardware {
+		hw := engine.Hardware{Flavour: engine.FlavourCUDA}
+		for i, m := range mbs {
+			hw.Devices = append(hw.Devices, engine.Device{Backend: engine.FlavourCUDA, Index: i, Name: "GPU", TotalMB: m})
+		}
+		return hw
+	}
+	// Background gets the 31B only where it fits as a second engine next to live's 26B-A4B: on
+	// another 32 GB card or one big card, not beside it on one 32 GB card. Live never gets it.
+	for _, c := range []struct {
+		mbs      []int64
+		live, bg string
+	}{
+		{[]int64{24576}, "gemma-4-26b-a4b", "gemma-4-26b-a4b"},
+		{[]int64{32768}, "gemma-4-26b-a4b", "gemma-4-26b-a4b"},
+		{[]int64{32768, 32768}, "gemma-4-26b-a4b", "gemma-4-31b"},
+		{[]int64{49152}, "gemma-4-26b-a4b", "gemma-4-31b"},
+		// Too small for either Gemma to fit: the picks are today's.
+		{[]int64{20480}, "qwen3-14b", "qwen3-14b"},
+		{[]int64{16384}, "qwen3-14b", "qwen3-14b"},
+	} {
+		if r := Recommend(card(c.mbs...), nil, nil); r["live"] != c.live || r["background"] != c.bg {
+			t.Errorf("%v MB: %v, want live %s, background %s", c.mbs, r, c.live, c.bg)
+		}
 	}
 	if r := Recommend(card(12288), nil, nil); r["live"] != "qwen3.5-9b" {
 		t.Errorf("12 GB: %v", r)
@@ -1640,14 +1672,19 @@ func TestCatalogKVAndHostBytes(t *testing.T) {
 		"qwen3-14b":   {40, 1, 8, 128},
 		"qwen3.5-9b":  {32, 4, 4, 256}, // hybrid: 8 full-attention layers of 32
 		"qwen3.8-27b": {64, 4, 4, 256}, // hybrid: 16 of 64 (plus a next-token layer)
+		// Gemma 4: one global layer in six (2 / 4 KV heads of 512); the other five are sliding-
+		// window (1024 tokens), whose cache stays the same size whatever the context.
+		"gemma-4-26b-a4b": {30, 6, 2, 512},
+		"gemma-4-31b":     {60, 6, 4, 512},
 	} {
 		e, _ := CatalogEntry(id)
 		if want := a.layers / a.fullEvery * a.kvHeads * a.headDim * 2 * 2; e.KVBytesPerTok != want {
 			t.Errorf("%s kv_bytes_per_token %d, want %d", id, e.KVBytesPerTok, want)
 		}
 	}
-	// Qwen3-4B ties its output to the token embeddings, which must then be on the card.
-	for id, want := range map[string]int64{"qwen3-4b": 0, "qwen3-8b": 350060544, "qwen3.5-9b": 572129280, "qwen3-14b": 437575680, "qwen3.8-27b": 715161600} {
+	// Qwen3-4B and Gemma 4 tie their output to the token embeddings, which must then be on the card.
+	for id, want := range map[string]int64{"qwen3-4b": 0, "qwen3-8b": 350060544, "qwen3.5-9b": 572129280, "qwen3-14b": 437575680, "qwen3.8-27b": 715161600,
+		"gemma-4-26b-a4b": 0, "gemma-4-31b": 0} {
 		if e, _ := CatalogEntry(id); e.HostBytes != want {
 			t.Errorf("%s host_bytes %d, want %d", id, e.HostBytes, want)
 		}

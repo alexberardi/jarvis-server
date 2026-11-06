@@ -64,6 +64,21 @@ func TestLivePromptProvider(t *testing.T) {
 	if tr := m.LiveModelTraits(ctx); tr != want {
 		t.Fatalf("catalog model traits: %+v want %+v", tr, want)
 	}
+	// Gemma 4's pinned template has enable_thinking, but its entry says no thinking: no suffix.
+	g, _ := models.CatalogEntry("gemma-4-26b-a4b")
+	if err := store.Upsert(ctx, models.Model{ID: g.ID, Kind: "llm", Display: "g", CatalogID: g.ID, Path: "/g", State: models.StateReady}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.settings.Set(ctx, "llm.live.model", g.ID, settings.Scope{}); err != nil {
+		t.Fatal(err)
+	}
+	if tpl, _ := g.Template(); !models.TemplateHasThinking(tpl) {
+		t.Fatal("Gemma 4 template lost enable_thinking: this check no longer proves anything")
+	}
+	want = ModelTraits{PromptProvider: "Gemma4", ToolCalling: "native", ToolCallingFrom: "template", Local: true}
+	if tr := m.LiveModelTraits(ctx); tr != want {
+		t.Fatalf("gemma traits: %+v want %+v", tr, want)
+	}
 	// The installed row's own provider wins (set at install, or by hand for a registered file).
 	if err := store.Upsert(ctx, models.Model{ID: "mine", Kind: "llm", Display: "m", Path: "/y", PromptProvider: "Qwen3_14B_Compressed", State: models.StateReady}); err != nil {
 		t.Fatal(err)

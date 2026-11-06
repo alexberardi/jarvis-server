@@ -45,7 +45,7 @@ type PromptProviderStatus struct {
 // PromptProvider reports the effective prompt provider and where it comes from.
 func (m *Module) PromptProvider(ctx context.Context) PromptProviderStatus {
 	st := PromptProviderStatus{Options: prompts.BuiltinNames()}
-	_, st.ToolCalling, st.ThinkingSwitch = m.llmMode(ctx, prompts.ModePrefs{})
+	_, st.ToolCalling, st.ThinkingSwitch = m.llmMode(ctx, m.defaultPrefs(ctx))
 	if m.settings != nil {
 		st.Value = strings.TrimSpace(m.settings.String(ctx, settingPromptProvider, settings.Scope{}))
 	}

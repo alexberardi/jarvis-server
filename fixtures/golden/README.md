@@ -29,6 +29,11 @@ Providers: `Qwen3_14B_Compressed` (prod), `Qwen3_8B_Compressed` (dev), `Qwen3_5_
 sensor-only, room hierarchy) plus `node_dev`, the real built-in command set captured from the dev
 node container.
 
+`Gemma4__<case>.json` (22) are not from the legacy stack: jarvisd's `Gemma4` built-in has no
+Python twin. They are the `Qwen3_5_9B_Compressed` cases with `provider` set to `Gemma4` and an
+empty `user_message_suffix` (same text, native tools, no `/think` suffix), are not in
+`_index.json`, and are checked by `TestGemma4PromptsGolden`.
+
 Known intentional divergences (decisions in docs/cc/QUESTIONS.md):
 
 - D8 bug fixes that change bytes: the `<message>` unwrap is added to the 8B/9B sanitize (D22), so

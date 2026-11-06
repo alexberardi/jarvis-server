@@ -554,7 +554,7 @@ func (m *Module) handleWakeResponse(w http.ResponseWriter, r *http.Request, n *n
 		return
 	}
 	ctx := r.Context()
-	mode, _, _ := m.llmMode(ctx, prompts.ModePrefs{})
+	mode, _, _ := m.llmMode(ctx, m.defaultPrefs(ctx))
 	user := "Hello Jarvis"
 	if s := mode.UserMessageSuffix(m.householdBool(ctx, settingIncludeThinking, n.HouseholdID)); s != "" {
 		user += "\n" + s

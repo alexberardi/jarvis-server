@@ -150,6 +150,73 @@
     "notes": "Needs a 24 GB card. For long contexts, such as 131072 tokens for the background label, give it a second card or use a q8_0 KV cache."
   },
   {
+    "id": "gemma-4-26b-a4b",
+    "display": "Gemma 4 26B-A4B (UD-Q4_K_M, vision)",
+    "kind": "llm",
+    "repo": "unsloth/gemma-4-26B-A4B-it-GGUF",
+    "revision": "c099eb48e663fd284577b04978a94ffccb261841",
+    "file": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+    "size": 16947541728,
+    "sha256": "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f",
+    "mmproj": "gemma-4-26b-a4b-mmproj",
+    "context_default": 32768,
+    "context_max": 262144,
+    "kv_bytes_per_token": 20480,
+    "prompt_provider": "Gemma4",
+    "chat_template": "gemma4.jinja",
+    "chat_template_sha256": "845f1ee48e39fc942fe190da9df6a1c5db229e17a96ea08966ad1c9274e73d1b",
+    "tags": [
+      "live",
+      "background",
+      "vision",
+      "large"
+    ],
+    "notes": "Mixture of experts: 26B parameters, about 4B active per token, so it answers about as fast as a small model. Needs a 24 GB card (about 19 GB at 32768 tokens)."
+  },
+  {
+    "id": "gemma-4-26b-a4b-mmproj",
+    "display": "Gemma 4 26B-A4B vision projector (F16)",
+    "kind": "mmproj",
+    "repo": "unsloth/gemma-4-26B-A4B-it-GGUF",
+    "revision": "c099eb48e663fd284577b04978a94ffccb261841",
+    "file": "mmproj-F16.gguf",
+    "size": 1193058784,
+    "sha256": "418a6d8723067cd712235facbbc5cba6c8fbbd413fc1292d2aace5a027d5a42f"
+  },
+  {
+    "id": "gemma-4-31b",
+    "display": "Gemma 4 31B (Q4_K_M, vision)",
+    "kind": "llm",
+    "repo": "unsloth/gemma-4-31B-it-GGUF",
+    "revision": "c1ac76e99d5513b141e8adde7288b85c3f9c32ec",
+    "file": "gemma-4-31B-it-Q4_K_M.gguf",
+    "size": 18323733440,
+    "sha256": "38bd64c852c4b460434cc7162fa9bdcf242faf86502581a754cb72956bb17f84",
+    "mmproj": "gemma-4-31b-mmproj",
+    "context_default": 16384,
+    "context_max": 262144,
+    "kv_bytes_per_token": 81920,
+    "prompt_provider": "Gemma4",
+    "chat_template": "gemma4.jinja",
+    "chat_template_sha256": "845f1ee48e39fc942fe190da9df6a1c5db229e17a96ea08966ad1c9274e73d1b",
+    "tags": [
+      "background",
+      "vision",
+      "large"
+    ],
+    "notes": "Dense 31B: slower per reply than the 26B-A4B, so it is for the background label. Tight on a 24 GB card of its own; 65536 tokens fit there with a q8_0 KV cache and flash attention (about 23 GB)."
+  },
+  {
+    "id": "gemma-4-31b-mmproj",
+    "display": "Gemma 4 31B vision projector (F16)",
+    "kind": "mmproj",
+    "repo": "unsloth/gemma-4-31B-it-GGUF",
+    "revision": "c1ac76e99d5513b141e8adde7288b85c3f9c32ec",
+    "file": "mmproj-F16.gguf",
+    "size": 1198957024,
+    "sha256": "6edcca228213c28d3567a35d22f849eea52d8360875093851959adf5d2f270eb"
+  },
+  {
     "id": "qwen3.8-27b-mmproj",
     "display": "Qwen 3.8 27B vision projector (F16)",
     "kind": "mmproj",

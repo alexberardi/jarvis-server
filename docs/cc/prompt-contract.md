@@ -224,7 +224,7 @@ A save and an import reject an invalid prompt with this body and store nothing. 
 - A household has **one active prompt**: a built-in (§10) by name, or an imported/edited text stored for that household.
 - **Edit:** the admin UI edits the text, starting from the active prompt (a built-in's text when the household uses one). A save validates (§7) and stores the text as the household's prompt.
 - **Reset:** drops the stored text; the household goes back to the install default.
-- **The prompt's LLM values:** a stored prompt keeps its own `tool_calling` and `thinking_switch` (each optional, as in §6), editable alongside the text. A built-in has none, so the chat template decides.
+- **The prompt's LLM values:** a stored prompt keeps its own `tool_calling` and `thinking_switch` (each optional, as in §6), editable alongside the text. A built-in has none, so the chat template decides, except `Gemma4`, whose own values are `native` and `none` (§10). A household's stored values win over a built-in's.
 - **The install default:** a household with no stored prompt uses the built-in named by `llm.prompt_provider` (the key keeps its name). A local install takes it from the model's catalog entry `prompt_provider`.
 - **Fallback:** a stored prompt that stops validating (a variable removed in a later version, say) is not sent. The household uses the install default, the server logs the error (§7 shape), and the admin UI shows it on the prompt page until the prompt is fixed or reset.
 - **When edits apply:** from the next conversation. A conversation keeps the system prompt it was warmed with (the prefix cache depends on it).
@@ -244,7 +244,7 @@ Content-Type: text/plain
 
 ## 10. Built-ins
 
-Four prompts are embedded in the server as `builtin/*.txt`. They keep the provider names exactly:
+Five prompts are embedded in the server as `builtin/*.txt`. The first four keep the legacy provider names exactly:
 
 | built-in | was | catalog models that default to it (`prompt_provider`) |
 | --- | --- | --- |
@@ -252,5 +252,8 @@ Four prompts are embedded in the server as `builtin/*.txt`. They keep the provid
 | `Qwen3_8B_Compressed` | the dev text prompt | `qwen3-1.7b`, `qwen3-4b`, `qwen3-8b` |
 | `Qwen3_5_9B_Compressed` | the native-tools prompt | `qwen3.5-9b` |
 | `Cloud` (was `ChatGPTOpenAI`, still accepted) | the e2e prompt (remote OpenAI); vendor-neutral | every remote live model (OpenAI, Anthropic, Gemini, OpenRouter…): `LiveModelTraits` derives it |
+| `Gemma4` | new in jarvisd: the `Qwen3_5_9B_Compressed` text, native tools, no suffix | `gemma-4-26b-a4b`, `gemma-4-31b`; a Gemma 4 model folder (`InferDirModel`) |
 
-Native or text tool calling is not a different built-in: it is `llm.tool_calling` (§5). A built-in written for text tool calling uses `{{tools}}` or `{{tools_compact}}`, which render empty when the model is native, so the same text serves both. The catalog's pinned templates (`qwen3.jinja`, `qwen3.5.jinja`, `qwen3.8.jinja`) all reference `tools` and have `enable_thinking`, so with `auto` and a built-in every catalog model, the prod 27B included, goes native with the suffix. The catalog's `prompt_provider` defaults are unchanged by this contract.
+Native or text tool calling is not a different built-in: it is `llm.tool_calling` (§5). A built-in written for text tool calling uses `{{tools}}` or `{{tools_compact}}`, which render empty when the model is native, so the same text serves both. The catalog's pinned Qwen templates (`qwen3.jinja`, `qwen3.5.jinja`, `qwen3.8.jinja`) all reference `tools` and have `enable_thinking`, so with `auto` and a built-in every Qwen catalog model, the prod 27B included, goes native with the suffix. The catalog's `prompt_provider` defaults are unchanged by this contract.
+
+`Gemma4` is the one built-in with LLM values of its own (`prompts.BuiltinPrefs`): `tool_calling=native`, `thinking_switch=none`. Gemma 4's template (`gemma4.jinja`) has `enable_thinking` too, which the template check would read as the suffix, but Gemma takes the switch only through `chat_template_kwargs`; `/think` and `/no_think` are Qwen's and must not reach it. The Gemma catalog entries also set no `thinking`, so the live model's traits report no suffix whichever built-in a household picks. Its text is byte-identical to `Qwen3_5_9B_Compressed`, which has no Qwen-specific wording in native mode (`qwenToolFormat` renders only in text mode, inside `{{tools_compact}}`); its goldens are `fixtures/golden/prompts/Gemma4__<case>.json`, the 9B cases with no suffix, outside the legacy 88.

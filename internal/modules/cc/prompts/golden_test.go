@@ -112,6 +112,9 @@ func fixtureMode(provider string) Mode {
 		return Mode{ToolCalling: ToolsText, ThinkingSuffix: true}
 	case Qwen3_5_9B:
 		return Mode{ToolCalling: ToolsNative, ThinkingSuffix: true}
+	case Gemma4:
+		p := BuiltinPrefs(Gemma4)
+		return Mode{ToolCalling: ToolCalling(p.ToolCalling), ThinkingSuffix: p.ThinkingSwitch == "suffix"}
 	}
 	return Mode{ToolCalling: ToolsNative}
 }
@@ -128,87 +131,105 @@ func TestG1PromptsGolden(t *testing.T) {
 	}
 	matched := 0
 	for _, row := range index {
-		file := og(row, "file").(string)
-		fx := loadFixture(t, file)
-		prov := og(fx, "provider").(string)
-		text, found := Builtin(prov)
-		if !found {
-			t.Fatalf("%s: no built-in %q", file, prov)
-		}
-		mode := fixtureMode(prov)
-		in := og(fx, "inputs")
-		ctx, ch := toContext(t, og(in, "node_context").(*pyjson.Object))
-		ch.Enabled = og(in, "characterization_injection").(bool)
-		tools := toTools(og(toolSets, og(in, "tools").(string)))
-		flags := toFlags(og(in, "command_flags"))
-
-		got, _ := SystemPrompt(text, Inputs{Context: ctx, Tools: tools, Flags: flags, ToolCalling: mode.ToolCalling}, ch)
-		want := og(fx, "system_prompt").(string)
-		goldenDump(t, map[string]string{"file": file, "system_prompt": got})
-		ok := true
-		if got != want {
-			ok = false
-			t.Errorf("%s system_prompt %s", file, firstDiff(got, want))
-		}
-		if s := mode.UserMessageSuffix(og(in, "include_thinking").(bool)); s != og(fx, "user_message_suffix").(string) {
-			ok = false
-			t.Errorf("%s suffix %q", file, s)
-		}
-		if mode.Native() != og(fx, "supports_native_tools").(bool) {
-			ok = false
-			t.Errorf("%s supports_native_tools", file)
-		}
-		if mode.Native() {
-			if mode.ResponseFormat() != nil {
-				ok = false
-				t.Errorf("%s: native mode sends a response_format", file)
-			}
-			// The fixture is the legacy ToolBuilder.build output; what the server sends
-			// (NativeTools) is that payload with the Jarvis extensions stripped (D8, 02.Q7).
-			want := toTools(og(fx, "native_tools"))
-			built := buildTools(tools, nativeBuild)
-			parts := make([]string, len(built))
-			for i, bt := range built {
-				parts[i] = pyjson.Dumps(bt, false)
-			}
-			goldenDump(t, map[string]string{"file": file, "native_tools": "[" + strings.Join(parts, ", ") + "]"})
-			for _, c := range []struct {
-				what      string
-				got, want []Tool
-			}{
-				{"native_tools", buildTools(tools, nativeBuild), want},
-				{"NativeTools", NativeTools(tools), StripJarvisExtensions(want)},
-			} {
-				if len(c.got) != len(c.want) {
-					ok = false
-					t.Errorf("%s %s: %d, want %d", file, c.what, len(c.got), len(c.want))
-					continue
-				}
-				for i := range c.got {
-					if a, b := CompactASCII(c.got[i]), CompactASCII(c.want[i]); a != b {
-						ok = false
-						t.Errorf("%s %s[%d] %s", file, c.what, i, firstDiff(a, b))
-					}
-				}
-			}
-		} else {
-			if a, b := pyjson.Dumps(mode.ResponseFormat(), true), pyjson.Dumps(og(fx, "response_format"), true); a != b {
-				ok = false
-				t.Errorf("%s response_format %s want %s", file, a, b)
-			}
-			if _, has := fx.(*pyjson.Object).Get("native_tools"); has {
-				t.Errorf("%s: text-mode fixture has native_tools", file)
-			}
-		}
-		if ok {
+		if checkPromptFixture(t, og(row, "file").(string), toolSets) {
 			matched++
 		}
 	}
 	t.Logf("G1: %d/88 fixtures byte-exact", matched)
 }
 
+// The Gemma4 built-in's fixtures (Gemma4__<case>.json, outside the legacy 88 and _index.json):
+// the 9B cases with the mode Gemma4's own LLM values give, native with no suffix.
+func TestGemma4PromptsGolden(t *testing.T) {
+	toolSets := og(loadFixture(t, "_inputs.json"), "tool_sets").(*pyjson.Object)
+	files, _ := filepath.Glob(filepath.Join(fixtureDir(t), Gemma4+"__*.json"))
+	if len(files) != 22 {
+		t.Fatalf("%d Gemma4 fixtures, want 22", len(files))
+	}
+	for _, f := range files {
+		checkPromptFixture(t, filepath.Base(f), toolSets)
+	}
+}
+
+// checkPromptFixture renders one provider fixture and compares it; true when it all matches.
+func checkPromptFixture(t *testing.T, file string, toolSets *pyjson.Object) bool {
+	t.Helper()
+	fx := loadFixture(t, file)
+	prov := og(fx, "provider").(string)
+	text, found := Builtin(prov)
+	if !found {
+		t.Fatalf("%s: no built-in %q", file, prov)
+	}
+	mode := fixtureMode(prov)
+	in := og(fx, "inputs")
+	ctx, ch := toContext(t, og(in, "node_context").(*pyjson.Object))
+	ch.Enabled = og(in, "characterization_injection").(bool)
+	tools := toTools(og(toolSets, og(in, "tools").(string)))
+	flags := toFlags(og(in, "command_flags"))
+
+	got, _ := SystemPrompt(text, Inputs{Context: ctx, Tools: tools, Flags: flags, ToolCalling: mode.ToolCalling}, ch)
+	want := og(fx, "system_prompt").(string)
+	goldenDump(t, map[string]string{"file": file, "system_prompt": got})
+	ok := true
+	if got != want {
+		ok = false
+		t.Errorf("%s system_prompt %s", file, firstDiff(got, want))
+	}
+	if s := mode.UserMessageSuffix(og(in, "include_thinking").(bool)); s != og(fx, "user_message_suffix").(string) {
+		ok = false
+		t.Errorf("%s suffix %q", file, s)
+	}
+	if mode.Native() != og(fx, "supports_native_tools").(bool) {
+		ok = false
+		t.Errorf("%s supports_native_tools", file)
+	}
+	if mode.Native() {
+		if mode.ResponseFormat() != nil {
+			ok = false
+			t.Errorf("%s: native mode sends a response_format", file)
+		}
+		// The fixture is the legacy ToolBuilder.build output; what the server sends
+		// (NativeTools) is that payload with the Jarvis extensions stripped (D8, 02.Q7).
+		want := toTools(og(fx, "native_tools"))
+		built := buildTools(tools, nativeBuild)
+		parts := make([]string, len(built))
+		for i, bt := range built {
+			parts[i] = pyjson.Dumps(bt, false)
+		}
+		goldenDump(t, map[string]string{"file": file, "native_tools": "[" + strings.Join(parts, ", ") + "]"})
+		for _, c := range []struct {
+			what      string
+			got, want []Tool
+		}{
+			{"native_tools", buildTools(tools, nativeBuild), want},
+			{"NativeTools", NativeTools(tools), StripJarvisExtensions(want)},
+		} {
+			if len(c.got) != len(c.want) {
+				ok = false
+				t.Errorf("%s %s: %d, want %d", file, c.what, len(c.got), len(c.want))
+				continue
+			}
+			for i := range c.got {
+				if a, b := CompactASCII(c.got[i]), CompactASCII(c.want[i]); a != b {
+					ok = false
+					t.Errorf("%s %s[%d] %s", file, c.what, i, firstDiff(a, b))
+				}
+			}
+		}
+	} else {
+		if a, b := pyjson.Dumps(mode.ResponseFormat(), true), pyjson.Dumps(og(fx, "response_format"), true); a != b {
+			ok = false
+			t.Errorf("%s response_format %s want %s", file, a, b)
+		}
+		if _, has := fx.(*pyjson.Object).Get("native_tools"); has {
+			t.Errorf("%s: text-mode fixture has native_tools", file)
+		}
+	}
+	return ok
+}
+
 func TestBuiltins(t *testing.T) {
-	want := []string{Cloud, Qwen3_14B, Qwen3_5_9B, Qwen3_8B}
+	want := []string{Cloud, Gemma4, Qwen3_14B, Qwen3_5_9B, Qwen3_8B}
 	sort.Strings(want)
 	if got := BuiltinNames(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("BuiltinNames = %v, want %v", got, want)

@@ -42,6 +42,26 @@ func Builtin(name string) (string, bool) {
 	return string(b), true
 }
 
+// builtinPrefs are the built-ins with LLM values of their own. Gemma 4's template has
+// enable_thinking, which the template check reads as Qwen's /think suffix; Gemma takes the
+// switch through chat_template_kwargs only, so its prompt says none.
+var builtinPrefs = map[string]ModePrefs{Gemma4: {ToolCalling: string(ToolsNative), ThinkingSwitch: "none"}}
+
+// BuiltinPrefs are the built-in prompt name's own LLM values (zero for most: the model's
+// template decides).
+func BuiltinPrefs(name string) ModePrefs { return builtinPrefs[name] }
+
+// Or fills p's unset values from q.
+func (p ModePrefs) Or(q ModePrefs) ModePrefs {
+	if p.ToolCalling == "" {
+		p.ToolCalling = q.ToolCalling
+	}
+	if p.ThinkingSwitch == "" {
+		p.ThinkingSwitch = q.ThinkingSwitch
+	}
+	return p
+}
+
 // BuiltinNames lists the built-in prompts, sorted.
 func BuiltinNames() []string {
 	entries, err := fs.ReadDir(builtinFS, "builtin")
