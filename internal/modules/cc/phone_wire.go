@@ -48,7 +48,10 @@ type PhoneConfig struct {
 	TTS phone.TTS
 }
 
-const phoneReaperJob = "cc.phone_reaper"
+const (
+	phoneReaperJob    = "cc.phone_reaper"
+	phoneRetentionJob = "cc.phone_retention"
+)
 
 // phoneService returns the (possibly not yet configured) phone service, so the server tool
 // can be registered with the other server tools before registerPhone fills it in.
@@ -94,10 +97,14 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 			p.Reap(ctx)
 			return nil, nil
 		}})
+		m.deps.Queue.Register(phoneRetentionJob, queue.Handler{Run: func(ctx context.Context, _ queue.Job) ([]byte, error) {
+			return nil, p.SweepRetention(ctx)
+		}, Concurrency: 1})
 	}
 }
 
-// startPhone binds live calls to the module's lifetime and schedules the 30 s reaper (D27).
+// startPhone binds live calls to the module's lifetime and schedules the 30 s reaper (D27)
+// and the hourly call-retention sweep.
 func (m *Module) startPhone(ctx context.Context) error {
 	if m.phone == nil {
 		return nil
@@ -106,9 +113,15 @@ func (m *Module) startPhone(ctx context.Context) error {
 	if m.deps.Scheduler == nil {
 		return nil
 	}
-	return m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
+	if err := m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
 		Name: phoneReaperJob, Kind: scheduler.KindInterval, JobType: phoneReaperJob,
 		Spec: scheduler.Spec{Every: phone.ReaperInterval},
+	}); err != nil {
+		return err
+	}
+	return m.deps.Scheduler.Ensure(ctx, scheduler.Trigger{
+		Name: phoneRetentionJob, Kind: scheduler.KindCron, JobType: phoneRetentionJob,
+		Spec: scheduler.Spec{Cron: phone.RetentionSweepCron},
 	})
 }
 
