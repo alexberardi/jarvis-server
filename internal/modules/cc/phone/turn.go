@@ -139,9 +139,15 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 	if s.LLM == nil {
 		return nil, "", nil, nil, nil, errors.New("no LLM")
 	}
-	msgs := p.messages
+	// The reminder rides on every turn: Qwen3.5-9B slid into the host's part late in a call
+	// ("could you spell the name for my records?", "anything else I can help you with?").
+	// It goes just before the newest message, which stays what the business just said.
+	msgs := append([]chatMsg(nil), p.messages...)
+	if n := len(msgs); n > 0 {
+		msgs = append(msgs[:n-1:n-1], chatMsg{"system", p.roleReminder()}, msgs[n-1])
+	}
 	if schedulingNote != "" {
-		msgs = append(append([]chatMsg(nil), p.messages...), chatMsg{"system", schedulingNote})
+		msgs = append(msgs, chatMsg{"system", schedulingNote})
 	}
 	tctx, cancel := context.WithTimeout(ctx, orDefault(s.TurnTimeout, defaultTurnTimeout))
 	defer cancel()
@@ -392,6 +398,17 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 			"thank them, say goodbye and emit [HANGUP]."
 	}
 	return note + "]"
+}
+
+func (p *turnPipeline) roleReminder() string {
+	who := p.rt.brief.InitiatorName
+	if who == "" {
+		who = "the person you are calling for"
+	}
+	return "[Reminder: you are the CALLER, an assistant phoning on behalf of " + who + ". The other person works at " +
+		"the business: they take the booking and ask the questions. Don't ask them for details \"for your records\" " +
+		"or offer them help. Once they confirm what you called for, record [OUTCOME: …], thank them, say goodbye " +
+		"and emit [HANGUP].]"
 }
 
 // noteOffered records times the business offered outside the window as call facts, so the

@@ -220,9 +220,10 @@ func TestLiveCallEndToEnd(t *testing.T) {
 		}
 	}
 	first := e.llm.streams[0]
-	if *first[1].Content.Text != "Hi, I'm an automated AI assistant calling on behalf of Alex. This call may be recorded." ||
-		*first[2].Content.Text != "Thanks for calling Tony's, how can I help? /no_think" {
-		t.Fatalf("messages: %v %v", *first[1].Content.Text, *first[2].Content.Text)
+	if len(first) != 4 || *first[1].Content.Text != "Hi, I'm an automated AI assistant calling on behalf of Alex. This call may be recorded." ||
+		!strings.HasPrefix(*first[2].Content.Text, "[Reminder: you are the CALLER") ||
+		*first[3].Content.Text != "Thanks for calling Tony's, how can I help? /no_think" {
+		t.Fatalf("messages: %d %v %v", len(first), *first[1].Content.Text, *first[len(first)-1].Content.Text)
 	}
 	c := e.notify.titled("✅ Call finished: Tony's Pizzeria")
 	if len(c) != 1 || c[0].Summary != "Ordered a large pie for pickup in 20 minutes." ||
