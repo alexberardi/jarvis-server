@@ -4,6 +4,7 @@ package contract
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"testing"
 )
@@ -33,12 +34,25 @@ func adminLogin(t *testing.T, tg *Target, u *User) string {
 	return r.Object()["access_token"].(string)
 }
 
+// Admin enriches the module's setting shape with scope metadata. Keep both exact: the
+// module settings API itself does not expose these admin-only household fields.
+var adminSettingShape = func() Obj {
+	shape := maps.Clone(settingShape)
+	shape["household_scoped"] = Bool
+	shape["household_values"] = Optional(ArrayOf(Obj{
+		"household_id": NonEmptyString, "household_name": NonEmptyString, "value": Any,
+		"updated_at": Optional(TimestampUTC),
+	}))
+	shape["households_using_default"] = Optional(Int)
+	return shape
+}()
+
 var aggregatedSettings = Obj{
 	"services": ArrayOf(Obj{
 		"service_name": NonEmptyString,
 		"display_name": NonEmptyString,
 		"success":      Bool,
-		"settings":     ArrayOf(settingShape),
+		"settings":     ArrayOf(adminSettingShape),
 		"error":        NullOr(String),
 		"latency_ms":   NullOr(Num),
 	}),

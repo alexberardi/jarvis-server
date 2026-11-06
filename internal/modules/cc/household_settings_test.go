@@ -6,18 +6,36 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
+	// Inbound setup is editable by superusers in the admin, but remains outside
+	// the mobile household-admin API. No other definition may opt into this scope.
+	adminOnly := map[string]bool{
+		phone.SettingInboundEnabled:       true,
+		phone.SettingInboundAnswerDelay:   true,
+		phone.SettingInboundMaxSeconds:    true,
+		phone.SettingInboundCallsPerDay:   true,
+		phone.SettingInboundMaxConcurrent: true,
+		phone.SettingInboundTransfers:     true,
+	}
 	defs := map[string]settings.Type{}
 	for _, d := range Definitions() {
 		defs[d.Key] = d.Type
-		// The allowlist is what marks a definition Household (the admin's household values).
-		if _, allowed := householdSettingType(d.Key); d.Household != allowed {
-			t.Errorf("%s: Household=%v, allowlisted=%v", d.Key, d.Household, allowed)
+		if _, mobileAllowed := householdSettingType(d.Key); d.Household != (mobileAllowed || adminOnly[d.Key]) {
+			t.Errorf("%s: Household=%v, mobile=%v, admin-only=%v", d.Key, d.Household, mobileAllowed, adminOnly[d.Key])
+		}
+	}
+	for key := range adminOnly {
+		if _, ok := defs[key]; !ok {
+			t.Errorf("missing admin-only definition %s", key)
+		}
+		if _, allowed := householdSettingType(key); allowed {
+			t.Errorf("admin-only definition %s is mobile-controllable", key)
 		}
 	}
 	if len(householdControllable) != 23 {
@@ -27,6 +45,40 @@ func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
 		ty, ok := defs[s.key]
 		if !ok || string(ty) != s.typ {
 			t.Fatalf("%s: declared %v as %q, allowlisted as %s", s.key, ok, ty, s.typ)
+		}
+	}
+}
+
+func TestInboundSettingsStayOutsideMobileHouseholdAPI(t *testing.T) {
+	e := newEnv(t)
+	admin := e.auth.addUser(5, "hh1", authn.RoleAdmin)
+	ctx := context.Background()
+	values := map[string]any{
+		phone.SettingInboundEnabled:       true,
+		phone.SettingInboundAnswerDelay:   int64(10),
+		phone.SettingInboundMaxSeconds:    int64(90),
+		phone.SettingInboundCallsPerDay:   int64(5),
+		phone.SettingInboundMaxConcurrent: int64(2),
+		phone.SettingInboundTransfers:     []any{},
+	}
+	for key, value := range values {
+		e.do("PUT", "/api/v0/mobile/household/hh1/settings/"+key, map[string]any{"value": value}, bearer(admin)).
+			detail(404, "Setting is not household-controllable: "+key)
+		if _, found, err := e.m.Settings().GetExact(ctx, key, settings.Scope{HouseholdID: "hh1"}); err != nil || found {
+			t.Fatalf("mobile write created %s: found=%v err=%v", key, found, err)
+		}
+		// Even a value saved by the superuser admin does not enter the mobile response.
+		if err := e.m.Settings().Set(ctx, key, value, settings.Scope{HouseholdID: "hh1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := e.do("GET", "/api/v0/mobile/household/hh1/settings", nil, bearer(admin)).want(200).json()["settings"].(map[string]any)
+	if len(got) != 23 {
+		t.Fatalf("mobile settings shape changed: %v", got)
+	}
+	for key := range values {
+		if _, exists := got[key]; exists {
+			t.Errorf("admin-only setting %s leaked into mobile settings", key)
 		}
 	}
 }

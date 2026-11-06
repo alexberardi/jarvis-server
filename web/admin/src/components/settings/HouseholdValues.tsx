@@ -7,6 +7,7 @@ import { formatSettingValue } from '@/lib/settings'
 import type { HouseholdValue, SettingResponse } from '@/types/settings'
 import { Button } from '@/components/ui'
 import SettingEditor from './SettingEditor'
+import AddHouseholdValue from './AddHouseholdValue'
 
 interface HouseholdValuesProps {
   setting: SettingResponse
@@ -22,16 +23,13 @@ function plural(n: number, one: string, many: string): string {
  * (in the mobile app, or here), each with an editor and "Use default", under the row's default.
  */
 export default function HouseholdValues({ setting, serviceName }: HouseholdValuesProps) {
+  const [adding, setAdding] = useState(false)
   const values = setting.household_values ?? []
   const usingDefault = setting.households_using_default
 
-  if (values.length === 0) {
-    return <p className="mt-1 text-caption text-text-muted">Households can change this in the app</p>
-  }
-
   return (
     <div className="mt-2 rounded-control bg-surface-alt px-3 py-1" data-testid={`household-values-${setting.key}`}>
-      <p className="pt-1 text-caption text-text-muted">Households with their own value</p>
+      <p className="pt-1 text-caption text-text-muted">{values.length ? 'Households with their own value' : 'No household overrides.'}</p>
       {values.map((hv) => (
         <HouseholdValueRow key={hv.household_id} setting={setting} serviceName={serviceName} hv={hv} />
       ))}
@@ -40,6 +38,11 @@ export default function HouseholdValues({ setting, serviceName }: HouseholdValue
           {plural(usingDefault, 'household uses', 'households use')} the default
         </p>
       )}
+      {adding ? (
+        <AddHouseholdValue setting={setting} serviceName={serviceName} onClose={() => setAdding(false)} />
+      ) : usingDefault === undefined || usingDefault > 0 ? (
+        <Button size="sm" className="my-2" onClick={() => setAdding(true)}>Set for a household</Button>
+      ) : null}
     </div>
   )
 }

@@ -61,7 +61,7 @@ const tests: { name: SipTestName; title: string; icon: ReactNode; about: string 
     title: 'Inbound call',
     icon: <PhoneIncoming size={16} aria-hidden />,
     about:
-      "Watches for 60 seconds while you call this extension, and shows the caller ID and the audio the PBX offers. Jarvis doesn't answer calls yet, so the PBX moves on to its next destination.",
+      'Watches for 60 seconds while you call this extension, and shows the caller ID and the audio the PBX offers. To have Jarvis answer, enable phone.inbound.enabled for the household in Settings.',
   },
 ]
 

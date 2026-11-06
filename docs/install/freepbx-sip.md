@@ -102,11 +102,19 @@ notification with the caller, the reason and a summary (the recording is kept). 
 - Do not put Jarvis in a ring group that rings everyone at once: it would answer first and take
   every call.
 
-In Jarvis, turn on `phone.inbound.enabled` in the same **Settings → Command center → phone_calls**
-(the default; on an install with several households sharing one extension, a household that should
-not get the calls sets its own value off). Until it is on, Jarvis refuses these calls (480) and the
-PBX moves on to the next destination, voicemail usually. The limits (`phone.inbound.answer_delay_seconds`,
-`max_call_seconds`, `calls_per_day`, `max_concurrent_calls`) are on the same page.
+In Jarvis, open **Settings → Command center → phone_calls** as a superuser. For
+`phone.inbound.enabled`, choose **Set for a household**, select the household, turn it on and
+**Save**. Keep **Default for all households** off when several households share one SIP
+account; only one household may answer that account's calls. If the default is already on,
+either turn it off and enable the intended household, or give every other household on that
+account its own false value. Ambiguous ownership refuses calls (480).
+
+On a single-household install, turning on the default also works. Until inbound is enabled,
+Jarvis refuses the call (480) and the PBX moves on to its next destination, usually voicemail.
+`phone_calls.enabled` must also be on. The answer delay, maximum duration, daily cap,
+concurrent-call cap and transfer targets each offer the same household control. **Use default**
+removes an override, so that household inherits the current install-wide value again. These
+controls are in the superuser admin; the mobile inbox receives messages and call approvals.
 
 ### Letting Jarvis put callers through (transfer)
 

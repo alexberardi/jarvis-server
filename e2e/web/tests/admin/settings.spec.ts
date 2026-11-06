@@ -17,22 +17,61 @@ interface Setting {
   household_values?: { household_id: string; household_name: string; value: unknown }[]
 }
 
-/** openSetting searches for the key and opens the module's card (the search leaves it collapsed). */
-async function openSetting(page: Page) {
-  await page.getByLabel('Search settings').fill(KEY)
-  await page.getByRole('button', { name: /Command center/ }).click()
+/** Search may finish before settings load, in which case the first matching card starts open. */
+async function openSetting(page: Page, key = KEY) {
+  await page.getByLabel('Search settings').fill(key)
+  const card = page.getByRole('button', { name: /Command center/ })
+  await expect(card).toBeVisible()
+  if (await card.getAttribute('aria-expanded') === 'false') await card.click()
+  await expect(card).toHaveAttribute('aria-expanded', 'true')
 }
 
-async function setting(): Promise<Setting> {
+async function setting(key = KEY): Promise<Setting> {
   const b = await must('GET', `${env('SBX_ADMIN')}/api/settings/?service=cc`, { token: tokenOf('superuser') })
-  const s = b.services.flatMap((svc: { settings: Setting[] }) => svc.settings).find((x: Setting) => x.key === KEY)
-  if (!s) throw new Error(`no ${KEY} in /api/settings/`)
+  const s = b.services.flatMap((svc: { settings: Setting[] }) => svc.settings).find((x: Setting) => x.key === key)
+  if (!s) throw new Error(`no ${key} in /api/settings/`)
   return s
 }
 
 const ownValue = (s: Setting, hh: string) => s.household_values?.find((v) => v.household_id === hh)?.value
 
 test.describe('admin settings', () => {
+  test('inbound household setup: create the first override, reload, disable and use default', async ({ page }) => {
+    const key = 'phone.inbound.enabled'
+    const name = `Phone home ${Date.now().toString(36)}`
+    const u = await newUser('inbound-settings', name)
+    const before = await setting(key)
+    expect(ownValue(before, u.householdId)).toBeUndefined()
+
+    await page.goto('/admin/settings')
+    await openSetting(page, key)
+    await page.getByRole('button', { name: 'Set for a household', exact: true }).click()
+    await page.getByRole('combobox', { name: 'Household', exact: true }).selectOption(u.householdId)
+    const editor = page.getByRole('group', { name: `Set ${key} for a household` })
+    await editor.getByRole('switch', { name: key, exact: true }).check()
+    await editor.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText(`Updated for ${name}`)).toBeVisible()
+    expect(ownValue(await setting(key), u.householdId)).toBe(true)
+
+    await page.reload()
+    await openSetting(page, key)
+    const row = page.getByTestId(`household-value-${u.householdId}`)
+    await expect(row).toContainText(name)
+    await expect(row).toContainText('true')
+    await row.getByRole('button', { name: `Edit ${name}`, exact: true }).click()
+    await row.getByRole('switch', { name: key, exact: true }).uncheck()
+    await row.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText(`Updated for ${name}`)).toBeVisible()
+    expect(ownValue(await setting(key), u.householdId)).toBe(false)
+
+    await row.getByRole('button', { name: 'Use default', exact: true }).click()
+    await expect(page.getByText(`${name} now uses the default`)).toBeVisible()
+    await expect(row).toHaveCount(0)
+    const after = await setting(key)
+    expect(after.value).toEqual(before.value)
+    expect(after.household_values).toEqual(before.household_values)
+  })
+
   test("a household's own value: edited, kept across a reload, then back to the default", async ({ page }) => {
     const u = await newUser('settings', `Settings home ${Date.now().toString(36)}`)
     const name = (await must('GET', `${env('SBX_AUTH')}/households/${u.householdId}`, { token: u.token })).name

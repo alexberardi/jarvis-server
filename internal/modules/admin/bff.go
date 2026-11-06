@@ -151,7 +151,7 @@ type serviceSettings struct {
 }
 
 // adminSetting is one setting as the settings page gets it: the system-scope SettingResponse
-// (its value is the default for every household), plus, for a key households may set
+// (its value is the default for every household), plus, for a key supporting household overrides
 // (Definition.Household), each household's own value and how many households use the default.
 type adminSetting struct {
 	settings.SettingResponse
@@ -199,8 +199,8 @@ func displayName(module string) string {
 }
 
 // handleSettings is GET /api/settings[?service=]: every module's settings at system scope, in
-// the legacy config-service gateway's AggregatedSettingsResponse shape. A setting households
-// may change also carries household_values (each household with its own value, by name) and
+// the legacy config-service gateway's AggregatedSettingsResponse shape. A setting that
+// supports household overrides also carries household_values (each own value, by name) and
 // households_using_default.
 func (m *Module) handleSettings(w http.ResponseWriter, r *http.Request) {
 	want := r.URL.Query().Get("service")
@@ -294,7 +294,7 @@ func (m *Module) adminSettings(ctx context.Context, svc *settings.Service, house
 
 // settingTarget resolves {service}/{key...} and the optional ?household_id= of a settings
 // write, writing the error itself. hh is "" for the system scope; with a household_id the key
-// must be one households may change and the household must exist.
+// must support household overrides and the household must exist.
 func (m *Module) settingTarget(w http.ResponseWriter, r *http.Request) (src SettingsSource, def settings.Definition, hh string, ok bool) {
 	service, key := r.PathValue("service"), r.PathValue("key")
 	src = m.settingsSource(service)

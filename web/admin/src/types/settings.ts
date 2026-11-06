@@ -10,8 +10,8 @@ export interface SettingResponse {
   from_db: boolean
   options: string[] | null
   /**
-   * A household may set its own value (in the mobile app); `value` is then the default for
-   * every household without one. Absent from older backends.
+   * Admins can manage household overrides; `value` is the default for every household
+   * without one. Household-user permissions are separate. Absent from older backends.
    */
   household_scoped?: boolean
   /** Households with their own value, by name. Present when household_scoped. */

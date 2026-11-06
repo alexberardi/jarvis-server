@@ -47,7 +47,7 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
   const value = formatSettingValue(setting)
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 px-4 py-2.5">
-      <div className="min-w-0 md:grid md:grid-cols-[minmax(0,1fr)_18rem] md:gap-x-6">
+      <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-x-6">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <code className="font-mono text-small font-medium break-all text-text">{setting.key}</code>
@@ -74,7 +74,7 @@ export default function SettingRow({ setting, serviceName }: SettingRowProps) {
           {setting.household_scoped && <p className="mt-0.5 text-caption text-text-muted">Default for all households</p>}
         </div>
 
-        <div className="mt-1 min-w-0 md:mt-0 md:pt-0.5">
+        <div className="mt-1 min-w-0 lg:mt-0 lg:pt-0.5">
           {editing ? (
             <SettingEditor
               setting={setting}
