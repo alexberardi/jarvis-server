@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -137,9 +139,15 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 	if s.LLM == nil {
 		return nil, "", nil, nil, nil, errors.New("no LLM")
 	}
-	msgs := p.messages
+	// The reminder rides on every turn: Qwen3.5-9B slid into the host's part late in a call
+	// ("could you spell the name for my records?", "anything else I can help you with?").
+	// It goes just before the newest message, which stays what the business just said.
+	msgs := append([]chatMsg(nil), p.messages...)
+	if n := len(msgs); n > 0 {
+		msgs = append(msgs[:n-1:n-1], chatMsg{"system", p.roleReminder()}, msgs[n-1])
+	}
 	if schedulingNote != "" {
-		msgs = append(append([]chatMsg(nil), p.messages...), chatMsg{"system", schedulingNote})
+		msgs = append(msgs, chatMsg{"system", schedulingNote})
 	}
 	tctx, cancel := context.WithTimeout(ctx, orDefault(s.TurnTimeout, defaultTurnTimeout))
 	defer cancel()
@@ -239,7 +247,11 @@ loop:
 	for _, e := range evs {
 		events = append(events, e)
 	}
-	tail += parser.Flush()
+	if rest := parser.Flush(); live.ParseUnclosed(rest) != nil {
+		events = append(events, live.ParseUnclosed(rest))
+	} else {
+		tail += rest
+	}
 	if tail != "" {
 		feed(tail)
 	}
@@ -292,7 +304,22 @@ loop:
 		spoken = append(spoken, c.sentence)
 		pcm = append(pcm, c.pcm...)
 	}
-	return pcm, strings.Join(spoken, " "), events, ttft, ttfb, nil
+	return pcm, strings.Join(spoken, " "), dropCopiedExample(events, heard), ttft, ttfb, nil
+}
+
+// dropCopiedExample removes an escalation that is the prompt's own example, word for word,
+// when the business said nothing about it: Qwen3.5-9B asked the caller "what is the patient's
+// date of birth?" on a pizza booking after hearing "Um...", and held the line for the answer.
+func dropCopiedExample(events []any, heard string) []any {
+	out := events[:0:0]
+	for _, ev := range events {
+		if e, ok := ev.(live.Escalate); ok && normQuestion(e.Question) == normQuestion(live.EscalateExample) &&
+			!strings.Contains(strings.ToLower(heard), "birth") {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // askedKeys is SpokenOutputGuard.asked_keys: which restricted fields the callee asked for,
@@ -324,30 +351,111 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 // injected into this generation only. Fails open: no note.
 func (p *turnPipeline) schedulingNote(heard string) string {
 	env := p.rt.brief.Constraints
-	if env == "" || p.timesFromCaller || !live.MightProposeTime(heard) {
+	heard = spokenClock(heard)
+	if env == "" || p.timesFromCaller || !mightBeTime(heard) {
 		return ""
 	}
-	v := timewindow.Check(env, heard)
-	if !v.TimeDetected || v.Available == nil {
+	// Every time they mention is judged ("7 is booked; we have 6:15 or 7:30"), not only the
+	// first: the first can be the one they just refused.
+	verdicts := timewindow.CheckAll(env, heard)
+	if len(verdicts) == 0 {
 		return ""
 	}
-	label := "that time"
-	if v.ProposedLabel != nil && *v.ProposedLabel != "" {
-		label = *v.ProposedLabel
+	var open, closed []string
+	for _, v := range verdicts {
+		if *v.Available {
+			open = append(open, *v.ProposedLabel)
+		} else {
+			closed = append(closed, *v.ProposedLabel)
+		}
 	}
-	if *v.Available {
+	if len(closed) == 0 {
+		label := *verdicts[0].ProposedLabel
 		return "[Scheduling check — ground truth, do not recompute: " + label + " " +
 			"is confirmed OPEN on the caller's calendar. Treat it as " +
 			"available: offer that slot to the business, and do not tell " +
 			"them it is unavailable.]"
 	}
+	p.noteOffered(closed)
 	summary := "the times in your brief"
-	if v.AcceptableSummary != nil && *v.AcceptableSummary != "" {
-		summary = *v.AcceptableSummary
+	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
+		summary = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(*s, "Acceptable times:"), "acceptable times:"))
 	}
-	return "[Scheduling check — ground truth, do not recompute: " + label + " is " +
-		"NOT open on the caller's calendar. Do not agree to it. Offer a " +
-		"time from — " + summary + "]"
+	who := p.rt.brief.InitiatorName
+	if who == "" {
+		who = "the person you are calling for"
+	}
+	one := len(closed) == 1
+	note := "[Scheduling check — ground truth, do not recompute: " + strings.Join(closed, ", ") + " " +
+		map[bool]string{true: "is", false: "are"}[one] + " outside the caller's acceptable times (" + summary + "). " +
+		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[one] + "."
+	if len(open) > 0 {
+		note += " Acceptable: " + strings.Join(open, ", ") + " — take that if the business can do it."
+	} else {
+		// Decided 2026-11-06: no mid-call question for a time outside the window; call back.
+		note += " Ask whether they have anything within the acceptable times. If they don't, do not agree " +
+			"to another time and do not use [ESCALATE]: tell them you'll check with " + who + " and call back, " +
+			"thank them, say goodbye and emit [HANGUP]."
+	}
+	return note + "]"
+}
+
+func (p *turnPipeline) roleReminder() string {
+	who := p.rt.brief.InitiatorName
+	if who == "" {
+		who = "the person you are calling for"
+	}
+	return "[Reminder: you are the CALLER, an assistant phoning on behalf of " + who + " with a request. The other " +
+		"person works where you called: they handle the request and ask the questions. Don't collect details from " +
+		"them or offer them help. Once they have done or confirmed what you called for, or said they can't, record " +
+		"[OUTCOME: …], thank them, say goodbye and emit [HANGUP].]"
+}
+
+// noteOffered records times the business offered outside the window as call facts, so the
+// result card tells the caller what they could have had.
+func (p *turnPipeline) noteOffered(labels []string) {
+	for _, l := range labels {
+		fact := "offered " + l + ", outside your acceptable times"
+		if !slices.Contains(p.outcomeFacts, fact) {
+			p.outcomeFacts = append(p.outcomeFacts, fact)
+		}
+	}
+}
+
+var (
+	holdRE = regexp.MustCompile(`(?i)\b(hold|moment|one sec|a sec|check)`)
+	// "7.30" is how whisper often writes 7:30; "$12.50" stays a price.
+	dottedClockRE = regexp.MustCompile(`(^|[^$\d.])(\d{1,2})\.(\d{2})\b`)
+	// "I could do 715": whisper drops the colon after an offer verb ("at 1200 Main Street" is an address).
+	runClockRE   = regexp.MustCompile(`(?i)\b(do|have|got|try|about|around|how about)\s+(1[0-2]|[1-9])([0-5]\d)\b`)
+	clockRE      = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
+	hourWords    = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
+	minuteWords  = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
+	spokenTimeRE = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
+)
+
+// spokenClock writes "six fifteen" as 6:15 and "seven o'clock" as 7 for the time checks: a
+// transcript can spell times out. A lone hour word ("a table for two") is left alone.
+func spokenClock(s string) string {
+	s = dottedClockRE.ReplaceAllString(s, "$1$2:$3")
+	s = runClockRE.ReplaceAllString(s, "$1 $2:$3")
+	return spokenTimeRE.ReplaceAllStringFunc(s, func(m string) string {
+		g := spokenTimeRE.FindStringSubmatch(m)
+		h, rest := hourWords[strings.ToLower(g[1])], strings.ToLower(strings.ReplaceAll(g[2], "-", " "))
+		switch {
+		case strings.HasSuffix(rest, "clock"):
+			return h + " o'clock"
+		case rest[0] == 'a' || rest[0] == 'p':
+			return h + " " + g[2]
+		}
+		return h + ":" + minuteWords[strings.Join(strings.Fields(rest), " ")]
+	})
+}
+
+// mightBeTime widens live.MightProposeTime (Python parity) to "7:30" and spelled-out times.
+func mightBeTime(s string) bool {
+	s = spokenClock(s)
+	return live.MightProposeTime(s) || clockRE.MatchString(s)
 }
 
 func (p *turnPipeline) stuckInLoop(heard string) bool {
@@ -451,7 +559,9 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int
 	}
 
 	if hasEscalate && !hangup {
-		extraPCM, extraSaid := p.runEscalation(ctx, escalate, ms, said != "")
+		// The hold line plays unless the model already said it's checking: "Of course, take your
+		// time." before 25 s of waiting is dead air to the business.
+		extraPCM, extraSaid := p.runEscalation(ctx, escalate, ms, holdRE.MatchString(said))
 		pcm = append(pcm, extraPCM...)
 		if extraSaid != "" {
 			said = strings.TrimSpace(said + " " + extraSaid)
@@ -547,7 +657,7 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		// trace in the history. The caller's answer is newer than the plan, so it wins.
 		p.messages = append(p.messages, chatMsg{"user", "[You asked " + who + ": \"" + question + "\". " + who +
 			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it.]"})
-		if live.MightProposeTime(answer) {
+		if mightBeTime(answer) {
 			p.timesFromCaller = true
 		}
 		p.answers = append(p.answers, "asked \""+question+"\", answered \""+answer+"\"")

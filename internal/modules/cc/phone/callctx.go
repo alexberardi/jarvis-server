@@ -3,6 +3,7 @@ package phone
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -37,7 +38,9 @@ type fieldSpec struct{ key, label, category, tier string }
 // wellKnownFields are the fixed-label fields (WELL_KNOWN_FIELDS).
 var wellKnownFields = []fieldSpec{
 	{"full_name", "Full name", CatGeneral, TierState},
-	{"address", "Address", CatGeneral, TierIfAsked},
+	// Home, not General: an address is for a plumber or a delivery, never a restaurant's
+	// "loyalty program" (docs/decisions/2026-11-05-call-context-by-category.md).
+	{"address", "Address", CatHome, TierIfAsked},
 	{"callback_number", "Callback number", CatGeneral, TierIfAsked},
 	{"date_of_birth", "Date of birth", CatMedical, TierIfAsked},
 	{"insurance_provider", "Insurance provider", CatMedical, TierIfAsked},
@@ -128,12 +131,14 @@ func coerceEntry(raw any) (ContextField, bool) {
 			label = known.label
 		}
 	}
+	// A well-known field always has its own category (a saved address is Home even if an older
+	// app stored it as General): categories decide which calls get it.
 	cat := strings.ToLower(strings.TrimSpace(pyStr(m["category"])))
-	if !isCategory(cat) {
+	switch {
+	case isKnown:
+		cat = known.category
+	case !isCategory(cat):
 		cat = CatGeneral
-		if isKnown {
-			cat = known.category
-		}
 	}
 	tier := strings.ToLower(strings.TrimSpace(pyStr(m["tier"])))
 	if tier != TierState && tier != TierIfAsked {
@@ -188,6 +193,19 @@ func ParseCallContext(raw any) []ContextField {
 // decision, 2026-07-23; per-call category selection is future work).
 func SelectForCall(fields []ContextField) []ContextField {
 	return append([]ContextField(nil), fields...)
+}
+
+// SelectForCategories is what one call's brief carries: General details always, the others
+// only for the call's categories (a dentist call gets Medical, a restaurant never does), so a
+// detail the business has no use for can't be read out however it asks.
+func SelectForCategories(fields []ContextField, cats []string) []ContextField {
+	var out []ContextField
+	for _, f := range fields {
+		if f.Category == CatGeneral || f.Category == "" || slices.Contains(cats, f.Category) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // RestrictedFields are the give-if-asked fields: the spoken-output guard's denylist.

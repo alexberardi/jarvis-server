@@ -36,6 +36,9 @@
 #                    Calls go through the tap (tools/pipeline tap, port 7799 + offset), which
 #                    logs every model call to .sandbox/<name>/llm.jsonl.
 #   --llm none       no model: everything but the LLM works
+#   --llm local      the sandbox runs its own engine as its llm.* settings say (set llm.live.engine
+#                    local and a model, then up again). Only when the installed jarvisd is stopped:
+#                    it would compete for the GPU
 #   --llm scripted   a deterministic model for UI tests: tools/scriptllm (port 7798 + offset, behind
 #                    the tap) answers from e2e/llm/default.json; needs no installed jarvisd. Tests
 #                    switch scripts at $SBX_SCRIPTLLM/control/script (docs/decisions/2026-10-17-scripted-llm.md)
@@ -48,6 +51,8 @@
 #                    ~/.cache/jarvis-harness/models ($JARVIS_HARNESS_CACHE) and used in place;
 #                    whisper-server runs on the CPU (stt.gpu_backend cpu, gpu_layers 0), never
 #                    the GPU the installed jarvisd uses. The CPU build is fetched on first use.
+#   --stt-gpu        with --voice: whisper-server on the GPU instead of the CPU (live phone calls:
+#                    ~2 s of CPU transcription per turn); check the GPU has room first
 #   --stt-model ID   the catalog's stt model for --voice (default whisper-small.en; base.en is
 #                    faster and mishears more; whisper-large-v3-turbo-q5_0 is better and slower)
 #   --speech local   (default) STT on the local whisper-server (--voice) or off
@@ -115,7 +120,7 @@ die() { say "$*"; exit 1; }
 CMD=${1:-}
 [ -n "$CMD" ] || { sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
-NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0 PHONE_SIM=0
+NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0 PHONE_SIM=0 STT_GPU=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local SPEECH_API=openai
 NODE_PROFILE=pi
 while [ $# -gt 0 ]; do
@@ -128,6 +133,7 @@ while [ $# -gt 0 ]; do
     --phone-sim) PHONE_SIM=1; shift ;;
     --voice) VOICE=1; shift ;;
     --sip) SIP=1; shift ;;
+    --stt-gpu) STT_GPU=1; shift ;;
     --speech) SPEECH=$2; shift 2 ;;
     --speech-api) SPEECH_API=$2; shift 2 ;;
     --stt-model) STT_MODEL=$2; shift 2 ;;
@@ -147,7 +153,7 @@ done
 case $NAME in *[!a-zA-Z0-9_-]*|'') die "--name: letters, digits, - and _ only" ;; esac
 case $NODE_NAME in *[!a-zA-Z0-9_-]*|'') die "--node-name: letters, digits, - and _ only" ;; esac
 case $NODE_PROFILE in pi|desktop) ;; *) die "--node-profile: pi or desktop" ;; esac
-case $LLM in '' | shared | none | scripted) ;; *) die "--llm: shared, none or scripted" ;; esac
+case $LLM in '' | shared | none | scripted | local) ;; *) die "--llm: shared, none, scripted or local" ;; esac
 case $PROFILE in minimal | rich | empty) ;; *) die "--profile: minimal, rich or empty" ;; esac
 case $RELAY in fake | none | http://* | https://*) ;; *) die "--relay: fake, none or an http(s) URL" ;; esac
 case $SPEECH in local | fake | speaches) ;; *) die "--speech: local, fake or speaches" ;; esac
@@ -216,6 +222,8 @@ json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 #   INSTALLED_LLM_URL=http://127.0.0.1:7704     (optional; the default)
 #   INSTALLED_LLM_LABEL=live                    (optional; live or background: which of its
 #                                                chat labels the sandbox's live label calls)
+#   INSTALLED_LLM_BACKGROUND_LABEL=background   (optional, env or file; the label the sandbox's
+#                                                background calls; unset, it shares live's)
 #   INSTALLED_APP_ID=claude-harness
 #   INSTALLED_APP_KEY=...
 CREDS=${JARVIS_HARNESS_ENV:-$HOME/.config/jarvis-harness/installed.env}
@@ -224,6 +232,7 @@ load_creds() {
   # shellcheck disable=SC1090
   [ -f "$CREDS" ] && . "$CREDS"
   case $INSTALLED_LLM_LABEL in live | background) ;; *) die "INSTALLED_LLM_LABEL must be live or background, not '$INSTALLED_LLM_LABEL'" ;; esac
+  case ${INSTALLED_LLM_BACKGROUND_LABEL:-} in '' | live | background) ;; *) die "INSTALLED_LLM_BACKGROUND_LABEL must be live or background" ;; esac
   [ -n "$INSTALLED_APP_ID" ] && [ -n "$INSTALLED_APP_KEY" ]
 }
 
@@ -271,6 +280,13 @@ point_llm() {
     say "llm: off"
     return
   fi
+  if [ "$LLM" = local ]; then
+    # The sandbox's own engine, as its llm.* settings say (set them, then up again: engine
+    # settings apply at start). Only when nothing else holds the GPU (the installed jarvisd stopped).
+    say "llm: local, as this sandbox's settings say (llm.live.engine $(curl -sf "$(svc_url "$llm")/settings/llm.live.engine" \
+      -H "Authorization: Bearer $TOKEN" | json 'd["value"]' 2>/dev/null || echo '?'))"
+    return
+  fi
   if [ "$LLM" = scripted ]; then
     point_scripted
     return
@@ -296,7 +312,18 @@ point_llm() {
   set_setting "$llm" llm.live.context "$ctx"
   set_setting "$llm" llm.live.remote_vision "$vision"
   set_setting "$llm" llm.live.fold_system_messages '"off"'
-  set_setting "$llm" llm.background.engine '"shared"'
+  if [ -n "${INSTALLED_LLM_BACKGROUND_LABEL:-}" ]; then
+    set_setting "$llm" llm.background.engine '"remote"'
+    set_setting "$llm" llm.background.remote_url "\"http://127.0.0.1:$(port 7799)/openai/v1\""
+    set_setting "$llm" llm.background.remote_api '"openai"'
+    set_setting "$llm" llm.background.context "$ctx"
+    set_setting "$llm" llm.background.remote_vision "$vision"
+    set_setting "$llm" llm.background.fold_system_messages '"off"'
+    set_setting "$llm" llm.background.remote_model "\"$INSTALLED_LLM_BACKGROUND_LABEL\""
+    say "llm: background → installed jarvisd's $INSTALLED_LLM_BACKGROUND_LABEL label"
+  else
+    set_setting "$llm" llm.background.engine '"shared"'
+  fi
   set_setting "$llm" llm.embeddings.engine '"off"'
   # A household with voice ID: the memory tools are offered (D3/D21) and refuse an unknown
   # speaker when called; pipeline turns name the speaker through dev speaker hints.
@@ -461,8 +488,13 @@ setup_voice() {
   set_setting "$llm" tts.model "\"$CACHE/kokoro-multi-lang-v1_0\""
   set_setting "$llm" speaker.model "\"$CACHE/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx\""
   set_setting "$llm" stt.model "\"$STT_FILE\""
-  set_setting "$llm" stt.gpu_backend '"cpu"'
-  set_setting "$llm" stt.gpu_layers 0
+  if [ "$STT_GPU" = 1 ]; then
+    set_setting "$llm" stt.gpu_backend '"auto"'
+    set_setting "$llm" stt.gpu_layers 999
+  else
+    set_setting "$llm" stt.gpu_backend '"cpu"'
+    set_setting "$llm" stt.gpu_layers 0
+  fi
   # whisper-server's default is 4 threads: half the cores, at most 8, is ~1.5x faster on a
   # short command without taking the whole box.
   local threads=$(( $(getconf _NPROCESSORS_ONLN) / 2 ))
@@ -470,7 +502,7 @@ setup_voice() {
   [ "$threads" -lt 1 ] && threads=1
   set_setting "$llm" stt.extra_args "\"-t $threads\""
   [ "$SPEECH" != local ] || set_setting "$llm" stt.engine '"local"'
-  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code stt_desc="$STT_MODEL on the CPU; the first start fetches whisper-server"
+  local node_id=5eed0000-0000-4000-8000-00000000a0de node_key code stt_desc="$STT_MODEL on the $([ "$STT_GPU" = 1 ] && echo GPU || echo CPU); the first start fetches whisper-server"
   case $SPEECH in
     fake) stt_desc="remote: tools/fakespeech ($SPEECH_API)" ;;
     speaches) stt_desc="remote: speaches, $SPEACHES_STT_MODEL" ;;

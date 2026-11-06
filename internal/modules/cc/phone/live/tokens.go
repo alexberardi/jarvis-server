@@ -133,6 +133,18 @@ func (p *TokenParser) Feed(delta string) (string, []ToolEvent) {
 	return text.String(), events
 }
 
+// EscalateExample is the example question in the call prompt's tool list (prompt_text.go).
+const EscalateExample = "what is the patient's date of birth?"
+
+// ParseUnclosed reads what Flush returned: a reply that ends inside a token ("[ESCALATE: which
+// works?") meant the token, and saying it aloud would read the business our question.
+func ParseUnclosed(s string) ToolEvent {
+	if !strings.HasPrefix(s, "[") || strings.Contains(s, "]") {
+		return nil
+	}
+	return parseComplete(s[1:])
+}
+
 // Flush ends the stream: an unfinished candidate is plain text after all.
 func (p *TokenParser) Flush() string {
 	out := p.buf

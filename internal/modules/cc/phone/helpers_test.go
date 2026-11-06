@@ -90,6 +90,7 @@ type fakeLLM struct {
 	drafts    []llm.ChatRequest
 	classifys int
 	assessed  []llm.ChatRequest // outcome assessments, in order
+	kinds     string            // the call-categories answer ("" = NONE)
 }
 
 func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -100,6 +101,11 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 		sys = *req.Messages[0].Content.Text
 	}
 	switch {
+	case sys == categorySystemPrompt:
+		if f.kinds == "" {
+			return &llm.ChatResponse{Content: "NONE"}, nil
+		}
+		return &llm.ChatResponse{Content: f.kinds}, nil
 	case sys == draftSystemPrompt:
 		f.drafts = append(f.drafts, req)
 		if f.draftErr != nil {
