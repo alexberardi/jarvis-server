@@ -110,3 +110,11 @@ func TestBriefCarriesOnlyTheCallsCategories(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvelopeFindsMidLineTimes(t *testing.T) {
+	// Qwen3.5-9B's drafted brief, verbatim.
+	details := "Please call Papa V's Pizza to reserve a table for two people on Friday at 7 PM. If asked: Confirm the party size is two and the date is this Friday. Acceptable times: Friday at 7 PM.\n- Callback number: 732-555-0142"
+	if got, want := ExtractConstraintEnvelope(details), "Acceptable times: Friday at 7 PM."; got != want {
+		t.Fatalf("envelope = %q, want %q", got, want)
+	}
+}

@@ -492,6 +492,8 @@ func ensureTimesSection(goal, details string) string {
 
 var constraintPrefixes = []string{"acceptable times:", "do not book:"}
 
+var midLineConstraintRE = regexp.MustCompile(`(?i)[^\S\n]+((?:acceptable times|do not book):)`)
+
 // ExtractConstraintEnvelope pulls the negotiating bounds back out of the confirmed brief
 // (placeholders are not constraints).
 func ExtractConstraintEnvelope(details string) string {
@@ -499,6 +501,8 @@ func ExtractConstraintEnvelope(details string) string {
 		return ""
 	}
 	var real []string
+	// A model may draft "…If asked: …. Acceptable times: …" on one line.
+	details = midLineConstraintRE.ReplaceAllString(details, "\n$1")
 	for _, line := range splitLines(details) {
 		t := strings.TrimSpace(line)
 		lt := strings.ToLower(t)
