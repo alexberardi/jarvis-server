@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -120,6 +121,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	calleeTap := fs.String("callee-tap", "", "tap the callee is played through instead of the sandbox's (another sandbox's, to hold the business's model fixed)")
 	only := fs.String("only", "", "run only these scenarios (comma-separated names)")
 	repeat := fs.Int("repeat", 1, "run each scenario this many times and report its pass rate")
+	you := fs.Bool("you", false, "you play the business (type its lines on stdin) and answer Jarvis's questions (lines starting with >)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -160,6 +162,10 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	cl := &callee{tap: env["SBX_LLM_TAP"], model: *model, out: stdout}
 	if *calleeTap != "" {
 		cl.tap = *calleeTap
+	}
+	if *you {
+		cl.you = readHuman(os.Stdin)
+		fmt.Fprintln(stdout, "You are the business: type its lines (end one with /hangup to hang up). Answer Jarvis's questions to you with a leading >.")
 	}
 	srv := &http.Server{Addr: env["SBX_PHONE_SIM"], Handler: cl, ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
@@ -273,7 +279,7 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 	fmt.Fprintf(stdout, "\n☎  Call now → %s\n", number)
 	watch, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
-	go api.answerQuestions(watch, env, confirmAt, sc.Answers, stdout)
+	go api.answerQuestions(watch, env, confirmAt, sc.Answers, cl.you, stdout)
 	select {
 	case <-ended:
 	case <-time.After(12 * time.Minute):
@@ -296,6 +302,7 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 type callee struct {
 	tap, model string
 	out        io.Writer
+	you        *human // --you: a person types the business's lines
 
 	mu       sync.Mutex
 	persona  string
@@ -355,7 +362,21 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	reply, err := c.chat(r.Context(), msgs)
+	var reply string
+	var err error
+	if c.you != nil {
+		fmt.Fprint(c.out, "   🧑 › ")
+		select {
+		case reply = <-c.you.business:
+			if strings.HasSuffix(reply, "/hangup") {
+				reply = strings.TrimSuffix(reply, "/hangup") + " [HANGUP]"
+			}
+		case <-r.Context().Done():
+			return
+		}
+	} else {
+		reply, err = c.chat(r.Context(), msgs)
+	}
 	if err != nil {
 		fmt.Fprintf(c.out, "   (callee model failed: %v)\n", err)
 		_ = json.NewEncoder(w).Encode(simline.Reply{})
@@ -373,10 +394,10 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Unlock()
 	// The persona model sometimes ends the call on its greeting or mid-question; a person doesn't.
-	if hangup && (replies < 2 || strings.Contains(reply, "?")) {
+	if hangup && c.you == nil && (replies < 2 || strings.Contains(reply, "?")) {
 		hangup = false
 	}
-	if reply != "" {
+	if reply != "" && c.you == nil {
 		fmt.Fprintf(c.out, "   🧑 %s\n", reply)
 	}
 	if hangup {
@@ -542,7 +563,7 @@ func (a *userAPI) tap(ctx context.Context, cc string, el cardElement, hh any) er
 
 // answerQuestions plays the caller's phone during a call: each "The call needs your input"
 // card gets the next of answers, tapped as Send answer; past the last, questions go unanswered.
-func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, since time.Time, answers []string, out io.Writer) {
+func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, since time.Time, answers []string, you *human, out io.Writer) {
 	seen := map[string]bool{}
 	for ctx.Err() == nil {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, env["SBX_NOTIFICATIONS"]+"/api/v0/inbox?limit=20", nil)
@@ -558,6 +579,15 @@ func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, si
 				seen[it.ID] = true
 				n := len(seen)
 				fmt.Fprintf(out, "   📱 %s\n", it.Summary)
+				if you != nil {
+					fmt.Fprintln(out, "   📱 (answer with > …)")
+					select {
+					case ans := <-you.answers:
+						answers = append(answers[:min(n-1, len(answers))], ans)
+					case <-ctx.Done():
+						return
+					}
+				}
 				if n > len(answers) {
 					fmt.Fprintln(out, "   📱 (no answer)")
 					continue
@@ -652,4 +682,26 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// human is a person at the terminal: lines starting with ">" answer Jarvis's questions to the
+// caller, every other line is the business speaking.
+type human struct{ business, answers chan string }
+
+func readHuman(r io.Reader) *human {
+	h := &human{business: make(chan string, 8), answers: make(chan string, 8)}
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			switch {
+			case line == "":
+			case strings.HasPrefix(line, ">"):
+				h.answers <- strings.TrimSpace(line[1:])
+			default:
+				h.business <- line
+			}
+		}
+	}()
+	return h
 }
