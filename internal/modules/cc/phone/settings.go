@@ -39,9 +39,10 @@ func Definitions() []settings.Definition {
 		{Key: SettingPlanTTL, Category: "phone_calls", Type: settings.Int, Default: int64(20),
 			Description: "Minutes a call plan (confirm card) stays valid before expiring"},
 		{Key: SettingRetentionDays, Category: "phone_calls", Type: settings.Int, Default: int64(defaultRetentionDays),
-			Description: "Days to keep a call's recording and transcript after the call ends; an hourly " +
-				"sweep then deletes both. 0 or less keeps nothing once the call has ended. The call " +
-				"itself (duration, outcome summary, inbox card, a taken message) is kept."},
+			Description: "Days to keep a call's recording, transcript and the personal details it carried " +
+				"(the call plan's details and call context) after the call ends; an hourly sweep then " +
+				"deletes them. 0 or less keeps nothing once the call has ended. The call itself (goal, " +
+				"duration, outcome summary, inbox card, a message taken on an inbound call) is kept."},
 		{Key: SettingMaxCallSeconds, Category: "phone_calls", Type: settings.Int, Default: int64(600),
 			Description: "Hard cap on a single call's duration (reaper enforces)"},
 		{Key: SettingCallsPerDay, Category: "phone_calls", Type: settings.Int, Default: int64(10),

@@ -7,17 +7,19 @@ import (
 )
 
 // Call retention (docs/decisions/2026-11-06-phone-retention.md): an hourly sweep deletes the
-// recording and transcript of every call that ended more than phone_calls.audio_retention_days
-// ago (per household; 0 or less keeps nothing once the call has ended). The row stays, with
-// its duration, outcome and summary, because the daily and monthly caps count past calls and
-// the inbox card is the user's record of the call. A blob that fails to delete keeps its key,
-// so the next sweep retries it.
+// recording, the transcript and the personal details (the plan's brief, the node context) of
+// every call that ended more than phone_calls.audio_retention_days ago (per household; 0 or
+// less keeps nothing once the call has ended). The row stays, with its duration, goal, outcome
+// and summary, because the daily and monthly caps count past calls and the inbox card is the
+// user's record of the call. A blob that fails to delete keeps its key, so the next sweep
+// retries it.
 
 const (
 	RetentionSweepCron    = "41 * * * *" // hourly, UTC
 	defaultRetentionDays  = 30
 	retentionSessionQuery = `SELECT id, household_id, audio_object_key, ended_at FROM cc_phone_call_sessions
-		WHERE ended_at IS NOT NULL AND (audio_object_key IS NOT NULL OR transcript_json IS NOT NULL)`
+		WHERE ended_at IS NOT NULL AND (audio_object_key IS NOT NULL OR transcript_json IS NOT NULL
+			OR details IS NOT NULL OR node_context_json IS NOT NULL)`
 	retentionInboundQuery = `SELECT id, household_id, audio_object_key, ended_at FROM cc_phone_inbound_calls
 		WHERE ended_at IS NOT NULL AND audio_object_key IS NOT NULL`
 )
@@ -43,12 +45,17 @@ func (s *Service) SweepRetention(ctx context.Context) error {
 	}
 	reaped := 0
 	for _, t := range []struct{ query, update string }{
-		// transcript_json is cleared unconditionally; the key only when its blob is gone (the
-		// CASE leaves a key a late outcome wrote meanwhile).
-		{retentionSessionQuery, `UPDATE cc_phone_call_sessions SET transcript_json = NULL,
-			audio_object_key = CASE WHEN audio_object_key = ? THEN NULL ELSE audio_object_key END WHERE id = ?`},
+		// The transcript and the personal details (details: the plan's brief, with the call
+		// context; node_context_json) are cleared unconditionally. The key, and the outcome's
+		// audio_available, only when its blob is gone (?1; the CASE leaves a key a late outcome
+		// wrote meanwhile). SET expressions all see the row's old values.
+		{retentionSessionQuery, `UPDATE cc_phone_call_sessions SET transcript_json = NULL, details = NULL,
+			node_context_json = NULL,
+			outcome_json = CASE WHEN audio_object_key = ?1 AND json_valid(outcome_json)
+				THEN json_set(outcome_json, '$.audio_available', json('false')) ELSE outcome_json END,
+			audio_object_key = CASE WHEN audio_object_key = ?1 THEN NULL ELSE audio_object_key END WHERE id = ?2`},
 		{retentionInboundQuery, `UPDATE cc_phone_inbound_calls SET
-			audio_object_key = CASE WHEN audio_object_key = ? THEN NULL ELSE audio_object_key END WHERE id = ?`},
+			audio_object_key = CASE WHEN audio_object_key = ?1 THEN NULL ELSE audio_object_key END WHERE id = ?2`},
 	} {
 		calls, err := s.retainedCalls(ctx, t.query)
 		if err != nil {
@@ -75,7 +82,7 @@ func (s *Service) SweepRetention(ctx context.Context) error {
 		}
 	}
 	if reaped > 0 {
-		s.log().Info("phone: expired call recordings and transcripts deleted", "calls", reaped)
+		s.log().Info("phone: expired call recordings, transcripts and details deleted", "calls", reaped)
 	}
 	return nil
 }

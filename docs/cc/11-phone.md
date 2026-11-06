@@ -13,7 +13,7 @@ Gateway (external, Python, frozen): `jarvis-phone-gateway`, port 7713. I read a 
 
 - **D16:** **jarvis-phone-gateway is absorbed into jarvisd** (Q1 option c). Phone becomes its own set of REST endpoints (Twilio voice webhook, Media Streams WebSocket, and the call/session/escalation routes), gated behind `phone_calls.enabled` (default off). Live calls use the in-process STT, LLM and TTS. **No Redis and no dial-queue shim** (Q2 is moot); dial hand-off is an in-process call or queue job. Twilio still needs the webhook/WS routes publicly reachable (a tunnel), configured only by households that turn phone on. Oddities caused by the two-process split are fixed (D8). Ported in Phase 5c; until cutover prod keeps the Python gateway. Prod: enabled, 17 calls 2026-08-06..08-30.
 - **D4:** `/internal/phone/*` stays open to any registered app for now; a future external-API connector concept will take this route over. (With D16 the absorbed gateway no longer calls it; see Q9.)
-- **D42:** call transcripts and audio are ported as-is (Q8 option a): no retention job, `audio_retention_days` stays inert, no notice-off mode. Revisit with a call-history screen. Prod: 4 of 17 calls have a transcript, none have audio. **Superseded 2026-11-06** ([phone retention](../decisions/2026-11-06-phone-retention.md)): an hourly sweep deletes audio and transcripts after `audio_retention_days`.
+- **D42:** call transcripts and audio are ported as-is (Q8 option a): no retention job, `audio_retention_days` stays inert, no notice-off mode. Revisit with a call-history screen. Prod: 4 of 17 calls have a transcript, none have audio. **Superseded 2026-11-06** ([phone retention](../decisions/2026-11-06-phone-retention.md)): an hourly sweep deletes audio, transcripts and the call's personal details after `audio_retention_days`.
 - **D20:** account deletion keeps `phone_call_sessions` as activity history with `user_id` (and `confirmed_by`) → NULL; it hard-deletes the user's pending call drafts and their `phone_calls.call_context`. The phonebook is household-owned and stays.
 - **D21:** unknown or ambiguous speaker → `make_phone_call` refuses (today's behaviour). Approvals are not tightened: any household member may confirm (Q10).
 - **M14 (D47) / D35:** when speaker recognition is off, the no-speaker refusal says "speaker recognition is off" rather than "I'm not sure who's speaking".
@@ -392,7 +392,7 @@ terminal: done, failed, declined, expired
 - Sessions are **never deleted**.
 - `phone_calls.audio_retention_days` (default 30, "audio AND transcript") is declared and exposed in mobile settings, but **nothing reads it** in CC or the gateway.
 
-> **jarvisd (2026-11-06, superseding D42):** an hourly sweep deletes the audio and transcript of calls that ended more than `audio_retention_days` ago; rows, outcome and cards stay ([phone retention](../decisions/2026-11-06-phone-retention.md)). **D20:** on account deletion, sessions are de-identified, not deleted.
+> **jarvisd (2026-11-06, superseding D42):** an hourly sweep deletes the audio, transcript, `details` and `node_context_json` of calls that ended more than `audio_retention_days` ago; rows, goal, outcome and cards stay ([phone retention](../decisions/2026-11-06-phone-retention.md)). **D20:** on account deletion, sessions are de-identified, not deleted.
 - Audio is stored in MinIO bucket `PHONE_CALLS_BUCKET` by the gateway (`services/recording.py`).
 
 **In-memory state in CC:** none. The gateway holds all live-call state in its own `call_runtimes` and its token registry.

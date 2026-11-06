@@ -68,15 +68,16 @@ func (m *memBlobs) has(key string) bool {
 }
 
 // endedSession stores a finished outbound call in household h that ended at ended, with a
-// recording, a transcript and an outcome.
+// recording, a transcript, the plan's details and node context, and an outcome.
 func (e *env) endedSession(h string, ended time.Time, blobs *memBlobs) (id, key string) {
 	e.t.Helper()
 	id = uuid4()
 	key = recordingPrefix + h + "/" + id + ".wav"
 	_, _ = blobs.Put(context.Background(), key, bytes.NewReader([]byte("RIFF")), "audio/wav")
-	if _, err := e.d.Write.Exec(`INSERT INTO cc_phone_call_sessions (id, household_id, goal, state, transcript_json,
-		outcome_json, audio_object_key, duration_seconds, created_at, in_call_at, ended_at)
-		VALUES (?, ?, 'order pizza', 'done', '[{"speaker":"callee","text":"hi"}]', '{"summary":"ordered"}', ?, 120, ?, ?, ?)`,
+	if _, err := e.d.Write.Exec(`INSERT INTO cc_phone_call_sessions (id, household_id, goal, details, node_context_json,
+		contact_address, state, transcript_json, outcome_json, audio_object_key, duration_seconds, created_at, in_call_at, ended_at)
+		VALUES (?, ?, 'order pizza', 'Policy 12345, callback 555-0100', '[{"key":"member_id","value":"M-9"}]',
+		'1 Main St', 'done', '[{"speaker":"callee","text":"hi"}]', '`+outcomeWithAudio+`', ?, 120, ?, ?, ?)`,
 		id, h, key, dbTime(ended.Add(-3*time.Minute)), dbTime(ended.Add(-2*time.Minute)), dbTime(ended)); err != nil {
 		e.t.Fatal(err)
 	}
@@ -96,16 +97,27 @@ func (e *env) oldInboundCall(h string, ended time.Time, blobs *memBlobs) (id, ke
 	return id, key
 }
 
+const (
+	outcomeWithAudio = `{"summary":"ordered","audio_available":true}`
+	outcomeAudioGone = `{"summary":"ordered","audio_available":false}`
+)
+
 type retained struct {
-	transcript, outcome, audio sql.NullString
-	duration                   sql.NullInt64
+	transcript, outcome, audio, details, nodeCtx, goal, address sql.NullString
+	duration                                                    sql.NullInt64
+}
+
+// cleared: nothing the setting promises to remove is left.
+func (r retained) cleared() bool {
+	return !r.transcript.Valid && !r.audio.Valid && !r.details.Valid && !r.nodeCtx.Valid
 }
 
 func (e *env) retainedSession(id string) retained {
 	e.t.Helper()
 	var r retained
-	if err := e.d.Read.QueryRow(`SELECT transcript_json, outcome_json, audio_object_key, duration_seconds
-		FROM cc_phone_call_sessions WHERE id = ?`, id).Scan(&r.transcript, &r.outcome, &r.audio, &r.duration); err != nil {
+	if err := e.d.Read.QueryRow(`SELECT transcript_json, outcome_json, audio_object_key, details, node_context_json,
+		goal, contact_address, duration_seconds FROM cc_phone_call_sessions WHERE id = ?`, id).Scan(&r.transcript,
+		&r.outcome, &r.audio, &r.details, &r.nodeCtx, &r.goal, &r.address, &r.duration); err != nil {
 		e.t.Fatal(err)
 	}
 	return r
@@ -147,11 +159,14 @@ func TestSweepRetentionPerHousehold(t *testing.T) {
 
 	for _, id := range []string{old, other} {
 		r := e.retainedSession(id)
-		if r.transcript.Valid || r.audio.Valid {
-			t.Errorf("%s: transcript/audio kept past retention: %+v", id, r)
+		if !r.cleared() {
+			t.Errorf("%s: transcript/audio/details kept past retention: %+v", id, r)
 		}
-		if r.outcome.String != `{"summary":"ordered"}` || r.duration.Int64 != 120 {
-			t.Errorf("%s: outcome or duration lost (caps and history need them): %+v", id, r)
+		if r.outcome.String != outcomeAudioGone {
+			t.Errorf("%s: outcome %q, want the summary kept and audio_available false", id, r.outcome.String)
+		}
+		if r.duration.Int64 != 120 || r.goal.String != "order pizza" || r.address.String != "1 Main St" {
+			t.Errorf("%s: duration, goal or business address lost (caps and history need them): %+v", id, r)
 		}
 	}
 	for _, k := range []string{oldKey, otherKey, oldInKey} {
@@ -159,7 +174,8 @@ func TestSweepRetentionPerHousehold(t *testing.T) {
 			t.Errorf("blob %s not deleted", k)
 		}
 	}
-	if r := e.retainedSession(recent); !r.transcript.Valid || r.audio.String != recentKey || !blobs.has(recentKey) {
+	if r := e.retainedSession(recent); !r.transcript.Valid || !r.details.Valid || !r.nodeCtx.Valid ||
+		r.audio.String != recentKey || !blobs.has(recentKey) || r.outcome.String != outcomeWithAudio {
 		t.Errorf("recent call lost its data: %+v", r)
 	}
 	if a, msg := e.inboundAudio(oldIn); a.Valid || msg.String != "call me back" {
@@ -177,7 +193,7 @@ func TestSweepRetentionPerHousehold(t *testing.T) {
 	if err := e.s.SweepRetention(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if r := e.retainedSession(recent); r.transcript.Valid || r.audio.Valid || blobs.has(recentKey) {
+	if r := e.retainedSession(recent); !r.cleared() || blobs.has(recentKey) {
 		t.Errorf("recent call kept after retention lowered: %+v", r)
 	}
 	if a, _ := e.inboundAudio(recentIn); a.Valid {
@@ -214,7 +230,7 @@ func TestSweepRetentionZeroAndClockAdvance(t *testing.T) {
 		if err := e.s.SweepRetention(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if r := e.retainedSession(id); r.transcript.Valid || r.audio.Valid || blobs.has(key) {
+		if r := e.retainedSession(id); !r.cleared() || blobs.has(key) {
 			t.Errorf("retention %d kept a just-ended call: %+v", v, r)
 		}
 	}
@@ -233,11 +249,11 @@ func TestSweepRetentionRetriesFailedBlobDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := e.retainedSession(id)
-	if r.transcript.Valid {
-		t.Error("transcript kept because the blob delete failed")
+	if r.transcript.Valid || r.details.Valid || r.nodeCtx.Valid {
+		t.Error("transcript or details kept because the blob delete failed")
 	}
-	if r.audio.String != key {
-		t.Errorf("failed blob delete lost track of the key: %+v", r)
+	if r.audio.String != key || r.outcome.String != outcomeWithAudio {
+		t.Errorf("failed blob delete lost track of the key or marked the audio gone: %+v", r)
 	}
 	if a, _ := e.inboundAudio(inID); a.String != inKey {
 		t.Errorf("failed inbound blob delete lost track of the key: %v", a)
@@ -248,7 +264,7 @@ func TestSweepRetentionRetriesFailedBlobDelete(t *testing.T) {
 	if err := e.s.SweepRetention(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if r := e.retainedSession(id); r.audio.Valid || blobs.has(key) {
+	if r := e.retainedSession(id); r.audio.Valid || blobs.has(key) || r.outcome.String != outcomeAudioGone {
 		t.Errorf("retry did not delete the blob: %+v", r)
 	}
 	if a, _ := e.inboundAudio(inID); a.Valid || blobs.has(inKey) {
