@@ -383,18 +383,22 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 }
 
 var (
+	holdRE = regexp.MustCompile(`(?i)\b(hold|moment|one sec|a sec|check)`)
 	// "7.30" is how whisper often writes 7:30; "$12.50" stays a price.
 	dottedClockRE = regexp.MustCompile(`(^|[^$\d.])(\d{1,2})\.(\d{2})\b`)
-	clockRE       = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
-	hourWords     = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
-	minuteWords   = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
-	spokenTimeRE  = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
+	// "I could do 715": whisper drops the colon after an offer verb ("at 1200 Main Street" is an address).
+	runClockRE   = regexp.MustCompile(`(?i)\b(do|have|got|try|about|around|how about)\s+(1[0-2]|[1-9])([0-5]\d)\b`)
+	clockRE      = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
+	hourWords    = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
+	minuteWords  = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
+	spokenTimeRE = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
 )
 
 // spokenClock writes "six fifteen" as 6:15 and "seven o'clock" as 7 for the time checks: a
 // transcript can spell times out. A lone hour word ("a table for two") is left alone.
 func spokenClock(s string) string {
 	s = dottedClockRE.ReplaceAllString(s, "$1$2:$3")
+	s = runClockRE.ReplaceAllString(s, "$1 $2:$3")
 	return spokenTimeRE.ReplaceAllStringFunc(s, func(m string) string {
 		g := spokenTimeRE.FindStringSubmatch(m)
 		h, rest := hourWords[strings.ToLower(g[1])], strings.ToLower(strings.ReplaceAll(g[2], "-", " "))
@@ -515,7 +519,9 @@ func (p *turnPipeline) turn(ctx context.Context, utt []int16, ms callLine) []int
 	}
 
 	if hasEscalate && !hangup {
-		extraPCM, extraSaid := p.runEscalation(ctx, escalate, ms, said != "")
+		// The hold line plays unless the model already said it's checking: "Of course, take your
+		// time." before 25 s of waiting is dead air to the business.
+		extraPCM, extraSaid := p.runEscalation(ctx, escalate, ms, holdRE.MatchString(said))
 		pcm = append(pcm, extraPCM...)
 		if extraSaid != "" {
 			said = strings.TrimSpace(said + " " + extraSaid)

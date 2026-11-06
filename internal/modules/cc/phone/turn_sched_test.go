@@ -91,6 +91,13 @@ func TestCopiedPromptExampleIsNotAsked(t *testing.T) {
 	if evs := dropCopiedExample([]any{live.Escalate{Question: "What is the patient's date of birth?"}}, "And the date of birth?"); len(evs) != 1 {
 		t.Fatal("dropped a real question the business asked")
 	}
+	if spokenClock("it doesn't look like it's available anymore I could do 715") != "it doesn't look like it's available anymore I could do 7:15" ||
+		spokenClock("we're at 1200 Main Street") != "we're at 1200 Main Street" {
+		t.Fatal("run-together clock")
+	}
+	if holdRE.MatchString("Of course, take your time.") || !holdRE.MatchString("Let me check, one moment.") {
+		t.Fatal("holdRE")
+	}
 	if !mightBeTime("I could do 7.30. Does that work?") || mightBeTime("a large pie is $12.50") {
 		t.Fatal("dotted clock")
 	}
