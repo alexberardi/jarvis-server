@@ -405,10 +405,10 @@ func (p *turnPipeline) roleReminder() string {
 	if who == "" {
 		who = "the person you are calling for"
 	}
-	return "[Reminder: you are the CALLER, an assistant phoning on behalf of " + who + ". The other person works at " +
-		"the business: they take the booking and ask the questions. Don't ask them for details \"for your records\" " +
-		"or offer them help. Once they confirm what you called for, record [OUTCOME: …], thank them, say goodbye " +
-		"and emit [HANGUP].]"
+	return "[Reminder: you are the CALLER, an assistant phoning on behalf of " + who + " with a request. The other " +
+		"person works where you called: they handle the request and ask the questions. Don't collect details from " +
+		"them or offer them help. Once they have done or confirmed what you called for, or said they can't, record " +
+		"[OUTCOME: …], thank them, say goodbye and emit [HANGUP].]"
 }
 
 // noteOffered records times the business offered outside the window as call facts, so the
