@@ -203,7 +203,7 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 			events = append(events, guardSuppressed{[]string{"confirmation"}})
 			return
 		}
-		if flagged := live.FindRestricted(sentence, p.restricted); len(flagged) > 0 {
+		if flagged := restrictedIn(sentence, p.restricted); len(flagged) > 0 {
 			if verdict == nil {
 				verdict = make(chan map[string]bool, 1)
 				go func() { verdict <- p.askedKeys(ctx, heard) }()
@@ -478,6 +478,29 @@ func (p *turnPipeline) roleReminder() string {
 		"person works where you called: they handle the request and ask the questions. Don't collect details from " +
 		"them or offer them help. Once they have done or confirmed what you called for, or said they can't, record " +
 		"[OUTCOME: …], thank them, say goodbye and emit [HANGUP].]"
+}
+
+var (
+	yearRE  = regexp.MustCompile(`\b(?:19|20)\d\d\b`)
+	monthRE = regexp.MustCompile(`(?i)\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b\d{1,2}/\d{1,2}/`)
+	birthRE = regexp.MustCompile(`(?i)\b(?:born|birth|birthday|dob|d\.o\.b)\b`)
+)
+
+// restrictedIn is live.FindRestricted, except that a saved date with a year (a date of birth)
+// is only disclosed when the sentence says the year or talks about a birth: Jarvis saying the
+// appointment it is booking, "Thursday, November 12", isn't reading out "November 12, 1978"
+// (a real call where every line naming the new date was suppressed).
+func restrictedIn(sentence string, fields []live.RestrictedField) []live.RestrictedField {
+	flagged := live.FindRestricted(sentence, fields)
+	out := flagged[:0:0]
+	for _, f := range flagged {
+		year := yearRE.FindString(f.Value)
+		if year != "" && monthRE.MatchString(f.Value) && !strings.Contains(sentence, year) && !birthRE.MatchString(sentence) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // noteOffered records times the business offered outside the window as call facts, so the
