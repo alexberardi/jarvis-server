@@ -381,7 +381,7 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 	if len(verdicts) == 0 {
 		return ""
 	}
-	var open, closed []string
+	refused := refusedLabels(env, heard, p.rt.now)
 	fresh := false
 	for _, v := range verdicts {
 		if !p.judged[*v.ProposedLabel] {
@@ -394,43 +394,79 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 	if p.judged == nil {
 		p.judged = map[string]bool{}
 	}
+	// A time the business says it can't do ("fully booked at 7") isn't an offer: listing it as
+	// acceptable had Gemma 4 keep asking for the 7 it had just been refused.
+	var cant, open, closed []string
 	for _, v := range verdicts {
-		p.judged[*v.ProposedLabel] = true
-		if *v.Available {
-			open = append(open, *v.ProposedLabel)
-		} else {
-			closed = append(closed, *v.ProposedLabel)
+		l := *v.ProposedLabel
+		p.judged[l] = true
+		switch {
+		case refused[l]:
+			cant = append(cant, l)
+		case *v.Available:
+			open = append(open, l)
+		default:
+			closed = append(closed, l)
 		}
-	}
-	if len(closed) == 0 {
-		label := *verdicts[0].ProposedLabel
-		return "[Scheduling check — ground truth, do not recompute: " + label + " " +
-			"is confirmed OPEN on the caller's calendar. Treat it as " +
-			"available: offer that slot to the business, and do not tell " +
-			"them it is unavailable.]"
-	}
-	p.noteOffered(closed)
-	summary := "the times in your brief"
-	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
-		summary = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(*s, "Acceptable times:"), "acceptable times:"))
 	}
 	who := p.rt.brief.InitiatorName
 	if who == "" {
 		who = "the person you are calling for"
 	}
-	one := len(closed) == 1
-	note := "[Scheduling check — ground truth, do not recompute: " + strings.Join(closed, ", ") + " " +
-		map[bool]string{true: "is", false: "are"}[one] + " outside the caller's acceptable times (" + summary + "). " +
-		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[one] + "."
-	if len(open) > 0 {
-		note += " Acceptable: " + strings.Join(open, ", ") + " — take that if the business can do it."
-	} else {
+	summary := "the times in your brief"
+	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
+		summary = strings.TrimRight(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(*s, "Acceptable times:"), "acceptable times:")), ".")
+	}
+	isAre := func(ls []string) string { return map[bool]string{true: " is", false: " are"}[len(ls) == 1] }
+	note := "[Scheduling check — ground truth, do not recompute:"
+	if len(cant) > 0 {
+		note += " They can't do " + strings.Join(cant, ", ") + "."
+	}
+	if len(closed) > 0 {
+		p.noteOffered(closed)
+		note += " " + strings.Join(closed, ", ") + isAre(closed) + " outside " + who + "'s acceptable times (" + summary +
+			"): don't agree to " + map[bool]string{true: "it", false: "them"}[len(closed) == 1] + "."
+	}
+	switch {
+	case len(open) > 0 && len(cant)+len(closed) == 0:
+		note += " " + strings.Join(open, ", ") + isAre(open) + " within " + who + "'s acceptable times: if they're offering " +
+			"it, accept it; if you're asking, ask for it. Don't tell them it doesn't work, and don't ask " + who + " first."
+	case len(open) > 0:
+		note += " " + strings.Join(open, ", ") + isAre(open) + " within " + who + "'s acceptable times: book " +
+			map[bool]string{true: "it", false: "one of them"}[len(open) == 1] + " with them now; don't ask " + who + " first."
+	default:
 		// Decided 2026-11-06: no mid-call question for a time outside the window; call back.
-		note += " Ask whether they have anything within the acceptable times. If they don't, do not agree " +
-			"to another time and do not use [ESCALATE]: tell them you'll check with " + who + " and call back, " +
-			"thank them, say goodbye and emit [HANGUP]."
+		note += " Ask whether they have anything within " + summary + ". If they don't, do not agree to another time " +
+			"and do not use [ESCALATE]: tell them you'll check with " + who + " and call back, thank them, say goodbye " +
+			"and emit [HANGUP]."
 	}
 	return note + "]"
+}
+
+var (
+	clauseRE  = regexp.MustCompile(`[.;!?]+(?:\s+|$)|,?\s+\b(?:but|however|though)\b`)
+	refusalRE = regexp.MustCompile(`(?i)\b(?:booked|full|fully|sold out|closed|unavailable|not available|isn'?t available|no (?:availability|tables?|openings?|room|spots?)|nothing (?:at|for)|can'?t|cannot|don'?t have|do not have|won'?t work)\b`)
+	weekdayRE = regexp.MustCompile(`(?i)\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tonight|tomorrow)\b`)
+)
+
+// refusedLabels are the times heard in a clause that turns them down ("we're fully booked at 7
+// this Friday"), judged with the utterance's day so their labels match its verdicts.
+func refusedLabels(env, heard string, now time.Time) map[string]bool {
+	out := map[string]bool{}
+	day := weekdayRE.FindString(heard)
+	for _, c := range clauseRE.Split(heard, -1) {
+		if !refusalRE.MatchString(c) {
+			continue
+		}
+		if day != "" && !weekdayRE.MatchString(c) {
+			c = day + " " + c
+		}
+		_, vs := judgeOffer(env, c, now)
+		for _, v := range vs {
+			out[*v.ProposedLabel] = true
+		}
+	}
+	return out
 }
 
 func (p *turnPipeline) roleReminder() string {

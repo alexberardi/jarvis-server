@@ -48,8 +48,14 @@ func TestOfferedAlternativesOutsideTheBriefAreFlagged(t *testing.T) {
 	p := (&Service{}).newTurnPipeline(rt, nil)
 	note := p.schedulingNote("Sorry, Friday at 7:00 PM is fully booked. We do have 6:15 PM or 7:30 PM available for two.")
 	// 7:30 is within the grace of a 7pm slot: take it, no question to the caller.
-	if !strings.Contains(note, "Friday at 6:15 pm is outside") || !strings.Contains(note, "Acceptable: Friday at 7 pm, Friday at 7:30 pm") ||
-		strings.Contains(note, "ESCALATE: …") {
+	// 7 is refused (not an offer), 6:15 is outside, 7:30 is within the grace: book it, no question.
+	for _, want := range []string{"They can't do Friday at 7 pm.", "Friday at 6:15 pm is outside", "Friday at 7:30 pm is within",
+		"book it with them now; don't ask Alex first"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("note lacks %q: %q", want, note)
+		}
+	}
+	if strings.Contains(note, "ESCALATE: …") {
 		t.Fatalf("note: %q", note)
 	}
 	if strings.Contains(note, "OPEN on the caller's calendar. Treat it as available") {
@@ -63,7 +69,7 @@ func TestSpokenOffersWithNoDayAreFlagged(t *testing.T) {
 		Constraints: "Acceptable times: Friday at 7 PM."}}
 	p := (&Service{}).newTurnPipeline(rt, nil)
 	note := p.schedulingNote("Hi Jordan, can I put you down for a table for two? We're fully booked for seven, but we have seats at six fifteen or seven thirty.")
-	if !strings.Contains(note, "Friday at 6:15 is outside") || !strings.Contains(note, "Acceptable: Friday at 7:30") {
+	if !strings.Contains(note, "Friday at 6:15 is outside") || !strings.Contains(note, "Friday at 7:30 is within") {
 		t.Fatalf("note: %q", note)
 	}
 }
@@ -119,7 +125,7 @@ func TestOnlyOffersOutsideTheWindowMeansCallBack(t *testing.T) {
 		t.Fatalf("facts: %v", p.outcomeFacts)
 	}
 	// 7:15 for a 7pm table is fine.
-	if note := p.schedulingNote("I can do 715 if that works."); !strings.Contains(note, "OPEN on the caller's calendar") {
+	if note := p.schedulingNote("I can do 715 if that works."); !strings.Contains(note, "within Alex's acceptable times: if they're offering it, accept it") {
 		t.Fatalf("7:15 note: %q", note)
 	}
 }
@@ -173,5 +179,26 @@ func TestCallRuntimeTakesTheResolvedThinkingSwitch(t *testing.T) {
 	s.ThinkingSuffix = func(context.Context) bool { return false }
 	if s.thinkingSuffix(t.Context()) {
 		t.Fatal("the hook was ignored")
+	}
+}
+
+func TestARefusedTimeIsNotAnOffer(t *testing.T) {
+	rt := &callRuntime{brief: live.Brief{Goal: "book a table", InitiatorName: "Jordan", Constraints: "Acceptable times: Friday at 7pm"}}
+	for heard, want := range map[string][]string{
+		// Whisper's text of the voice-mode baseline call where Gemma 4 kept asking for 7.
+		"I'm sorry, we are fully booked at 7.00 this Friday.  I can offer you 6.15 PM or 7.30 PM for two.": {
+			"They can't do Friday at 7", "Friday at 7:30"},
+		"Friday at 7 isn't available, but we have 7:30.":                     {"They can't do Friday at 7", "Friday at 7:30"},
+		"We can't do 7 on Friday. Nothing until 9:15.":                       {"They can't do Friday at 7", "call back"},
+		"Sure, Friday at 7 works. What's the name?":                          {"within Jordan's acceptable times: if they're offering it, accept it"},
+		"We're closed Friday at 7 for a private party; 6:45 is open though.": {"They can't do Friday at 7", "Friday at 6:45 is within"},
+	} {
+		p := (&Service{}).newTurnPipeline(rt, nil)
+		note := p.schedulingNote(heard)
+		for _, w := range want {
+			if !strings.Contains(note, w) {
+				t.Errorf("%q\nnote lacks %q:\n%s", heard, w, note)
+			}
+		}
 	}
 }
