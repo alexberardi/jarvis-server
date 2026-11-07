@@ -6,6 +6,7 @@ import (
 	"math"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -68,6 +69,9 @@ type turnPipeline struct {
 	// timesFromCaller: the caller answered a question with a time mid-call, so the brief's time
 	// window no longer vetoes what the business proposes.
 	timesFromCaller bool
+	// judged are the offered times a scheduling note already spoke to: a host repeating "7:30"
+	// while taking the name is not a new offer, and re-noting it stalled Gemma 4 for 20 s.
+	judged map[string]bool
 	// given are the restricted fields already spoken on this call (asked for and cleared): a
 	// read-back of one is them checking what we said, not fishing for it.
 	given map[string]bool
@@ -362,7 +366,20 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 		return ""
 	}
 	var open, closed []string
+	fresh := false
 	for _, v := range verdicts {
+		if !p.judged[*v.ProposedLabel] {
+			fresh = true
+		}
+	}
+	if !fresh {
+		return ""
+	}
+	if p.judged == nil {
+		p.judged = map[string]bool{}
+	}
+	for _, v := range verdicts {
+		p.judged[*v.ProposedLabel] = true
 		if *v.Available {
 			open = append(open, *v.ProposedLabel)
 		} else {
@@ -786,6 +803,10 @@ func (s *Service) assess(ctx context.Context, p *turnPipeline, goal string) (str
 		}
 		instr = "During the call the assistant checked with " + who + ", who decided: " + strings.Join(p.answers, "; ") +
 			". Those decisions update the goal: an outcome that matches what " + who + " approved counts as achieved.\n\n" + instr
+	}
+	if c := strings.TrimSpace(p.rt.brief.Constraints); c != "" {
+		instr = "The caller's scheduling bounds were:\n" + c + "\nA single acceptable time also accepts anything within " +
+			strconv.Itoa(timewindow.Grace) + " minutes of it, so a booking inside those bounds achieves the goal.\n\n" + instr
 	}
 	if goal != "" {
 		instr = "The stated goal of this call (from the caller's brief) was: " + goal + "\n\n" + instr
