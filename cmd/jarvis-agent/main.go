@@ -845,8 +845,12 @@ func runAgent(ctx context.Context, args []string) error {
 	if tf.pkgs != nil {
 		listPkgs = tf.pkgs.List
 	}
-	hub := &playback.Hub{Sources: playbackSources(tf.live, displayEngine, packageNames(tf.live, listPkgs)), OnChange: logPlayback(log)}
+	reporter := newPlaybackReporter(liveCC.Load, log)
+	logChange := logPlayback(log)
+	hub := &playback.Hub{Sources: playbackSources(tf.live, displayEngine, packageNames(tf.live, listPkgs)),
+		OnChange: func(n *playback.Now) { logChange(n); reporter.update(n) }}
 	go runPlayback(ctx, hub, tf.live, log)
+	go reporter.run(ctx)
 	tools = append(tools, &playback.Tools{Hub: hub})
 	var servedTools node.Toolset = tools
 	if displayEngine != nil {
@@ -953,6 +957,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	// A Pi's voice-profile takes go through the pipeline's microphone (voiceprofile.go).
 	addVerbs(r, voiceProfileVerbs(p, mic, log))
+	addVerbs(r, map[string]func(context.Context, *node.CC, map[string]any){"playback_control": playbackVerb(hub, reporter, time.Now, log)})
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)

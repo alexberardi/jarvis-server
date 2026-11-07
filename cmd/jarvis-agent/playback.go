@@ -8,6 +8,7 @@ import (
 	"time"
 
 	displaynode "github.com/alexberardi/jarvis-server/internal/agent/display"
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/playback"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -166,7 +167,7 @@ func runPlayback(ctx context.Context, hub *playback.Hub, live *sidecar.Live, log
 	}
 }
 
-// logPlayback is the hub's OnChange until jarvisd takes the state (piece 3).
+// logPlayback logs each change of what the hub shows.
 func logPlayback(log *slog.Logger) func(*playback.Now) {
 	return func(n *playback.Now) {
 		if n == nil {
@@ -175,5 +176,122 @@ func logPlayback(log *slog.Logger) func(*playback.Now) {
 		}
 		b, _ := json.Marshal(n.State)
 		log.Info("playback: now", "source", n.Source, "state", string(b))
+	}
+}
+
+// playbackReporter sends what the hub shows to jarvisd (P12): each change at most once a
+// second, the latest winning; while something plays, again every playbackResend even with no
+// change (jarvisd drops a report not refreshed within 30 s, P14); and nil once when it stops.
+type playbackReporter struct {
+	cc   func() *node.CC
+	log  *slog.Logger
+	now  func() time.Time
+	wake chan struct{}
+
+	mu       sync.Mutex
+	latest   *playback.Now
+	dirty    bool
+	lastSent time.Time
+}
+
+const (
+	playbackMinGap = time.Second
+	playbackResend = 10 * time.Second
+)
+
+func newPlaybackReporter(cc func() *node.CC, log *slog.Logger) *playbackReporter {
+	return &playbackReporter{cc: cc, log: log, now: time.Now, wake: make(chan struct{}, 1)}
+}
+
+// update is the hub's OnChange.
+func (p *playbackReporter) update(n *playback.Now) {
+	p.mu.Lock()
+	p.latest, p.dirty = n, true
+	p.mu.Unlock()
+	p.poke()
+}
+
+// force sends the current state on the next pass even if nothing changed: a control from
+// jarvisd waits for the node's read-back.
+func (p *playbackReporter) force() {
+	p.mu.Lock()
+	p.dirty = true
+	p.mu.Unlock()
+	p.poke()
+}
+
+func (p *playbackReporter) poke() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+// due is what to send now, if anything.
+func (p *playbackReporter) due() (*playback.Now, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	since := p.now().Sub(p.lastSent)
+	switch {
+	case p.dirty && since >= playbackMinGap:
+	case !p.dirty && p.latest != nil && since >= playbackResend:
+	default:
+		return nil, false
+	}
+	p.dirty, p.lastSent = false, p.now()
+	return p.latest, true
+}
+
+func (p *playbackReporter) run(ctx context.Context) {
+	t := time.NewTicker(playbackMinGap)
+	defer t.Stop()
+	for {
+		if n, ok := p.due(); ok {
+			p.send(ctx, n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-p.wake:
+		}
+	}
+}
+
+func (p *playbackReporter) send(ctx context.Context, n *playback.Now) {
+	cc := p.cc()
+	if cc == nil {
+		p.force() // not connected: try again on the next pass
+		return
+	}
+	if err := cc.Do(ctx, "POST", "/api/v0/node/playback", map[string]any{"now": n}, nil); err != nil {
+		p.log.Debug("playback: report failed", "err", err)
+		p.force()
+	}
+}
+
+// playbackVerb is jarvisd's playback_control command: a control from the app, sent to the
+// shown source. One that arrives after its expires_at (queued while the node was away) is
+// dropped, so a pause never plays out minutes later.
+func playbackVerb(hub *playback.Hub, rep *playbackReporter, now func() time.Time, log *slog.Logger) func(context.Context, *node.CC, map[string]any) {
+	return func(ctx context.Context, _ *node.CC, d map[string]any) {
+		if exp, _ := d["expires_at"].(string); exp != "" {
+			if at, err := time.Parse(time.RFC3339, exp); err == nil && now().After(at) {
+				log.Info("playback: dropping an expired control", "action", d["action"])
+				return
+			}
+		}
+		action, _ := d["action"].(string)
+		args := map[string]any{}
+		if v, ok := d["volume"].(float64); ok {
+			args["volume"] = max(0, min(100, int(v)))
+		}
+		if v, ok := d["position"].(float64); ok {
+			args["position"] = v
+		}
+		if _, err := hub.Control(ctx, action, args); err != nil {
+			log.Info("playback: control failed", "action", action, "err", err)
+		}
+		rep.force() // the app waits for the read-back, changed or not
 	}
 }
