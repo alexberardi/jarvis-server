@@ -202,3 +202,23 @@ func TestARefusedTimeIsNotAnOffer(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAppointmentDateIsNotTheDateOfBirth(t *testing.T) {
+	dob := []live.RestrictedField{{Key: "date_of_birth", Label: "Date of birth", Value: "November 12, 1978"}}
+	for s, want := range map[string]bool{
+		// The real call: every line naming the new appointment was replaced by a refusal.
+		"I'd like to move it to Thursday, November 12, around 4:30.": false,
+		"Her date of birth is November 12, 1978.":                    true,
+		"She was born November 12.":                                  true,
+		"That's November 12 1978.":                                   true,
+		"The birthday on file is the 12th of November.":              true,
+	} {
+		if got := len(restrictedIn(s, dob)) > 0; got != want {
+			t.Errorf("%q: flagged %v, want %v", s, got, want)
+		}
+	}
+	member := []live.RestrictedField{{Key: "insurance_member_id", Label: "Insurance member ID", Value: "BSN9920311"}}
+	if len(restrictedIn("The member ID is BSN9920311.", member)) == 0 {
+		t.Fatal("a non-date field stopped being guarded")
+	}
+}
