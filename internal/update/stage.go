@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -462,6 +463,8 @@ func extractBinary(archive, dst string) error {
 
 // extractNamed copies <dir>/<want> out of a release archive to dst, executable.
 func extractNamed(archive, dst, want string) error {
+	holdForks := noForkWhileWriting()
+	defer holdForks()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o700)
 	if err != nil {
 		return err
@@ -543,6 +546,16 @@ func extractNamed(archive, dst, want string) error {
 		return fmt.Errorf("%s has no %s", filepath.Base(archive), want)
 	}
 	return os.Chmod(dst, 0o755)
+}
+
+// noForkWhileWriting holds off this process's forks until the returned func is called: a child
+// forked while a file is open for writing inherits that descriptor until its exec, and exec'ing
+// the file meanwhile fails with ETXTBSY ("text file busy", golang/go#22315). That failed the
+// agent's update check when the sidecar started at the same moment. Fork takes ForkLock for
+// writing (syscall/exec_unix.go); Windows doesn't use it.
+func noForkWhileWriting() func() {
+	syscall.ForkLock.RLock()
+	return syscall.ForkLock.RUnlock
 }
 
 // checkVersion runs `<bin> version` and requires the release's tag: the new binary runs on
