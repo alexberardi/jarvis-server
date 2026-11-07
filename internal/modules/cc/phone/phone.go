@@ -163,6 +163,9 @@ type Service struct {
 	Go      func(fn func()) bool
 	Options Options
 	Now     func() time.Time
+	// ThinkingSuffix reports whether the live model takes Qwen's /no_think (cc's resolved
+	// thinking switch). Nil keeps the directive, as the legacy calls did.
+	ThinkingSuffix func(ctx context.Context) bool
 	// Zone is the household's timezone ("tomorrow" in a brief is a weekday there). Nil: UTC.
 	Zone func(ctx context.Context, hh string) *time.Location
 	// Timing knobs (tests shorten them; zero = the legacy values).
@@ -194,6 +197,10 @@ func (s *Service) now() time.Time {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (s *Service) thinkingSuffix(ctx context.Context) bool {
+	return s.ThinkingSuffix == nil || s.ThinkingSuffix(ctx)
 }
 
 // localNow is now in the household's timezone.

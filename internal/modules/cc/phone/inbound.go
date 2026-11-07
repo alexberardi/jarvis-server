@@ -389,7 +389,7 @@ func (s *Service) runInbound(t *inboundTicket, call Call) {
 		nullStr(t.caller.Name), nullStr(t.caller.Source), dbTime(start)); err != nil {
 		s.log().Error("phone: recording an inbound call failed", "err", err)
 	}
-	rt := &callRuntime{sessionID: id, householdID: t.hh, recorder: &live.Recorder{}, disclosure: t.disclosure,
+	rt := &callRuntime{sessionID: id, householdID: t.hh, suffix: s.thinkingSuffix(ctx), recorder: &live.Recorder{}, disclosure: t.disclosure,
 		ctx: ctx, cancel: cancel, started: make(chan struct{}), done: make(chan struct{}), call: call, callID: call.ID(),
 		timeLimit: time.Now().Add(limit), timeUpLine: live.InboundTimeUpLine}
 	agent := s.newInboundAgent(rt, t.brief, t.transfers)
@@ -538,7 +538,7 @@ func (s *Service) summarizeInbound(ctx context.Context, a *inboundAgent) string 
 	msgs := append(a.transcript(), chatMsg{"user", live.InboundSummaryInstruction})
 	actx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: toLLM(msgs)})
+	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: a.rt.wire(msgs)})
 	if err != nil || resp == nil {
 		s.log().Error("phone: inbound summary failed", "err", err)
 		return fallback()

@@ -283,7 +283,7 @@ func (a *inboundAgent) reply(ctx context.Context) (pcm []int16, said string, eve
 	tctx, cancel := context.WithTimeout(ctx, orDefault(s.TurnTimeout, defaultTurnTimeout))
 	defer cancel()
 	maxTok := 300
-	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: toLLM(a.messages), MaxTokens: &maxTok})
+	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: a.rt.wire(a.messages), MaxTokens: &maxTok})
 	if err != nil {
 		return nil, "", nil, err
 	}

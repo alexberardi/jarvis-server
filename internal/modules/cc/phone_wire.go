@@ -81,6 +81,10 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 	p.Twilio, p.EnvCredentials, p.NewTwilio = m.Phone.Twilio, m.Phone.EnvCredentials, m.Phone.NewTwilio
 	p.Options, p.Now, p.Go = m.Phone.Options, m.now, m.tasks.Go
 	p.Zone = m.householdLocation
+	p.ThinkingSuffix = func(ctx context.Context) bool {
+		mode, _, _ := m.llmMode(ctx, m.defaultPrefs(ctx))
+		return mode.ThinkingSuffix
+	}
 	if m.TTS != nil {
 		p.TTS = phoneTTS{m.TTS}
 	}
