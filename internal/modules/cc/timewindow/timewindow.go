@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Days are Mon=0 … Sun=6, matched on the first three letters ("Tue", "Tuesday", "tues").
@@ -414,4 +415,21 @@ func soleDay(ivs []Interval) (int, bool) {
 		}
 	}
 	return ivs[0].Day, true
+}
+
+var relativeDayRE = regexp.MustCompile(`(?i)\b(today|tonight|tomorrow)\b`)
+
+// ResolveRelativeDays names the weekday for "today", "tonight" and "tomorrow" in an envelope:
+// a drafted brief says "Acceptable times: Tomorrow at 7 p.m.", and the windows are weekdays.
+// now is the household's local time when the call starts.
+// shortcut: a plan made before midnight and called after it shifts by a day; plans expire in
+// 20 minutes, so resolve at plan time if that ever matters.
+func ResolveRelativeDays(envelope string, now time.Time) string {
+	return relativeDayRE.ReplaceAllStringFunc(envelope, func(w string) string {
+		d := now
+		if strings.EqualFold(w, "tomorrow") {
+			d = now.AddDate(0, 0, 1)
+		}
+		return dayNames[(int(d.Weekday())+6)%7]
+	})
 }

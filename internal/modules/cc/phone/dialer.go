@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/timewindow"
 )
 
 // The absorbed dial worker (gateway services/dial_worker.py), in process (D16): claim CAS →
@@ -150,7 +151,8 @@ func (s *Service) runCall(id string, tel Telephony) {
 		return
 	}
 	brief := live.Brief{Goal: sess.Goal, Details: sess.Details,
-		Constraints: ExtractConstraintEnvelope(sess.Details), InitiatorName: s.initiatorName(ctx, sess.UserID)}
+		Constraints:   timewindow.ResolveRelativeDays(ExtractConstraintEnvelope(sess.Details), s.localNow(ctx, sess.HouseholdID)),
+		InitiatorName: s.initiatorName(ctx, sess.UserID)}
 
 	// Prewarm, and a hard gate: no disclosure, no dial.
 	disclosure, _ := s.synthesize(ctx, live.BuildDisclosure(brief))
