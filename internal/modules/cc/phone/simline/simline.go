@@ -8,6 +8,14 @@
 // what was said. The far end's replies are played into Frames as a square wave whose amplitude
 // names the reply, and the Line as STT reads that amplitude back. Both directions are 8 kHz, as
 // the call loop uses them, so the samples arrive unchanged.
+//
+// Voice mode (Line.Voice, JARVIS_DEV_PHONE_SIM_AUDIO=voice) carries real audio instead. The
+// Line stays the phone service's TTS and STT, but as a pass-through to the sandbox's own:
+// Jarvis's replies are real TTS at 8 kHz (with the marker in front, so the exact text still
+// travels for logs and checks) and play out in real time, so barge-in and Flush work as on
+// SIP. What reached the far end's ear is transcribed with the sandbox's whisper at 8 kHz and
+// sent as Turn.Heard. The driver's replies are synthesized in another voice, resampled to
+// 8 kHz and played into Frames in real time, for Jarvis's own VAD, STT and turn loop.
 package simline
 
 import (
@@ -17,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -24,7 +33,9 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
 	"github.com/alexberardi/jarvis-server/internal/modules/stt"
+	"github.com/alexberardi/jarvis-server/internal/modules/tts"
 )
 
 const (
@@ -39,16 +50,27 @@ const (
 	quietAfterJarvis = 1500 * time.Millisecond
 	// silenceNudge: with nothing said for this long, the far end is told so ("Hello?").
 	silenceNudge = 20 * time.Second
+	// FarVoice is the far end's Kokoro voice in voice mode (Jarvis's default is bm_george).
+	FarVoice = "af_heart"
 )
 
 // Turn is what the line posts to the driver: what Jarvis said since the far end last spoke.
 // Event is "spoke" (Jarvis finished a reply), "silence" (nothing for a while) or "ended" (the call
 // is over; no answer is read).
 type Turn struct {
-	SessionID string   `json:"session_id"`
-	To        string   `json:"to"`
-	Event     string   `json:"event"`
-	Said      []string `json:"said"`
+	SessionID string `json:"session_id"`
+	To        string `json:"to"`
+	Event     string `json:"event"`
+	// Said is the exact text Jarvis's TTS was given. In voice mode it is for logs and checks
+	// only: the far end did not hear it, it heard Heard.
+	Said []string `json:"said"`
+	// Voice: the line carries real audio, and Heard and Understood are set.
+	Voice bool `json:"voice,omitempty"`
+	// Heard is the sandbox's whisper transcription of Jarvis's audio as the far end heard it
+	// (8 kHz, cut short by a barge-in); "" when nothing intelligible arrived.
+	Heard string `json:"heard,omitempty"`
+	// Understood is what Jarvis's STT made of the far end's speech since the last turn.
+	Understood []string `json:"understood,omitempty"`
 }
 
 // Reply is the driver's answer: what the far end says next ("" says nothing), and whether it
@@ -58,21 +80,57 @@ type Reply struct {
 	Hangup bool   `json:"hangup"`
 }
 
+// Voice is the sandbox's real speech, for voice mode.
+type Voice struct {
+	STT phone.STT
+	// TTS renders text in a Kokoro voice ("" is the sandbox's configured one, Jarvis's).
+	TTS      func(ctx context.Context, text, voice string) (pcm []int16, rate int, err error)
+	FarVoice string // the far end's voice
+}
+
+// SpeakWith adapts the tts module to Voice.TTS.
+func SpeakWith(m *tts.Module) func(context.Context, string, string) ([]int16, int, error) {
+	return func(ctx context.Context, text, voice string) ([]int16, int, error) {
+		st, err := m.Speak(ctx, text, tts.SpeakOptions{Voice: voice})
+		if err != nil {
+			return nil, 0, err
+		}
+		defer st.Close()
+		b, err := io.ReadAll(st)
+		return live.PCMBytesToInt16(b), st.Format.SampleRate, err
+	}
+}
+
 // Line is the provider, TTS and STT of simulated calls.
 type Line struct {
 	URL    string // the driver's base URL; turns go to URL + "/turn"
 	Log    *slog.Logger
+	Voice  *Voice // nil: text mode
 	client *http.Client
 
-	mu    sync.Mutex
-	texts map[int]string // id → text, both directions
-	next  int
+	// Tests: tick replaces the 20 ms ticker, now the wall clock, and asked is called once a
+	// driver reply has been queued.
+	tick  <-chan time.Time
+	now   func() time.Time
+	asked func()
+
+	mu         sync.Mutex
+	texts      map[int]string // id → text, both directions
+	next       int
+	understood []string // voice mode: Jarvis's transcriptions not yet reported
 }
 
 // New returns a line whose far end is the driver at url.
 func New(url string, log *slog.Logger) *Line {
 	return &Line{URL: strings.TrimRight(url, "/"), Log: log, client: &http.Client{Timeout: 3 * time.Minute},
 		texts: map[int]string{}}
+}
+
+func (l *Line) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now()
 }
 
 func (l *Line) remember(text string) int {
@@ -93,21 +151,35 @@ func (l *Line) text(id int) (string, bool) {
 	return t, ok
 }
 
-// SynthesizePCM is the phone service's TTS: a marker naming text, at 8 kHz.
-func (l *Line) SynthesizePCM(_ context.Context, text string) ([]int16, int, error) {
+// SynthesizePCM is the phone service's TTS: a marker naming text, at 8 kHz; in voice mode the
+// marker is followed by the text's real speech.
+func (l *Line) SynthesizePCM(ctx context.Context, text string) ([]int16, int, error) {
+	n, var8k := frameLen, []int16(nil)
+	if l.Voice != nil {
+		pcm, r, err := l.Voice.TTS(ctx, text, "")
+		if err != nil {
+			return nil, 0, err
+		}
+		// shortcut: the 4 marker samples are a 0.5 ms click in the call recording (the far
+		// end's transcription gets them zeroed); drop them if a recording check ever minds.
+		n, var8k = 4, live.Resample(pcm, r, rate)
+	}
 	id := l.remember(text)
-	pcm := make([]int16, frameLen)
+	pcm := append(make([]int16, n), var8k...)
 	pcm[0], pcm[1], pcm[2], pcm[3] = markerA, -markerA, int16(id), markerTail
 	return pcm, rate, nil
 }
 
-// spoken is the texts whose markers pcm holds, in order.
-func (l *Line) spoken(pcm []int16) []string {
+// spoken is the texts whose markers pcm holds, in order; unmark zeroes the markers.
+func (l *Line) spoken(pcm []int16, unmark bool) []string {
 	var out []string
 	for i := 0; i+3 < len(pcm); i++ {
 		if pcm[i] == markerA && pcm[i+1] == -markerA && pcm[i+3] == markerTail {
 			if t, ok := l.text(int(pcm[i+2])); ok {
 				out = append(out, t)
+			}
+			if unmark {
+				pcm[i], pcm[i+1], pcm[i+2], pcm[i+3] = 0, 0, 0, 0
 			}
 			i += 3
 		}
@@ -115,8 +187,19 @@ func (l *Line) spoken(pcm []int16) []string {
 	return out
 }
 
-// Transcribe is the phone service's STT: the reply the utterance's amplitude names.
-func (l *Line) Transcribe(_ context.Context, wav []byte, _ stt.TranscribeOptions) (stt.Result, error) {
+// Transcribe is the phone service's STT: the reply the utterance's amplitude names, or in
+// voice mode the sandbox's STT, noted for the driver.
+func (l *Line) Transcribe(ctx context.Context, wav []byte, opts stt.TranscribeOptions) (stt.Result, error) {
+	if l.Voice != nil {
+		res, err := l.Voice.STT.Transcribe(ctx, wav, opts)
+		if err == nil {
+			// shortcut: kept per line, not per call; a sandbox runs one simulated call at a time.
+			l.mu.Lock()
+			l.understood = append(l.understood, res.Text)
+			l.mu.Unlock()
+		}
+		return res, err
+	}
 	if len(wav) <= 44 {
 		return stt.Result{}, nil
 	}
@@ -173,6 +256,13 @@ func (l *Line) LineType(context.Context, string) string { return "landline" }
 func (l *Line) Dial(_ context.Context, req phone.DialRequest) (phone.Call, error) {
 	c := &call{line: l, req: req, started: make(chan struct{}), done: make(chan struct{}),
 		frames: make(chan []int16), played: closedCh()}
+	if l.Voice != nil {
+		c.played = make(chan struct{})
+		// The last call's final line, transcribed after its "ended" turn, is not this call's.
+		l.mu.Lock()
+		l.understood = nil
+		l.mu.Unlock()
+	}
 	close(c.started)
 	go c.run()
 	return c, nil
@@ -184,7 +274,8 @@ func closedCh() chan struct{} {
 	return ch
 }
 
-// call is one simulated call. Playback is instant: Played is always at the frame clock.
+// call is one simulated call. In text mode playback is instant: Played is always at the frame
+// clock. In voice mode Jarvis's audio queues in out and plays a frame per tick into ear.
 type call struct {
 	line    *Line
 	req     phone.DialRequest
@@ -201,6 +292,8 @@ type call struct {
 	queue     []int16   // the far end's speech still to send
 	asking    bool      // a driver request is out
 	hangAfter bool      // the far end hangs up once its queue is sent
+	out       []int16   // voice mode: Jarvis's audio still to play
+	ear       []int16   // voice mode: Jarvis's audio the far end has heard since it last spoke
 	reason    phone.EndReason
 	endOnce   sync.Once
 }
@@ -211,7 +304,6 @@ func (c *call) ID() string                   { return "sim-" + c.req.SessionID }
 func (c *call) Started() <-chan struct{}     { return c.started }
 func (c *call) Frames() <-chan []int16       { return c.frames }
 func (c *call) Done() <-chan struct{}        { return c.done }
-func (c *call) Flush() error                 { return nil }
 func (c *call) SendDTMF(string) error        { return phone.ErrUnsupported }
 func (c *call) Hangup(context.Context) error { c.end(phone.EndClosed); return nil }
 func (c *call) Close()                       { c.end(phone.EndClosed) }
@@ -221,15 +313,41 @@ func (c *call) Played() (int64, <-chan struct{}) {
 	return c.pos, c.played
 }
 
+// Flush drops what has not played (voice mode), as a SIP pacer: Played jumps to its end.
+func (c *call) Flush() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.out) > 0 {
+		c.pos += int64(len(c.out))
+		c.out = nil
+		c.advanced()
+	}
+	return nil
+}
+
+// advanced signals Played's change (c.mu held; voice mode).
+func (c *call) advanced() {
+	close(c.played)
+	c.played = make(chan struct{})
+}
+
 func (c *call) EndReason() phone.EndReason {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.reason
 }
 
-// Play hears what Jarvis said; it has played by the time Play returns.
+// Play hears what Jarvis said; it has played by the time Play returns. In voice mode it is
+// queued and plays in real time.
 func (c *call) Play(pcm []int16, _ string) (int64, error) {
-	texts := c.line.spoken(pcm)
+	if c.line.Voice != nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.out = append(c.out, pcm...)
+		c.lastPlay = c.line.clock()
+		return c.pos + int64(len(c.out)), nil
+	}
+	texts := c.line.spoken(pcm, false)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.said = append(c.said, texts...)
@@ -237,15 +355,39 @@ func (c *call) Play(pcm []int16, _ string) (int64, error) {
 	return c.pos, nil
 }
 
+// take is the turn to post: what Jarvis said since the far end last heard (exact text) and, in
+// voice mode, the transcription of what reached the far end's ear and what Jarvis made of it.
+func (c *call) take(ctx context.Context, event string) Turn {
+	c.mu.Lock()
+	said, ear := c.said, c.ear
+	c.said, c.ear = nil, nil
+	c.mu.Unlock()
+	t := Turn{SessionID: c.req.SessionID, To: c.req.To, Event: event, Said: said}
+	v := c.line.Voice
+	if v == nil {
+		return t
+	}
+	t.Voice, t.Said = true, c.line.spoken(ear, true)
+	c.line.mu.Lock()
+	t.Understood, c.line.understood = c.line.understood, nil
+	c.line.mu.Unlock()
+	if len(ear) > 0 {
+		res, err := v.STT.Transcribe(ctx, live.WAV(ear, rate), stt.TranscribeOptions{})
+		if err != nil && c.line.Log != nil {
+			c.line.Log.Warn("simline: transcribing Jarvis failed — the far end heard nothing", "session", c.req.SessionID, "err", err)
+		}
+		t.Heard = strings.TrimSpace(res.Text)
+	}
+	return t
+}
+
 func (c *call) end(r phone.EndReason) {
 	c.endOnce.Do(func() {
 		c.mu.Lock()
 		c.reason = r
-		said := c.said
-		c.said = nil
 		c.mu.Unlock()
 		close(c.done)
-		go func() { _, _ = c.line.post(Turn{SessionID: c.req.SessionID, To: c.req.To, Event: "ended", Said: said}) }()
+		go func() { _, _ = c.line.post(c.take(context.Background(), "ended")) }()
 	})
 }
 
@@ -254,23 +396,33 @@ func (c *call) end(r phone.EndReason) {
 func (c *call) run() {
 	defer close(c.frames)
 	c.mu.Lock()
-	c.lastHeard = time.Now()
+	c.lastHeard = c.line.clock()
 	c.mu.Unlock()
-	tick := time.NewTicker(20 * time.Millisecond)
-	defer tick.Stop()
+	ticks := c.line.tick
+	if ticks == nil {
+		t := time.NewTicker(20 * time.Millisecond)
+		defer t.Stop()
+		ticks = t.C
+	}
 	for {
 		select {
 		case <-c.done:
 			return
-		case <-tick.C:
+		case <-ticks:
 		}
 		frame := make([]int16, frameLen)
 		c.mu.Lock()
+		if len(c.out) > 0 {
+			n := min(frameLen, len(c.out))
+			c.ear = append(c.ear, c.out[:n]...)
+			c.out = c.out[n:]
+			c.lastPlay = c.line.clock()
+		}
 		if len(c.queue) > 0 {
 			copy(frame, c.queue[:frameLen])
 			c.queue = c.queue[frameLen:]
 			if len(c.queue) == 0 {
-				c.lastHeard = time.Now()
+				c.lastHeard = c.line.clock()
 				if c.hangAfter {
 					c.mu.Unlock()
 					c.end(phone.EndRemote)
@@ -279,6 +431,9 @@ func (c *call) run() {
 			}
 		}
 		c.pos += frameLen
+		if c.line.Voice != nil {
+			c.advanced()
+		}
 		event := c.due()
 		c.mu.Unlock()
 		select {
@@ -295,15 +450,16 @@ func (c *call) run() {
 // due is the driver event to send now, if any (c.mu held): "spoke" once Jarvis has said
 // something and gone quiet, "silence" once nobody has said anything for a while.
 func (c *call) due() string {
-	if c.asking || len(c.queue) > 0 || c.hangAfter {
+	if c.asking || len(c.queue) > 0 || len(c.out) > 0 || c.hangAfter {
 		return ""
 	}
-	now := time.Now()
-	if len(c.said) > 0 && now.Sub(c.lastPlay) >= quietAfterJarvis {
+	now := c.line.clock()
+	spoke := len(c.said) > 0 || len(c.ear) > 0
+	if spoke && now.Sub(c.lastPlay) >= quietAfterJarvis {
 		c.asking = true
 		return "spoke"
 	}
-	if len(c.said) == 0 && now.Sub(c.lastHeard) >= silenceNudge && now.Sub(c.lastPlay) >= silenceNudge {
+	if !spoke && now.Sub(c.lastHeard) >= silenceNudge && now.Sub(c.lastPlay) >= silenceNudge {
 		c.asking = true
 		return "silence"
 	}
@@ -311,30 +467,49 @@ func (c *call) due() string {
 }
 
 func (c *call) ask(event string) {
-	c.mu.Lock()
-	said := c.said
-	c.said = nil
-	c.mu.Unlock()
-	r, err := c.line.post(Turn{SessionID: c.req.SessionID, To: c.req.To, Event: event, Said: said})
+	if c.line.asked != nil {
+		defer c.line.asked()
+	}
+	r, err := c.line.post(c.take(context.Background(), event))
+	var pcm []int16
+	if err == nil && strings.TrimSpace(r.Say) != "" {
+		pcm, err = c.speak(r.Say)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.asking = false
-	c.lastHeard = time.Now()
+	c.lastHeard = c.line.clock()
 	if err != nil {
 		if c.line.Log != nil {
 			c.line.Log.Warn("simline: driver failed — the far end stays silent", "session", c.req.SessionID, "err", err)
 		}
 		return
 	}
-	if strings.TrimSpace(r.Say) != "" {
-		c.queue = append(c.queue, speech(c.line.remember(r.Say), len(strings.Fields(r.Say)))...)
-	}
+	c.queue = append(c.queue, pcm...)
 	if r.Hangup {
 		c.hangAfter = true
 		if len(c.queue) == 0 {
 			go c.end(phone.EndRemote)
 		}
 	}
+}
+
+// speak is the far end saying text: tagged PCM, or in voice mode its real speech at 8 kHz in
+// whole frames.
+func (c *call) speak(text string) ([]int16, error) {
+	v := c.line.Voice
+	if v == nil {
+		return speech(c.line.remember(text), len(strings.Fields(text))), nil
+	}
+	pcm, r, err := v.TTS(context.Background(), text, v.FarVoice)
+	if err != nil {
+		return nil, fmt.Errorf("far end's TTS: %w", err)
+	}
+	pcm = live.Resample(pcm, r, rate)
+	if n := len(pcm) % frameLen; n > 0 {
+		pcm = append(pcm, make([]int16, frameLen-n)...)
+	}
+	return pcm, nil
 }
 
 func (l *Line) post(t Turn) (Reply, error) {

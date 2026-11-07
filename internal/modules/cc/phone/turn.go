@@ -3,6 +3,7 @@ package phone
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
 	"slices"
@@ -355,13 +356,10 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 // injected into this generation only. Fails open: no note.
 func (p *turnPipeline) schedulingNote(heard string) string {
 	env := p.rt.brief.Constraints
-	heard = spokenClock(heard)
-	if env == "" || p.timesFromCaller || !mightBeTime(heard) {
+	if env == "" || p.timesFromCaller {
 		return ""
 	}
-	// Every time they mention is judged ("7 is booked; we have 6:15 or 7:30"), not only the
-	// first: the first can be the one they just refused.
-	verdicts := timewindow.CheckAll(env, heard)
+	_, verdicts := judgeOffer(env, heard, p.rt.now)
 	if len(verdicts) == 0 {
 		return ""
 	}
@@ -439,24 +437,66 @@ func (p *turnPipeline) noteOffered(labels []string) {
 	}
 }
 
+// runEnd closes a run-together clock: the number ends there ("at 732-555-0142" is a phone number).
+const runEnd = `(\s*$|[\s?!;)]|[.,](?:\s|$))`
+
 var (
 	holdRE = regexp.MustCompile(`(?i)\b(hold|moment|one sec|a sec|check)`)
 	// "7.30" is how whisper often writes 7:30; "$12.50" stays a price.
 	dottedClockRE = regexp.MustCompile(`(^|[^$\d.])(\d{1,2})\.(\d{2})\b`)
 	// "I could do 715": whisper drops the colon after an offer verb ("at 1200 Main Street" is an address).
-	runClockRE   = regexp.MustCompile(`(?i)\b(do|have|got|try|about|around|how about)\s+(1[0-2]|[1-9])([0-5]\d)\b`)
-	clockRE      = regexp.MustCompile(`\b\d{1,2}:\d{2}\b`)
-	hourWords    = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
-	minuteWords  = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty five": "45", "fifty": "50"}
-	spokenTimeRE = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh five|forty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
+	runClockRE = regexp.MustCompile(`(?i)\b(do|have|got|try|about|around|how about)\s+(1[0-2]|[1-9])([0-5]\d)` + runEnd)
+	// "at 730", "6:15 or 730": three digits only, so "at 1200 Main Street" stays an address.
+	atRunClockRE = regexp.MustCompile(`(?i)\b(at|or|say|after|before|by)\s+([1-9])([0-5]\d)` + runEnd)
+	// "730pm" is a time wherever it is.
+	merRunClockRE = regexp.MustCompile(`(?i)\b(1[0-2]|[1-9])\s?([0-5]\d)\s*([ap]\.?m\b\.?)`)
+	// "at 7 30": whisper's space for a colon, after a time word.
+	spacedClockRE = regexp.MustCompile(`(?i)\b(at|do|have|got|try|about|around|say|or|after|before|by)\s+(1[0-2]|[1-9])\s([0-5]\d)` + runEnd)
+	hourWords     = map[string]string{"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
+	minuteWords   = map[string]string{"oh five": "05", "ten": "10", "fifteen": "15", "twenty": "20", "twenty five": "25", "thirty": "30", "thirty five": "35", "forty": "40", "forty five": "45", "fifty": "50", "fifty five": "55"}
+	spokenTimeRE  = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]+(oh[\s-]five|twenty[\s-]five|thirty[\s-]five|forty[\s-]five|fifty[\s-]five|fifteen|twenty|thirty|forty|fifty|ten|o'?clock|[ap]\.?m\b)`)
+	hourTok       = `(1[0-2]|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)`
+	// "quarter past seven", "a quarter till 8", "ten to eight", "half past 7".
+	pastToRE = regexp.MustCompile(`(?i)\b(?:a\s+)?(quarter|half|twenty[\s-]five|twenty|ten|five)\s+(past|after|to|till|til|of|before)\s+` + hourTok + `\b`)
+	// "half seven" is 7:30 (British).
+	halfRE = regexp.MustCompile(`(?i)\bhalf\s+` + hourTok + `\b`)
+	ishRE  = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]?ish\b`)
+	// "at eight", "how about eight?": an hour word after a time word, where the sentence moves on
+	// ("about one of them" is no time). "for eight" and "we've got eight" are counts.
+	prepHourRE = regexp.MustCompile(`(?i)\b(at|around|about|after|before|by|say|do)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)` +
+		`(\s*(?:[?.!,;]|$)|\s+(?:on|or|and|is|works?|tonight|tomorrow|today|this|next|instead|if|then|sharp|okay|ok|please|for|(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*)\b)`)
+	pastToMinutes = map[string]int{"quarter": 15, "half": 30, "twenty five": 25, "twenty": 20, "ten": 10, "five": 5}
 )
 
-// spokenClock writes "six fifteen" as 6:15 and "seven o'clock" as 7 for the time checks: a
-// transcript can spell times out. A lone hour word ("a table for two") is left alone.
+func hourDigits(w string) string {
+	if h, ok := hourWords[strings.ToLower(w)]; ok {
+		return h
+	}
+	return w
+}
+
+// spokenClock writes a transcript's times as clocks for the time checks: "six fifteen" as 6:15,
+// "7.30" and "I have 730" as 7:30, "quarter to eight" as 7:45, "seven o'clock" as 7 o'clock.
+// A lone hour word ("a table for two") is left alone.
 func spokenClock(s string) string {
 	s = dottedClockRE.ReplaceAllString(s, "$1$2:$3")
-	s = runClockRE.ReplaceAllString(s, "$1 $2:$3")
-	return spokenTimeRE.ReplaceAllStringFunc(s, func(m string) string {
+	s = merRunClockRE.ReplaceAllString(s, "$1:$2 $3")
+	s = runClockRE.ReplaceAllString(s, "$1 $2:$3$4")
+	s = atRunClockRE.ReplaceAllString(s, "$1 $2:$3$4")
+	s = spacedClockRE.ReplaceAllString(s, "$1 $2:$3$4")
+	s = pastToRE.ReplaceAllStringFunc(s, func(m string) string {
+		g := pastToRE.FindStringSubmatch(m)
+		mins := pastToMinutes[strings.ToLower(strings.Join(strings.FieldsFunc(g[1], func(r rune) bool { return r == ' ' || r == '-' }), " "))]
+		h, _ := strconv.Atoi(hourDigits(g[3]))
+		if dir := strings.ToLower(g[2]); dir != "past" && dir != "after" {
+			if h, mins = h-1, 60-mins; h == 0 {
+				h = 12
+			}
+		}
+		return fmt.Sprintf("%d:%02d", h, mins)
+	})
+	s = halfRE.ReplaceAllStringFunc(s, func(m string) string { return hourDigits(halfRE.FindStringSubmatch(m)[1]) + ":30" })
+	s = spokenTimeRE.ReplaceAllStringFunc(s, func(m string) string {
 		g := spokenTimeRE.FindStringSubmatch(m)
 		h, rest := hourWords[strings.ToLower(g[1])], strings.ToLower(strings.ReplaceAll(g[2], "-", " "))
 		switch {
@@ -467,12 +507,32 @@ func spokenClock(s string) string {
 		}
 		return h + ":" + minuteWords[strings.Join(strings.Fields(rest), " ")]
 	})
+	s = ishRE.ReplaceAllStringFunc(s, func(m string) string { return hourDigits(ishRE.FindStringSubmatch(m)[1]) + "ish" })
+	return prepHourRE.ReplaceAllStringFunc(s, func(m string) string {
+		g := prepHourRE.FindStringSubmatch(m)
+		return g[1] + " " + hourDigits(g[2]) + g[3]
+	})
 }
 
-// mightBeTime widens live.MightProposeTime (Python parity) to "7:30" and spelled-out times.
+// mightBeTime widens live.MightProposeTime (Python parity) to every clock time CheckAll reads
+// ("7:30", "around 7", spelled-out times).
 func mightBeTime(s string) bool {
 	s = spokenClock(s)
-	return live.MightProposeTime(s) || clockRE.MatchString(s)
+	return live.MightProposeTime(s) || timewindow.MentionsTime(s)
+}
+
+// judgeOffer normalises what the callee said and judges every time in it ("7 is booked; we have
+// 6:15 or 7:30"), not only the first: the first can be the one they just refused. gated is
+// mightBeTime's answer; now (the call's local start, zero when unknown) places "tomorrow".
+func judgeOffer(env, heard string, now time.Time) (gated bool, verdicts []timewindow.Result) {
+	if !now.IsZero() {
+		heard = timewindow.ResolveRelativeDays(heard, now)
+	}
+	heard = spokenClock(heard)
+	if !mightBeTime(heard) {
+		return false, nil
+	}
+	return true, timewindow.CheckAll(env, heard)
 }
 
 func (p *turnPipeline) stuckInLoop(heard string) bool {

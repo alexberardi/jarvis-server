@@ -164,7 +164,20 @@ scripts/sandbox up --name calls --phone-sim        # the simulated line (JARVIS_
 go run ./tools/pipeline call --sandbox calls --repeat 3 tools/pipeline/calls/*.json
 ```
 
+- A fresh sandbox has `phone_calls.enabled` off and, for scenarios without a `contact`,
+  `web_search.enabled` off: PUT both to `true` on `$SBX_CC/settings/…` first.
 - `--only a,b` picks scenarios; `--repeat N` prints a pass rate per scenario.
+- **Voice mode**, `scripts/sandbox up --name calls --phone-sim voice` (implies `--voice`; add
+  `--stt-gpu` when the GPU has room): the line carries real audio instead of tagged text
+  (`JARVIS_DEV_PHONE_SIM_AUDIO=voice`). Jarvis's replies are Kokoro at 8 kHz and play out in
+  real time; the far end hears them through the sandbox's whisper at 8 kHz, and the persona
+  model gets only that transcription (`simline.Turn.Heard`). Its replies are spoken in another
+  Kokoro voice (`af_heart`), resampled to 8 kHz and played into the call frame by frame, so
+  Jarvis's own VAD, barge-in, STT and turn loop run as on SIP. The output adds
+  `👂 business heard:` under each `🤖` line (the exact text, which `expect` checks) and
+  `👂 jarvis heard:` under each `🧑` line (`Turn.Understood`). A turn costs a TTS and a whisper
+  pass in each direction; the persona's last line before it hangs up has no `jarvis heard:`
+  (it is in the call's transcript). Text mode stays the default.
 - `--callee-tap URL` plays the business through another sandbox's tap, so two models' runs
   face the same business (a small model playing the host invents demands).
 - Prod splits calls across labels: `live` talks, `background` drafts the plan, picks the

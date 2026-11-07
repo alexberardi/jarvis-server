@@ -347,6 +347,9 @@ jobs:
           SIGNED: ${{ steps.keychain.outputs.signed }}
         run: |
           set -euo pipefail
+          # Apple's ticket lookup (api.apple-cloudkit.com) drops CI runners' connections now and then
+          # ("The network connection was lost", stapler error 68, spctl exit 3): retry it.
+          retry() { local i; for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; "$@"; }
           s="$RUNNER_TEMP/signing"
           if [ "$SIGNED" = true ]; then
             SIGN_IDENTITY="$(cat "$s/identity")"; SIGN_KEYCHAIN="$s/signing.keychain-db"
@@ -368,8 +371,8 @@ jobs:
             rm -f "$zip"
             for app in apps/*.app; do
               xcrun stapler staple "$app"
-              xcrun stapler validate "$app"
-              v="$(spctl --assess --type execute --verbose=4 "$app" 2>&1 || true)"; echo "$v"
+              retry xcrun stapler validate "$app"
+              v="$(retry spctl --assess --type execute --verbose=4 "$app" 2>&1 || true)"; echo "$v"
               echo "$v" | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept $app as notarized"; exit 1; }
             done
           fi
@@ -378,8 +381,8 @@ jobs:
             for dmg in dmgs/*.dmg; do
               scripts/macos/notarize.sh "$dmg"
               xcrun stapler staple "$dmg"
-              xcrun stapler validate "$dmg"
-              v="$(spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1 || true)"; echo "$v"
+              retry xcrun stapler validate "$dmg"
+              v="$(retry spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1 || true)"; echo "$v"
               echo "$v" | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept $dmg as notarized"; exit 1; }
             done
           fi
@@ -688,6 +691,9 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          # Apple's ticket lookup (api.apple-cloudkit.com) drops CI runners' connections now and then
+          # ("The network connection was lost", stapler error 68, spctl exit 3): retry it.
+          retry() { local i; for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; "$@"; }
           bin="dist/$NAME/jarvisd"
           if [ "$SIGNED" != true ]; then
             echo "::warning::unsigned dry run: the macOS binary is ad-hoc signed and not notarized"
@@ -699,7 +705,7 @@ jobs:
           echo "$info" | grep -q "^Authority=Developer ID Application:"
           echo "$info" | grep -Eq "flags=0x[0-9a-f]+\(runtime\)"
           # (-t execute only judges app bundles; -t open on the primary signature is the CLI form.)
-          v="$(spctl --assess --type open --context context:primary-signature --verbose=4 "$bin" 2>&1)"; echo "$v"
+          v="$(retry spctl --assess --type open --context context:primary-signature --verbose=4 "$bin" 2>&1)"; echo "$v"
           echo "$v" | grep -q "source=Notarized Developer ID"
           # A browser download: quarantined, then run. Gatekeeper assesses it on exec; one it
           # doesn't accept is held at exec (waiting on a dialog nobody answers here), so a
@@ -727,6 +733,9 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          # Apple's ticket lookup (api.apple-cloudkit.com) drops CI runners' connections now and then
+          # ("The network connection was lost", stapler error 68, spctl exit 3): retry it.
+          retry() { local i; for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; "$@"; }
           app="dist/jarvis-agent-${VERSION}-darwin-arm64/Jarvis Automation Agent.app"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -dvv "$app" 2>&1 | grep -qx "Identifier=net.jarvisautomation.agent"
@@ -734,7 +743,7 @@ jobs:
           notarized=""
           if [ "$SIGNED" = true ]; then
             codesign -dvv "$app" 2>&1 | grep -qx "TeamIdentifier=${TEAM_ID}"
-            xcrun stapler validate "$app"
+            retry xcrun stapler validate "$app"
             notarized=notarized
           else
             echo "::warning::unsigned dry run: the apps are ad-hoc signed and the dmgs unsigned (not notarized)"

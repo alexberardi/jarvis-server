@@ -240,10 +240,12 @@ func parseRange(text string) (int, int, bool) {
 }
 
 // parseEntries reads "Tue 4-8pm; Wed 5-8pm; ..." into intervals. Bad entries drop silently.
-// The day must lead; the range may sit anywhere after it.
+// The day (or days: "Mon–Fri", "this weekend") must lead; the times may sit anywhere after.
+// An entry of days alone takes the next entry's times ("Friday or Saturday at 7pm").
 func parseEntries(body string) []Interval {
 	var out []Interval
-	for _, chunk := range strings.Split(body, ";") {
+	var pending []int
+	for _, chunk := range strings.Split(entrySepRE.ReplaceAllString(body, "; $1"), ";") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
 			continue
@@ -251,32 +253,126 @@ func parseEntries(body string) []Interval {
 		// Strip a trailing "(Work)"-style label that Do-not-book lines carry.
 		chunk = strings.TrimSpace(labelRE.ReplaceAllString(chunk, ""))
 		chunk = leadRE.ReplaceAllString(chunk, "")
-		loc := dayRE.FindStringSubmatchIndex(chunk)
-		if loc == nil || loc[0] != 0 {
+		ds, rest, ok := leadDays(chunk)
+		if !ok {
+			pending = nil
 			continue
 		}
-		day := days[strings.ToLower(chunk[loc[2]:loc[3]])]
-		rm := rangeRE.FindStringSubmatch(chunk[loc[1]:])
-		if rm == nil {
-			// One time, not a range ("Friday at 7pm", a drafted brief's exact slot): Grace either
-			// side of it (7:15 for a 7pm table is fine), each plausible reading of a bare hour.
-			if tm := timeRE.FindStringSubmatch(chunk[loc[1]:]); tm != nil {
-				hour, _ := strconv.Atoi(tm[1])
-				minute := 0
-				if tm[2] != "" {
-					minute, _ = strconv.Atoi(tm[2])
-				}
-				for _, m := range candidateMinutes(hour, minute, meridiemOf(tm[3])) {
-					out = append(out, Interval{day, m - Grace, m + Grace + 1})
+		ds = append(pending, ds...)
+		pending = nil
+		rest = strings.TrimSpace(dateRE.ReplaceAllString(rest, " "))
+		if strings.Trim(rest, " ,.") == "" {
+			pending = ds
+			continue
+		}
+		for _, sp := range entrySpans(rest) {
+			for _, d := range ds {
+				out = append(out, Interval{d, sp[0], sp[1]})
+			}
+		}
+	}
+	return out
+}
+
+var (
+	// entrySepRE splits "Fri 5-8pm, Sat 6-9pm" and "Friday or Saturday" into entries.
+	entrySepRE = regexp.MustCompile(`(?i)\s*(?:,|/|&|\band\b|\bor\b)\s*((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\b)`)
+	dayRangeRE = regexp.MustCompile(`(?i)^\s*(?:-|–|—|to|through|thru)\s*`)
+	groupRE    = regexp.MustCompile(`(?i)^(?:(?:this|the)\s+)?(weekends?|weekdays?|every\s*day|daily)\b`)
+	// dateRE is a calendar date inside an entry ("Tue Aug 5", "November 13, 2026", "the 13th",
+	// "11/13"): its numbers are not times; the weekday carries the day.
+	dateRE = regexp.MustCompile(`(?i)\b(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?:,?\s+\d{4}\b)?|(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b|\d{1,2}/\d{1,2}(?:/\d{2,4})?\b)`)
+	// boundRE is an open-ended entry: "after 6pm", "from 6pm", "before 2pm", "until 2pm".
+	boundRE = regexp.MustCompile(`(?i)\b(after|from|before|until|till|til)\s+(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)`)
+	// laterRE is "6pm or later" / "2pm or earlier".
+	laterRE = regexp.MustCompile(`(?i)(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\s*or\s+(later|after|earlier|before)\b`)
+)
+
+// leadDays reads the day(s) an entry starts with: "Fri", "Mon–Fri", "this weekend",
+// "weekdays".
+func leadDays(chunk string) ([]int, string, bool) {
+	if g := groupRE.FindStringSubmatch(chunk); g != nil {
+		rest := chunk[len(g[0]):]
+		switch w := strings.ToLower(g[1]); {
+		case strings.HasPrefix(w, "weekend"):
+			return []int{5, 6}, rest, true
+		case strings.HasPrefix(w, "weekday"):
+			return []int{0, 1, 2, 3, 4}, rest, true
+		default:
+			return []int{0, 1, 2, 3, 4, 5, 6}, rest, true
+		}
+	}
+	loc := dayRE.FindStringSubmatchIndex(chunk)
+	if loc == nil || loc[0] != 0 {
+		return nil, "", false
+	}
+	first := days[strings.ToLower(chunk[loc[2]:loc[3]])]
+	rest := chunk[loc[1]:]
+	if sep := dayRangeRE.FindString(rest); sep != "" {
+		r := rest[len(sep):]
+		if l2 := dayRE.FindStringSubmatchIndex(r); l2 != nil && l2[0] == 0 {
+			last := days[strings.ToLower(r[l2[2]:l2[3]])]
+			var ds []int
+			for d := first; ; d = (d + 1) % 7 {
+				ds = append(ds, d)
+				if d == last {
+					break
 				}
 			}
-			continue
+			return ds, r[l2[1]:], true
 		}
+	}
+	return []int{first}, rest, true
+}
+
+// entrySpans is an entry's time spans after its day: a range ("4-8pm") is exact; "after 6pm"
+// runs to midnight and "before 2pm" from it; a single time ("at 7pm", a drafted brief's exact
+// slot) gets Grace either side (7:15 for a 7pm table is fine). A bare hour gives every reading.
+func entrySpans(rest string) [][2]int {
+	if rm := rangeRE.FindStringSubmatch(rest); rm != nil {
 		start, end, ok := parseRange(strings.TrimSpace(rm[1]) + "-" + strings.TrimSpace(rm[2]))
 		if !ok {
+			return nil
+		}
+		return [][2]int{{start, end}}
+	}
+	after, faceText := false, ""
+	if m := boundRE.FindStringSubmatch(rest); m != nil {
+		w := strings.ToLower(m[1])
+		after, faceText = w == "after" || w == "from", m[2]
+	} else if m := laterRE.FindStringSubmatch(rest); m != nil {
+		w := strings.ToLower(m[2])
+		after, faceText = w == "later" || w == "after", m[1]
+	}
+	if faceText != "" {
+		f, ok := parseFace(faceText)
+		if !ok {
+			return nil
+		}
+		var out [][2]int
+		for _, m := range candidateMinutes(f.hour, f.minute, f.meridiem) {
+			if after {
+				out = append(out, [2]int{m, 24 * 60})
+			} else {
+				out = append(out, [2]int{0, m})
+			}
+		}
+		return out
+	}
+	var out [][2]int
+	for i, tm := range timeRE.FindAllStringSubmatch(rest, -1) {
+		// After the first, only clock-shaped times count ("at 7pm or 8pm"; "for 2 people" isn't one).
+		if i > 0 && tm[2] == "" && tm[3] == "" {
 			continue
 		}
-		out = append(out, Interval{day, start, end})
+		hour, _ := strconv.Atoi(tm[1])
+		minute := 0
+		if tm[2] != "" {
+			minute, _ = strconv.Atoi(tm[2])
+		}
+		for _, m := range candidateMinutes(hour, minute, meridiemOf(tm[3])) {
+			out = append(out, [2]int{m - Grace, m + Grace + 1})
+		}
 	}
 	return out
 }
@@ -297,13 +393,23 @@ func ParseWindows(envelope string) Windows {
 	return ws
 }
 
+// acceptableSummary is the envelope's Acceptable line; several are joined into one.
 func acceptableSummary(envelope string) *string {
+	var sum string
 	for _, line := range strings.Split(envelope, "\n") {
-		if l := strings.TrimSpace(line); strings.HasPrefix(strings.ToLower(l), acceptablePrefix) {
-			return &l
+		l := strings.TrimSpace(line)
+		switch {
+		case !strings.HasPrefix(strings.ToLower(l), acceptablePrefix):
+		case sum == "":
+			sum = l
+		default:
+			sum = strings.TrimRight(sum, " .;") + "; " + strings.TrimSpace(l[len(acceptablePrefix):])
 		}
 	}
-	return nil
+	if sum == "" {
+		return nil
+	}
+	return &sum
 }
 
 // --- check ---
@@ -341,77 +447,4 @@ func Check(envelope, utterance string) Result {
 	}
 	res.Available = &open
 	return res
-}
-
-// CheckAll judges every time the utterance mentions, on its first weekday ("Friday at 7 is
-// booked; we have 6:15 or 7:30" is three proposals for Friday), where Check judges only the
-// first. With no weekday ("we have 6:15 or 7:30"), clock times are judged on the envelope's
-// day when it names only one. Only times with a verdict are returned (none when nothing can
-// be judged).
-func CheckAll(envelope, utterance string) []Result {
-	text := midnightRE.ReplaceAllString(noonRE.ReplaceAllString(strings.TrimSpace(utterance), "12 pm"), "12 am")
-	ws := ParseWindows(envelope)
-	dm := dayRE.FindStringSubmatch(text)
-	var day int
-	if dm != nil {
-		day = days[strings.ToLower(dm[1])]
-	} else if d, ok := soleDay(ws.Acceptable); ok {
-		day = d
-	} else {
-		return nil
-	}
-	summary := acceptableSummary(envelope)
-	var out []Result
-	for _, m := range timeRE.FindAllStringSubmatch(text, -1) {
-		if dm == nil && m[2] == "" && m[3] == "" {
-			continue // a bare number with no day is a party size or an ID, not a time
-		}
-		hour, _ := strconv.Atoi(m[1])
-		minute := 0
-		if m[2] != "" {
-			minute, _ = strconv.Atoi(m[2])
-		}
-		mer := meridiemOf(m[3])
-		cands := candidateMinutes(hour, minute, mer)
-		if len(cands) == 0 {
-			continue
-		}
-		label := formatLabel(day, hour, minute, mer)
-		res := Result{TimeDetected: true, ProposedLabel: &label, AcceptableSummary: summary}
-		blocked := false
-		for _, c := range cands {
-			if anyContains(ws.Blocked, day, c) {
-				blocked = true
-			}
-		}
-		switch {
-		case blocked:
-			res.Available = new(bool)
-		case len(ws.Acceptable) > 0:
-			open := false
-			for _, c := range cands {
-				if ws.isOpen(day, c) {
-					open = true
-				}
-			}
-			res.Available = &open
-		default:
-			continue
-		}
-		out = append(out, res)
-	}
-	return out
-}
-
-// soleDay is the one day every interval is on.
-func soleDay(ivs []Interval) (int, bool) {
-	if len(ivs) == 0 {
-		return 0, false
-	}
-	for _, iv := range ivs[1:] {
-		if iv.Day != ivs[0].Day {
-			return 0, false
-		}
-	}
-	return ivs[0].Day, true
 }

@@ -182,15 +182,23 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 		}
 	}
 
+	// The draft (the slowest model call, ~15 s on a 31B) doesn't wait for the categories call or
+	// the nodes' call_context: neither depends on it, and the card waited for all three in turn.
+	cats := make(chan []string, 1)
+	go func() { cats <- s.callCategories(ctx, req.Business, req.Goal) }()
+	nodeCh := make(chan []ContextField, 1)
+	go func() {
+		var f []ContextField
+		if s.NodeContext != nil {
+			f = s.NodeContext.CallContext(ctx, hh, req.UserID, req.Business, req.Goal)
+		}
+		nodeCh <- f
+	}()
 	initiator := s.initiatorName(ctx, req.UserID)
 	details := s.draftDetails(ctx, req.Business, req.Goal, initiator)
 	details, calendarSource := s.applyAvailability(ctx, hh, req.Goal, details, req.UserID)
-	var nodeFields []ContextField
-	if s.NodeContext != nil {
-		nodeFields = s.NodeContext.CallContext(ctx, hh, req.UserID, req.Business, req.Goal)
-	}
-	fields := SelectForCategories(mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields),
-		s.callCategories(ctx, req.Business, req.Goal))
+	nodeFields := <-nodeCh
+	fields := SelectForCategories(mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields), <-cats)
 	if block := BuildContextBlock(fields); block != "" {
 		details = strings.TrimRight(details, " \t\n\r\v\f") + "\n\n" + block
 	}
@@ -492,7 +500,13 @@ func ensureTimesSection(goal, details string) string {
 
 var constraintPrefixes = []string{"acceptable times:", "do not book:"}
 
-var midLineConstraintRE = regexp.MustCompile(`(?i)[^\S\n]+((?:acceptable times|do not book):)`)
+var (
+	midLineConstraintRE = regexp.MustCompile(`(?i)[^\S\n]+((?:acceptable times|do not book):)`)
+	// A drafted line can be Markdown: "- **Acceptable times:** Friday at 7pm".
+	markdownLeadRE = regexp.MustCompile(`^(?:[-*•>]+\s*)?`)
+	// placeholderRE is ensureTimesSection's and formatAvailability's to-do text.
+	placeholderRE = regexp.MustCompile(`(?i)\((?:[^)]*\bfill in\b|calendar shows no free windows)[^)]*\)`)
+)
 
 // ExtractConstraintEnvelope pulls the negotiating bounds back out of the confirmed brief
 // (placeholders are not constraints).
@@ -504,16 +518,16 @@ func ExtractConstraintEnvelope(details string) string {
 	// A model may draft "…If asked: …. Acceptable times: …" on one line.
 	details = midLineConstraintRE.ReplaceAllString(details, "\n$1")
 	for _, line := range splitLines(details) {
-		t := strings.TrimSpace(line)
+		t := strings.TrimSpace(markdownLeadRE.ReplaceAllString(strings.NewReplacer("**", "", "__", "").Replace(strings.TrimSpace(line)), ""))
 		lt := strings.ToLower(t)
-		match := false
 		for _, p := range constraintPrefixes {
-			if strings.HasPrefix(lt, p) {
-				match = true
+			if !strings.HasPrefix(lt, p) {
+				continue
 			}
-		}
-		if match && !strings.Contains(lt, "(fill in") {
-			real = append(real, t)
+			// A placeholder is no constraint; times typed beside one are ("Friday 7pm (fill in …)").
+			if body := strings.TrimSpace(placeholderRE.ReplaceAllString(t[len(p):], "")); strings.Trim(body, " .;") != "" {
+				real = append(real, strings.TrimSpace(t[:len(p)]+" "+body))
+			}
 		}
 	}
 	return strings.Join(real, "\n")

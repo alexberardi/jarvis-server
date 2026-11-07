@@ -717,15 +717,8 @@ func (c *callee) forget(session string) {
 	delete(c.calls, session)
 }
 
-// lineTurn is simline.Turn plus what the line heard of Jarvis in voice mode.
-// shortcut: Heard is the voice line's field as planned in flight; rename it if the line ships it differently.
-type lineTurn struct {
-	simline.Turn
-	Heard []string `json:"heard,omitempty"`
-}
-
 func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var t lineTurn
+	var t simline.Turn
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -749,16 +742,25 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		close(st.started)
 	}
 	said := strings.Join(t.Said, " ")
+	for _, u := range t.Understood {
+		fmt.Fprintf(c.out, "   👂 jarvis heard: %s\n", u)
+	}
 	if said != "" {
 		fmt.Fprintf(st.out, "   🤖 %s\n", said)
 		st.add("jarvis", said)
 	}
+	// Voice mode: the persona hears only whisper's transcription of Jarvis's audio; the exact
+	// text above stays in the log and the expectations.
 	heard := said
-	if c.voice && len(t.Heard) > 0 {
-		heard = strings.Join(t.Heard, " ")
+	if t.Voice && said != "" {
+		heard = t.Heard
+		if heard == "" {
+			heard = "(something you couldn't make out)"
+		}
+		fmt.Fprintf(st.out, "   👂 business heard: %s\n", heard)
 	}
 	switch {
-	case heard != "":
+	case said != "":
 		st.messages = append(st.messages, map[string]string{"role": "user", "content": heard})
 	case t.Event == "silence":
 		st.add("event", "(silence)")

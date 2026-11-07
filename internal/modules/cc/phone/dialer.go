@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/timewindow"
 )
 
 // The absorbed dial worker (gateway services/dial_worker.py), in process (D16): claim CAS →
@@ -36,13 +37,15 @@ type callRuntime struct {
 	sessionID   string
 	householdID string
 	brief       live.Brief
-	maxSeconds  int64
-	escalation  *live.EscalationWindow
-	recorder    *live.Recorder
-	disclosure  []int16
-	pipeline    *turnPipeline
-	ctx         context.Context
-	cancel      context.CancelFunc
+	// now is the household's local time when the call started: it places an offer's "tomorrow".
+	now        time.Time
+	maxSeconds int64
+	escalation *live.EscalationWindow
+	recorder   *live.Recorder
+	disclosure []int16
+	pipeline   *turnPipeline
+	ctx        context.Context
+	cancel     context.CancelFunc
 
 	started   chan struct{}
 	startOnce sync.Once
@@ -149,8 +152,10 @@ func (s *Service) runCall(id string, tel Telephony) {
 		fail(err.Error())
 		return
 	}
+	now := s.localNow(ctx, sess.HouseholdID)
 	brief := live.Brief{Goal: sess.Goal, Details: sess.Details,
-		Constraints: ExtractConstraintEnvelope(sess.Details), InitiatorName: s.initiatorName(ctx, sess.UserID)}
+		Constraints:   timewindow.ResolveRelativeDays(ExtractConstraintEnvelope(sess.Details), now),
+		InitiatorName: s.initiatorName(ctx, sess.UserID)}
 
 	// Prewarm, and a hard gate: no disclosure, no dial.
 	disclosure, _ := s.synthesize(ctx, live.BuildDisclosure(brief))
@@ -160,7 +165,7 @@ func (s *Service) runCall(id string, tel Telephony) {
 	}
 
 	rt := &callRuntime{
-		sessionID: id, householdID: sess.HouseholdID, brief: brief,
+		sessionID: id, householdID: sess.HouseholdID, brief: brief, now: now,
 		maxSeconds: s.intSetting(ctx, SettingMaxCallSeconds, sess.HouseholdID, 600),
 		escalation: &live.EscalationWindow{Timeout: s.EscalationWindow},
 		recorder:   &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,
