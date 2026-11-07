@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/alexberardi/jarvis-server/internal/agent/spotifyconnect"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -68,20 +68,9 @@ type spotifyReply struct {
 	} `json:"track"`
 }
 
-// writeSpotifyConfig writes go-librespot's config.yml: a speaker named like the other receivers, joined from
-// the Spotify app (zeroconf, remembered after the first connection), PulseAudio output, and the API on loopback.
+// writeSpotifyConfig writes go-librespot's config.yml, shared with the headless receiver.
 func writeSpotifyConfig(dir, name string, port int) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	quoted, err := json.Marshal(name) // a JSON string is a valid YAML double-quoted scalar
-	if err != nil {
-		return err
-	}
-	config := "device_name: " + string(quoted) + "\ndevice_type: speaker\naudio_backend: pulseaudio\nzeroconf_enabled: true\n" +
-		"credentials:\n  type: zeroconf\n  zeroconf:\n    persist_credentials: true\n" +
-		"server:\n  enabled: true\n  address: 127.0.0.1\n  port: " + strconv.Itoa(port) + "\n"
-	return os.WriteFile(filepath.Join(dir, "config.yml"), []byte(config), 0600)
+	return spotifyconnect.WriteConfig(dir, name, port)
 }
 
 // StartSpotify starts the receiver when the configuration asks for it. Callers hold e.mu, as for StartReceiver.

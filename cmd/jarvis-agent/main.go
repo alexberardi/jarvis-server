@@ -60,6 +60,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/spotifyconnect"
 	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
@@ -578,6 +579,8 @@ type runFlags struct {
 	computerOn         *bool
 	noTray             *bool
 	displayOn          *bool
+	spotifyConnect     *bool
+	spotifyName        *string
 	noAutoUpdate       *bool
 	profile            *string
 	vf                 *voiceFlags
@@ -593,11 +596,13 @@ const voiceByDefault = true
 func newRunFlags(errs flag.ErrorHandling) (*flag.FlagSet, *runFlags) {
 	fs := flag.NewFlagSet("run", errs)
 	return fs, &runFlags{
-		displayOn: fs.Bool("display", false, "offer the local touch display, configured by the server; needs a Linux graphical session with a screen"),
-		cp:        fs.String("creds", "", "credentials file"),
-		config:    fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
-		tf:        addToolFlags(fs),
-		voiceOn:   fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
+		spotifyConnect: fs.Bool("spotify-connect", false, "run a Spotify Connect speaker on this node (needs go-librespot on PATH and Spotify Premium); a --display node runs its own"),
+		spotifyName:    fs.String("spotify-name", "", "the speaker's name in the Spotify app (default: this computer's name)"),
+		displayOn:      fs.Bool("display", false, "offer the local touch display, configured by the server; needs a Linux graphical session with a screen"),
+		cp:             fs.String("creds", "", "credentials file"),
+		config:         fs.String("config", "", "settings file (default: <user config dir>/jarvis-agent/agent.json); flags given here win over it"),
+		tf:             addToolFlags(fs),
+		voiceOn:        fs.Bool("voice", voiceByDefault, `listen for "hey jarvis" and run voice turns`),
 		computerOn: fs.Bool("computer-control", false, `let Jarvis use this computer (computer tasks, recording); `+
 			`off by default, the menu's "Computer control" sets it`),
 		noOverlay: fs.Bool("no-overlay", false, "don't show the on-screen indicator (the island: voice states, the \"Jarvis is running\" pill)"),
@@ -838,6 +843,9 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 		displayEngine.Host = h
 		defer displayEngine.Close()
+	}
+	if *f.spotifyConnect && displayEngine == nil {
+		go runSpotifyConnect(ctx, filepath.Join(filepath.Dir(path), "spotify"), *f.spotifyName, log)
 	}
 	var servedTools node.Toolset = tools
 	if displayEngine != nil {
@@ -1637,4 +1645,22 @@ func addVerbs(r *node.Runner, verbs map[string]func(context.Context, *node.CC, m
 		r.Verbs = map[string]func(context.Context, *node.CC, map[string]any){}
 	}
 	maps.Copy(r.Verbs, verbs)
+}
+
+// runSpotifyConnect keeps a go-librespot speaker running on a node with no screen. A missing binary is logged
+// once and the node carries on: Spotify must never take voice down.
+func runSpotifyConnect(ctx context.Context, dir, name string, log *slog.Logger) {
+	if name == "" {
+		name, _ = os.Hostname()
+	}
+	if name == "" {
+		name = "Jarvis"
+	}
+	r := &spotifyconnect.Receiver{Dir: dir, Name: name, Log: log}
+	switch err := r.Run(ctx); {
+	case errors.Is(err, spotifyconnect.ErrNotInstalled):
+		log.Warn("--spotify-connect is set but go-librespot is not on PATH; install it (docs/agent/spotify-connect.md)")
+	case err != nil && ctx.Err() == nil:
+		log.Warn("spotify connect receiver stopped", "err", err)
+	}
 }

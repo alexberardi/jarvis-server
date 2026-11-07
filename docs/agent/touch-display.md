@@ -104,7 +104,8 @@ for separately enabled experimental Cast V2 reception. On Debian the tested open
 also needed `libxdo3`. This is a software flinging receiver; stock Google applications can reject its
 certificate. Screen mirroring and universal Chromecast compatibility are not provided.
 
-Spotify Connect is a third receiver (`spotify_connect`), on by default whenever the display is enabled; turn it off
+Spotify Connect is a third receiver (`spotify_connect`), on by default whenever the display is enabled (nodes with no
+screen run it with a flag: see [spotify-connect.md](spotify-connect.md)); turn it off
 in the display settings to stop it. Without go-librespot installed it simply shows as unavailable. Install
 [go-librespot](https://github.com/devgianlu/go-librespot) (GPL-3.0, so it runs as its own program, never linked into the
 agent) and a Spotify Premium account is required. The agent writes its `config.yml` under the display folder
