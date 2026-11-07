@@ -406,7 +406,12 @@ const draftSystemPrompt = "You draft briefs for an assistant that places phone "
 	"with an 'Acceptable times:' line — copy times from " +
 	"the goal if stated, otherwise write exactly " +
 	"'Acceptable times: (fill in your availability " +
-	"before calling)'. Never include payment details. " +
+	"before calling)'. Write vague times as a window: " +
+	"'after work' as 'after 5pm', 'morning' as '9am-12pm', " +
+	"'afternoon' as '12pm-5pm', 'evening' as '5pm-9pm', " +
+	"'lunchtime' as '11:30am-1:30pm', 'around 7' or '7ish' " +
+	"as '7pm'; keep the day as said (tomorrow, Thursday). " +
+	"Never include payment details. " +
 	"Stay strictly consistent with the goal: never mix " +
 	"pickup and delivery; only include an address for a " +
 	"delivery; invent no facts."
