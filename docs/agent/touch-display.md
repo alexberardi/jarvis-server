@@ -110,6 +110,26 @@ The display browser blocks external requests through a loopback-only proxy bypas
 use a separate browser profile. Network isolation is enforced by the installed browser launch as
 well as theme CSP. Never launch the display profile with its proxy restrictions removed.
 
+## Now playing
+
+While music plays on the node, from any installed package that is a playback source
+(`IJarvisMusicCommand`, [PLAYBACK.md](PLAYBACK.md)), the display shows it full screen: where it plays from,
+the cover, title and artist, a seek bar and the transport controls. A button appears only when the source
+lists that action, so a radio that can only pause shows only Play and Pause. **Back to home** hides the
+view until the next track; a "Now playing" bar on the other screens opens it again. The view sits under
+the header (Exit stays reachable) and under the speech circle. While something plays the display doesn't
+go idle; paused, it goes idle as usual. The display's own player (`display_media`, Cast, Playercast) is not
+shown here: its video is already on the screen.
+
+The view reads the node's playback hub (`now_playing` in `/api/state`) and sends its buttons to
+`POST /api/now-playing`, which answers with the state read back from the player. Sliders send once, when
+they are let go. The cover is the image the package hands over (P19), served at `/now-playing/cover` behind
+the display's session cookie; nothing fetches it from the service. Nothing in the view names a service.
+
+| Now playing                                                      | Now playing, phone width                                        |
+| ---------------------------------------------------------------- | --------------------------------------------------------------- |
+| ![Now playing](touch-display-screenshots/now-playing-1280x800.png) | ![Now playing, phone](touch-display-screenshots/now-playing-390x844.png) |
+
 ## Themes
 
 Import `themes/starter.zip` through the asset controls, preview it, choose it and save. Export

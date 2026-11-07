@@ -850,6 +850,9 @@ func runAgent(ctx context.Context, args []string) error {
 	hub := &playback.Hub{Sources: playbackSources(tf.live, displayEngine, packageNames(tf.live, listPkgs)),
 		OnChange: func(n *playback.Now) { logChange(n); reporter.update(n) }}
 	go runPlayback(ctx, hub, tf.live, log)
+	if displayEngine != nil {
+		displayEngine.SetPlayback(hub) // the now-playing view
+	}
 	go reporter.run(ctx)
 	tools = append(tools, &playback.Tools{Hub: hub})
 	var servedTools node.Toolset = tools

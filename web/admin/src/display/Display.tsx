@@ -5,11 +5,13 @@ import './Display.css'
 import SpeechWaveform from './SpeechWaveform'
 import { type Catalogue, deviceType, isMediaDestination } from './catalogue'
 import { createLimiter } from './limit'
+import { NowPlayingBar, NowPlayingView } from './NowPlaying'
+import { type NowPlaying, trackKey } from './nowPlayingModel'
 
 type Config = { waveform_colour?: string; waveform_emphasis?: number; enabled: boolean; clock: string; hour_24: boolean; timezone: string; idle_seconds: number; slide_seconds: number; photos: string[]; favourites: string[]; night_dim: boolean; dim_start: number; dim_end: number; dim_percent: number; shortcuts: { name: string; url: string }[]; destination: string }
 type Device = { id: string; name: string; domain: string; entity_id: string; room_name: string; supported_actions: { button_action: string; button_text: string }[] | null }
 type Playback = { active: boolean; kind: string; controllable: boolean; paused?: boolean; position?: number; duration?: number; features?: string[]; media_title?: string }
-type State = { configuration: Config; voice: string; last_interaction: number; playback: Playback; theme_url: string; receivers: Record<string, string>; status: string }
+type State = { configuration: Config; voice: string; last_interaction: number; playback: Playback; theme_url: string; receivers: Record<string, string>; status: string; now_playing?: NowPlaying | null }
 
 async function CallDisplay(path: string, body?: unknown) {
   const r = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Jarvis-Display': '1', 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
@@ -61,6 +63,8 @@ export function ShowDisplay() {
   const [pin, setPIN] = useState('')
   const [themeReady, setThemeReady] = useState(false)
   const [themeFailed, setThemeFailed] = useState(false)
+  // Home hides the now-playing view until the next track (trackKey).
+  const [dismissed, setDismissed] = useState('')
   const [confirmation, setConfirmation] = useState<{ device: Device; action: string; request?: string } | null>(null)
   // One limit for the display's whole life: a refresh, or a new page of devices, never adds to
   // requests still outstanding from an earlier one.
@@ -140,6 +144,13 @@ export function ShowDisplay() {
       if (to !== 'local') setRemote({ target: to, playback: await CallDisplay('media', { action: 'status', destination: to }) as unknown as Playback })
     } catch (e) { setError((e as Error).message) }
   }
+  const nowPlaying = async (body: { action: string; volume?: number; position?: number }) => {
+    setError('')
+    try {
+      const r = await CallDisplay('now-playing', body)
+      setState(s => s ? { ...s, now_playing: (r.now_playing as NowPlaying | null) ?? null } : s)
+    } catch (e) { setError((e as Error).message) }
+  }
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== 'null') return
@@ -157,7 +168,8 @@ export function ShowDisplay() {
   })
   useEffect(() => { if (themeReady) frame.current?.contentWindow?.postMessage({ api_version: 1, type: 'state', devices: devices.map(d => ({ ...d, state: states[d.id] })), clock: { timestamp: now.getTime(), timezone: config?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }, display: { voice: state?.voice, view }, media: playback }, '*') }, [themeReady, devices, states, now, config?.timezone, state?.voice, playback, view])
   if (!state || !config) return <main className="display-shell"><h1>Jarvis</h1><p role="status">Loading the display…</p>{error && <p role="alert">{error}</p>}</main>
-  const idle = !exit && !confirmation && !parameters && !state.playback.active && !remotePlayback?.active && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
+  const np = state.now_playing ?? null
+  const idle = !exit && !confirmation && !parameters && !state.playback.active && !remotePlayback?.active && np?.state.state !== 'playing' && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
   const hour = Number(new Intl.DateTimeFormat('en-AU', { ...(config.timezone ? { timeZone: config.timezone } : {}), hour: '2-digit', hour12: false }).format(now)) % 24
   const dim = config.night_dim && (config.dim_start < config.dim_end ? hour >= config.dim_start && hour < config.dim_end : hour >= config.dim_start || hour < config.dim_end)
   const photo = config.photos.length ? config.photos[Math.floor(now.getTime() / (config.slide_seconds * 1000)) % config.photos.length] : ''
@@ -169,6 +181,8 @@ export function ShowDisplay() {
     {offline && <p className="display-note" role="status">Server offline. Clocks and cached themes remain available.</p>}
     {state.status && <p role="status">{state.status}</p>}
     {!config.enabled && <p role="status">Display mode is disabled. Set an exit PIN and enable this node in server settings.</p>}
+    {np && !idle && dismissed !== trackKey(np) && !exit && !confirmation && !parameters && <NowPlayingView n={np} now={now} send={b => void nowPlaying(b)} onHome={() => setDismissed(trackKey(np))} />}
+    {np && !idle && dismissed === trackKey(np) && <NowPlayingBar n={np} onOpen={() => setDismissed('')} />}
     {idle ? <button className="idle-screen" aria-label="Wake Jarvis display" onClick={() => setLastTouch(Date.now())}>{photo && <img src={`/photo/${photo}`} alt="Slideshow photo" />}<ShowClock now={now} config={config} /></button> : <>
       <nav aria-label="Display views">{[{ name: 'Home', icon: Home }, { name: 'Devices', icon: Lightbulb }, { name: 'Media', icon: Play }].map(({ name, icon: Icon }) => <button key={name} aria-current={view === name ? 'page' : undefined} onClick={() => { setView(name); setPage(0) }}><Icon size={22} aria-hidden="true" />{name}</button>)}<button onClick={() => { setThemeFailed(true); void CallDisplay('recover', {}) }}><RotateCcw size={21} aria-hidden="true" />Built-in view</button></nav>
       {custom && <iframe ref={frame} title="Jarvis theme" className={`theme-frame ${themeReady ? '' : 'theme-loading'}`} sandbox="allow-scripts" src={state.theme_url} onError={() => setThemeFailed(true)} />}

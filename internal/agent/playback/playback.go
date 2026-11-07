@@ -89,6 +89,7 @@ type Hub struct {
 	mu      sync.Mutex
 	tracked map[string]*entry
 	shown   *Now
+	art     artwork
 }
 
 type entry struct {
@@ -309,4 +310,61 @@ func same(a, b *Now) bool {
 	ja, _ := json.Marshal(a.State)
 	jb, _ := json.Marshal(b.State)
 	return a.Source == b.Source && a.Name == b.Name && string(ja) == string(jb)
+}
+
+// ArtworkSource is a source that can hand over the current track's cover image (P19): the
+// bytes, never a URL, so nothing on the node or in the apps fetches from a service.
+type ArtworkSource interface {
+	Artwork(ctx context.Context) (data []byte, mime string, err error)
+}
+
+// artwork is the one cover kept: the shown track's, fetched once per track.
+type artwork struct {
+	key  string
+	data []byte
+	mime string
+}
+
+// TrackKey names the shown track: a new one means new artwork.
+func TrackKey(n *Now) string {
+	if n == nil {
+		return ""
+	}
+	return n.Source + "\x00" + n.State.MediaTitle + "\x00" + n.State.MediaArtist + "\x00" + n.State.MediaAlbum
+}
+
+// Artwork is the shown track's cover, from the source on the first ask for each track. ok is
+// false when nothing is shown, the source has no artwork, or fetching it failed (asked again
+// on the next track, not on every request).
+func (h *Hub) Artwork(ctx context.Context) (data []byte, mime string, ok bool) {
+	shown := h.Shown()
+	key := TrackKey(shown)
+	if key == "" {
+		return nil, "", false
+	}
+	h.mu.Lock()
+	if h.art.key == key {
+		a := h.art
+		h.mu.Unlock()
+		return a.data, a.mime, a.data != nil
+	}
+	h.mu.Unlock()
+	var src ArtworkSource
+	if h.Sources != nil {
+		for _, s := range h.Sources() {
+			if s.ID() == shown.Source {
+				src, _ = s.(ArtworkSource)
+			}
+		}
+	}
+	a := artwork{key: key}
+	if src != nil {
+		if b, m, err := src.Artwork(ctx); err == nil && len(b) > 0 {
+			a.data, a.mime = b, m
+		}
+	}
+	h.mu.Lock()
+	h.art = a
+	h.mu.Unlock()
+	return a.data, a.mime, a.data != nil
 }

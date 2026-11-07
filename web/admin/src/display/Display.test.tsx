@@ -120,3 +120,82 @@ it('keeps device state requests at four through slow refreshes and page changes'
     expect(most).toBe(4)
   } finally { vi.useRealTimers() }
 })
+
+const np = (over: Record<string, unknown> = {}) => ({ source: 'pkg:radio', name: 'Radio', updated_at: new Date().toISOString(),
+  state: { state: 'playing', media_title: 'So What', media_artist: 'Miles Davis', media_album: 'Kind of Blue', context: '', actions: ['play', 'pause', 'next', 'volume'], position: 30, duration: 545, volume: 40, ...over } })
+function stubNowPlaying(nowPlaying: unknown, sent: Record<string, unknown>[], extra: Record<string, unknown> = {}, lastInteraction = Date.now()) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const path = url.replace('/api/', '')
+    let body: unknown = {}
+    if (path === 'state') body = { configuration: { ...config, ...extra }, voice: 'idle', last_interaction: lastInteraction, playback: { active: false }, theme_url: '', receivers: {}, now_playing: nowPlaying }
+    else if (path === 'devices') body = []
+    else if (path === 'now-playing') { const b = JSON.parse(init!.body as string); sent.push(b); body = { now_playing: nowPlaying } }
+    return { ok: true, text: async () => JSON.stringify(body) }
+  }))
+}
+it('shows what plays, with only the actions the source lists', async () => {
+  const sent: Record<string, unknown>[] = []
+  stubNowPlaying(np(), sent)
+  render(<ShowDisplay />)
+  const view = await screen.findByRole('region', { name: 'Now playing' })
+  expect(view).toHaveTextContent('So What')
+  expect(view).toHaveTextContent('Miles Davis')
+  expect(view).toHaveTextContent('Playing on Radio')
+  expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Next track' })).toBeInTheDocument()
+  // Not listed by this source: no button.
+  expect(screen.queryByRole('button', { name: 'Previous track' })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Shuffle|Repeat|Like/ })).toBeNull()
+  // No seek action: progress only.
+  expect(screen.getByRole('progressbar', { name: 'Position' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+  await waitFor(() => expect(sent).toEqual([{ action: 'pause' }]))
+})
+it('sends a slider once, when it is let go', async () => {
+  const sent: Record<string, unknown>[] = []
+  stubNowPlaying(np(), sent)
+  render(<ShowDisplay />)
+  const volume = await screen.findByRole('slider', { name: 'Volume' })
+  fireEvent.change(volume, { target: { value: '55' } })
+  fireEvent.change(volume, { target: { value: '60' } })
+  expect(sent).toHaveLength(0)
+  fireEvent.pointerUp(volume)
+  await waitFor(() => expect(sent).toEqual([{ action: 'volume', volume: 60 }]))
+})
+it('Home hides the view until the next track, and the bar brings it back', async () => {
+  stubNowPlaying(np(), [])
+  render(<ShowDisplay />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Back to home' }))
+  expect(screen.queryByRole('region', { name: 'Now playing' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: /Now playing: So What/ }))
+  expect(await screen.findByRole('region', { name: 'Now playing' })).toBeInTheDocument()
+})
+it('shows toggles with their state, and a blank cover when none loads', async () => {
+  stubNowPlaying(np({ actions: ['pause', 'shuffle', 'repeat', 'like', 'seek', 'previous'], shuffle: true, repeat: 'one', liked: false, context: 'Late Jazz' }), [])
+  render(<ShowDisplay />)
+  expect(await screen.findByRole('button', { name: 'Shuffle' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('button', { name: 'Repeat one' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('button', { name: 'Like this track' })).toHaveAttribute('aria-pressed', 'false')
+  expect(screen.getByRole('slider', { name: 'Position' })).toBeInTheDocument()
+  expect(screen.getByText('Late Jazz')).toBeInTheDocument()
+  const cover = screen.getByRole('img', { name: 'Cover of Kind of Blue' })
+  fireEvent.error(cover)
+  expect(screen.queryByRole('img', { name: 'Cover of Kind of Blue' })).toBeNull()
+})
+it('keeps the screen awake while playing, not while paused', async () => {
+  // Fake timers: the display's clock is moved past the idle timeout, never waited for.
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    stubNowPlaying(np(), [], { idle_seconds: 60 })
+    const { unmount } = render(<ShowDisplay />)
+    expect(await screen.findByRole('region', { name: 'Now playing' })).toBeInTheDocument()
+    await act(async () => { vi.advanceTimersByTime(61000) })
+    expect(screen.queryByRole('button', { name: 'Wake Jarvis display' })).toBeNull()
+    unmount()
+    stubNowPlaying(np({ state: 'paused' }), [], { idle_seconds: 60 })
+    render(<ShowDisplay />)
+    expect(await screen.findByRole('region', { name: 'Now playing' })).toBeInTheDocument()
+    await act(async () => { vi.advanceTimersByTime(61000) })
+    expect(screen.getByRole('button', { name: 'Wake Jarvis display' })).toBeInTheDocument()
+  } finally { vi.useRealTimers() }
+})
