@@ -169,6 +169,8 @@ func ExtractTree(archive, dst, sub string) error {
 	if sub == "" || sub != path.Base(sub) {
 		return fmt.Errorf("ExtractTree: %q is not one directory name", sub)
 	}
+	holdForks := noForkWhileWriting() // the bundle's binary is run next (noForkWhileWriting)
+	defer holdForks()
 	if err := os.Mkdir(dst, 0o755); err != nil {
 		return err
 	}
