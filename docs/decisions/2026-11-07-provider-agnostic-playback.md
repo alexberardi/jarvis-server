@@ -17,4 +17,4 @@ This is why #591 (a Spotify Connect receiver and a Spotify now-playing view in t
 is not merged as written. Spotify stays in `jarvis-cmd-spotify`, which now works as a speaker with no setup
 (jarvis-cmd-spotify#2).
 
-The design, with its decisions P1–P9 and open questions, is in [the playback plan](../agent/PLAYBACK.md).
+The design, with its decisions and open questions, is in [the playback plan](../agent/PLAYBACK.md).

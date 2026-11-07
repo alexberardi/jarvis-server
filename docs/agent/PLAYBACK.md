@@ -42,12 +42,16 @@ Music starts, stops and changes from many places, and nothing holds one answer t
 | P1 | **Core is provider-agnostic.** No service's name, API or program in jarvisd, the agent or the apps. A node with no music package has no now-playing view, no setting and no background process. Open protocols that are not a service (Bluetooth audio, the display's own mpv) may be built-in sources. |
 | P2 | **One owner per node: the agent's music module.** It already sees every music command (takeover) and every player (ducking). It becomes the node's playback hub: the registry of sources, the one current state, and the only path for controls. |
 | P3 | **The player is the source of truth.** The hub never records what a command meant to do. It reads state back from the source, so a change from any entry point, inside Jarvis or not, shows up the same way. |
-| P4 | **An SDK contract for sources.** A package reports what is playing and which actions it supports, and handles actions sent back to it. Its shape is Q4. |
+| P4 | **An SDK contract for sources.** A package reports what is playing and which actions it supports, and handles actions sent back to it, as an `IJarvisMusicCommand` (P13). |
 | P5 | **Generic transport commands in core.** "Pause the music", "next", "turn it down" and "what's playing" are built-in commands that go to the active source through the hub. Packages keep only what is theirs: search and starting playback. |
 | P6 | **jarvisd keeps the latest state per node and relays controls.** The display, the mobile card and the web UI read that one state, and their buttons go back through the hub's control path. |
 | P7 | **Field names follow the catalogue's `media_player` type**, so one mobile media card can serve both Jarvis nodes and imported speakers. |
-| P8 | **Spotify stays a package.** `jarvis-cmd-spotify` works as a speaker with no setup (jarvis-cmd-spotify#2: Client ID optional) and implements the contract. #591 is closed with a pointer here. |
+| P8 | **Spotify stays a package.** `jarvis-cmd-spotify` works as a speaker with no setup (jarvis-cmd-spotify#2: Client ID optional) and implements the contract. #591 stays open until the user has verified and tested the replacement; it is then closed with a pointer here. |
 | P9 | **Ducking and takeover run on the hub's registry.** The hardcoded player lists and `legacyTakeover` go once every music package declares itself. |
+| P10 | **The mobile card shows the whole household (Q1, 2026-11-07).** Several nodes can play at once, and the card lists every node that is playing, each with its own controls. The first version is whatever is simplest beyond that: a plain list, no ordering by the user's own node and no grouping beyond one entry per node. The user's words: "whatever's easiest on the first pass, assuming you can play multiple nodes and view them in the household." |
+| P11 | **The mobile app checks playback once, at the root (Q2, 2026-11-07).** One React Query query beside `PresenceManager` in `App.tsx`; no screen subscribes. It checks every 2 s while any node plays and every 15 s when none does, only while signed in and in the foreground (wire React Query's `focusManager` to `AppState`, which the app doesn't do yet). A control shows the state jarvisd returns at once. A mini-player bar, drawn once in the tab navigator's tab bar, appears when something plays and opens the full list. It shows only on each tab's first screen: drill-in screens (a routine's edit screen, say) and the root stack's screens (Settings, Inbox) never show it. The tabs hold stack navigators that keep the tab bar on drill-ins, so "wherever the tab bar shows" is not the rule. |
+| P12 | **The node reports changes with an HTTP request (Q3, 2026-11-07).** The user was fine with MQTT or an API request. The node already sends everything to jarvisd over HTTP with its own credentials (the once-a-minute status message is `CC.Beat`, an HTTP call), and uses MQTT only for jarvisd's requests to it and its replies. So it sends each playback change to a node route, at most one a second, with the latest state winning; the status message carries the same record, so jarvisd catches up after a restart. The new route needs tier expectations and the user's review. Controls from jarvisd to the node use the existing MQTT request channel (P6). |
+| P13 | **Sources are an `IJarvisMusicCommand` in the SDK (Q4, 2026-11-07).** The user's idea: "an IMusicCommand that exposes these commands and inherits from IJarvisCommand so it's compatible as a regular command but also gets further customization." Named `IJarvisMusicCommand` after the SDK's `IJarvis*` convention. It adds `playback_status()`, `playback_control()` and `playback_binary` as abstract members, and `report()` as a helper. No new manifest component type. |
 
 ## Design
 
@@ -68,11 +72,18 @@ One record per node, `null` when nothing plays:
 
 ### SDK
 
-A package that plays audio declares itself a playback source and implements two calls: `playback_status()`
-returns the record above, and `playback_control(action, **args)` performs one action and returns the new
-record. An optional `report()` helper pushes a change as it happens (a track change, the phone pausing), so
-the hub doesn't have to wait for its next poll. Declaring a source replaces `takes_over_playback_binary`: the
-hub knows which binary to duck and stop from the same declaration.
+A package that plays audio subclasses `IJarvisMusicCommand` (P13), which inherits from `IJarvisCommand`: it
+is still a regular command, with its own parameters and `run()`, and the sidecar's scan finds it as one
+(`issubclass(cls, IJarvisCommand)`). On top, it implements:
+
+- `playback_status()`: the record above, or `None` when it isn't playing.
+- `playback_control(action, **args)`: performs one action and returns the record read back afterwards.
+- `playback_binary`: the player process it runs, for ducking and takeover. It replaces
+  `takes_over_playback_binary`, which the sidecar keeps reading for packages that haven't moved.
+
+The base class gives it `report()`, a helper that pushes a change as it happens (a track change, the phone
+pausing), so the hub doesn't have to wait for its next poll. The sidecar recognises a source by
+`issubclass(cls, IJarvisMusicCommand)`; a package built against an older SDK stays a plain command.
 
 ### Node (the hub)
 
@@ -84,7 +95,7 @@ hub knows which binary to duck and stop from the same declaration.
 - **Controls:** every control, from voice, the display, the mobile card or the web UI, goes through
   `hub.Control(action)`, which calls the active source and returns the state read back afterwards.
 - **Ducking and takeover:** they use the registry's declared binaries instead of the hardcoded lists.
-- **Reporting:** state changes go to jarvisd promptly (Q3).
+- **Reporting:** state changes go to jarvisd as an HTTP request, at most one a second (P12).
 - **Built-in commands:** the hub registers the generic transport commands (P5). A music package's own pause
   and skip actions keep working through the migration; once the built-ins ship, they can go.
 
@@ -99,17 +110,13 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 
 - **Display:** a generic now-playing view (cover, title and artist, seek bar, the source's actions, volume),
   full screen while playing, built from #591's view with the Spotify specifics removed.
-- **Mobile:** a now-playing card with controls (Q1 for its scope, Q2 for how it stays current).
+- **Mobile:** a now-playing card listing every playing node in the household, each with its controls (P10), behind a mini-player on the tabs' first screens (P11).
 - **Web UI:** the same card, later; not in the first pieces.
 
 ## Open questions (recommendations; settle one at a time)
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | Does the mobile card show one node's music, or everything playing in the household? | The whole household, grouped by node, with the user's current node first. |
-| Q2 | How does the mobile app stay current? It has no live channel today except chat's stream. | Poll the household's playback while the card is on screen (every 2 s), and take the state a control returns immediately. A live stream can come later without changing the record. |
-| Q3 | How does the node report changes? The heartbeat runs once a minute. | Publish over the node's existing MQTT connection on each change, throttled to one message a second; the heartbeat carries the same record so jarvisd recovers after a restart. |
-| Q4 | Contract shape: optional methods on the existing command class, or a new `player` component type? | Optional methods on the command class, found by the sidecar's scan the way `takes_over_playback_binary` is, plus the `report()` helper. No new component type to install or list. |
 | Q5 | How does cover art reach the clients? | The source returns the image bytes through the sidecar; the node caches them per track and serves them to the display and to jarvisd. No client or core code fetches a service's image host. |
 | Q6 | Which source is active when two report playing? | The one that most recently started; takeover keeps it to one in practice. |
 | Q7 | Is a phone streaming over Bluetooth a source in the first version? | Yes, as "Bluetooth: <phone name>", with play, pause, next and previous over the phone's Bluetooth remote-control profile. Track details (title and artist from the phone) follow in a later piece; that is new work in `internal/agent/bluetooth`. |
@@ -119,7 +126,7 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 
 ## Pieces (in order)
 
-1. **SDK:** the contract, the `report()` helper and their tests (jarvis-command-sdk).
+1. **SDK:** `IJarvisMusicCommand`, the `report()` helper and their tests (jarvis-command-sdk).
 2. **Agent hub:** the registry, current state, `Control`, the built-in transport commands, ducking and
    takeover on the registry, and the display's mpv as a built-in source.
 3. **Server:** the per-node record, the household-scoped read and control routes with tier expectations
