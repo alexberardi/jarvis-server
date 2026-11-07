@@ -103,8 +103,32 @@ func TestLegacyCacheRevisionWithoutAppearanceFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.WaveformColour, c.WaveformEmphasis = "", 0
+	c.WaveformColour, c.WaveformEmphasis, c.SpotifyConnect = "", 0, nil
 	if got, want := GetRevision(c, ""), Digest([]byte(`{"Config":`+legacy+`,"Verifier":""}`)); got != want {
 		t.Fatal("older offline cache revision changed", got, want)
+	}
+}
+
+func TestSpotifyConnectIsOnUnlessALayerTurnsItOff(t *testing.T) {
+	for name, layers := range map[string][]map[string]any{
+		"default":                 nil,
+		"explicitly on":           {{"spotify_connect": true}},
+		"off then back on":        {{"spotify_connect": false}, {"spotify_connect": true}},
+		"null leaves the default": {{"spotify_connect": nil}},
+	} {
+		c, err := MergeConfiguration(layers...)
+		if err != nil || !c.SpotifyEnabled() {
+			t.Errorf("%s: enabled %v, err %v", name, c.SpotifyEnabled(), err)
+		}
+	}
+	c, err := MergeConfiguration(map[string]any{"spotify_connect": false})
+	if err != nil || c.SpotifyEnabled() {
+		t.Fatalf("a layer turning it off: enabled %v, err %v", c.SpotifyEnabled(), err)
+	}
+	if !(Configuration{}).SpotifyEnabled() {
+		t.Error("an older cached configuration without the setting must mean on")
+	}
+	if _, err := MergeConfiguration(map[string]any{"spotify_connect": "yes"}); err == nil {
+		t.Error("a non-boolean value was accepted")
 	}
 }

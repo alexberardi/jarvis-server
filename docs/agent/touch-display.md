@@ -34,7 +34,7 @@ The node must be running the new agent with `--display` before these controls ap
 Every field can inherit the server default. **Use server default** removes that field's override.
 An empty override object inherits everything. The built-in values are a digital clock, 120 seconds
 before idle, 30 seconds per slideshow photo, the node's timezone, local playback and no night dimming.
-Playercast and experimental Cast start disabled. Favourites use catalogue device IDs; the node editor
+Playercast and experimental Cast start disabled; Spotify Connect starts enabled. Favourites use catalogue device IDs; the node editor
 also offers a named device checklist when its household has imported devices.
 
 Saved and applied revisions are separate. An online node receives a nudge and polls every 30 seconds;
@@ -104,7 +104,8 @@ for separately enabled experimental Cast V2 reception. On Debian the tested open
 also needed `libxdo3`. This is a software flinging receiver; stock Google applications can reject its
 certificate. Screen mirroring and universal Chromecast compatibility are not provided.
 
-Spotify Connect is a third, separately enabled receiver (`spotify_connect`, off by default). Install
+Spotify Connect is a third receiver (`spotify_connect`), on by default whenever the display is enabled; turn it off
+in the display settings to stop it. Without go-librespot installed it simply shows as unavailable. Install
 [go-librespot](https://github.com/devgianlu/go-librespot) (GPL-3.0, so it runs as its own program, never linked into the
 agent) and a Spotify Premium account is required. The agent writes its `config.yml` under the display folder
 (a speaker named like the other receivers, PulseAudio output, remembered pairing, API on `127.0.0.1` only) and starts

@@ -334,7 +334,7 @@ func (e *Engine) EnsureProcesses() {
 	}
 	e.StartReceiver("playercast", c.Playercast, "playercast", "--name", c.ReceiverName, "--player", "mpv", "--disable-cec")
 	e.StartReceiver("cast", c.ExperimentalCast, "openchromecast", "--friendly-name", c.ReceiverName, "--player", "mpv", "--mpv", filepath.Join(e.root, "bin", "mpv"), "--no-tray")
-	e.StartSpotify(c.SpotifyConnect)
+	e.StartSpotify(c.SpotifyEnabled())
 }
 func (e *Engine) StartReceiver(key string, on bool, program string, args ...string) {
 	if !on {

@@ -47,7 +47,7 @@ type Configuration struct {
 	Shortcuts        []Shortcut `json:"shortcuts"`
 	Playercast       bool       `json:"playercast"`
 	ExperimentalCast bool       `json:"experimental_cast"`
-	SpotifyConnect   bool       `json:"spotify_connect,omitempty"`
+	SpotifyConnect   *bool      `json:"spotify_connect,omitempty"` // nil (an older cached configuration) means on, like the default
 	ReceiverName     string     `json:"receiver_name"`
 }
 type Delivery struct {
@@ -56,8 +56,12 @@ type Delivery struct {
 	Verifier      string        `json:"verifier"`
 }
 
+// SpotifyEnabled reports whether the Spotify Connect receiver is on. It is on unless a layer turns it off.
+func (c Configuration) SpotifyEnabled() bool { return c.SpotifyConnect == nil || *c.SpotifyConnect }
+
 func MergeConfiguration(layers ...map[string]any) (Configuration, error) {
-	c := Configuration{WaveformColour: "#a56bff", WaveformEmphasis: 150, Theme: "builtin", Favourites: []string{}, IdleSeconds: 120, SlideSeconds: 30, Photos: []string{}, Clock: "digital", Hour24: true, Destination: "local", Shortcuts: []Shortcut{}, ReceiverName: "Jarvis Display", DimStart: 22, DimEnd: 7, DimPercent: 35}
+	on := true
+	c := Configuration{SpotifyConnect: &on, WaveformColour: "#a56bff", WaveformEmphasis: 150, Theme: "builtin", Favourites: []string{}, IdleSeconds: 120, SlideSeconds: 30, Photos: []string{}, Clock: "digital", Hour24: true, Destination: "local", Shortcuts: []Shortcut{}, ReceiverName: "Jarvis Display", DimStart: 22, DimEnd: 7, DimPercent: 35}
 	b, _ := json.Marshal(c)
 	var merged map[string]any
 	_ = json.Unmarshal(b, &merged)
