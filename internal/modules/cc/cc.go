@@ -191,6 +191,7 @@ type Module struct {
 	wakeDrops, voiceDrops atomic.Int64
 	vocab                 sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
 	enroll                *enrollments
+	playback              *playbackStore
 	pairings              *pairingStore // device-code pairing (pairing.go)
 	tools                 *servertools.Registry
 	dateKeys              []string      // DT_KEYS override (tests); nil = the shared vocabulary
@@ -301,6 +302,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.wakeSem = make(chan struct{}, wakeVerifyLimit)
 	m.voiceSem = make(chan struct{}, voiceCheckLimit)
 	m.enroll = newEnrollments()
+	m.playback = newPlaybackStore()
 	m.pairings = newPairingStore()
 	if m.tools == nil {
 		m.tools = servertools.NewRegistry()
@@ -406,6 +408,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 	// Phase 5b: the voice pipeline, tool loop, media proxy and node plugin API.
 	m.registerVoice(mux)
+	m.registerPlayback(mux) // docs/agent/PLAYBACK.md piece 3
 	// Phase 5d: mobile chat (doc 13 §3.1-3.2) and the mobile voice-profile routes (doc 06 V1/V6).
 	m.registerMobileChat(mux)
 	m.registerVoiceProfiles(mux)
