@@ -37,6 +37,10 @@ func TestInferDirModel(t *testing.T) {
 		// No size in the name: from the config (40 layers of 5120: about 16B).
 		{"my-finetune", `{"model_type":"qwen3","hidden_size":5120,"num_hidden_layers":40,"intermediate_size":17408,"vocab_size":151936}`,
 			DirTraits{"qwen3", 16.4, "Qwen3_14B_Compressed", false}},
+		{"gemma-4-31B-it", `{"model_type":"gemma4","text_config":{"model_type":"gemma4_text"}}`, DirTraits{"gemma4", 31, "Gemma4", false}},
+		{"gemma-4-26B-A4B-it-4bit", `{"architectures":["Gemma4ForConditionalGeneration"]}`, DirTraits{"gemma4", 26, "Gemma4", false}},
+		{"gemma-4-E4B-it", ``, DirTraits{"gemma4", 0, "Gemma4", false}},
+		{"gemma-3-4b-it", ``, DirTraits{"", 4, "", false}},
 		// The config wins over the name.
 		{"Qwen3-8B-abliterated", `{"model_type":"llama"}`, DirTraits{"", 8, "", false}},
 		{"Llama-3.1-8B-Instruct-4bit", `{"model_type":"llama"}`, DirTraits{"", 8, "", false}},

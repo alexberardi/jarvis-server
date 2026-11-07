@@ -208,7 +208,9 @@ func readTemplateTraits(e models.Entry, inCatalog bool, mod models.Model) (Model
 	if models.TemplateSupportsTools(tpl) {
 		tr.ToolCalling = "native"
 	}
-	tr.Thinking = models.TemplateHasThinking(tpl)
+	// A catalog entry without thinking (Gemma 4: enable_thinking through the kwargs only) never
+	// gets the /think suffix, whatever its template mentions.
+	tr.Thinking = models.TemplateHasThinking(tpl) && (!inCatalog || e.Thinking)
 	return tr, nil
 }
 

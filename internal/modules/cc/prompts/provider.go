@@ -1,5 +1,5 @@
 // Package prompts builds command-center's system prompts. A prompt is text with {{variables}}
-// (docs/cc/prompt-contract.md): the four built-in prompts are embedded text files, Render
+// (docs/cc/prompt-contract.md): the built-in prompts are embedded text files, Render
 // fills in the variables from Inputs, and SystemPrompt adds the per-turn <person_view> tail.
 // How a turn talks to the model (native or text tool calling, the thinking suffix, the
 // force-tools guard) is a Mode, resolved from the LLM settings and the model, not from the
@@ -17,6 +17,7 @@ const (
 	Qwen3_8B    = "Qwen3_8B_Compressed"   // dev
 	Qwen3_5_9B  = "Qwen3_5_9B_Compressed" // native tools
 	Cloud       = "Cloud"                 // remote models (any vendor), native tools
+	Gemma4      = "Gemma4"                // Gemma 4: native tools, never the Qwen suffix (BuiltinPrefs)
 	thinkOpen   = "<think>"
 	thinkClose  = "</think>"
 	suffixThink = "/think"

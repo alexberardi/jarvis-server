@@ -335,7 +335,12 @@ Fit verdicts: `fits`, `tight` (within 10% of the card), `split` (only with tenso
 split across cards), `too_big`, `cpu` (no usable GPU), `in_binary` (tts/speaker). The estimate
 is weights + KV (`kv_bytes_per_token` × context, f16) + ~3% + 600 MB for LLMs, weights × 1.25 +
 500 MB for whisper. `kv_bytes_per_token` counts full-attention layers only, so hybrid models
-(Qwen 3.5/3.8: one in four) need a quarter of what a dense model would. On a GPU an LLM's
+(Qwen 3.5/3.8: one in four) need a quarter of what a dense model would. Gemma 4 counts its
+global layers (one in six) only: its sliding-window layers keep a cache of about 1024 tokens
+whatever the context (≈0.3 GB on the 26B-A4B, ≈1.2 GB on the 31B, f16), which the 3% and
+600 MB cover on the 26B-A4B (estimated 19059 MB at 32768 against ~18.9 GB measured on prod).
+An entry tagged for only one of live and background is recommended for that label alone, and
+background's pick, unless it is live's own model, must fit next to live's engine. On a GPU an LLM's
 `host_bytes` don't count: llama.cpp keeps the input token embeddings in system RAM (unless the
 output is tied to them). Checked against Qwen 3.5 9B + F16 projector at 32768 context on a
 3080 Ti: estimated 7560 MB, measured 7506 MB. Free memory per CUDA card comes from nvidia-smi

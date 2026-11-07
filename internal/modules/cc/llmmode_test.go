@@ -162,3 +162,31 @@ func TestPromptProviderStatusLLMMode(t *testing.T) {
 		}
 	}
 }
+
+// Gemma4's own values: a Gemma 4 template has enable_thinking, which the template check reads
+// as the suffix, but neither the install default nor a household's pick of it gets /no_think.
+// A household's own value still wins.
+func TestGemma4PromptHasNoSuffix(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Gemma4, func(m *Module) {
+		withTraits(m, llm.ModelTraits{ToolCalling: "native", ToolCallingFrom: ModeSourceTemplate, Thinking: true, Local: true})
+	})
+	m, ctx := ve.m, context.Background()
+	check := func(what, want string) {
+		t.Helper()
+		mode, tc, th := m.llmMode(ctx, mustResolve(t, m, voiceHH).Prefs)
+		if !mode.Native() || tc.Effective != "native" || th.Effective != want || mode.ThinkingSuffix != (want == "suffix") {
+			t.Errorf("%s: mode %+v, tool calling %+v, thinking %+v; want native, %s", what, mode, tc, th, want)
+		}
+	}
+	check("install default", "none")
+	if st := m.PromptProvider(ctx); st.ThinkingSwitch.Effective != "none" || st.ThinkingSwitch.Source != ModeSourcePrompt {
+		t.Errorf("status thinking %+v", st.ThinkingSwitch)
+	}
+	mustSavePrompt(t, m, voiceHH, householdPrompt{Source: promptSourceBuiltin, Name: prompts.Gemma4})
+	check("household built-in", "none")
+	mustSavePrompt(t, m, voiceHH, householdPrompt{Source: promptSourceBuiltin, Name: prompts.Gemma4, ThinkingSwitch: str("suffix")})
+	check("household's own value", "suffix")
+	// Another built-in has no values of its own: the template decides, as before.
+	mustSavePrompt(t, m, voiceHH, householdPrompt{Source: promptSourceBuiltin, Name: prompts.Qwen3_5_9B})
+	check("Qwen 3.5 built-in", "suffix")
+}

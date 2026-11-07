@@ -1332,7 +1332,8 @@ func (m *Manager) log() *slog.Logger {
 
 // Recommend suggests a catalog entry per label: the largest LLM that fits one card (else one
 // that fits tightly; on Apple Silicon's Metal the largest MLX directory entry, which mlx-lm
-// runs faster than llama.cpp, when one fits; never an entry marked no_recommend), MiniLM for
+// runs faster than llama.cpp, when one fits; never an entry marked no_recommend, nor one whose
+// tags leave the label out; background's pick, unless live's, fits next to live's), MiniLM for
 // embeddings, and whisper large-v3-turbo on a GPU when it fits next to the live model (else
 // small.en).
 //
@@ -1350,14 +1351,37 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour, others []
 		out[v.Name] = v.DefaultModel
 	}
 	llms := map[string]Entry{}
+	// liveResident is the recommended live model as an engine on its proposed card, for a label
+	// on build f sharing those cards with it (false when it doesn't: the CPU, another build).
+	liveResident := func(f engine.Flavour) (Resident, bool) {
+		lhw := on(engine.LabelLive)
+		if onCPU(lhw) || lhw.Flavour != f {
+			return Resident{}, false
+		}
+		best := llms[engine.LabelLive]
+		return Resident{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(lhw, best).NeededMB,
+			Devices: deviceList(engine.Propose(hw)[engine.LabelLive].Devices)}, true
+	}
 	for _, l := range []string{engine.LabelLive, engine.LabelBackground} {
 		lhw := on(l)
+		// Background shares live's engine when it picks the same model; any other model is a
+		// second engine, judged next to live's (a 31B beside a 26B needs a second card).
+		alongside := others
+		if r, ok := liveResident(lhw.Flavour); ok && l == engine.LabelBackground {
+			alongside = append(slices.Clone(others), r)
+		}
+		fit := func(e Entry) Fit {
+			if l == engine.LabelBackground && e.ID == llms[engine.LabelLive].ID {
+				return entryFitAlongside(lhw, e, others)
+			}
+			return entryFitAlongside(lhw, e, alongside)
+		}
 		var best Entry
 		// MLX entries only on Metal (Apple Silicon), and there first.
 		for _, dir := range []bool{lhw.Flavour == engine.FlavourMetal, false} {
 			for _, verdict := range []string{"fits", "tight"} {
 				for _, e := range Catalog() {
-					if e.Kind == engine.ModelLLM && e.Directory == dir && !e.NoRecommend && entryFitAlongside(lhw, e, others).Verdict == verdict && e.Size > best.Size {
+					if e.Kind == engine.ModelLLM && e.Directory == dir && !e.NoRecommend && forLabel(e, l) && fit(e).Verdict == verdict && e.Size > best.Size {
 						best = e
 					}
 				}
@@ -1384,10 +1408,8 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour, others []
 	}
 	// STT shares a card with the live model: large-v3-turbo only when it fits next to it.
 	live := slices.Clone(others)
-	if lhw := on(engine.LabelLive); !onCPU(lhw) && lhw.Flavour == shw.Flavour {
-		best := llms[engine.LabelLive]
-		live = append(live, Resident{Labels: []string{engine.LabelLive}, Model: best.ID, NeededMB: EntryFit(lhw, best).NeededMB,
-			Devices: deviceList(engine.Propose(hw)[engine.LabelLive].Devices)})
+	if r, ok := liveResident(shw.Flavour); ok {
+		live = append(live, r)
 	}
 	if e, ok := CatalogEntry("whisper-large-v3-turbo"); ok {
 		if FitAlongside(shw, e.Kind, e.Size, 0, 0, live).Verdict == "fits" {
@@ -1395,6 +1417,12 @@ func Recommend(hw engine.Hardware, flavours map[string]engine.Flavour, others []
 		}
 	}
 	return out
+}
+
+// forLabel says an LLM entry may be recommended for an engine label: one tagged for only some
+// of live and background (Gemma 4 31B: background) only for those; an untagged one for both.
+func forLabel(e Entry, label string) bool {
+	return slices.Contains(e.Tags, label) || !slices.Contains(e.Tags, engine.LabelLive) && !slices.Contains(e.Tags, engine.LabelBackground)
 }
 
 // onCPU says a label seeing hw runs on the CPU: the CPU build, or no card of its build.

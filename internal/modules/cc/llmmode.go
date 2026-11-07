@@ -84,6 +84,15 @@ func (m *Module) llmMode(ctx context.Context, prefs prompts.ModePrefs) (prompts.
 	return mode, tc, th
 }
 
+// defaultPrefs are the install default prompt's own LLM values (a built-in's: BuiltinPrefs),
+// what a household without a stored prompt gets.
+func (m *Module) defaultPrefs(ctx context.Context) prompts.ModePrefs {
+	if m.settings == nil {
+		return prompts.ModePrefs{}
+	}
+	return prompts.BuiltinPrefs(m.defaultPromptName(ctx))
+}
+
 // modeValue reads an LLM mode setting; unset or blank is auto.
 func (m *Module) modeValue(ctx context.Context, key string) string {
 	if m.settings == nil {

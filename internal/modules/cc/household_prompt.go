@@ -91,7 +91,7 @@ func (m *Module) resolvePrompt(ctx context.Context, hh string) (resolved, error)
 		return resolved{}, err
 	}
 	original, _ := prompts.Builtin(name)
-	def := resolved{Source: promptSourceDefault, Name: name, Text: original, Original: original}
+	def := resolved{Source: promptSourceDefault, Name: name, Text: original, Original: original, Prefs: prompts.BuiltinPrefs(name)}
 
 	row, err := m.loadHouseholdPrompt(ctx, hh)
 	if err != nil {
@@ -107,6 +107,7 @@ func (m *Module) resolvePrompt(ctx context.Context, hh string) (resolved, error)
 	switch row.Source {
 	case promptSourceBuiltin:
 		r.Original, _ = prompts.Builtin(row.Name)
+		r.Prefs = r.Prefs.Or(prompts.BuiltinPrefs(row.Name))
 		if err := prompts.CheckBuiltin(row.Name); err != nil {
 			return m.promptFallback(hh, def, r, err), nil
 		}
@@ -124,11 +125,11 @@ func (m *Module) resolvePrompt(ctx context.Context, hh string) (resolved, error)
 }
 
 // promptFallback logs why the household's stored prompt r is not used and returns the default
-// with r's LLM values.
+// with r's LLM values (the default's own for those r leaves unset).
 func (m *Module) promptFallback(hh string, def, r resolved, err error) resolved {
 	m.deps.Log.Warn("cc: household prompt not used; install default instead", "household", hh,
 		"source", r.Source, "prompt", r.Name, "default", def.Name, "err", err)
-	def.Prefs = r.Prefs
+	def.Prefs = r.Prefs.Or(def.Prefs)
 	def.Fallback = fmt.Sprintf("%s prompt %q: %v", r.Source, r.Name, err)
 	return def
 }

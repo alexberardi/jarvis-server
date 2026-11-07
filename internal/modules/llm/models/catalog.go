@@ -56,8 +56,11 @@ type Entry struct {
 	// GGUF's token_embd.weight.
 	HostBytes      int64  `json:"host_bytes,omitempty"`
 	PromptProvider string `json:"prompt_provider,omitempty"`
-	Thinking       bool   `json:"thinking,omitempty"`
-	Dims           int    `json:"dims,omitempty"`
+	// Thinking: the model takes Qwen's /think and /no_think suffix when its template has
+	// enable_thinking (llm.ModelTraits.Thinking). False for Gemma 4, whose template has the
+	// switch but reads it from chat_template_kwargs only.
+	Thinking bool `json:"thinking,omitempty"`
+	Dims     int  `json:"dims,omitempty"`
 	// ChatTemplate names the pinned chat template (a file under templates/) and
 	// ChatTemplateSHA256 its digest; LLM entries only (ID12).
 	ChatTemplate       string `json:"chat_template,omitempty"`
@@ -99,7 +102,7 @@ func (e Entry) Template() (string, error) {
 
 // KeptPromptProviders are the providers jarvisd ports (PLAN Appendix B, D11: an unknown
 // provider is a hard error).
-var KeptPromptProviders = []string{"Qwen3_14B_Compressed", "Qwen3_8B_Compressed", "Qwen3_5_9B_Compressed"}
+var KeptPromptProviders = []string{"Qwen3_14B_Compressed", "Qwen3_8B_Compressed", "Qwen3_5_9B_Compressed", "Gemma4"}
 
 // Catalog returns the built-in catalog.
 func Catalog() []Entry {
