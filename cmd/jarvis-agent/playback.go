@@ -42,6 +42,11 @@ func (s packageSource) Control(ctx context.Context, action string, args map[stri
 	return playback.Parse(raw)
 }
 
+// Artwork is the command's playback_artwork(): the cover as bytes.
+func (s packageSource) Artwork(ctx context.Context) ([]byte, string, error) {
+	return s.live.PlaybackArtwork(ctx, s.cmd.Name)
+}
+
 // displaySource is the touch display's mpv (display_media, Cast and Playercast all play there).
 type displaySource struct{ e *displaynode.Engine }
 

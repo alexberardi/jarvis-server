@@ -16,18 +16,23 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	_ "time/tzdata"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
+	"github.com/alexberardi/jarvis-server/internal/agent/playback"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/devicetypes"
 	displayconfig "github.com/alexberardi/jarvis-server/internal/display"
 )
 
 type Engine struct {
-	Host                    *host.Host
+	Host *host.Host
+	// playback is the node's playback hub (docs/agent/PLAYBACK.md), set once the agent has it
+	// (SetPlayback) while the display may already be serving.
+	playback                atomic.Pointer[playback.Hub]
 	returnWindow            string
 	mu                      sync.Mutex
 	syncMu                  sync.Mutex
@@ -417,6 +422,23 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, filepath.Base(r.URL.Path), time.Time{}, strings.NewReader(string(b)))
 		return
 	}
+	if r.URL.Path == "/now-playing/cover" && r.Method == "GET" {
+		// An <img> can't send the API's header, so this sits outside /api and checks the
+		// session cookie itself: what someone listens to stays on this display.
+		if cookie, err := r.Cookie("display_session"); err != nil || cookie.Value != e.secret || e.playback.Load() == nil {
+			http.Error(w, "Unauthorised", 403)
+			return
+		}
+		data, mime, ok := e.playback.Load().Artwork(r.Context())
+		if !ok || (mime != "image/jpeg" && mime != "image/png" && mime != "image/webp") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mime)
+		w.Header().Set("Cache-Control", "private, max-age=3600") // the URL carries the track
+		_, _ = w.Write(data)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/photo/") {
 		id := strings.TrimPrefix(r.URL.Path, "/photo/")
 		e.mu.Lock()
@@ -444,7 +466,12 @@ func (e *Engine) HandleAPI(w http.ResponseWriter, r *http.Request) {
 	d := e.delivery
 	cc := e.cc
 	e.mu.Unlock()
+	if r.URL.Path == "/api/now-playing" && r.Method == "POST" {
+		e.handleNowPlaying(w, r)
+		return
+	}
 	if r.URL.Path == "/api/state" && r.Method == "GET" {
+		nowPlaying := e.nowPlaying()
 		playback := e.GetPlaybackStatus()
 		delete(playback, "socket")
 		e.mu.Lock()
@@ -452,7 +479,7 @@ func (e *Engine) HandleAPI(w http.ResponseWriter, r *http.Request) {
 		if e.theme != nil {
 			theme = "/theme/" + e.theme.Manifest.Entry
 		}
-		state := map[string]any{"playback": playback, "configuration": d.Configuration, "revision": d.Revision, "voice": e.state, "voice_level": e.level, "last_interaction": e.lastInteraction.UnixMilli(), "media_active": e.media != nil, "media_kind": e.mediaKind, "paused": e.mediaPaused, "receivers": e.receiverStatus, "theme_url": theme, "status": e.statusError}
+		state := map[string]any{"playback": playback, "configuration": d.Configuration, "revision": d.Revision, "voice": e.state, "voice_level": e.level, "last_interaction": e.lastInteraction.UnixMilli(), "media_active": e.media != nil, "media_kind": e.mediaKind, "paused": e.mediaPaused, "receivers": e.receiverStatus, "theme_url": theme, "status": e.statusError, "now_playing": nowPlaying}
 		WriteJSON(w, state)
 		e.mu.Unlock()
 		return

@@ -241,3 +241,55 @@ func TestParse(t *testing.T) {
 		t.Fatalf("parse = %+v, %v", s, err)
 	}
 }
+
+// artFake is a source with a cover; fetches counts Artwork calls.
+type artFake struct {
+	fake
+	fetches int
+	cover   []byte
+}
+
+func (a *artFake) Artwork(context.Context) ([]byte, string, error) {
+	a.fetches++
+	if a.cover == nil {
+		return nil, "", errors.New("no cover")
+	}
+	return a.cover, "image/jpeg", nil
+}
+
+func TestArtworkIsFetchedOncePerTrack(t *testing.T) {
+	src := &artFake{fake: fake{id: "pkg:radio", name: "Radio", st: playing("One")}, cover: []byte("jpeg-1")}
+	r := newRig(src)
+	if _, _, ok := r.hub.Artwork(context.Background()); ok {
+		t.Fatal("artwork with nothing shown")
+	}
+	r.step(0)
+	for i := 0; i < 3; i++ {
+		b, mime, ok := r.hub.Artwork(context.Background())
+		if !ok || string(b) != "jpeg-1" || mime != "image/jpeg" {
+			t.Fatalf("artwork = %q %q %v", b, mime, ok)
+		}
+	}
+	if src.fetches != 1 {
+		t.Fatalf("fetches = %d, want 1", src.fetches)
+	}
+	// A new track: fetched again.
+	src.st, src.cover = playing("Two"), []byte("jpeg-2")
+	r.step(2 * time.Second)
+	if b, _, _ := r.hub.Artwork(context.Background()); string(b) != "jpeg-2" || src.fetches != 2 {
+		t.Fatalf("new track artwork = %q, fetches %d", b, src.fetches)
+	}
+	// A failed fetch isn't retried on every request, only on the next track.
+	src.st, src.cover = playing("Three"), nil
+	r.step(2 * time.Second)
+	r.hub.Artwork(context.Background())
+	if _, _, ok := r.hub.Artwork(context.Background()); ok || src.fetches != 3 {
+		t.Fatalf("failed cover: ok %v, fetches %d", ok, src.fetches)
+	}
+	// A source without artwork.
+	plain := newRig(&fake{id: "pkg:plain", name: "Plain", st: playing("x")})
+	plain.step(0)
+	if _, _, ok := plain.hub.Artwork(context.Background()); ok {
+		t.Fatal("artwork from a source that has none")
+	}
+}
