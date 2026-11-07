@@ -36,20 +36,29 @@ type SpotifyStatus struct {
 	Shuffle       bool     `json:"shuffle"`
 	RepeatContext bool     `json:"repeat_context"`
 	RepeatTrack   bool     `json:"repeat_track"`
+	DeviceName    string   `json:"device_name"`
+	ContextName   string   `json:"context_name"` // the playlist, album or artist playing, when Spotify says
+	ContextKind   string   `json:"context_kind"` // playlist, album, artist ...
+	URI           string   `json:"uri"`
+	Liked         bool     `json:"liked"`
 	UpdatedAt     int64    `json:"updated_at"` // unix ms of the reading, so the shell can advance the position between polls
 }
 
 // spotifyReply is the part of go-librespot's GET /status the display uses.
 type spotifyReply struct {
-	Stopped       bool `json:"stopped"`
-	Paused        bool `json:"paused"`
-	Buffering     bool `json:"buffering"`
-	Volume        int  `json:"volume"`
-	VolumeSteps   int  `json:"volume_steps"`
-	RepeatContext bool `json:"repeat_context"`
-	RepeatTrack   bool `json:"repeat_track"`
-	Shuffle       bool `json:"shuffle_context"`
+	Stopped       bool    `json:"stopped"`
+	Paused        bool    `json:"paused"`
+	Buffering     bool    `json:"buffering"`
+	Volume        int     `json:"volume"`
+	VolumeSteps   int     `json:"volume_steps"`
+	RepeatContext bool    `json:"repeat_context"`
+	RepeatTrack   bool    `json:"repeat_track"`
+	Shuffle       bool    `json:"shuffle_context"`
+	DeviceName    string  `json:"device_name"`
+	ContextName   *string `json:"context_name"`
+	PlayOrigin    *string `json:"play_origin"`
 	Track         *struct {
+		URI        string   `json:"uri"`
 		Name       string   `json:"name"`
 		Artists    []string `json:"artist_names"`
 		Album      string   `json:"album_name"`
@@ -163,13 +172,98 @@ func (e *Engine) pollSpotify() {
 			cover = spotifyCoverURL(r.Track.CoverURL)
 			status = SpotifyStatus{Active: true, Paused: r.Paused, Title: r.Track.Name, Artists: r.Track.Artists, Album: r.Track.Album, HasCover: cover != "",
 				PositionMS: r.Track.PositionMS, DurationMS: r.Track.DurationMS, Volume: r.Volume, VolumeSteps: r.VolumeSteps,
-				Shuffle: r.Shuffle, RepeatContext: r.RepeatContext, RepeatTrack: r.RepeatTrack, UpdatedAt: time.Now().UnixMilli()}
+				Shuffle: r.Shuffle, RepeatContext: r.RepeatContext, RepeatTrack: r.RepeatTrack, DeviceName: r.DeviceName, URI: r.Track.URI, UpdatedAt: time.Now().UnixMilli()}
+			if r.ContextName != nil {
+				status.ContextName = *r.ContextName
+			}
+			if r.PlayOrigin != nil {
+				status.ContextKind = *r.PlayOrigin
+			}
 		}
 		resp.Body.Close()
+	}
+	if status.URI != "" {
+		status.Liked = e.spotifyLikedState(status.URI)
 	}
 	e.mu.Lock()
 	e.spotify, e.spotifyCover = status, cover
 	e.mu.Unlock()
+}
+
+// spotifyLikedState reports whether the track is in Liked Songs. It asks the receiver once per track and
+// remembers the answer; a failed lookup reads as not liked and is retried on the next poll.
+func (e *Engine) spotifyLikedState(uri string) bool {
+	e.mu.Lock()
+	if e.spotifyLikedURI == uri {
+		liked := e.spotifyLiked
+		e.mu.Unlock()
+		return liked
+	}
+	e.mu.Unlock()
+	resp, err := e.spotifyCall("GET", "/library/liked?uris="+url.QueryEscape(uri), nil)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var r struct {
+		Items []struct {
+			Liked bool `json:"liked"`
+		} `json:"items"`
+	}
+	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&r) != nil || len(r.Items) != 1 {
+		return false
+	}
+	e.mu.Lock()
+	e.spotifyLikedURI, e.spotifyLiked = uri, r.Items[0].Liked
+	e.mu.Unlock()
+	return r.Items[0].Liked
+}
+
+// spotifyToggle handles the buttons that flip a setting: shuffle, repeat (off, then context, then track, as in the
+// Spotify app) and Liked Songs. The new value comes from the engine's last reading, so a stale shell cannot drift.
+func (e *Engine) spotifyToggle(action string) error {
+	e.mu.Lock()
+	cur := e.spotify
+	e.mu.Unlock()
+	post := func(path string, payload any) error {
+		resp, err := e.spotifyCall("POST", path, payload)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			return fmt.Errorf("receiver answered %d", resp.StatusCode)
+		}
+		return nil
+	}
+	switch action {
+	case "shuffle":
+		return post("/player/shuffle_context", map[string]any{"shuffle_context": !cur.Shuffle})
+	case "repeat":
+		ctx, trk := false, false
+		switch {
+		case cur.RepeatTrack: // track -> off
+		case cur.RepeatContext:
+			trk = true // context -> track
+		default:
+			ctx = true // off -> context
+		}
+		if err := post("/player/repeat_context", map[string]any{"repeat_context": ctx}); err != nil {
+			return err
+		}
+		return post("/player/repeat_track", map[string]any{"repeat_track": trk})
+	case "like":
+		if cur.URI == "" {
+			return fmt.Errorf("nothing is playing")
+		}
+		if err := post("/library/liked", map[string]any{"uris": []string{cur.URI}, "liked": !cur.Liked}); err != nil {
+			return err
+		}
+		e.mu.Lock()
+		e.spotifyLikedURI, e.spotifyLiked = cur.URI, !cur.Liked
+		e.mu.Unlock()
+	}
+	return nil
 }
 
 // spotifyCoverURL returns raw only when it is an https URL on Spotify's image host.
@@ -199,6 +293,15 @@ func (e *Engine) handleSpotify(w http.ResponseWriter, r *http.Request) bool {
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
 			http.Error(w, "Invalid Spotify request", 400)
+			return true
+		}
+		if body.Action == "shuffle" || body.Action == "repeat" || body.Action == "like" {
+			if err := e.spotifyToggle(body.Action); err != nil {
+				http.Error(w, "Spotify receiver refused the request", 502)
+				return true
+			}
+			go e.pollSpotify()
+			WriteJSON(w, map[string]any{"success": true})
 			return true
 		}
 		action, ok := spotifyActions[body.Action]

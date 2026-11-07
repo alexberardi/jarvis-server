@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { ShowClock, ShowDisplay, ShowSpotify, type Spotify } from './Display'
+import { ShowClock, ShowDisplay, ShowSpotify, ShowSpotifyFull, type Spotify } from './Display'
 
 const config = { enabled: true, clock: 'combined', hour_24: true, timezone: 'Australia/Perth', idle_seconds: 120, slide_seconds: 30, photos: [], favourites: [], night_dim: false, dim_start: 22, dim_end: 7, dim_percent: 35, destination: 'local', shortcuts: [] }
 const devices = Array.from({ length: 1000 }, (_, i) => ({ id: `d${i}`, name: i === 0 ? 'Front door' : `Light ${i}`, room_name: 'Living room', domain: i === 0 ? 'lock' : 'light', entity_id: `light.${i}`, supported_actions: [{ button_action: i === 0 ? 'unlock' : 'turn_on', button_text: i === 0 ? 'Unlock' : 'Turn on' }] }))
@@ -121,7 +121,7 @@ it('keeps device state requests at four through slow refreshes and page changes'
   } finally { vi.useRealTimers() }
 })
 
-const track: Spotify = { active: true, paused: false, title: 'Hysteria', artists: ['Muse'], album: 'Absolution', has_cover: true, position_ms: 61000, duration_ms: 227000, volume: 40, volume_steps: 100, updated_at: 1_000_000 }
+const track: Spotify = { shuffle: true, device_name: 'Jarvis Display', context_name: 'Daily Mix 1', context_kind: 'playlist', liked: false, active: true, paused: false, title: 'Hysteria', artists: ['Muse'], album: 'Absolution', has_cover: true, position_ms: 61000, duration_ms: 227000, volume: 40, volume_steps: 100, updated_at: 1_000_000 }
 it('shows the Spotify track, advances its position and sends the transport buttons', () => {
   const sent: Record<string, unknown>[] = []
   render(<ShowSpotify spotify={track} now={new Date(1_005_000)} send={b => sent.push(b)} />)
@@ -143,7 +143,7 @@ it('holds the position and offers Play while Spotify is paused', () => {
   expect(screen.getByRole('button', { name: 'Play Spotify' })).toBeInTheDocument()
   expect(screen.queryByRole('img')).not.toBeInTheDocument()
 })
-it('shows Spotify on the Media view and sends a pause through the display API', async () => {
+it('takes the whole screen while Spotify plays, sends a pause, and Menu returns to the views', async () => {
   const sent: unknown[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     const path = url.replace('/api/', '')
@@ -154,10 +154,28 @@ it('shows Spotify on the Media view and sends a pause through the display API', 
     else body = { state: { state: 'on' } }
     return { ok: true, text: async () => JSON.stringify(body) }
   }))
-  render(<ShowDisplay />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Media' }))
+  const { container } = render(<ShowDisplay />)
   expect(await screen.findByRole('heading', { name: 'Hysteria' })).toBeInTheDocument()
-  expect(screen.getByText('Spotify Connect (Premium): running')).toBeInTheDocument()
+  expect(container.querySelector('.spotify-full')).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Pause Spotify' }))
   await waitFor(() => expect(sent).toEqual([{ action: 'playpause' }]))
+  fireEvent.click(screen.getByRole('button', { name: 'Close now playing' }))
+  expect(container.querySelector('.spotify-full')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Media' }))
+  expect(await screen.findByRole('heading', { name: 'Hysteria' })).toBeInTheDocument()
+  expect(screen.getByText('Spotify Connect (Premium): running')).toBeInTheDocument()
+})
+
+it('the full-screen view shows where it plays from and sends shuffle, repeat and like', () => {
+  const sent: Record<string, unknown>[] = []
+  render(<ShowSpotifyFull spotify={track} now={new Date(1_005_000)} send={b => sent.push(b)} onHome={() => {}} />)
+  expect(screen.getByText('Playing from playlist')).toBeInTheDocument()
+  expect(screen.getByText('Daily Mix 1')).toBeInTheDocument()
+  expect(screen.getByText('Jarvis Display')).toBeInTheDocument()
+  expect(screen.getByText('01:06')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Shuffle' })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.click(screen.getByRole('button', { name: 'Shuffle' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Repeat off' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add to Liked Songs' }))
+  expect(sent).toEqual([{ action: 'shuffle' }, { action: 'repeat' }, { action: 'like' }])
 })

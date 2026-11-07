@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Home, Lightbulb, Pause, Play, Shield, SkipBack, SkipForward, Star, RotateCcw } from 'lucide-react'
+import { Heart, Home, Lightbulb, Music, Pause, Play, Repeat, Repeat1, Shield, Shuffle, SkipBack, SkipForward, Star, RotateCcw, Volume2 } from 'lucide-react'
 import './Display.css'
 import SpeechWaveform from './SpeechWaveform'
 import { type Catalogue, deviceType, isMediaDestination } from './catalogue'
@@ -9,7 +9,7 @@ import { createLimiter } from './limit'
 type Config = { waveform_colour?: string; waveform_emphasis?: number; enabled: boolean; clock: string; hour_24: boolean; timezone: string; idle_seconds: number; slide_seconds: number; photos: string[]; favourites: string[]; night_dim: boolean; dim_start: number; dim_end: number; dim_percent: number; shortcuts: { name: string; url: string }[]; destination: string }
 type Device = { id: string; name: string; domain: string; entity_id: string; room_name: string; supported_actions: { button_action: string; button_text: string }[] | null }
 type Playback = { active: boolean; kind: string; controllable: boolean; paused?: boolean; position?: number; duration?: number; features?: string[]; media_title?: string }
-export type Spotify = { active: boolean; paused: boolean; title: string; artists: string[]; album: string; has_cover: boolean; position_ms: number; duration_ms: number; volume: number; volume_steps: number; updated_at: number }
+export type Spotify = { active: boolean; paused: boolean; title: string; artists: string[]; album: string; has_cover: boolean; position_ms: number; duration_ms: number; volume: number; volume_steps: number; shuffle?: boolean; repeat_context?: boolean; repeat_track?: boolean; device_name?: string; context_name?: string; context_kind?: string; uri?: string; liked?: boolean; updated_at: number }
 type State = { configuration: Config; voice: string; last_interaction: number; playback: Playback; theme_url: string; receivers: Record<string, string>; status: string; spotify?: Spotify }
 
 async function CallDisplay(path: string, body?: unknown) {
@@ -36,6 +36,43 @@ export function ShowSpotify({ spotify, now, send }: { spotify: Spotify; now: Dat
         <button aria-label="Next track" onClick={() => send({ action: 'next' })}><SkipForward size={22} aria-hidden="true" /></button>
       </div>
       <label>Volume<input type="range" min="0" max={spotify.volume_steps || 100} value={spotify.volume} onChange={e => send({ action: 'volume', volume: Number(e.target.value) })} /></label>
+    </div>
+  </section>
+}
+// The full-screen now-playing view shown while Spotify plays: where it is playing from, the cover and title, the
+// seek bar, then shuffle, previous, play or pause, next and repeat, with the device name, volume and Liked Songs.
+export function ShowSpotifyFull({ spotify, now, send, onHome }: { spotify: Spotify; now: Date; send: (body: Record<string, unknown>) => void; onHome: () => void }) {
+  const position = Math.min(spotify.duration_ms, spotify.position_ms + (spotify.paused ? 0 : Math.max(0, now.getTime() - spotify.updated_at)))
+  const time = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+  const RepeatIcon = spotify.repeat_track ? Repeat1 : Repeat
+  const repeatOn = !!(spotify.repeat_track || spotify.repeat_context)
+  return <section className="spotify-full" aria-label="Spotify now playing">
+    <header className="sf-top">
+      <div className="sf-from"><Music size={30} aria-hidden="true" />{spotify.context_name && <div><small>Playing from {spotify.context_kind || 'Spotify'}</small><strong>{spotify.context_name}</strong></div>}</div>
+      <button className="sf-home" aria-label="Close now playing" onClick={onHome}><Home size={36} aria-hidden="true" />Home</button>
+      <span />
+    </header>
+    <div className="sf-main">
+      {spotify.has_cover ? <img src={`/spotify/cover?v=${encodeURIComponent(spotify.album + spotify.title)}`} alt={`Cover of ${spotify.album}`} /> : <div className="spotify-cover-blank" aria-hidden="true" />}
+      <div className="sf-text"><h1>{spotify.title}</h1><p>{spotify.artists.join(', ')}</p></div>
+    </div>
+    <div className="sf-seek">
+      <input type="range" aria-label="Position" min="0" max={spotify.duration_ms} value={position} onChange={e => send({ action: 'seek', position_ms: Number(e.target.value) })} />
+      <div><span>{time(position)}</span><span>{time(spotify.duration_ms)}</span></div>
+    </div>
+    <div className="sf-bar">
+      <span className="sf-device">{spotify.device_name}</span>
+      <div className="sf-controls">
+        <button aria-label="Shuffle" aria-pressed={!!spotify.shuffle} className={spotify.shuffle ? 'on' : ''} onClick={() => send({ action: 'shuffle' })}><Shuffle size={42} aria-hidden="true" /></button>
+        <button className="sf-skip" aria-label="Previous track" onClick={() => send({ action: 'prev' })}><SkipBack size={48} aria-hidden="true" /></button>
+        <button className="sf-play" aria-label={spotify.paused ? 'Play Spotify' : 'Pause Spotify'} onClick={() => send({ action: 'playpause' })}>{spotify.paused ? <Play size={60} aria-hidden="true" /> : <Pause size={60} aria-hidden="true" />}</button>
+        <button className="sf-skip" aria-label="Next track" onClick={() => send({ action: 'next' })}><SkipForward size={48} aria-hidden="true" /></button>
+        <button aria-label={spotify.repeat_track ? 'Repeat track' : spotify.repeat_context ? 'Repeat all' : 'Repeat off'} aria-pressed={repeatOn} className={repeatOn ? 'on' : ''} onClick={() => send({ action: 'repeat' })}><RepeatIcon size={42} aria-hidden="true" /></button>
+      </div>
+      <div className="sf-right">
+        <label className="sf-volume"><Volume2 size={33} aria-label="Volume" /><input type="range" aria-label="Volume" min="0" max={spotify.volume_steps || 100} value={spotify.volume} onChange={e => send({ action: 'volume', volume: Number(e.target.value) })} /></label>
+        <button aria-label={spotify.liked ? 'Remove from Liked Songs' : 'Add to Liked Songs'} aria-pressed={!!spotify.liked} className={spotify.liked ? 'on' : ''} onClick={() => send({ action: 'like' })}><Heart size={42} fill={spotify.liked ? 'currentColor' : 'none'} aria-hidden="true" /></button>
+      </div>
     </div>
   </section>
 }
@@ -78,6 +115,7 @@ export function ShowDisplay() {
   const [url, setURL] = useState('')
   const [destination, setDestination] = useState('')
   const [exit, setExit] = useState(false)
+  const [dismissed, setDismissed] = useState('')
   const [pin, setPIN] = useState('')
   const [themeReady, setThemeReady] = useState(false)
   const [themeFailed, setThemeFailed] = useState(false)
@@ -182,11 +220,15 @@ export function ShowDisplay() {
   useEffect(() => { if (themeReady) frame.current?.contentWindow?.postMessage({ api_version: 1, type: 'state', devices: devices.map(d => ({ ...d, state: states[d.id] })), clock: { timestamp: now.getTime(), timezone: config?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }, display: { voice: state?.voice, view }, media: playback }, '*') }, [themeReady, devices, states, now, config?.timezone, state?.voice, playback, view])
   if (!state || !config) return <main className="display-shell"><h1>Jarvis</h1><p role="status">Loading the display…</p>{error && <p role="alert">{error}</p>}</main>
   const idle = !exit && !confirmation && !parameters && !state.playback.active && !(state.spotify?.active && !state.spotify.paused) && !remotePlayback?.active && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
+  // While Spotify plays, the now-playing view takes the whole screen. Home hides it until the next track.
+  const spotifyKey = state.spotify ? `${state.spotify.title}\u0000${state.spotify.album}` : ''
+  const nowPlaying = !!state.spotify?.active && dismissed !== spotifyKey && !exit && !confirmation && !parameters && (!state.spotify.paused || !idle)
   const hour = Number(new Intl.DateTimeFormat('en-AU', { ...(config.timezone ? { timeZone: config.timezone } : {}), hour: '2-digit', hour12: false }).format(now)) % 24
   const dim = config.night_dim && (config.dim_start < config.dim_end ? hour >= config.dim_start && hour < config.dim_end : hour >= config.dim_start || hour < config.dim_end)
   const photo = config.photos.length ? config.photos[Math.floor(now.getTime() / (config.slide_seconds * 1000)) % config.photos.length] : ''
   const custom = state.theme_url && !themeFailed
   return <main className="display-shell" onPointerDown={() => setLastTouch(Date.now())} onKeyDown={() => setLastTouch(Date.now())} style={{ filter: dim ? `brightness(${config.dim_percent}%)` : undefined }}>
+    {nowPlaying && state.spotify && <ShowSpotifyFull spotify={state.spotify} now={now} send={body => void spotify(body)} onHome={() => setDismissed(spotifyKey)} />}
     <SpeechWaveform voice={state.voice} theme={frame} colour={config.waveform_colour || '#a56bff'} emphasis={config.waveform_emphasis || 150} />
     <header><span className="brand">Jarvis</span><span role="status" className="voice-state">{state.voice === 'idle' ? 'Ready when you are' : state.voice.replace('_', ' ')}</span><button onClick={() => setExit(true)}><Shield size={21} aria-hidden="true" />Exit</button></header>
     {error && <div className="display-error" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}

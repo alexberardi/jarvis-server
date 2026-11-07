@@ -116,6 +116,12 @@ internet, so the agent serves the cover art itself, fetching only from `i.scdn.c
 and resumes it afterwards unless you had paused it. This is an unofficial client: Spotify can change its service without
 notice, and its terms may not permit third-party clients. The receiver failing leaves voice and the display running.
 
+While Spotify plays, the display shows a full-screen now-playing view. It shows the playlist or album playing from,
+the cover, title and artist, a seek bar with elapsed and total time, then shuffle, previous, play or pause, next and
+repeat (off, all, then one track). The device name, a volume slider and a Liked Songs heart sit along the bottom.
+Home leaves the view until the next track starts. The view stays up while paused until the display's idle timeout.
+Lyrics are not offered because go-librespot's local API has no lyrics function.
+
 Spotify Connect discovery needs multicast DNS (mDNS) to reach the phone or computer that is playing. The receiver
 advertises `_spotify-connect._tcp` on UDP port 5353 of the display's own network only, and mDNS does not cross
 subnets or VLANs. If the Spotify app is on a different subnet (for example the display is on a Wi-Fi VLAN and the phone

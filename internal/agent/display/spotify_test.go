@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 type fakeSpotify struct {
 	mu     sync.Mutex
 	status string // "" answers 204 (no session)
+	liked  bool   // what GET /library/liked answers
 	calls  []string
 	bodies []string
 }
@@ -28,6 +30,11 @@ func (f *fakeSpotify) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(f.status))
+		return
+	}
+	if r.Method == "GET" && r.URL.Path == "/library/liked" {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"uri":"` + r.URL.Query().Get("uris") + `","liked":` + strconv.FormatBool(f.liked) + `}]}`))
 		return
 	}
 	buf := make([]byte, 256)
@@ -47,8 +54,8 @@ func (f *fakeSpotify) called(call string) bool {
 	return false
 }
 
-const playingStatus = `{"stopped":false,"paused":false,"buffering":false,"volume":40,"volume_steps":100,"repeat_context":false,"repeat_track":false,"shuffle_context":true,
-"track":{"name":"Hysteria","artist_names":["Muse"],"album_name":"Absolution","album_cover_url":"https://i.scdn.co/image/abc","position":61000,"duration":227000}}`
+const playingStatus = `{"stopped":false,"paused":false,"buffering":false,"volume":40,"volume_steps":100,"repeat_context":false,"repeat_track":false,"shuffle_context":true,"device_name":"Jarvis Display","context_name":"Daily Mix 1","play_origin":"playlist",
+"track":{"uri":"spotify:track:abc","name":"Hysteria","artist_names":["Muse"],"album_name":"Absolution","album_cover_url":"https://i.scdn.co/image/abc","position":61000,"duration":227000}}`
 
 func startSpotifyEngine(t *testing.T, status string) (*Engine, *fakeSpotify) {
 	t.Helper()
@@ -231,5 +238,43 @@ func TestSpotifyCoverNeedsTheSessionAndATrack(t *testing.T) {
 	}
 	if code, _ := (shell{method: "GET", path: "/spotify/cover"}).do(t, e); code != 404 {
 		t.Errorf("with nothing playing = %d, want 404", code)
+	}
+}
+
+func TestSpotifyPollReadsContextDeviceAndLikedState(t *testing.T) {
+	e, f := startSpotifyEngine(t, playingStatus)
+	f.liked = true
+	e.pollSpotify()
+	e.mu.Lock()
+	got := e.spotify
+	e.mu.Unlock()
+	if got.ContextName != "Daily Mix 1" || got.ContextKind != "playlist" || got.DeviceName != "Jarvis Display" || got.URI != "spotify:track:abc" || !got.Liked {
+		t.Fatalf("status %+v", got)
+	}
+}
+
+func TestSpotifyShuffleRepeatAndLikeToggleFromTheLastReading(t *testing.T) {
+	e, f := startSpotifyEngine(t, playingStatus) // shuffle on, repeat off, not liked
+	enable(t, e, "1234")
+	e.pollSpotify()
+	for body, want := range map[string]string{
+		`{"action":"shuffle"}`: `{"shuffle_context":false}`,
+		`{"action":"repeat"}`:  `{"repeat_track":false}`, // off -> context: also sets repeat_context true
+		`{"action":"like"}`:    `"liked":true`,
+	} {
+		if code, out := (shell{path: "/api/spotify", body: body}).do(t, e); code != 200 {
+			t.Fatalf("%s = %d %s", body, code, out)
+		}
+		f.mu.Lock()
+		joined := strings.Join(f.bodies, "|")
+		f.mu.Unlock()
+		if !strings.Contains(joined, want) {
+			t.Errorf("%s: want %s in %v", body, want, joined)
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !strings.Contains(strings.Join(f.bodies, "|"), `{"repeat_context":true}`) {
+		t.Errorf("repeat off should turn repeat context on: %v", f.bodies)
 	}
 }

@@ -55,6 +55,8 @@ type Engine struct {
 	spotifyCover            string
 	spotifyAutoPaused       bool
 	spotifyPolling          bool
+	spotifyLiked            bool
+	spotifyLikedURI         string
 	theme                   *displayconfig.Theme
 	statusError             string
 	ctx                     context.Context
@@ -295,7 +297,7 @@ func (e *Engine) StopReceivers() {
 	}
 	e.receivers = map[string]*exec.Cmd{}
 	e.receiverStatus = map[string]string{}
-	e.spotifyAddr, e.spotify, e.spotifyCover = "", SpotifyStatus{}, ""
+	e.spotifyAddr, e.spotify, e.spotifyCover, e.spotifyLikedURI = "", SpotifyStatus{}, "", ""
 }
 func (e *Engine) GetBrowserCommand() *exec.Cmd {
 	// The local-only profile has no website credentials and must start with auto-login.
