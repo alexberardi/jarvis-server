@@ -1,7 +1,7 @@
 # Playback: one now-playing state per node, any provider (plan)
 
-Status: **planned, 2026-11-07.** Nothing here is built yet. The decisions below were made with the user on
-2026-11-07; each open question carries a recommendation, to be settled one at a time before the pieces start.
+Status: **planned, 2026-11-07; every open question settled the same day (P10–P19).** Nothing here is built
+yet. The next step is piece 1, the SDK.
 
 Paths are relative to the repo root. "The agent" is `cmd/jarvis-agent` and `internal/agent/`; "the music
 module" is `internal/agent/music`; "the SDK" is `jarvis-command-sdk`.
@@ -52,11 +52,12 @@ Music starts, stops and changes from many places, and nothing holds one answer t
 | P11 | **The mobile app checks playback once, at the root (Q2, 2026-11-07).** One React Query query beside `PresenceManager` in `App.tsx`; no screen subscribes. It checks every 2 s while any node plays and every 15 s when none does, only while signed in and in the foreground (wire React Query's `focusManager` to `AppState`, which the app doesn't do yet). A control shows the state jarvisd returns at once. A mini-player bar, drawn once in the tab navigator's tab bar, appears when something plays and opens the full list. It shows only on each tab's first screen: drill-in screens (a routine's edit screen, say) and the root stack's screens (Settings, Inbox) never show it. The tabs hold stack navigators that keep the tab bar on drill-ins, so "wherever the tab bar shows" is not the rule. |
 | P12 | **The node reports changes with an HTTP request (Q3, 2026-11-07).** The user was fine with MQTT or an API request. The node already sends everything to jarvisd over HTTP with its own credentials (the once-a-minute status message is `CC.Beat`, an HTTP call), and uses MQTT only for jarvisd's requests to it and its replies. So it sends each playback change to a node route, at most one a second, with the latest state winning; the status message carries the same record, so jarvisd catches up after a restart. The new route needs tier expectations and the user's review. Controls from jarvisd to the node use the existing MQTT request channel (P6). |
 | P13 | **Sources are an `IJarvisMusicCommand` in the SDK (Q4, 2026-11-07).** The user's idea: "an IMusicCommand that exposes these commands and inherits from IJarvisCommand so it's compatible as a regular command but also gets further customization." Named `IJarvisMusicCommand` after the SDK's `IJarvis*` convention. It adds `playback_status()`, `playback_control()` and `playback_binary` as abstract members, and `report()` as a helper. No new manifest component type. |
-| P14 | **The most recent source wins, and the older one stops (Q6, 2026-11-07).** The user: "most recent works, and when we discover that we should auto kill the old one's status." When a second source starts playing, by any route, the hub stops the older source (its `playback_control("pause")`, or takeover's stop for a player without one) and drops its state, so only one entry per node is ever shown. |
+| P14 | **No stale now-playing (Q6, 2026-11-07).** The most recently started source that is still playing is the one shown. The user's concern, which this decision is built around: "I'm just afraid we're going to have stale data showing" (first stated as "auto kill the old one's status", then: "maybe overcorrecting it"). So nothing is stopped automatically; instead every layer expires what it can no longer confirm. The node polls every source that has reported playing and drops one after three failed checks (6 s). While playing it resends the state every 10 s and sends an empty state on stop. jarvisd drops a node's record after 30 s without a refresh. A control returns the state read back from the player, never the state asked for. The end-to-end check covers each case: stop from outside Jarvis, a second source, the node going offline. |
 | P15 | **A phone streaming over Bluetooth is a source in the first version, if it's easy (Q7, 2026-11-07).** BlueZ exposes the phone's remote-control profile as `org.bluez.MediaPlayer1` over D-Bus, which `internal/agent/bluetooth` already speaks (godbus): play, pause, next, previous, and the track's title, artist, album, duration and position. If that holds on real phones, it ships with the other sources; if it turns out hard, it moves after them and the rest doesn't wait. A phone that doesn't offer the profile shows as "Bluetooth: <phone name>" with no controls. |
 | P16 | **The display's own mpv is a built-in source (Q8, 2026-11-07),** over its existing status and controls (`GetPlaybackStatus`, `ControlMedia`); Cast and Playercast feed that mpv. |
 | P17 | **The hub polls the active source every 2 s while it plays (Q9, 2026-11-07),** and never while idle. A source that pushes with `report()` is still polled, every 10 s, as a check. |
 | P18 | **Go agent nodes only (Q10, 2026-11-07).** The user: the Python node is "totally deprecated." `jarvis-node-setup` gets none of this. |
+| P19 | **Cover art is the image itself (Q5, 2026-11-07; the user took the recommendation).** The source returns the image bytes through the sidecar; the node keeps one per track and serves it to the display and to jarvisd, which serves it to the apps. No core code or app fetches from a service's image host (P1), and an image that needs sign-in works. |
 
 ## Design
 
@@ -71,7 +72,7 @@ One record per node, `null` when nothing plays:
 | `media_title`, `media_artist`, `media_album` | Strings; `media_album` is the one new field next to the catalogue's. |
 | `position`, `duration` | Seconds, with `updated_at`, so a viewer advances the position on its own clock between readings. |
 | `volume` | 0 to 100. |
-| `artwork` | A reference the node serves, never a third-party URL handed to clients (Q5). |
+| `artwork` | A reference to the image the node serves, never a third-party URL handed to clients (P19). |
 | `actions` | What this source supports, from a fixed list: `play`, `pause`, `next`, `previous`, `seek`, `volume`, `shuffle`, `repeat`, plus `like` for a source with a library. Clients show only these. |
 | `shuffle`, `repeat`, `liked`, `context` | Optional; present only when the source reports them. `context` is "playing from" (a playlist or album name). |
 
@@ -95,20 +96,24 @@ pausing), so the hub doesn't have to wait for its next poll. The sidecar recogni
 - **Registry:** sources come from the sidecar's package scan (declared commands) and from built-ins (the
   display's mpv, P16; a phone streaming over Bluetooth, P15).
 - **Current state:** while something plays, the hub polls the active source every 2 s (P17) and takes
-  `report()` pushes. The active source is the one that most recently started playing (P14). When the hub
-  sees a second source start, from anywhere (a voice command, the phone's Spotify app, a phone over
-  Bluetooth), it stops the older one and drops its state, so one source plays at a time. Takeover already
-  does the stopping for a music command's "play"; the hub extends it to sources started outside Jarvis.
+  `report()` pushes. The node shows the most recently started source that is still playing (P14). It polls every
+  source that has reported playing, not only the shown one, so when the newer one stops, an older one
+  still playing shows again. A source that fails three checks in a row (6 s) counts as stopped and its
+  state is dropped. The hub stops no player on its own; takeover still stops the others when a music
+  command plays, as today.
 - **Controls:** every control, from voice, the display, the mobile card or the web UI, goes through
   `hub.Control(action)`, which calls the active source and returns the state read back afterwards.
 - **Ducking and takeover:** they use the registry's declared binaries instead of the hardcoded lists.
-- **Reporting:** state changes go to jarvisd as an HTTP request, at most one a second (P12).
+- **Reporting:** state changes go to jarvisd as an HTTP request, at most one a second (P12). While
+  something plays the node resends the state every 10 s even with no change, and sends an empty state
+  when playback stops (P14).
 - **Built-in commands:** the hub registers the generic transport commands (P5). A music package's own pause
   and skip actions keep working through the migration; once the built-ins ship, they can go.
 
 ### Server
 
-jarvisd keeps the latest record per node in memory (it is live state, not history) and serves it to members
+jarvisd keeps the latest record per node in memory (it is live state, not history), and drops a record
+that hasn't been refreshed for 30 s (a node that crashed or went offline) so the apps never show it (P14). It serves the records to members
 of that node's household. A control request is checked against the household and relayed to the node as a
 command verb (the same channel `node.Runner.Verbs` already carries). New `/api` routes need tier expectations
 in the same PR and get the user's review (AGENTS.md merge policy).
@@ -120,11 +125,9 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 - **Mobile:** a now-playing card listing every playing node in the household, each with its controls (P10), behind a mini-player on the tabs' first screens (P11).
 - **Web UI:** the same card, later; not in the first pieces.
 
-## Open questions (recommendations; settle one at a time)
+## Open questions
 
-| # | Question | Recommendation |
-|---|---|---|
-| Q5 | How does cover art reach the clients? | The source returns the image bytes through the sidecar; the node caches them per track and serves them to the display and to jarvisd. No client or core code fetches a service's image host. |
+None: Q1–Q10 were settled with the user on 2026-11-07 (P10–P19).
 
 ## Pieces (in order)
 
