@@ -3,9 +3,11 @@ package phone
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -116,5 +118,38 @@ func TestEnvelopeFindsMidLineTimes(t *testing.T) {
 	details := "Please call Papa V's Pizza to reserve a table for two people on Friday at 7 PM. If asked: Confirm the party size is two and the date is this Friday. Acceptable times: Friday at 7 PM.\n- Callback number: 732-555-0142"
 	if got, want := ExtractConstraintEnvelope(details), "Acceptable times: Friday at 7 PM."; got != want {
 		t.Fatalf("envelope = %q, want %q", got, want)
+	}
+}
+
+// overlapLLM holds the plan's draft until the categories call has started: in turn, the draft
+// would come first and never see it.
+type overlapLLM struct {
+	*fakeLLM
+	t          *testing.T
+	catStarted chan struct{}
+	once       sync.Once
+}
+
+func (o *overlapLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	switch *req.Messages[0].Content.Text {
+	case categorySystemPrompt:
+		o.once.Do(func() { close(o.catStarted) })
+	case draftSystemPrompt:
+		select {
+		case <-o.catStarted:
+		case <-time.After(10 * time.Second): // only on failure
+			o.t.Error("the draft waited for the categories call: the plan runs them in turn")
+		}
+	}
+	return o.fakeLLM.Chat(ctx, req)
+}
+
+func TestPlanDraftsWhileChoosingCategories(t *testing.T) {
+	e := newEnv(t)
+	e.s.LLM = &overlapLLM{fakeLLM: e.llm, t: t, catStarted: make(chan struct{})}
+	id := e.s.CreatePlan(context.Background(), PlanRequest{Business: "Somewhere", Goal: "do a thing",
+		HouseholdID: hh, UserID: uidPtr(1)})
+	if e.session(id).Details == "" {
+		t.Fatal("no draft")
 	}
 }

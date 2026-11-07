@@ -17,7 +17,7 @@ func TestSpokenTextCrossesTheAudioPath(t *testing.T) {
 	l := New("http://unused", nil)
 	a, _, _ := l.SynthesizePCM(context.Background(), "Hi, this is Jarvis.")
 	b, _, _ := l.SynthesizePCM(context.Background(), "A table for two?")
-	got := l.spoken(append(append([]int16{}, a...), b...))
+	got := l.spoken(append(append([]int16{}, a...), b...), false)
 	if len(got) != 2 || got[0] != "Hi, this is Jarvis." || got[1] != "A table for two?" {
 		t.Fatalf("spoken = %q", got)
 	}

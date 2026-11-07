@@ -21,6 +21,9 @@
 set -euo pipefail
 
 fail() { echo "macos-dmg-check: FAIL: $*" >&2; exit 1; }
+# Apple's ticket lookup (api.apple-cloudkit.com) drops CI runners' connections now and then
+# ("The network connection was lost", stapler error 68, spctl exit 3): retry it.
+retry() { local i; for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; "$@"; }
 say() { printf '\n=== %s\n' "$*"; }
 [ $# -ge 2 ] || fail "usage: $0 <server.dmg> <agent.dmg> [notarized]"
 [ -n "${CI:-}" ] || [ -n "${JARVIS_INSTALL_CHECK_OK:-}" ] || fail "CI only (it installs a system service)"
@@ -102,16 +105,16 @@ done
 if [ "$NOTARIZED" = notarized ]; then
   say "Gatekeeper and the stapled tickets"
   for app in "$SERVER_IN_DMG" "$AGENT_IN_DMG"; do
-    v=$(spctl --assess --type execute --verbose=4 "$app" 2>&1) || { echo "$v"; fail "Gatekeeper refuses $app"; }
+    v=$(retry spctl --assess --type execute --verbose=4 "$app" 2>&1) || { echo "$v"; fail "Gatekeeper refuses $app"; }
     echo "$v"
     echo "$v" | grep -q "source=Notarized Developer ID" || fail "$app isn't notarized"
-    xcrun stapler validate "$app" || fail "$app has no stapled ticket"
+    retry xcrun stapler validate "$app" || fail "$app has no stapled ticket"
   done
   for dmg in "$SERVER_DMG" "$AGENT_DMG"; do
-    v=$(spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1) || { echo "$v"; fail "Gatekeeper refuses $dmg"; }
+    v=$(retry spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1) || { echo "$v"; fail "Gatekeeper refuses $dmg"; }
     echo "$v"
     echo "$v" | grep -q "source=Notarized Developer ID" || fail "$dmg isn't notarized"
-    xcrun stapler validate "$dmg" || fail "$dmg has no stapled ticket"
+    retry xcrun stapler validate "$dmg" || fail "$dmg has no stapled ticket"
   done
 else
   echo "(not notarized: an ad-hoc dry run; spctl and stapler are checked on a signed release)"

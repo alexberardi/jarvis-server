@@ -77,7 +77,7 @@ func modules(env config.Env) []module.Module {
 			AllowAnonymous: env.MQTTAllowAnonymous,
 			AllowedOrigins: mqttAllowedOrigins(env.MQTTWSAllowedOrigins),
 		},
-		Phone: phoneConfig(env), // cmd/jarvisd/phone.go
+		Phone: phoneConfig(env, ttsm, sttm), // cmd/jarvisd/phone.go
 	}
 	auth := &authmod.Module{
 		AdminToken: env.AuthAdminToken,

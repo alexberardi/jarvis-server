@@ -353,8 +353,21 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	said := strings.Join(t.Said, " ")
+	for _, u := range t.Understood {
+		fmt.Fprintf(c.out, "   👂 jarvis heard: %s\n", u)
+	}
 	if said != "" {
 		fmt.Fprintf(c.out, "   🤖 %s\n", said)
+	}
+	// Voice mode: the persona hears only whisper's transcription of Jarvis's audio; the exact
+	// text above stays in the log and the expectations.
+	heard := said
+	if t.Voice && said != "" {
+		heard = t.Heard
+		if heard == "" {
+			heard = "(something you couldn't make out)"
+		}
+		fmt.Fprintf(c.out, "   👂 business heard: %s\n", heard)
 	}
 	c.mu.Lock()
 	c.said = append(c.said, t.Said...)
@@ -362,7 +375,7 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	persona := c.persona
 	switch {
 	case said != "":
-		c.messages = append(c.messages, map[string]string{"role": "user", "content": said})
+		c.messages = append(c.messages, map[string]string{"role": "user", "content": heard})
 	case t.Event == "silence":
 		c.messages = append(c.messages, map[string]string{"role": "user", "content": "(silence on the line)"})
 	}
