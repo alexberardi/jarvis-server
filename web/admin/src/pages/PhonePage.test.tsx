@@ -58,17 +58,18 @@ beforeEach(() => {
   get.mockImplementation(async (url: string) => {
     if (url === '/api/phone/sip') return { data: status }
     if (url === '/api/phone/sip/trace') return { data: { dialogs: trace } }
+    if (url === '/api/settings/?service=cc') return { data: { services: [{ service_name: 'cc', success: true, settings: [], error: null, latency_ms: 1 }], total_services: 1, successful_services: 1, failed_services: 0 } }
     throw new Error('unexpected GET ' + url)
   })
   post.mockResolvedValue({ data: { test: 'connection', state: 'running', started: '2026-10-22T08:00:00Z', summary: '', steps: [] } })
 })
 
 describe('PhonePage', () => {
-  it('shows the empty state with a way to Settings when no SIP account runs', async () => {
+  it('shows the empty state with a way to the phone settings when no SIP account runs', async () => {
     status.accounts = []
     renderPage()
     expect(await screen.findByRole('heading', { name: 'No SIP account is running' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/admin/settings')
+    expect(screen.getByRole('link', { name: 'Set up the phone line' })).toHaveAttribute('href', '#phone-calls-section')
   })
 
   it('shows an account: registration, round trips and the five self-tests', async () => {

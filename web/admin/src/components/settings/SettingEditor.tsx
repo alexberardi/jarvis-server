@@ -10,11 +10,13 @@ interface SettingEditorProps {
   onSave: (value: unknown) => void
   onCancel: () => void
   isSaving: boolean
+  /** The controls' accessible name; the key by default. */
+  label?: string
 }
 
 const OTHER = '__other__'
 
-export default function SettingEditor({ setting, onSave, onCancel, isSaving }: SettingEditorProps) {
+export default function SettingEditor({ setting, onSave, onCancel, isSaving, label = setting.key }: SettingEditorProps) {
   const [rawValue, setRawValue] = useState(() => {
     // Write-only: a secret's editor starts empty, never with the mask (I5).
     if (setting.is_secret) return ''
@@ -84,7 +86,7 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
       {hasOptions ? (
         <>
           <Select
-            aria-label={setting.key}
+            aria-label={label}
             wrapperClassName="w-full sm:w-64"
             value={showCustomInput ? OTHER : rawValue}
             onValueChange={(v) => {
@@ -103,7 +105,7 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
           />
           {showCustomInput && (
             <Input
-              aria-label={`${setting.key}, custom value`}
+              aria-label={`${label}, custom value`}
               wrapperClassName="w-full sm:w-64"
               value={rawValue}
               onChange={(e) => setRawValue(e.target.value)}
@@ -115,14 +117,14 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
       ) : setting.value_type === 'bool' ? (
         <Switch
           className="flex h-10 items-center"
-          aria-label={setting.key}
+          aria-label={label}
           checked={boolValue}
           onCheckedChange={setBoolValue}
         />
       ) : setting.value_type === 'json' ? (
         <div className="flex w-full flex-col gap-1.5">
           <textarea
-            aria-label={setting.key}
+            aria-label={label}
             aria-invalid={validationError ? true : undefined}
             aria-describedby={validationError ? errorId : undefined}
             value={rawValue}
@@ -138,7 +140,7 @@ export default function SettingEditor({ setting, onSave, onCancel, isSaving }: S
         </div>
       ) : (
         <Input
-          aria-label={setting.key}
+          aria-label={label}
           wrapperClassName="w-full sm:w-64"
           type={setting.value_type === 'int' || setting.value_type === 'float' ? 'number' : setting.is_secret ? 'password' : 'text'}
           step={setting.value_type === 'float' ? 'any' : undefined}
