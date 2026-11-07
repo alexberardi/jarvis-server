@@ -492,7 +492,13 @@ func ensureTimesSection(goal, details string) string {
 
 var constraintPrefixes = []string{"acceptable times:", "do not book:"}
 
-var midLineConstraintRE = regexp.MustCompile(`(?i)[^\S\n]+((?:acceptable times|do not book):)`)
+var (
+	midLineConstraintRE = regexp.MustCompile(`(?i)[^\S\n]+((?:acceptable times|do not book):)`)
+	// A drafted line can be Markdown: "- **Acceptable times:** Friday at 7pm".
+	markdownLeadRE = regexp.MustCompile(`^(?:[-*•>]+\s*)?`)
+	// placeholderRE is ensureTimesSection's and formatAvailability's to-do text.
+	placeholderRE = regexp.MustCompile(`(?i)\((?:[^)]*\bfill in\b|calendar shows no free windows)[^)]*\)`)
+)
 
 // ExtractConstraintEnvelope pulls the negotiating bounds back out of the confirmed brief
 // (placeholders are not constraints).
@@ -504,16 +510,16 @@ func ExtractConstraintEnvelope(details string) string {
 	// A model may draft "…If asked: …. Acceptable times: …" on one line.
 	details = midLineConstraintRE.ReplaceAllString(details, "\n$1")
 	for _, line := range splitLines(details) {
-		t := strings.TrimSpace(line)
+		t := strings.TrimSpace(markdownLeadRE.ReplaceAllString(strings.NewReplacer("**", "", "__", "").Replace(strings.TrimSpace(line)), ""))
 		lt := strings.ToLower(t)
-		match := false
 		for _, p := range constraintPrefixes {
-			if strings.HasPrefix(lt, p) {
-				match = true
+			if !strings.HasPrefix(lt, p) {
+				continue
 			}
-		}
-		if match && !strings.Contains(lt, "(fill in") {
-			real = append(real, t)
+			// A placeholder is no constraint; times typed beside one are ("Friday 7pm (fill in …)").
+			if body := strings.TrimSpace(placeholderRE.ReplaceAllString(t[len(p):], "")); strings.Trim(body, " .;") != "" {
+				real = append(real, strings.TrimSpace(t[:len(p)]+" "+body))
+			}
 		}
 	}
 	return strings.Join(real, "\n")
