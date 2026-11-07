@@ -37,13 +37,15 @@ type callRuntime struct {
 	sessionID   string
 	householdID string
 	brief       live.Brief
-	maxSeconds  int64
-	escalation  *live.EscalationWindow
-	recorder    *live.Recorder
-	disclosure  []int16
-	pipeline    *turnPipeline
-	ctx         context.Context
-	cancel      context.CancelFunc
+	// now is the household's local time when the call started: it places an offer's "tomorrow".
+	now        time.Time
+	maxSeconds int64
+	escalation *live.EscalationWindow
+	recorder   *live.Recorder
+	disclosure []int16
+	pipeline   *turnPipeline
+	ctx        context.Context
+	cancel     context.CancelFunc
 
 	started   chan struct{}
 	startOnce sync.Once
@@ -150,8 +152,9 @@ func (s *Service) runCall(id string, tel Telephony) {
 		fail(err.Error())
 		return
 	}
+	now := s.localNow(ctx, sess.HouseholdID)
 	brief := live.Brief{Goal: sess.Goal, Details: sess.Details,
-		Constraints:   timewindow.ResolveRelativeDays(ExtractConstraintEnvelope(sess.Details), s.localNow(ctx, sess.HouseholdID)),
+		Constraints:   timewindow.ResolveRelativeDays(ExtractConstraintEnvelope(sess.Details), now),
 		InitiatorName: s.initiatorName(ctx, sess.UserID)}
 
 	// Prewarm, and a hard gate: no disclosure, no dial.
@@ -162,7 +165,7 @@ func (s *Service) runCall(id string, tel Telephony) {
 	}
 
 	rt := &callRuntime{
-		sessionID: id, householdID: sess.HouseholdID, brief: brief,
+		sessionID: id, householdID: sess.HouseholdID, brief: brief, now: now,
 		maxSeconds: s.intSetting(ctx, SettingMaxCallSeconds, sess.HouseholdID, 600),
 		escalation: &live.EscalationWindow{Timeout: s.EscalationWindow},
 		recorder:   &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,
