@@ -130,3 +130,18 @@ func TestDedupeFacts(t *testing.T) {
 		t.Fatalf("facts: %q", got)
 	}
 }
+
+func TestARepeatedOfferIsNotJudgedAgain(t *testing.T) {
+	rt := &callRuntime{brief: live.Brief{Goal: "book a table", Constraints: "Acceptable times: Friday at 7pm"}}
+	p := (&Service{}).newTurnPipeline(rt, nil)
+	if p.schedulingNote("Fully booked at 7. I can do 6:15 PM or 7:30 PM on Friday.") == "" {
+		t.Fatal("no note on the offers")
+	}
+	// Gemma 4 stalled 20 s when the host's "Yes, 7:30 PM. Can I get a name?" re-noted 7:30.
+	if note := p.schedulingNote("Yes, we can do 7:30 PM on Friday. Can I get a name?"); note != "" {
+		t.Fatalf("re-noted an offer: %q", note)
+	}
+	if p.schedulingNote("Or Friday at 9:15 PM?") == "" {
+		t.Fatal("a new offer got no note")
+	}
+}
