@@ -58,6 +58,18 @@ CommandInvoker runs another loaded command in this process, and the SDK's stdlib
 fallback writes to stderr. Without the flag (the desktop agent) none is registered, so a
 command gets the SDK's safe defaults.
 
+Music commands (IJarvisMusicCommand, SDK >= 0.16.0; describe marks them "music": true) are the
+playback sources of docs/agent/PLAYBACK.md. The agent polls and controls them:
+
+    -> {"method": "playback_status", "params": {"command_name"}}   <- {"state": {...} | null} | {"error"}
+    -> {"method": "playback_control", "params": {"command_name", "action", "args": {...}}}
+                                                                   <- {"state": {...} | null} | {"error"}
+    -> {"method": "playback_artwork", "params": {"command_name"}}  <- {"mime", "data": base64} | {} | {"error"}
+    -> {"method": "playback_reports"}       <- {"reports": [{"command_name", "state": {...} | null}, ...]}
+
+A command's report() (any thread) only queues its latest state here: the agent reads stdout only
+while it waits for a reply, so nothing is written unasked. playback_reports drains the queue.
+
 "signals" are the CommandResponse fields only the node acts on; they never reach
 command-center. A command's on_response_complete callable (a media command's deferred "start
 playing now") stays here under a token; the agent runs it with "complete" once the spoken reply
@@ -77,6 +89,7 @@ import json
 import pathlib
 import re
 import sys
+import threading
 import traceback
 
 PROTO = sys.stdout
@@ -645,6 +658,87 @@ def _takeover(cmd):
     return binary if isinstance(binary, str) else None
 
 
+# --- Playback: IJarvisMusicCommand sources (docs/agent/PLAYBACK.md) ---
+
+_REPORTS: dict = {}  # command -> its latest reported state (None: stopped), until drained
+_REPORTS_LOCK = threading.Lock()
+
+
+def _music_base():
+    """IJarvisMusicCommand, or None with an SDK older than 0.16.0 (a desktop venv may hold one)."""
+    try:
+        from jarvis_command_sdk.music import IJarvisMusicCommand
+    except ImportError:
+        return None
+    return IJarvisMusicCommand
+
+
+def _is_music(cmd) -> bool:
+    base = _music_base()
+    return base is not None and isinstance(cmd, base)
+
+
+def register_playback_backend() -> None:
+    """report() queues here on every node (no --backends needed: nothing leaves the process)."""
+    try:
+        from jarvis_command_sdk.music import PlaybackBackend, set_playback_backend
+    except ImportError:
+        return
+
+    class QueuedReports(PlaybackBackend):
+        def report(self, command_name, state):
+            with _REPORTS_LOCK:
+                _REPORTS[command_name] = state
+            return True
+
+    set_playback_backend(QueuedReports())
+
+
+def _music_command(commands: dict, params: dict):
+    cmd = commands.get(params.get("command_name", ""))
+    if cmd is None or not _is_music(cmd):
+        raise LookupError(f"not a music command: {params.get('command_name')!r}")
+    return cmd
+
+
+def _state(st):
+    return st.to_dict() if st is not None else None
+
+
+def playback_status(commands: dict, params: dict) -> dict:
+    try:
+        return {"state": _state(_music_command(commands, params).playback_status())}
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def playback_control(commands: dict, params: dict) -> dict:
+    try:
+        cmd = _music_command(commands, params)
+        return {"state": _state(cmd.playback_control(params.get("action", ""), **(params.get("args") or {})))}
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def playback_artwork(commands: dict, params: dict) -> dict:
+    import base64
+
+    try:
+        art = _music_command(commands, params).playback_artwork()
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    if art is None:
+        return {}
+    return {"mime": art.mime, "data": base64.b64encode(art.data).decode("ascii")}
+
+
+def playback_reports() -> dict:
+    with _REPORTS_LOCK:
+        reports = [{"command_name": k, "state": v} for k, v in _REPORTS.items()]
+        _REPORTS.clear()
+    return {"reports": reports}
+
+
 def describe(commands: dict) -> dict:
     tools = []
     for name, cmd in commands.items():
@@ -655,7 +749,7 @@ def describe(commands: dict) -> dict:
                           "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name),
                           "context_operations": _context_ops(cmd),
                           "call_context_description": _optional(cmd, "call_context_description"),
-                          "takes_over_playback_binary": _takeover(cmd)})
+                          "takes_over_playback_binary": _takeover(cmd), "music": _is_music(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:
@@ -1399,6 +1493,7 @@ DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "devic
 
 def main() -> None:
     set_backend(AgentStorage())
+    register_playback_backend()
     if "--backends" in sys.argv[2:]:
         register_backends()
     commands = None
@@ -1442,6 +1537,14 @@ def main() -> None:
                 reply = {"id": msg_id, "result": user_secrets(commands, msg.get("params") or {})}
             elif method == "context_query":
                 reply = {"id": msg_id, "result": context_query(commands, msg.get("params") or {})}
+            elif method == "playback_status":
+                reply = {"id": msg_id, "result": playback_status(commands, msg.get("params") or {})}
+            elif method == "playback_control":
+                reply = {"id": msg_id, "result": playback_control(commands, msg.get("params") or {})}
+            elif method == "playback_artwork":
+                reply = {"id": msg_id, "result": playback_artwork(commands, msg.get("params") or {})}
+            elif method == "playback_reports":
+                reply = {"id": msg_id, "result": playback_reports()}
             elif method == "agent_run":
                 reply = {"id": msg_id, "result": agent_run(msg.get("params") or {})}
             elif method == "reminders_due":

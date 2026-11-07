@@ -89,6 +89,7 @@ type Sidecar struct {
 	context []nodesettings.ContextCommand
 	pkgOf   map[string]string // command -> the installed package it came from
 	player  map[string]string // command -> its takes_over_playback_binary
+	music   []MusicCommand    // the IJarvisMusicCommand sources, in load order
 	failed  map[string]string // package -> why its commands didn't load
 	agents  []AgentDef
 
@@ -190,6 +191,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			ContextOps  []json.RawMessage         `json:"context_operations"`
 			ContextDesc string                    `json:"call_context_description"`
 			Player      string                    `json:"takes_over_playback_binary"`
+			Music       bool                      `json:"music"`
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
@@ -216,6 +218,9 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			Description: contextDescription(t.ContextDesc, t.ContextOps)})
 		if t.Player != "" {
 			s.player[t.Name] = t.Player
+		}
+		if t.Music {
+			s.music = append(s.music, MusicCommand{Name: t.Name, Binary: t.Player})
 		}
 		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
 			b.Name = t.Name
