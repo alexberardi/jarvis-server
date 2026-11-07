@@ -95,6 +95,24 @@ func (s *Service) newTurnPipeline(rt *callRuntime, restricted []live.RestrictedF
 	return p
 }
 
+// wire is what goes to the model: the messages, with the call prompt's /no_think directive
+// (written for Qwen, which reads it as "answer without thinking") taken out unless the live
+// model takes it. Gemma 4 read it as text on every turn.
+func (rt *callRuntime) wire(ms []chatMsg) []llm.Message {
+	if rt == nil || rt.suffix {
+		return toLLM(ms)
+	}
+	out := make([]chatMsg, 0, len(ms))
+	for _, m := range ms {
+		t := strings.TrimSpace(strings.TrimSuffix(strings.TrimRight(m.content, " \n"), live.NoThinkDirective))
+		if t == "" && m.content != "" {
+			continue // a message that was only the directive
+		}
+		out = append(out, chatMsg{m.role, t})
+	}
+	return toLLM(out)
+}
+
 func toLLM(ms []chatMsg) []llm.Message {
 	out := make([]llm.Message, len(ms))
 	for i, m := range ms {
@@ -158,7 +176,7 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 	defer cancel()
 	maxTok := 400
 	t0 := time.Now()
-	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: toLLM(msgs), MaxTokens: &maxTok})
+	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
 	if err != nil {
 		return nil, "", nil, nil, nil, err
 	}
@@ -185,7 +203,7 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 			events = append(events, guardSuppressed{[]string{"confirmation"}})
 			return
 		}
-		if flagged := live.FindRestricted(sentence, p.restricted); len(flagged) > 0 {
+		if flagged := restrictedIn(sentence, p.restricted); len(flagged) > 0 {
 			if verdict == nil {
 				verdict = make(chan map[string]bool, 1)
 				go func() { verdict <- p.askedKeys(ctx, heard) }()
@@ -341,7 +359,7 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 		msgs = append(msgs, chatMsg{m[0], m[1]})
 	}
 	maxTok := live.ClassifyMaxTokens
-	resp, err := p.s.LLM.Chat(cctx, llm.ChatRequest{Label: "live", Messages: toLLM(msgs), MaxTokens: &maxTok})
+	resp, err := p.s.LLM.Chat(cctx, llm.ChatRequest{Label: "live", Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
 	if err != nil || resp == nil {
 		p.s.log().Warn("phone: ask-classifier unavailable, suppressing", "err", err)
 		return out
@@ -363,7 +381,7 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 	if len(verdicts) == 0 {
 		return ""
 	}
-	var open, closed []string
+	refused := refusedLabels(env, heard, p.rt.now)
 	fresh := false
 	for _, v := range verdicts {
 		if !p.judged[*v.ProposedLabel] {
@@ -376,43 +394,79 @@ func (p *turnPipeline) schedulingNote(heard string) string {
 	if p.judged == nil {
 		p.judged = map[string]bool{}
 	}
+	// A time the business says it can't do ("fully booked at 7") isn't an offer: listing it as
+	// acceptable had Gemma 4 keep asking for the 7 it had just been refused.
+	var cant, open, closed []string
 	for _, v := range verdicts {
-		p.judged[*v.ProposedLabel] = true
-		if *v.Available {
-			open = append(open, *v.ProposedLabel)
-		} else {
-			closed = append(closed, *v.ProposedLabel)
+		l := *v.ProposedLabel
+		p.judged[l] = true
+		switch {
+		case refused[l]:
+			cant = append(cant, l)
+		case *v.Available:
+			open = append(open, l)
+		default:
+			closed = append(closed, l)
 		}
-	}
-	if len(closed) == 0 {
-		label := *verdicts[0].ProposedLabel
-		return "[Scheduling check — ground truth, do not recompute: " + label + " " +
-			"is confirmed OPEN on the caller's calendar. Treat it as " +
-			"available: offer that slot to the business, and do not tell " +
-			"them it is unavailable.]"
-	}
-	p.noteOffered(closed)
-	summary := "the times in your brief"
-	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
-		summary = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(*s, "Acceptable times:"), "acceptable times:"))
 	}
 	who := p.rt.brief.InitiatorName
 	if who == "" {
 		who = "the person you are calling for"
 	}
-	one := len(closed) == 1
-	note := "[Scheduling check — ground truth, do not recompute: " + strings.Join(closed, ", ") + " " +
-		map[bool]string{true: "is", false: "are"}[one] + " outside the caller's acceptable times (" + summary + "). " +
-		"Do not agree to " + map[bool]string{true: "it", false: "any of them"}[one] + "."
-	if len(open) > 0 {
-		note += " Acceptable: " + strings.Join(open, ", ") + " — take that if the business can do it."
-	} else {
+	summary := "the times in your brief"
+	if s := verdicts[0].AcceptableSummary; s != nil && *s != "" {
+		summary = strings.TrimRight(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(*s, "Acceptable times:"), "acceptable times:")), ".")
+	}
+	isAre := func(ls []string) string { return map[bool]string{true: " is", false: " are"}[len(ls) == 1] }
+	note := "[Scheduling check — ground truth, do not recompute:"
+	if len(cant) > 0 {
+		note += " They can't do " + strings.Join(cant, ", ") + "."
+	}
+	if len(closed) > 0 {
+		p.noteOffered(closed)
+		note += " " + strings.Join(closed, ", ") + isAre(closed) + " outside " + who + "'s acceptable times (" + summary +
+			"): don't agree to " + map[bool]string{true: "it", false: "them"}[len(closed) == 1] + "."
+	}
+	switch {
+	case len(open) > 0 && len(cant)+len(closed) == 0:
+		note += " " + strings.Join(open, ", ") + isAre(open) + " within " + who + "'s acceptable times: if they're offering " +
+			"it, accept it; if you're asking, ask for it. Don't tell them it doesn't work, and don't ask " + who + " first."
+	case len(open) > 0:
+		note += " " + strings.Join(open, ", ") + isAre(open) + " within " + who + "'s acceptable times: book " +
+			map[bool]string{true: "it", false: "one of them"}[len(open) == 1] + " with them now; don't ask " + who + " first."
+	default:
 		// Decided 2026-11-06: no mid-call question for a time outside the window; call back.
-		note += " Ask whether they have anything within the acceptable times. If they don't, do not agree " +
-			"to another time and do not use [ESCALATE]: tell them you'll check with " + who + " and call back, " +
-			"thank them, say goodbye and emit [HANGUP]."
+		note += " Ask whether they have anything within " + summary + ". If they don't, do not agree to another time " +
+			"and do not use [ESCALATE]: tell them you'll check with " + who + " and call back, thank them, say goodbye " +
+			"and emit [HANGUP]."
 	}
 	return note + "]"
+}
+
+var (
+	clauseRE  = regexp.MustCompile(`[.;!?]+(?:\s+|$)|,?\s+\b(?:but|however|though)\b`)
+	refusalRE = regexp.MustCompile(`(?i)\b(?:booked|full|fully|sold out|closed|unavailable|not available|isn'?t available|no (?:availability|tables?|openings?|room|spots?)|nothing (?:at|for)|can'?t|cannot|don'?t have|do not have|won'?t work)\b`)
+	weekdayRE = regexp.MustCompile(`(?i)\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tonight|tomorrow)\b`)
+)
+
+// refusedLabels are the times heard in a clause that turns them down ("we're fully booked at 7
+// this Friday"), judged with the utterance's day so their labels match its verdicts.
+func refusedLabels(env, heard string, now time.Time) map[string]bool {
+	out := map[string]bool{}
+	day := weekdayRE.FindString(heard)
+	for _, c := range clauseRE.Split(heard, -1) {
+		if !refusalRE.MatchString(c) {
+			continue
+		}
+		if day != "" && !weekdayRE.MatchString(c) {
+			c = day + " " + c
+		}
+		_, vs := judgeOffer(env, c, now)
+		for _, v := range vs {
+			out[*v.ProposedLabel] = true
+		}
+	}
+	return out
 }
 
 func (p *turnPipeline) roleReminder() string {
@@ -424,6 +478,29 @@ func (p *turnPipeline) roleReminder() string {
 		"person works where you called: they handle the request and ask the questions. Don't collect details from " +
 		"them or offer them help. Once they have done or confirmed what you called for, or said they can't, record " +
 		"[OUTCOME: …], thank them, say goodbye and emit [HANGUP].]"
+}
+
+var (
+	yearRE  = regexp.MustCompile(`\b(?:19|20)\d\d\b`)
+	monthRE = regexp.MustCompile(`(?i)\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b\d{1,2}/\d{1,2}/`)
+	birthRE = regexp.MustCompile(`(?i)\b(?:born|birth|birthday|dob|d\.o\.b)\b`)
+)
+
+// restrictedIn is live.FindRestricted, except that a saved date with a year (a date of birth)
+// is only disclosed when the sentence says the year or talks about a birth: Jarvis saying the
+// appointment it is booking, "Thursday, November 12", isn't reading out "November 12, 1978"
+// (a real call where every line naming the new date was suppressed).
+func restrictedIn(sentence string, fields []live.RestrictedField) []live.RestrictedField {
+	flagged := live.FindRestricted(sentence, fields)
+	out := flagged[:0:0]
+	for _, f := range flagged {
+		year := yearRE.FindString(f.Value)
+		if year != "" && monthRE.MatchString(f.Value) && !strings.Contains(sentence, year) && !birthRE.MatchString(sentence) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // noteOffered records times the business offered outside the window as call facts, so the
@@ -733,7 +810,9 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		// The question goes with the answer: a reply that was only the escalation token left no
 		// trace in the history. The caller's answer is newer than the plan, so it wins.
 		p.messages = append(p.messages, chatMsg{"user", "[You asked " + who + ": \"" + question + "\". " + who +
-			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it.]"})
+			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it. " +
+			"If it doesn't actually give what you asked for (\"whatever works\", \"I don't know\"), never repeat their words as the detail: " +
+			"choose within your brief, or tell the business you don't have it.]"})
 		if mightBeTime(answer) {
 			p.timesFromCaller = true
 		}
@@ -881,11 +960,20 @@ func (s *Service) assess(ctx context.Context, p *turnPipeline, goal string) (str
 	if s.LLM == nil {
 		return fallback()
 	}
-	actx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: toLLM(msgs)})
+	// The background slot can be busy (a 31B behind other work): the card has no hurry, so it
+	// waits longer and asks twice before falling back to a verdict-less "Call completed".
+	var resp *llm.ChatResponse
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		actx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		resp, err = s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: p.rt.wire(msgs)})
+		cancel()
+		if err == nil && resp != nil {
+			break
+		}
+		s.log().Warn("phone: wrapup assessment failed", "attempt", attempt+1, "err", err)
+	}
 	if err != nil || resp == nil {
-		s.log().Error("phone: wrapup assessment failed", "err", err)
 		return fallback()
 	}
 	summary, achieved := live.ParseAssessment(live.StripThinkText(resp.Content))
