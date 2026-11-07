@@ -55,7 +55,7 @@ Music starts, stops and changes from many places, and nothing holds one answer t
 | P14 | **No stale now-playing (Q6, 2026-11-07).** The most recently started source that is still playing is the one shown. The user's concern, which this decision is built around: "I'm just afraid we're going to have stale data showing" (first stated as "auto kill the old one's status", then: "maybe overcorrecting it"). So nothing is stopped automatically; instead every layer expires what it can no longer confirm. The node polls every source that has reported playing and drops one after three failed checks (6 s). While playing it resends the state every 10 s and sends an empty state on stop. jarvisd drops a node's record after 30 s without a refresh. A control returns the state read back from the player, never the state asked for. The end-to-end check covers each case: stop from outside Jarvis, a second source, the node going offline. |
 | P15 | **A phone streaming over Bluetooth is a source in the first version, if it's easy (Q7, 2026-11-07).** BlueZ exposes the phone's remote-control profile as `org.bluez.MediaPlayer1` over D-Bus, which `internal/agent/bluetooth` already speaks (godbus): play, pause, next, previous, and the track's title, artist, album, duration and position. If that holds on real phones, it ships with the other sources; if it turns out hard, it moves after them and the rest doesn't wait. A phone that doesn't offer the profile shows as "Bluetooth: <phone name>" with no controls. |
 | P16 | **The display's own mpv is a built-in source (Q8, 2026-11-07),** over its existing status and controls (`GetPlaybackStatus`, `ControlMedia`); Cast and Playercast feed that mpv. |
-| P17 | **The hub polls the active source every 2 s while it plays (Q9, 2026-11-07),** and never while idle. A source that pushes with `report()` is still polled, every 10 s, as a check. |
+| P17 | **The hub polls each source that is playing every 2 s (Q9, 2026-11-07),** and none while idle. A source that pushes with `report()` is still polled, every 10 s, as a check. |
 | P18 | **Go agent nodes only (Q10, 2026-11-07).** The user: the Python node is "totally deprecated." `jarvis-node-setup` gets none of this. |
 | P19 | **Cover art is the image itself (Q5, 2026-11-07; the user took the recommendation).** The source returns the image bytes through the sidecar; the node keeps one per track and serves it to the display and to jarvisd, which serves it to the apps. No core code or app fetches from a service's image host (P1), and an image that needs sign-in works. |
 
@@ -95,7 +95,7 @@ pausing), so the hub doesn't have to wait for its next poll. The sidecar recogni
 
 - **Registry:** sources come from the sidecar's package scan (declared commands) and from built-ins (the
   display's mpv, P16; a phone streaming over Bluetooth, P15).
-- **Current state:** while something plays, the hub polls the active source every 2 s (P17) and takes
+- **Current state:** while something plays, the hub polls each playing source every 2 s (P17) and takes
   `report()` pushes. The node shows the most recently started source that is still playing (P14). It polls every
   source that has reported playing, not only the shown one, so when the newer one stops, an older one
   still playing shows again. A source that fails three checks in a row (6 s) counts as stopped and its
