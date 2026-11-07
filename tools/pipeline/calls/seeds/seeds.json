@@ -1,0 +1,140 @@
+[
+  {
+    "name": "restaurant",
+    "category": "dining",
+    "business": "Harbor Grill",
+    "contact": {"name": "Harbor Grill", "number": "+17325550111"},
+    "task": "a dinner reservation",
+    "request": "Call Harbor Grill and book a table{party}{when}{name}",
+    "callee": "You are Gina, the host at Harbor Grill, a seafood restaurant in Point Pleasant, New Jersey. Greet with \"Harbor Grill, this is Gina.\" Take reservations: ask for the name, confirm the booking back, then say goodbye.",
+    "timed": true,
+    "hour": 19,
+    "party": 2
+  },
+  {
+    "name": "dentist-calendar",
+    "category": "medical",
+    "business": "Bright Smiles Dental",
+    "contact": {"name": "Bright Smiles Dental", "number": "+17325550199"},
+    "task": "a dental cleaning that fits the calendar",
+    "request": "Call Bright Smiles Dental and book me a cleaning next week that fits my calendar{name}",
+    "callee": "You are Dana, the receptionist at Bright Smiles Dental. Greet with \"Bright Smiles Dental, this is Dana.\" Book cleanings: ask for the patient's name and date of birth, read the appointment back, and say goodbye.",
+    "timed": true,
+    "hour": 15,
+    "offer_day": "Wednesday next week",
+    "other_day": "Tuesday next week",
+    "node_context": {
+      "availability": {
+        "free": ["Wed 1-5pm", "Thu 2-5pm"],
+        "busy": ["Mon 8am-6pm (Work)", "Tue 8am-6pm (Work)", "Fri 8am-6pm (Travel)"]
+      }
+    }
+  },
+  {
+    "name": "doctor-physical",
+    "category": "medical",
+    "business": "Shore Family Medicine",
+    "contact": {"name": "Shore Family Medicine", "number": "+17325550140"},
+    "task": "an annual physical",
+    "request": "Call Shore Family Medicine and schedule my annual physical{when}{name}",
+    "callee": "You are Pat at the front desk of Shore Family Medicine. Greet with \"Shore Family Medicine, this is Pat.\" Schedule the physical: ask for the patient's name, confirm the appointment, remind them to arrive ten minutes early, then say goodbye.",
+    "timed": true,
+    "hour": 10
+  },
+  {
+    "name": "pharmacy-refill",
+    "category": "medical",
+    "business": "Brick Family Pharmacy",
+    "contact": {"name": "Brick Family Pharmacy", "number": "+17325550123"},
+    "task": "a prescription refill",
+    "request": "Call Brick Family Pharmacy and get my lisinopril refilled{name}",
+    "callee": "You are Sam, a pharmacy technician at Brick Family Pharmacy. Greet with \"Brick Family Pharmacy, this is Sam.\" To find the prescription ask for the patient's name. Then say the lisinopril refill will be ready tomorrow after 2 PM for pickup, confirm that's okay, and say goodbye.",
+    "answer": "Yes, tomorrow after 2 is fine"
+  },
+  {
+    "name": "gym-cancel",
+    "category": "general",
+    "business": "Ironworks Gym",
+    "contact": {"name": "Ironworks Gym", "number": "+17325550177"},
+    "task": "cancelling a gym membership despite retention offers",
+    "request": "Call Ironworks Gym and cancel my membership. Don't accept any discounts or freezes, I just want it cancelled{name}",
+    "callee": "You are Chris in member services at Ironworks Gym. Greet with \"Ironworks Gym, member services, this is Chris.\" When asked to cancel, ask for the member's name. Then try to keep them twice: first offer three months at half price, then offer to freeze the membership for free. Only after they refuse both, confirm the cancellation is done effective the end of the month, give cancellation number CX-2291, and say goodbye.",
+    "answer": "No, just cancel it"
+  },
+  {
+    "name": "internet-renewal",
+    "category": "home",
+    "business": "Shore Fiber",
+    "contact": {"name": "Shore Fiber", "number": "+17325550188"},
+    "task": "renewing an internet promo rate without add-ons",
+    "request": "Call Shore Fiber and renew my internet promo rate before it expires. Keep it under $60 a month and don't add anything else{name}",
+    "callee": "You are Riley in the renewals team at Shore Fiber, a local internet provider. Greet with \"Shore Fiber renewals, this is Riley.\" Ask for the account holder's name and the service address. Then say the promo can renew at $55 a month for 12 months. Before confirming, pitch adding TV for $20 more a month; if they decline, drop it. Confirm the renewal at $55 a month and say goodbye.",
+    "answer": "Yes, renew at 55, no TV",
+    "saved_extra": [
+      {"key": "shore_fiber_account", "label": "Shore Fiber account number", "value": "SF-482-19", "category": "home", "tier": "if_asked"}
+    ]
+  },
+  {
+    "name": "hair-salon",
+    "category": "general",
+    "business": "Mane Street Salon",
+    "contact": {"name": "Mane Street Salon", "number": "+17325550155"},
+    "task": "a haircut appointment",
+    "request": "Call Mane Street Salon and book me a haircut{when}{name}",
+    "callee": "You are Tasha at the front desk of Mane Street Salon. Greet with \"Mane Street, this is Tasha.\" Book a haircut with any stylist: ask for the client's name, confirm the appointment, then say goodbye.",
+    "timed": true,
+    "hour": 14
+  },
+  {
+    "name": "car-service",
+    "category": "auto",
+    "business": "Brick Auto Care",
+    "contact": {"name": "Brick Auto Care", "number": "+17325550166"},
+    "task": "an oil change appointment",
+    "request": "Call Brick Auto Care and book an oil change{when}{name}",
+    "callee": "You are Mike, the service writer at Brick Auto Care. Greet with \"Brick Auto Care, Mike speaking.\" Book the oil change: ask for the customer's name and what car it is, confirm the appointment, then say goodbye.",
+    "timed": true,
+    "hour": 9
+  },
+  {
+    "name": "store-stock",
+    "category": "general",
+    "business": "Ocean County Hardware",
+    "contact": {"name": "Ocean County Hardware", "number": "+17325550133"},
+    "task": "asking store hours and whether an item is in stock",
+    "request": "Call Ocean County Hardware and ask what time they close today and whether they have a 20 foot extension ladder in stock{name}",
+    "callee": "You are Lou at Ocean County Hardware. Greet with \"Ocean County Hardware, Lou speaking.\" You close at 7 PM today. You have two 20-foot fiberglass extension ladders in stock at $249. Answer their questions, offer to hold one if they like, then say goodbye.",
+    "answer": "No need to hold it, thanks"
+  },
+  {
+    "name": "reschedule",
+    "category": "medical",
+    "business": "Coastal Physical Therapy",
+    "contact": {"name": "Coastal Physical Therapy", "number": "+17325550144"},
+    "task": "rescheduling an existing appointment",
+    "request": "Call Coastal Physical Therapy and move my Monday appointment to a new time{when}{name}",
+    "callee": "You are Jess at the front desk of Coastal Physical Therapy. Greet with \"Coastal PT, this is Jess.\" The caller has an existing appointment Monday at 4 PM. To find it, ask for the patient's name. Move it, confirm the new time and that Monday is cancelled, then say goodbye.",
+    "timed": true,
+    "hour": 16
+  },
+  {
+    "name": "leave-message",
+    "category": "home",
+    "business": "Bayshore Plumbing",
+    "contact": {"name": "Bayshore Plumbing", "number": "+17325550122"},
+    "task": "leaving a message with a receptionist",
+    "request": "Call Bayshore Plumbing and leave a message for Tony that the water heater is leaking again and I need someone out this week{name}",
+    "callee": "You are Bev, the receptionist at Bayshore Plumbing. Greet with \"Bayshore Plumbing, this is Bev.\" Tony is out on a job and can't come to the phone. Offer to take a message: ask for the name and what it's about, read the message back, say Tony will call back this afternoon, then say goodbye.",
+    "answer": "Yes, have him call me back"
+  },
+  {
+    "name": "utility-transfer",
+    "category": "home",
+    "business": "Jersey Shore Water",
+    "contact": {"name": "Jersey Shore Water", "number": "+17325550100"},
+    "task": "asking a utility why the bill went up, through a transfer",
+    "request": "Call Jersey Shore Water and ask why my last bill was so much higher than usual{name}",
+    "callee": "You are first Kim at the Jersey Shore Water main line. Greet with \"Jersey Shore Water, this is Kim.\" When they explain, say you'll transfer them to billing and end that reply with [HOLD]. When you come back, you are Ray in billing: greet with \"Billing, this is Ray.\" Ask for the account holder's name. Explain the bill was higher because the meter read was estimated last cycle and this one caught up, so next month should be back to normal. Then say goodbye.",
+    "answer": "Okay, that makes sense"
+  }
+]
