@@ -116,6 +116,14 @@ internet, so the agent serves the cover art itself, fetching only from `i.scdn.c
 and resumes it afterwards unless you had paused it. This is an unofficial client: Spotify can change its service without
 notice, and its terms may not permit third-party clients. The receiver failing leaves voice and the display running.
 
+Spotify Connect discovery needs multicast DNS (mDNS) to reach the phone or computer that is playing. The receiver
+advertises `_spotify-connect._tcp` on UDP port 5353 of the display's own network only, and mDNS does not cross
+subnets or VLANs. If the Spotify app is on a different subnet (for example the display is on a Wi-Fi VLAN and the phone
+is on the main LAN), the speaker never appears in the device list. Either join the phone to the display's network for
+the first pairing, or enable an mDNS repeater or reflector between the networks (in UniFi Network this is the
+multicast DNS setting). Once paired, the receiver remembers the account. To check from a Linux machine on the display's
+network, run `avahi-browse -rt _spotify-connect._tcp` and look for the display's receiver name.
+
 The agent supervises the two receivers independently. A private mpv wrapper shares their existing
 IPC sockets with the playback and voice lifecycle. Neither receiver receives Jarvis node credentials.
 The display browser blocks external requests through a loopback-only proxy bypass; streaming sites
