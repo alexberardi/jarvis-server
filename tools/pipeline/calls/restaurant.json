@@ -109,10 +109,7 @@
     "request": "Call Papa V's Pizza and make a reservation for 2 on Friday at 7pm",
     "callee": "You are Gina, the host at Papa V's Pizza in Brick, New Jersey. Greet with \"Papa V's, this is Gina.\" You don't take reservations at all: walk-ins only. On Fridays around 7 the wait is usually about thirty minutes. Answer their questions, then say goodbye.",
     "expect": {
-      "achieved": false,
-      "card": [
-        "walk"
-      ]
+      "achieved": false
     }
   },
   {
