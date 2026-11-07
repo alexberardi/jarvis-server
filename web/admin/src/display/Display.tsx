@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Home, Lightbulb, Play, Shield, Star, RotateCcw } from 'lucide-react'
+import { Home, Lightbulb, Pause, Play, Shield, SkipBack, SkipForward, Star, RotateCcw } from 'lucide-react'
 import './Display.css'
 import SpeechWaveform from './SpeechWaveform'
 import { type Catalogue, deviceType, isMediaDestination } from './catalogue'
@@ -9,7 +9,8 @@ import { createLimiter } from './limit'
 type Config = { waveform_colour?: string; waveform_emphasis?: number; enabled: boolean; clock: string; hour_24: boolean; timezone: string; idle_seconds: number; slide_seconds: number; photos: string[]; favourites: string[]; night_dim: boolean; dim_start: number; dim_end: number; dim_percent: number; shortcuts: { name: string; url: string }[]; destination: string }
 type Device = { id: string; name: string; domain: string; entity_id: string; room_name: string; supported_actions: { button_action: string; button_text: string }[] | null }
 type Playback = { active: boolean; kind: string; controllable: boolean; paused?: boolean; position?: number; duration?: number; features?: string[]; media_title?: string }
-type State = { configuration: Config; voice: string; last_interaction: number; playback: Playback; theme_url: string; receivers: Record<string, string>; status: string }
+export type Spotify = { active: boolean; paused: boolean; title: string; artists: string[]; album: string; has_cover: boolean; position_ms: number; duration_ms: number; volume: number; volume_steps: number; updated_at: number }
+type State = { configuration: Config; voice: string; last_interaction: number; playback: Playback; theme_url: string; receivers: Record<string, string>; status: string; spotify?: Spotify }
 
 async function CallDisplay(path: string, body?: unknown) {
   const r = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Jarvis-Display': '1', 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
@@ -18,6 +19,25 @@ async function CallDisplay(path: string, body?: unknown) {
   try { value = JSON.parse(raw) } catch { throw new Error(raw || 'Jarvis is unavailable') }
   if (!r.ok || value.success === false || value.error) throw new Error(String(value.error || 'Jarvis could not complete this request'))
   return value
+}
+// The Spotify Connect card: what is playing, with transport buttons. The position advances on the display's own
+// clock between the receiver's readings.
+export function ShowSpotify({ spotify, now, send }: { spotify: Spotify; now: Date; send: (body: Record<string, unknown>) => void }) {
+  const position = Math.min(spotify.duration_ms, spotify.position_ms + (spotify.paused ? 0 : Math.max(0, now.getTime() - spotify.updated_at)))
+  const time = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+  return <section className="spotify-card" aria-label="Spotify Connect">
+    {spotify.has_cover ? <img src={`/spotify/cover?v=${encodeURIComponent(spotify.album + spotify.title)}`} alt={`Cover of ${spotify.album}`} /> : <div className="spotify-cover-blank" aria-hidden="true" />}
+    <div className="spotify-details">
+      <h2>{spotify.title}</h2><p>{spotify.artists.join(', ')}</p><p className="display-note">{spotify.album}</p>
+      <label>Position {time(position)} of {time(spotify.duration_ms)}<input type="range" min="0" max={spotify.duration_ms} value={position} onChange={e => send({ action: 'seek', position_ms: Number(e.target.value) })} /></label>
+      <div className="media-buttons">
+        <button aria-label="Previous track" onClick={() => send({ action: 'prev' })}><SkipBack size={22} aria-hidden="true" /></button>
+        <button aria-label={spotify.paused ? 'Play Spotify' : 'Pause Spotify'} onClick={() => send({ action: 'playpause' })}>{spotify.paused ? <Play size={22} aria-hidden="true" /> : <Pause size={22} aria-hidden="true" />}</button>
+        <button aria-label="Next track" onClick={() => send({ action: 'next' })}><SkipForward size={22} aria-hidden="true" /></button>
+      </div>
+      <label>Volume<input type="range" min="0" max={spotify.volume_steps || 100} value={spotify.volume} onChange={e => send({ action: 'volume', volume: Number(e.target.value) })} /></label>
+    </div>
+  </section>
 }
 export function ShowClock({ now, config }: { now: Date; config: Config }) {
   const options: Intl.DateTimeFormatOptions = { ...(config.timezone ? { timeZone: config.timezone } : {}), hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: !config.hour_24 }
@@ -132,6 +152,10 @@ export function ShowDisplay() {
       respond(request, { success: true })
     } catch (e) { setError((e as Error).message); respond(request, { error: (e as Error).message }) } finally { setBusy('') }
   }
+  const spotify = async (body: Record<string, unknown>) => {
+    setError('')
+    try { await CallDisplay('spotify', body) } catch (e) { setError((e as Error).message) }
+  }
   const media = async (action: string, link = url, local?: string, query?: string, seconds?: number) => {
     setError('')
     const to = local || target
@@ -157,7 +181,7 @@ export function ShowDisplay() {
   })
   useEffect(() => { if (themeReady) frame.current?.contentWindow?.postMessage({ api_version: 1, type: 'state', devices: devices.map(d => ({ ...d, state: states[d.id] })), clock: { timestamp: now.getTime(), timezone: config?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }, display: { voice: state?.voice, view }, media: playback }, '*') }, [themeReady, devices, states, now, config?.timezone, state?.voice, playback, view])
   if (!state || !config) return <main className="display-shell"><h1>Jarvis</h1><p role="status">Loading the display…</p>{error && <p role="alert">{error}</p>}</main>
-  const idle = !exit && !confirmation && !parameters && !state.playback.active && !remotePlayback?.active && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
+  const idle = !exit && !confirmation && !parameters && !state.playback.active && !(state.spotify?.active && !state.spotify.paused) && !remotePlayback?.active && now.getTime() - Math.max(lastTouch, state.last_interaction) >= config.idle_seconds * 1000
   const hour = Number(new Intl.DateTimeFormat('en-AU', { ...(config.timezone ? { timeZone: config.timezone } : {}), hour: '2-digit', hour12: false }).format(now)) % 24
   const dim = config.night_dim && (config.dim_start < config.dim_end ? hour >= config.dim_start && hour < config.dim_end : hour >= config.dim_start || hour < config.dim_end)
   const photo = config.photos.length ? config.photos[Math.floor(now.getTime() / (config.slide_seconds * 1000)) % config.photos.length] : ''
@@ -184,7 +208,7 @@ export function ShowDisplay() {
           <div className="media-buttons">{config.shortcuts.map(s => <button key={s.name} onClick={() => void media('play', s.name, 'local')}>{s.name}</button>)}</div>
           <p role="status">{!playback?.active ? 'Nothing playing' : playback.kind === 'remote' ? `${playback.paused ? 'Paused' : 'Playing'}${playback.media_title ? `: ${playback.media_title}` : ''}` : `Playing ${playback.kind || 'received media'}`}</p><div className="media-buttons"><button disabled={!playback?.controllable || (playback.kind === 'remote' && !playback.features?.includes('pause'))} onClick={() => void media('pause')}>Pause</button><button disabled={!playback?.controllable || (playback.kind === 'remote' && !playback.features?.includes('play'))} onClick={() => void media('resume')}>Resume</button><button onClick={() => void media('stop')}>{target === 'local' ? 'Stop and return' : 'Stop'}</button></div>
           {playback?.controllable && (playback.kind !== 'remote' || playback.features?.includes('seek')) && <label>Seek<input type="range" min="0" max={playback.duration || 0} value={playback.position || 0} onChange={e => void media('seek', '', undefined, undefined, Number(e.target.value))} /></label>}
-          <h2>Receivers</h2>{Object.entries(state.receivers).map(([k, v]) => <p key={k}>{k === 'cast' ? 'Experimental Cast V2' : 'Playercast (compatible Playercast senders)'}: {v}</p>)}<p className="display-note">Streaming services use this device’s browser sign-in. Control their pages by touch.</p></>}
+          {state.spotify?.active && <ShowSpotify spotify={state.spotify} now={now} send={body => void spotify(body)} />}<h2>Receivers</h2>{Object.entries(state.receivers).map(([k, v]) => <p key={k}>{k === 'cast' ? 'Experimental Cast V2' : k === 'spotify' ? 'Spotify Connect (Premium)' : 'Playercast (compatible Playercast senders)'}: {v}</p>)}<p className="display-note">Streaming services use this device’s browser sign-in. Control their pages by touch.</p></>}
       </section>}
     </>}
     <dialog ref={parameterDialog} onCancel={() => setParameters(null)}><form onSubmit={e => {

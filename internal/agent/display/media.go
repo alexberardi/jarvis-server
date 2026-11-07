@@ -73,6 +73,7 @@ func (e *Engine) DuckMedia() {
 	was := e.autoPaused
 	active := e.state == "listening" || e.state == "thinking" || e.state == "speaking"
 	e.mu.Unlock()
+	e.duckSpotify(active)
 	if active {
 		paused := []string{}
 		for _, socket := range e.MediaSockets() {

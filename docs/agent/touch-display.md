@@ -104,6 +104,17 @@ for separately enabled experimental Cast V2 reception. On Debian the tested open
 also needed `libxdo3`. This is a software flinging receiver; stock Google applications can reject its
 certificate. Screen mirroring and universal Chromecast compatibility are not provided.
 
+Spotify Connect is a third, separately enabled receiver (`spotify_connect`, off by default). Install
+[go-librespot](https://github.com/devgianlu/go-librespot) (GPL-3.0, so it runs as its own program, never linked into the
+agent) and a Spotify Premium account is required. The agent writes its `config.yml` under the display folder
+(a speaker named like the other receivers, PulseAudio output, remembered pairing, API on `127.0.0.1` only) and starts
+it with `go-librespot -config_dir`. Choose the node in the Spotify app once; the first connection is paired by
+Zeroconf. The agent reads the receiver's `GET /status` every second and the Media view then shows the track, artist,
+album and cover art with previous, play/pause, next, seek and volume buttons. The display browser cannot reach the
+internet, so the agent serves the cover art itself, fetching only from `i.scdn.co`. Voice pauses Spotify while you talk
+and resumes it afterwards unless you had paused it. This is an unofficial client: Spotify can change its service without
+notice, and its terms may not permit third-party clients. The receiver failing leaves voice and the display running.
+
 The agent supervises the two receivers independently. A private mpv wrapper shares their existing
 IPC sockets with the playback and voice lifecycle. Neither receiver receives Jarvis node credentials.
 The display browser blocks external requests through a loopback-only proxy bypass; streaming sites

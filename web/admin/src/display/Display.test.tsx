@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { ShowClock, ShowDisplay } from './Display'
+import { ShowClock, ShowDisplay, ShowSpotify, type Spotify } from './Display'
 
 const config = { enabled: true, clock: 'combined', hour_24: true, timezone: 'Australia/Perth', idle_seconds: 120, slide_seconds: 30, photos: [], favourites: [], night_dim: false, dim_start: 22, dim_end: 7, dim_percent: 35, destination: 'local', shortcuts: [] }
 const devices = Array.from({ length: 1000 }, (_, i) => ({ id: `d${i}`, name: i === 0 ? 'Front door' : `Light ${i}`, room_name: 'Living room', domain: i === 0 ? 'lock' : 'light', entity_id: `light.${i}`, supported_actions: [{ button_action: i === 0 ? 'unlock' : 'turn_on', button_text: i === 0 ? 'Unlock' : 'Turn on' }] }))
@@ -119,4 +119,45 @@ it('keeps device state requests at four through slow refreshes and page changes'
     await act(() => vi.advanceTimersByTimeAsync(31000))
     expect(most).toBe(4)
   } finally { vi.useRealTimers() }
+})
+
+const track: Spotify = { active: true, paused: false, title: 'Hysteria', artists: ['Muse'], album: 'Absolution', has_cover: true, position_ms: 61000, duration_ms: 227000, volume: 40, volume_steps: 100, updated_at: 1_000_000 }
+it('shows the Spotify track, advances its position and sends the transport buttons', () => {
+  const sent: Record<string, unknown>[] = []
+  render(<ShowSpotify spotify={track} now={new Date(1_005_000)} send={b => sent.push(b)} />)
+  expect(screen.getByRole('heading', { name: 'Hysteria' })).toBeInTheDocument()
+  expect(screen.getByText('Muse')).toBeInTheDocument()
+  expect(screen.getByText('Absolution')).toBeInTheDocument()
+  expect(screen.getByText('Position 1:06 of 3:47')).toBeInTheDocument()
+  expect(screen.getByRole('img', { name: 'Cover of Absolution' })).toHaveAttribute('src', expect.stringMatching(/^\/spotify\/cover\?v=/))
+  fireEvent.click(screen.getByRole('button', { name: 'Pause Spotify' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Next track' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Previous track' }))
+  fireEvent.change(screen.getByLabelText(/^Volume/), { target: { value: '70' } })
+  fireEvent.change(screen.getByLabelText(/^Position/), { target: { value: '90000' } })
+  expect(sent).toEqual([{ action: 'playpause' }, { action: 'next' }, { action: 'prev' }, { action: 'volume', volume: 70 }, { action: 'seek', position_ms: 90000 }])
+})
+it('holds the position and offers Play while Spotify is paused', () => {
+  render(<ShowSpotify spotify={{ ...track, paused: true, has_cover: false }} now={new Date(1_060_000)} send={() => {}} />)
+  expect(screen.getByText('Position 1:01 of 3:47')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Play Spotify' })).toBeInTheDocument()
+  expect(screen.queryByRole('img')).not.toBeInTheDocument()
+})
+it('shows Spotify on the Media view and sends a pause through the display API', async () => {
+  const sent: unknown[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    const path = url.replace('/api/', '')
+    let body: unknown
+    if (path === 'state') body = { configuration: config, voice: 'idle', last_interaction: Date.now(), playback: { active: false }, theme_url: '', receivers: { spotify: 'running' }, spotify: { ...track, updated_at: Date.now() } }
+    else if (path === 'devices') body = []
+    else if (path === 'spotify') { sent.push(JSON.parse(init.body as string)); body = { success: true } }
+    else body = { state: { state: 'on' } }
+    return { ok: true, text: async () => JSON.stringify(body) }
+  }))
+  render(<ShowDisplay />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Media' }))
+  expect(await screen.findByRole('heading', { name: 'Hysteria' })).toBeInTheDocument()
+  expect(screen.getByText('Spotify Connect (Premium): running')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Pause Spotify' }))
+  await waitFor(() => expect(sent).toEqual([{ action: 'playpause' }]))
 })

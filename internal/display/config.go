@@ -47,6 +47,7 @@ type Configuration struct {
 	Shortcuts        []Shortcut `json:"shortcuts"`
 	Playercast       bool       `json:"playercast"`
 	ExperimentalCast bool       `json:"experimental_cast"`
+	SpotifyConnect   bool       `json:"spotify_connect,omitempty"`
 	ReceiverName     string     `json:"receiver_name"`
 }
 type Delivery struct {

@@ -50,6 +50,11 @@ type Engine struct {
 	blockedUntil            time.Time
 	receivers               map[string]*exec.Cmd
 	receiverStatus          map[string]string
+	spotify                 SpotifyStatus
+	spotifyAddr             string
+	spotifyCover            string
+	spotifyAutoPaused       bool
+	spotifyPolling          bool
 	theme                   *displayconfig.Theme
 	statusError             string
 	ctx                     context.Context
@@ -228,7 +233,7 @@ func (e *Engine) Watch(ctx context.Context, cc *node.CC) {
 func (e *Engine) Capabilities() map[string]any {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return map[string]any{"display": true, "display_enabled": e.delivery.Configuration.Enabled, "display_revision": e.delivery.Revision, "display_status": e.statusError, "display_playercast": e.receiverStatus["playercast"], "display_cast": e.receiverStatus["cast"]}
+	return map[string]any{"display": true, "display_enabled": e.delivery.Configuration.Enabled, "display_revision": e.delivery.Revision, "display_status": e.statusError, "display_playercast": e.receiverStatus["playercast"], "display_cast": e.receiverStatus["cast"], "display_spotify": e.receiverStatus["spotify"]}
 }
 func (e *Engine) SetState(c voice.Cue, _ time.Duration) {
 	e.mu.Lock()
@@ -290,6 +295,7 @@ func (e *Engine) StopReceivers() {
 	}
 	e.receivers = map[string]*exec.Cmd{}
 	e.receiverStatus = map[string]string{}
+	e.spotifyAddr, e.spotify, e.spotifyCover = "", SpotifyStatus{}, ""
 }
 func (e *Engine) GetBrowserCommand() *exec.Cmd {
 	// The local-only profile has no website credentials and must start with auto-login.
@@ -328,6 +334,7 @@ func (e *Engine) EnsureProcesses() {
 	}
 	e.StartReceiver("playercast", c.Playercast, "playercast", "--name", c.ReceiverName, "--player", "mpv", "--disable-cec")
 	e.StartReceiver("cast", c.ExperimentalCast, "openchromecast", "--friendly-name", c.ReceiverName, "--player", "mpv", "--mpv", filepath.Join(e.root, "bin", "mpv"), "--no-tray")
+	e.StartSpotify(c.SpotifyConnect)
 }
 func (e *Engine) StartReceiver(key string, on bool, program string, args ...string) {
 	if !on {
@@ -399,6 +406,14 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		e.HandleAPI(w, r)
 		return
 	}
+	if r.URL.Path == "/spotify/cover" && r.Method == "GET" {
+		if cookie, err := r.Cookie("display_session"); err != nil || cookie.Value != e.secret {
+			http.Error(w, "Unauthorised", 403)
+			return
+		}
+		e.serveSpotifyCover(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/theme/") {
 		e.mu.Lock()
 		defer e.mu.Unlock()
@@ -444,6 +459,9 @@ func (e *Engine) HandleAPI(w http.ResponseWriter, r *http.Request) {
 	d := e.delivery
 	cc := e.cc
 	e.mu.Unlock()
+	if strings.HasPrefix(r.URL.Path, "/api/spotify") && e.handleSpotify(w, r) {
+		return
+	}
 	if r.URL.Path == "/api/state" && r.Method == "GET" {
 		playback := e.GetPlaybackStatus()
 		delete(playback, "socket")
@@ -452,7 +470,7 @@ func (e *Engine) HandleAPI(w http.ResponseWriter, r *http.Request) {
 		if e.theme != nil {
 			theme = "/theme/" + e.theme.Manifest.Entry
 		}
-		state := map[string]any{"playback": playback, "configuration": d.Configuration, "revision": d.Revision, "voice": e.state, "voice_level": e.level, "last_interaction": e.lastInteraction.UnixMilli(), "media_active": e.media != nil, "media_kind": e.mediaKind, "paused": e.mediaPaused, "receivers": e.receiverStatus, "theme_url": theme, "status": e.statusError}
+		state := map[string]any{"playback": playback, "configuration": d.Configuration, "revision": d.Revision, "voice": e.state, "voice_level": e.level, "last_interaction": e.lastInteraction.UnixMilli(), "media_active": e.media != nil, "media_kind": e.mediaKind, "paused": e.mediaPaused, "receivers": e.receiverStatus, "spotify": e.spotify, "theme_url": theme, "status": e.statusError}
 		WriteJSON(w, state)
 		e.mu.Unlock()
 		return
