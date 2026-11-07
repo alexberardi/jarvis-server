@@ -1,5 +1,4 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { Download, Phone, PhoneCall, PhoneIncoming, Play, Radio, Volume2 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -14,6 +13,7 @@ import {
   type SipTestRun,
 } from '@/api/phone'
 import { Alert, Badge, Button, buttonStyles, Card, CardHeader, EmptyState, ErrorState, Input, PageHeader, Skeleton, Spinner, toast, type BadgeTone } from '@/components/ui'
+import PhoneSettings from '@/components/phone/PhoneSettings'
 import { errorMessage } from '@/lib/errors'
 import { formatServerTime, timeAgo } from '@/lib/time'
 
@@ -61,7 +61,7 @@ const tests: { name: SipTestName; title: string; icon: ReactNode; about: string 
     title: 'Inbound call',
     icon: <PhoneIncoming size={16} aria-hidden />,
     about:
-      'Watches for 60 seconds while you call this extension, and shows the caller ID and the audio the PBX offers. To have Jarvis answer, enable phone.inbound.enabled for the household in Settings.',
+      'Watches for 60 seconds while you call this extension, and shows the caller ID and the audio the PBX offers. To have Jarvis answer, turn on Answer calls for the household under Answering calls below.',
   },
 ]
 
@@ -305,41 +305,41 @@ export default function PhonePage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Phone"
-        description="Jarvis on your phone system as a SIP extension: whether the PBX accepts it, self-tests for audio and calls, and a SIP trace for support."
+        description="Phone calls: the line's status and self-tests, a SIP trace for support, and every phone setting."
       />
-      {isLoading && (
-        <Card role="status" aria-label="Loading the SIP status" className="space-y-3">
-          <Skeleton className="h-6 w-1/2" />
-          <Skeleton className="h-4 w-3/4" />
-        </Card>
-      )}
-      {isError && (
-        <Card>
-          <ErrorState title="Couldn't read the SIP status" message={errorMessage(error)} onRetry={() => refetch()} />
-        </Card>
-      )}
-      {data && (
-        <div className="space-y-4">
-          {data.accounts.length === 0 ? (
+      <div className="space-y-4">
+        {isLoading && (
+          <Card role="status" aria-label="Loading the SIP status" className="space-y-3">
+            <Skeleton className="h-6 w-1/2" />
+            <Skeleton className="h-4 w-3/4" />
+          </Card>
+        )}
+        {isError && (
+          <Card>
+            <ErrorState title="Couldn't read the SIP status" message={errorMessage(error)} onRetry={() => refetch()} />
+          </Card>
+        )}
+        {data &&
+          (data.accounts.length === 0 ? (
             <Card>
               <EmptyState
                 icon={<Phone size={20} />}
                 titleAs="h2"
                 title="No SIP account is running"
-                description="Calls go through Twilio unless phone.provider is sip. Set it, with the PBX's address and the extension's number and password (phone.sip.*), for the install or a household."
+                description="Calls go through Twilio unless the provider is SIP. Choose SIP under Calls, then enter the PBX's address and the extension's number and password under Phone line."
                 action={
-                  <Link to="/admin/settings" className={buttonStyles()}>
-                    Open Settings
-                  </Link>
+                  <a href="#phone-calls-section" className={buttonStyles()}>
+                    Set up the phone line
+                  </a>
                 }
               />
             </Card>
           ) : (
             data.accounts.map((a) => <AccountCard key={a.local_port} account={a} />)
-          )}
-          <TraceCard />
-        </div>
-      )}
+          ))}
+        <PhoneSettings />
+        <TraceCard />
+      </div>
     </div>
   )
 }
