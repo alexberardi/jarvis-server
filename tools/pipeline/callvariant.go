@@ -579,8 +579,12 @@ func derive(seed CallSeed, dims map[string]string, saved []map[string]string, of
 	if !seed.Timed && dims["caller"] == "contradicts" {
 		achieved = nil // only if Jarvis asks
 	}
-	if dims["temperament"] == "rude-hangup" || dims["adversarial"] == "wrong-number" {
+	switch {
+	case dims["adversarial"] == "wrong-number", dims["temperament"] == "rude-hangup" && seed.Timed:
 		achieved, e.CardTimes = &no, nil
+	case dims["temperament"] == "rude-hangup":
+		// A question can be answered before the host hangs up (run 1, store-stock/v68).
+		achieved, e.CardTimes = nil, nil
 	}
 	e.Achieved = achieved
 	if dims["brief"] == "no-party" {

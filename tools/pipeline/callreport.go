@@ -52,6 +52,7 @@ type CallReport struct {
 	} `json:"turn_ms"`
 	Worst       []worstCall `json:"worst"`
 	Regressions []string    `json:"regressions,omitempty"`
+	Ignored     string      `json:"ignored,omitempty"` // checks left out of pass/fail
 }
 
 type worstCall struct {
@@ -69,7 +70,9 @@ func runCallReport(args []string, stdout io.Writer) error {
 	baseline := fs.String("baseline", "", "an earlier report's JSON: flag dimension values and seeds whose pass rate dropped")
 	drop := fs.Float64("drop", 0.15, "a pass-rate drop at least this large (with 3+ calls on both sides) is a regression")
 	worst := fs.Int("worst", 10, "how many of the worst calls to list")
-	recheck := fs.Bool("recheck", false, "re-run the deterministic checks on the records with this build's checks (no calls)")
+	ignore := fs.String("ignore", "", "checks left out of pass/fail (comma-separated), e.g. silence when the model server is shared and its latency is not the product's")
+	recheck := fs.Bool("recheck", false, "re-derive variants' expectations and re-run the deterministic checks with this build (no calls)")
+	seedsGlob := fs.String("seeds", "tools/pipeline/calls/seeds/*.json", "with --recheck: the seeds variants are re-derived from")
 	maxTurn := fs.Duration("max-turn", 8*time.Second, "with --recheck: a turn slower than this is a long silence")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -82,13 +85,24 @@ func runCallReport(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *recheck {
+		seeds, _ := loadSeeds(*seedsGlob, "") // no seeds: hand-written expectations only
 		for _, r := range recs {
+			if e := rederive(seeds, r.Variant, r.CallContext); e != nil {
+				r.Expect = *e
+			}
 			if len(r.Checks) > 0 { // a call that failed before its checks has none to redo
 				r.Checks = runChecks(r.Expect, r.facts(), *maxTurn)
 			}
 		}
 	}
+	if *ignore != "" {
+		skip := strings.Split(*ignore, ",")
+		for _, r := range recs {
+			r.Checks = slices.DeleteFunc(r.Checks, func(c CheckResult) bool { return slices.Contains(skip, c.Name) })
+		}
+	}
 	rep := buildReport(recs, *worst)
+	rep.Ignored = *ignore
 	if *baseline != "" {
 		b, err := os.ReadFile(*baseline)
 		if err != nil {
@@ -299,6 +313,9 @@ func (rep CallReport) markdown() string {
 	fmt.Fprintf(&b, "# Call variants\n\n%d calls: **%s pass**", rep.Calls, rate(rep.Overall))
 	if rep.HarnessErrors > 0 {
 		fmt.Fprintf(&b, ", %d left out for harness errors", rep.HarnessErrors)
+	}
+	if rep.Ignored != "" {
+		fmt.Fprintf(&b, " (checks not counted: %s)", rep.Ignored)
 	}
 	fmt.Fprintf(&b, ".\n\nTurn latency (transcript total_ms, %d turns): p50 %.1fs, p95 %.1fs, max %.1fs.\n\n",
 		rep.TurnMS.N, rep.TurnMS.P50/1000, rep.TurnMS.P95/1000, rep.TurnMS.Max/1000)

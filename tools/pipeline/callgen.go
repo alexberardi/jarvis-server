@@ -31,16 +31,20 @@ func runCallGen(ctx context.Context, args []string, stdout io.Writer) error {
 	url := fs.String("url", "", "OpenAI-compatible base URL for the generator instead of the sandbox's tap")
 	model := fs.String("model", "background", "model label that writes the texts")
 	offline := fs.Bool("offline", false, "write the seeds' templates only (no model)")
+	redo := fs.String("rederive", "", "rewrite this variants file's expectations with this build's derivation (texts untouched), then stop")
 	conc := fs.Int("concurrency", 3, "generator calls at once")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *out == "" {
-		return errors.New("call-gen: --out FILE")
-	}
 	seeds, err := loadSeeds(*seedsGlob, *only)
 	if err != nil {
 		return err
+	}
+	if *redo != "" {
+		return rederiveFile(seeds, *redo)
+	}
+	if *out == "" {
+		return errors.New("call-gen: --out FILE")
 	}
 	base := *url
 	if base == "" && !*offline {
@@ -78,6 +82,36 @@ func runCallGen(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote %d variants to %s (pair coverage %.0f%%)\n", len(scs), *out, 100*pairCoverage(seeds, picks))
 	return ctx.Err()
+}
+
+// rederive is a variant's expectations from this build's derive (nil when it isn't one, or
+// its seed is gone): expectations follow the code, the texts stay what the model wrote.
+func rederive(seeds []CallSeed, v *Variant, saved []map[string]string) *CallExpect {
+	if v == nil {
+		return nil
+	}
+	for _, s := range seeds {
+		if s.Name == v.Seed {
+			e := derive(s, v.Dims, saved, v.Offers)
+			return &e
+		}
+	}
+	return nil
+}
+
+// rederiveFile rewrites a variants file's expectations in place.
+func rederiveFile(seeds []CallSeed, path string) error {
+	scs, err := loadCallScenarios([]string{path}, "")
+	if err != nil {
+		return err
+	}
+	for i := range scs {
+		if e := rederive(seeds, scs[i].Variant, scs[i].CallContext); e != nil {
+			scs[i].Expect = *e
+		}
+	}
+	b, _ := json.MarshalIndent(scs, "", "  ")
+	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
 func loadSeeds(glob, only string) ([]CallSeed, error) {

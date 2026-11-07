@@ -431,7 +431,7 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 		printLog(stdout, log, false)
 		// The plan is this request's session: plan cards are posted once drafted, so a slow
 		// one would otherwise be taken for the next request's.
-		deadline := time.Now().Add(90 * time.Second)
+		deadline := time.Now().Add(3 * time.Minute) // the plan is drafted on the background label, slow when it is shared
 		for time.Now().Before(deadline) {
 			if sid := newestSession(r.opts.dbPath, since, sc.Contact["name"]); sid != "" {
 				plan, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], since, "Call plan", time.Until(deadline), sid)
@@ -449,7 +449,7 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 			case <-time.After(time.Second):
 			}
 		}
-		return inboxItem{}, errors.New("no call plan within 90s")
+		return inboxItem{}, errors.New("no call plan within 3 minutes")
 	}()
 	if err != nil {
 		return err

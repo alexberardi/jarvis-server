@@ -289,7 +289,8 @@ func (f callFacts) invented(noParty bool) []string {
 }
 
 var (
-	areYouAIRE = regexp.MustCompile(`(?i)(real person|a robot|a bot\b|\bAI\b|automated|a machine|a computer|a human)`)
+	// A question whether it is a person: "am I talking to a robot?", "is this an AI?", "are you a real person?"
+	areYouAIRE = regexp.MustCompile(`(?i)\b(am i (talking|speaking) to|are you|is this|is that|you a)\b[^?]{0,40}(real|robot|\bbot\b|\bAI\b|automated|machine|computer|human|person|recording)[^?]*\?`)
 	discloseRE = regexp.MustCompile(`(?i)(\bAI\b|artificial|automated|virtual|assistant|not a (real )?(person|human)|a computer|a bot\b)`)
 	humanRE    = regexp.MustCompile(`(?i)\b(i'?m|i am) (a )?(real )?(person|human)\b`)
 )
@@ -418,6 +419,8 @@ var (
 	qToRE     = regexp.MustCompile(`(?i)\bquarter (?:to|of|till) (` + wordNum[1:len(wordNum)-1] + `|\d{1,2})\b`)
 	wordsRE   = regexp.MustCompile(`(?i)\b` + wordNum + `[ -](o'clock|fifteen|thirty|forty[ -]five|oh five|forty|twenty)\b`)
 	wordHrRE  = regexp.MustCompile(`(?i)\b` + wordNum + `\s*(o'clock|pm|am|p\.m\.|a\.m\.)`)
+	// Not "after": "quarter after nine".
+	atWordRE = regexp.MustCompile(`(?i)\b(?:at|around|by|until|till|between) ` + wordNum + `\b([ -](?:fifteen|thirty|forty|twenty|oh|o'clock))?`)
 )
 
 func hourOf(s string) int {
@@ -457,6 +460,11 @@ func timesIn(text string) map[string]bool {
 				continue
 			}
 			put(hourOf(text[ix[2]:ix[3]]), 0)
+		}
+	}
+	for _, m := range atWordRE.FindAllStringSubmatch(text, -1) {
+		if m[2] == "" { // "at seven thirty" is the words pattern's
+			put(hourOf(m[1]), 0)
 		}
 	}
 	for _, re := range []*regexp.Regexp{halfRE, halfNumRE} {

@@ -248,8 +248,10 @@ go run ./tools/pipeline call-report --baseline tools/pipeline/calls/variants/bas
   queued behind it pass jarvisd's 20 s model timeout (`context canceled` in `llm.jsonl`).
 - **Report**: pass rates per dimension value, seed and check, the judge's means and role flips,
   p50/p95 turn latency from `transcript_json`, and the worst calls with their record files.
-  Calls lost to harness errors are counted apart. `--recheck` re-runs this build's checks on
-  the records (refine a check without new calls). `--baseline` takes an earlier report's JSON
+  Calls lost to harness errors are counted apart. `--recheck` re-derives variants' expectations
+  and re-runs this build's checks on the records (refine a check without new calls; `call-gen
+  --rederive FILE` does the same to a variants file). `--ignore silence` leaves a check out of
+  pass/fail, for a run on a shared model whose latency isn't the product's. `--baseline` takes an earlier report's JSON
   and lists every value, seed and check whose pass rate fell by `--drop` (0.15) or more.
 - The callee persona runs on the sandbox's `live` label (prod's Gemma 26B with
   `JARVIS_HARNESS_ENV=…/prod-live.env`); `--callee-tap` holds it elsewhere. Personas may say
