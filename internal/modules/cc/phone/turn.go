@@ -960,11 +960,20 @@ func (s *Service) assess(ctx context.Context, p *turnPipeline, goal string) (str
 	if s.LLM == nil {
 		return fallback()
 	}
-	actx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: p.rt.wire(msgs)})
+	// The background slot can be busy (a 31B behind other work): the card has no hurry, so it
+	// waits longer and asks twice before falling back to a verdict-less "Call completed".
+	var resp *llm.ChatResponse
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		actx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		resp, err = s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: p.rt.wire(msgs)})
+		cancel()
+		if err == nil && resp != nil {
+			break
+		}
+		s.log().Warn("phone: wrapup assessment failed", "attempt", attempt+1, "err", err)
+	}
 	if err != nil || resp == nil {
-		s.log().Error("phone: wrapup assessment failed", "err", err)
 		return fallback()
 	}
 	summary, achieved := live.ParseAssessment(live.StripThinkText(resp.Content))
