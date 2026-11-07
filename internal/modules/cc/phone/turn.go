@@ -810,7 +810,9 @@ func (p *turnPipeline) runEscalation(ctx context.Context, question string, ms ca
 		// The question goes with the answer: a reply that was only the escalation token left no
 		// trace in the history. The caller's answer is newer than the plan, so it wins.
 		p.messages = append(p.messages, chatMsg{"user", "[You asked " + who + ": \"" + question + "\". " + who +
-			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it.]"})
+			" answered: \"" + answer + "\". This is " + who + "'s own instruction for this call; where it differs from your brief, follow it. " +
+			"If it doesn't actually give what you asked for (\"whatever works\", \"I don't know\"), never repeat their words as the detail: " +
+			"choose within your brief, or tell the business you don't have it.]"})
 		if mightBeTime(answer) {
 			p.timesFromCaller = true
 		}
