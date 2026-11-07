@@ -9,6 +9,8 @@ import (
 	ccmod "github.com/alexberardi/jarvis-server/internal/modules/cc"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/simline"
+	sttmod "github.com/alexberardi/jarvis-server/internal/modules/stt"
+	ttsmod "github.com/alexberardi/jarvis-server/internal/modules/tts"
 )
 
 // phoneConfig is the telephony bootstrap from the environment (config.Env). Twilio credentials are
@@ -18,7 +20,7 @@ import (
 // anywhere gets an honest "phone not configured". JARVIS_PHONE_PUBLIC_URL is the https base a
 // tunnel maps to the command-center listener; only phone.MediaPath needs to be exposed.
 // Households still have to turn phone_calls.enabled on.
-func phoneConfig(env config.Env) ccmod.PhoneConfig {
+func phoneConfig(env config.Env, ttsm *ttsmod.Module, sttm *sttmod.Module) ccmod.PhoneConfig {
 	cfg := ccmod.PhoneConfig{
 		EnvCredentials: phone.Credentials{
 			AccountSID: env.TwilioAccountSID,
@@ -32,10 +34,14 @@ func phoneConfig(env config.Env) ccmod.PhoneConfig {
 	}
 	// JARVIS_DEV_PHONE_SIM (dev sandboxes only: scripts/sandbox up --phone-sim) sends every
 	// household's calls to a simulated line whose far end is the driver at that URL
-	// (tools/pipeline call), instead of Twilio or SIP.
+	// (tools/pipeline call), instead of Twilio or SIP. JARVIS_DEV_PHONE_SIM_AUDIO=voice
+	// (--phone-sim voice) makes the line carry real speech through the sandbox's TTS and STT.
 	if url := os.Getenv("JARVIS_DEV_PHONE_SIM"); url != "" {
 		slog.Warn("JARVIS_DEV_PHONE_SIM is set: phone calls go to a simulated line; for dev sandboxes only", "driver", url)
 		line := simline.New(url, slog.Default())
+		if os.Getenv("JARVIS_DEV_PHONE_SIM_AUDIO") == "voice" {
+			line.Voice = &simline.Voice{STT: sttm, TTS: simline.SpeakWith(ttsm), FarVoice: simline.FarVoice}
+		}
 		cfg.Provider, cfg.STT, cfg.TTS = line, line, line
 	}
 	return cfg

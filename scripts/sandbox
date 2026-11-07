@@ -44,6 +44,8 @@
 #                    switch scripts at $SBX_SCRIPTLLM/control/script (docs/decisions/2026-10-17-scripted-llm.md)
 #   --phone-sim      phone calls go to a simulated line (JARVIS_DEV_PHONE_SIM) whose far end is
 #                    tools/pipeline call (port 7794 + offset), instead of Twilio or SIP
+#   --phone-sim voice  the simulated line carries real audio (implies --voice): Jarvis is heard
+#                    through whisper at 8 kHz and the far end speaks in another Kokoro voice
 #   --ui             build the admin SPA first (npm, with the /dev/ui gallery) and serve it; otherwise web/admin/dist/ui
 #                    is served when it exists, else the built-in placeholder page
 #   --voice          real TTS and STT, for voice pipeline runs (pipeline say --voice): Kokoro,
@@ -118,7 +120,7 @@ say() { echo "sandbox: $*" >&2; }
 die() { say "$*"; exit 1; }
 
 CMD=${1:-}
-[ -n "$CMD" ] || { sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$CMD" ] || { sed -n '2,112p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 NAME=default OFFSET= PROFILE=minimal LLM= UI=0 PURGE=0 FOLLOW=0 VOICE=0 STT_MODEL=whisper-small.en SIP=0 PHONE_SIM=0 STT_GPU=0
 VERSION=dev-sandbox TRUST_KEY= RELAY=fake NODE_NAME=sim-node LAN=0 LAN_HOST="" SINGLE_PORT=0 SPEECH=local SPEECH_API=openai
@@ -130,7 +132,7 @@ while [ $# -gt 0 ]; do
     --profile) PROFILE=$2; shift 2 ;;
     --llm) LLM=$2; shift 2 ;;
     --ui) UI=1; shift ;;
-    --phone-sim) PHONE_SIM=1; shift ;;
+    --phone-sim) PHONE_SIM=1; shift; if [ "${1:-}" = voice ]; then PHONE_SIM=voice VOICE=1; shift; fi ;;
     --voice) VOICE=1; shift ;;
     --sip) SIP=1; shift ;;
     --stt-gpu) STT_GPU=1; shift ;;
@@ -146,7 +148,7 @@ while [ $# -gt 0 ]; do
     --node-name) NODE_NAME=$2; shift 2 ;;
     --node-profile) NODE_PROFILE=$2; shift 2 ;;
     -f) FOLLOW=1; shift ;;
-    -h|--help) sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,112p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -583,7 +585,8 @@ write_env() {
     echo "export SBX_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token")"
     if [ "$VOICE" = 1 ]; then echo "export SBX_VOICE=$STT_MODEL"; fi
     if [ "$SIP" = 1 ]; then echo "export SBX_SIP_LANE=$DIR/sip/lane.env"; fi
-    if [ "$PHONE_SIM" = 1 ]; then echo "export SBX_PHONE_SIM=127.0.0.1:$(port 7794)"; fi
+    if [ "$PHONE_SIM" != 0 ]; then echo "export SBX_PHONE_SIM=127.0.0.1:$(port 7794)"; fi
+    if [ "$PHONE_SIM" = voice ]; then echo "export SBX_PHONE_SIM_AUDIO=voice"; fi
     if [ "$PROFILE" = empty ]; then
       # Nobody to sign in as: first-run setup is still to do, with this one-time token
       # (the wizard's link is $SBX_ADMIN/setup#token=$SBX_SETUP_TOKEN).
@@ -656,9 +659,10 @@ cmd_up() {
   # Every harness URL assumes the legacy ports unless --single-port asks for a fresh install's.
   local legacy=1
   [ "$SINGLE_PORT" = 0 ] || legacy=0
-  local phone_sim=
+  local phone_sim= phone_audio=
   [ "$PHONE_SIM" = 0 ] || phone_sim=http://127.0.0.1:$(port 7794)
-  JARVIS_DEV_PHONE_SIM=$phone_sim RELAY_URL=$relay_url JARVIS_LEGACY_PORTS=$legacy JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
+  [ "$PHONE_SIM" != voice ] || phone_audio=voice
+  JARVIS_DEV_PHONE_SIM=$phone_sim JARVIS_DEV_PHONE_SIM_AUDIO=$phone_audio RELAY_URL=$relay_url JARVIS_LEGACY_PORTS=$legacy JARVIS_HOST=$bind JARVIS_MDNS=0 JARVIS_NO_BROWSER=1 JARVIS_ADMIN_UI_DIR=$ui JARVIS_DEV_SPEAKER_HINTS=1 \
     ADMIN_API_KEY=$(cat "$DIR/admin-api-key") JARVIS_AUTH_ADMIN_TOKEN=$(cat "$DIR/auth-admin-token") \
     detach "$DIR/jarvisd" --home "$HOME_DIR" serve --port-offset "$(cat "$OFFSETF")" >>"$LOG" 2>&1 </dev/null &
   echo $! >"$PIDFILE"
