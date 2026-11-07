@@ -199,7 +199,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	if opts.concurrency > 1 {
 		api := newUserAPI(env)
 		if hh, err := api.household(ctx, env); err == nil {
-			_ = api.put(env["SBX_CC"]+"/api/v0/mobile/household/"+hh+"/settings/"+"phone_calls.max_concurrent_calls", map[string]any{"value": opts.concurrency})
+			_ = api.put(env["SBX_CC"]+"/api/v0/mobile/household/"+hh+"/settings/"+"phone_calls.max_concurrent_calls", map[string]any{"value": opts.concurrency + 2}) // +2: the next plan, and a call still in wrapup after its card
 		}
 	}
 
@@ -210,10 +210,7 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 			jobs = append(jobs, job{i, n})
 		}
 	}
-	// Calls at once must share the saved details (the call re-reads them as it starts), so the
-	// queue is grouped by them.
-	slices.SortStableFunc(jobs, func(a, b job) int { return strings.Compare(ctxKey(scs[a.i]), ctxKey(scs[b.i])) })
-	run := &callRun{d: d, env: env, cl: cl, opts: opts, gate: &ctxGate{}, stdout: &lockedWriter{w: stdout}}
+	run := &callRun{d: d, env: env, cl: cl, opts: opts, stdout: &lockedWriter{w: stdout}}
 	failed := 0
 	passes := make([]int, len(scs))
 	var mu sync.Mutex
@@ -277,39 +274,6 @@ func loadCallScenarios(paths []string, only string) ([]CallScenario, error) {
 	return scs, nil
 }
 
-func ctxKey(sc CallScenario) string {
-	b, _ := json.Marshal(sc.CallContext)
-	return string(b)
-}
-
-// ctxGate lets calls run at once only while they share the saved details.
-type ctxGate struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	key    string
-	active int
-}
-
-func (g *ctxGate) acquire(key string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.cond == nil {
-		g.cond = sync.NewCond(&g.mu)
-	}
-	for g.active > 0 && g.key != key {
-		g.cond.Wait()
-	}
-	g.key = key
-	g.active++
-}
-
-func (g *ctxGate) release() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.active--
-	g.cond.Broadcast()
-}
-
 type lockedWriter struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -327,7 +291,6 @@ type callRun struct {
 	env    map[string]string
 	cl     *callee
 	opts   callOpts
-	gate   *ctxGate
 	planMu sync.Mutex // one plan at a time: plan cards are told apart by order only
 	stdout *lockedWriter
 }
@@ -400,7 +363,9 @@ func (r *callRun) attempt(ctx context.Context, sc CallScenario, rep int, out io.
 func upstreamErrors(es []TapEntry) int {
 	n := 0
 	for _, e := range es {
-		if e.Status == 0 || e.Status >= 500 || e.Error != "" {
+		// "context canceled" is jarvisd giving up on a slow model call itself (its 20 s turn
+		// budget): the product's behaviour under load, not a broken harness.
+		if (e.Status == 0 || e.Status >= 500 || e.Error != "") && !strings.Contains(e.Error, "context canceled") {
 			n++
 		}
 	}
@@ -430,12 +395,13 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 	env, cl := r.env, r.cl
 	fmt.Fprintf(stdout, "══ %s\n", sc.Name)
 	api := newUserAPI(env)
-	r.gate.acquire(ctxKey(sc))
-	defer r.gate.release()
+	// One call is set up at a time, from its saved details to its start: the plan and the
+	// call's start both read the user's saved details, and plan cards are told apart by order.
+	r.planMu.Lock()
+	unlock := sync.OnceFunc(r.planMu.Unlock)
+	defer unlock()
 
 	plan, err := func() (inboxItem, error) {
-		r.planMu.Lock()
-		defer r.planMu.Unlock()
 		ctxJSON, _ := json.Marshal(sc.CallContext)
 		if sc.CallContext == nil {
 			ctxJSON = []byte("[]")
@@ -460,14 +426,14 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 			}
 			defer stop() // the plan reads the node's context; the call itself doesn't
 		}
-		since := time.Now().UTC().Add(-2 * time.Second)
+		since := time.Now().UTC() // no margin: the call set up just before this one has a session from moments ago
 		log := r.d.Run(ctx, Scenario{Name: sc.Name, Speaker: "primary", Turns: []Turn{{Say: sc.Request}}})
 		printLog(stdout, log, false)
 		// The plan is this request's session: plan cards are posted once drafted, so a slow
 		// one would otherwise be taken for the next request's.
 		deadline := time.Now().Add(90 * time.Second)
 		for time.Now().Before(deadline) {
-			if sid := newestSession(r.opts.dbPath, since); sid != "" {
+			if sid := newestSession(r.opts.dbPath, since, sc.Contact["name"]); sid != "" {
 				plan, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], since, "Call plan", time.Until(deadline), sid)
 				if err != nil {
 					return inboxItem{}, fmt.Errorf("no call plan: %w", err)
@@ -490,7 +456,12 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 	}
 	rec.Plan = plan.Title
 	if strings.Contains(plan.Title, "not started") {
-		return fmt.Errorf("%s: %s", plan.Title, plan.Summary)
+		err := fmt.Errorf("%s: %s", plan.Title, plan.Summary)
+		if strings.Contains(plan.Summary, "already a call in progress") && r.opts.concurrency > 1 {
+			time.Sleep(30 * time.Second) // our own calls hold the household's slots: wait, then retry
+			return harnessError{err}
+		}
+		return err
 	}
 	confirm, ok := element(plan, "confirm_call")
 	if !ok {
@@ -533,6 +504,12 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 		return fmt.Errorf("Call now: %w", err)
 	}
 	fmt.Fprintf(stdout, "\n☎  Call now → %s\n", number)
+	select { // the call has read the saved details once it speaks
+	case <-st.started:
+	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
+	}
+	unlock()
 	watch, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	note := func(who, text string) { cl.mu.Lock(); st.add(who, text); cl.mu.Unlock() }
@@ -575,7 +552,7 @@ func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, st
 	rec.Started, rec.Ended, rec.Contact = today, ended, sc.Contact
 	rec.Checks = runChecks(sc.Expect, rec.facts(), r.opts.maxTurn)
 	if r.opts.judgeModel != "" && ended {
-		rec.Judge = judgeCall(ctx, r.opts.judgeTap, r.opts.judgeModel, sc, rec)
+		rec.Judge = judgeCall(ctx, r.opts.judgeTap, r.opts.judgeModel, rec)
 		if rec.Judge.Error == "" {
 			fmt.Fprintf(stdout, "   ⚖ %d/5 role=%v: %s\n", rec.Judge.Overall, rec.Judge.RoleConsistent, clip(rec.Judge.Summary, 200))
 		}
@@ -646,16 +623,18 @@ type sessionRow struct {
 	outcome json.RawMessage
 }
 
-// newestSession is the newest call session created since then, or "".
-func newestSession(path string, since time.Time) string {
+// newestSession is the newest call session created since then (to contact, when given), or "".
+// Plans are drafted by a queued job, so a request from an earlier, interrupted run can still
+// create its session now: the contact tells them apart.
+func newestSession(path string, since time.Time, contact string) string {
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return ""
 	}
 	defer db.Close()
 	var id string
-	_ = db.QueryRow(`SELECT id FROM cc_phone_call_sessions WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1`,
-		since.UTC().Format("2006-01-02T15:04:05.000Z")).Scan(&id)
+	_ = db.QueryRow(`SELECT id FROM cc_phone_call_sessions WHERE created_at >= ? AND (? = '' OR contact_name = ?)
+		ORDER BY created_at DESC LIMIT 1`, since.UTC().Format("2006-01-02T15:04:05.000Z"), contact, contact).Scan(&id)
 	return id
 }
 
@@ -705,7 +684,8 @@ type callState struct {
 	messages []map[string]string
 	lines    []callLine
 	ended    chan struct{}
-	hold     int // >0: on hold (the persona said [HOLD]); counts turns spent there
+	started  chan struct{} // closed on the call's first turn
+	hold     int           // >0: on hold (the persona said [HOLD]); counts turns spent there
 	errs     int
 }
 
@@ -726,7 +706,7 @@ func (c *callee) expect(session, persona string, out io.Writer) *callState {
 	if c.calls == nil {
 		c.calls = map[string]*callState{}
 	}
-	st := &callState{persona: persona, out: out, start: time.Now(), ended: make(chan struct{})}
+	st := &callState{persona: persona, out: out, start: time.Now(), ended: make(chan struct{}), started: make(chan struct{})}
 	c.calls[session] = st
 	return st
 }
@@ -762,6 +742,11 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(c.out, "   (a turn for unknown call %q)\n", t.SessionID)
 		_ = json.NewEncoder(w).Encode(simline.Reply{})
 		return
+	}
+	select {
+	case <-st.started:
+	default:
+		close(st.started)
 	}
 	said := strings.Join(t.Said, " ")
 	if said != "" {

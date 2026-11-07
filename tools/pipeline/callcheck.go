@@ -179,7 +179,18 @@ func (f callFacts) volunteered() []string {
 				}
 			}
 		}
-		tok := tokens(c["value"])[0]
+		// The value's most telling part that the call doesn't say anyway ("Delta Dental" to a
+		// dental office is "Delta").
+		tok := ""
+		for _, t := range tokens(c["value"]) {
+			if !contains(f.Request+" "+f.Contact["name"], t) {
+				tok = t
+				break
+			}
+		}
+		if tok == "" {
+			continue
+		}
 		asked := false
 		for _, l := range f.Lines {
 			switch {
@@ -441,8 +452,11 @@ func timesIn(text string) map[string]bool {
 		}
 	}
 	for _, re := range []*regexp.Regexp{hourRE, atHourRE, wordHrRE} {
-		for _, m := range re.FindAllStringSubmatch(text, -1) {
-			put(hourOf(m[1]), 0)
+		for _, ix := range re.FindAllStringSubmatchIndex(text, -1) {
+			if s := ix[2]; s > 0 && (text[s-1] == ':' || text[s-1] == '.') { // the "15" of "12:15 pm"
+				continue
+			}
+			put(hourOf(text[ix[2]:ix[3]]), 0)
 		}
 	}
 	for _, re := range []*regexp.Regexp{halfRE, halfNumRE} {

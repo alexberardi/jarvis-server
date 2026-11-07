@@ -26,21 +26,12 @@ func TestRecordFactsRecheck(t *testing.T) {
 	}
 }
 
-func TestCtxGateRunsOnlySharedDetailsTogether(t *testing.T) {
-	g := &ctxGate{}
-	g.acquire("a")
-	g.acquire("a") // same details: at once
-	got := make(chan bool)
-	go func() { g.acquire("b"); got <- true }()
-	select {
-	case <-got:
-		t.Fatal("b ran beside a")
-	case <-time.After(50 * time.Millisecond):
+func TestUpstreamErrorsLeaveOutTheProductsOwnTimeouts(t *testing.T) {
+	es := []TapEntry{{Status: 200}, {Status: 502, Error: "dial tcp: connection refused"}, {Status: 200, Error: "context canceled"},
+		{Status: 502, Error: `Post "http://x/v1/chat/completions": context canceled`}, {Status: 503}}
+	if n := upstreamErrors(es); n != 2 {
+		t.Errorf("%d harness errors, want 2", n)
 	}
-	g.release()
-	g.release()
-	<-got
-	g.release()
 }
 
 // The callee routes turns by session and keeps the line quiet after [HOLD].

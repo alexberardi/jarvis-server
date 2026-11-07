@@ -170,10 +170,10 @@ go run ./tools/pipeline call --sandbox calls --repeat 3 tools/pipeline/calls/*.j
 - Prod splits calls across labels: `live` talks, `background` drafts the plan, picks the
   details' categories and writes the summary. `INSTALLED_LLM_BACKGROUND_LABEL=background` (with
   `JARVIS_HARNESS_ENV` naming the installed server) points the sandbox's background there too.
-- `--concurrency N` runs N calls at once (2-3 on a shared model). Plans are still made one at a
-  time (plan cards are told apart only by order), and calls at once share the saved details (a
-  call re-reads them as it starts), so the queue is grouped by them. The rest of a call (its
-  questions, result card, the callee) is matched by session id.
+- `--concurrency N` runs N calls at once (2-3 on a shared model). Calls are still set up one
+  at a time, from writing the saved details until the call first speaks (the plan and the
+  call's start both read them); the plan card is found by the session the request created, and
+  the rest of a call (its questions, result card, the callee) is matched by session id.
 - `--out DIR` writes one record per call: the plan's brief, every line with its time, the
   session's `transcript_json` (with each turn's timings, from the sandbox's database), the
   cards, the checks and the judge. `--judge background` has prod's strongest label score each
@@ -209,7 +209,8 @@ category of saved details it is about, and for a booking its usual hour and part
 
 ```bash
 go run ./tools/pipeline call-gen --sandbox calls --count 72 --rng 1 --out /tmp/variants.json
-go run ./tools/pipeline call --sandbox calls --concurrency 3 --judge background --out /tmp/run1 /tmp/variants.json
+go run ./tools/pipeline call --sandbox calls --concurrency 3 --out /tmp/run1 /tmp/variants.json
+go run ./tools/pipeline call-judge --sandbox calls /tmp/run1          # judges each record, one at a time
 go run ./tools/pipeline call-report --md /tmp/run1.md --json /tmp/run1.json /tmp/run1
 go run ./tools/pipeline call-report --baseline tools/pipeline/calls/variants/baseline.json /tmp/run2   # exits 1 on a regression
 ```
@@ -242,7 +243,9 @@ go run ./tools/pipeline call-report --baseline tools/pipeline/calls/variants/bas
   the expectations. Role consistency (Jarvis is the caller, never the business: offering the
   business's times, taking the booking, confirming as staff) with quotes, then naturalness,
   honesty, efficiency, goal and overall, 1-5. It is reported beside the checks; a call passes
-  or fails on the checks alone.
+  or fails on the checks alone. On a shared server judge after the run (`call-judge`) rather than
+  inline (`call --judge`): the judge reasons at length on the background label, and live turns
+  queued behind it pass jarvisd's 20 s model timeout (`context canceled` in `llm.jsonl`).
 - **Report**: pass rates per dimension value, seed and check, the judge's means and role flips,
   p50/p95 turn latency from `transcript_json`, and the worst calls with their record files.
   Calls lost to harness errors are counted apart. `--recheck` re-runs this build's checks on

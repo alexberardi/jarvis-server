@@ -248,6 +248,7 @@ func TestTimesIn(t *testing.T) {
 		"anytime between 6:30 PM and 8:30 PM":        {"6:30", "8:30"},
 		"born in 1985, member XJH448812":             nil,
 		"quarter to eight":                           {"7:45"},
+		"offered Wednesday at 12:15 pm":              {"12:15"},
 	} {
 		got := timesIn(text)
 		if len(got) != len(want) {

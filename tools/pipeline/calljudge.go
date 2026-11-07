@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 )
 
@@ -44,8 +47,8 @@ Reply with ONLY a JSON object:
 {"role_consistent": true|false, "role_flips": ["quote", ...], "naturalness": n, "honesty": n, "efficiency": n, "goal": n, "overall": n, "problems": ["what went wrong, quoting the line", ...], "summary": "one or two sentences"}`
 
 // judgeCall asks the judge about rec; a model that fails twice leaves the error on the result.
-func judgeCall(ctx context.Context, base, model string, sc CallScenario, rec *CallRecord) *Judgement {
-	user := judgeInput(sc, rec)
+func judgeCall(ctx context.Context, base, model string, rec *CallRecord) *Judgement {
+	user := judgeInput(rec)
 	var last error
 	for attempt := range 3 {
 		txt, err := chatComplete(ctx, base, model, []map[string]string{{"role": "system", "content": judgeRubric}, {"role": "user", "content": user}}, 4000, 0, uint64(attempt+1), nil) // room for hidden reasoning
@@ -63,9 +66,49 @@ func judgeCall(ctx context.Context, base, model string, sc CallScenario, rec *Ca
 	return &Judgement{Error: last.Error()}
 }
 
-func judgeInput(sc CallScenario, rec *CallRecord) string {
+// runCallJudge is pipeline call-judge: judge records after a run, one at a time, so the
+// judge's long reasoning never holds up a live call's model on a shared server.
+func runCallJudge(ctx context.Context, args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("call-judge", flag.ContinueOnError)
+	sandbox := fs.String("sandbox", "", "sandbox whose tap the judge is reached through")
+	url := fs.String("url", "", "OpenAI-compatible base URL instead of the sandbox's tap")
+	model := fs.String("model", "background", "the judge's model label")
+	again := fs.Bool("again", false, "judge records that already have a judgement too")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	base := *url
+	if base == "" {
+		env, _, _, err := sandboxEnv(*sandbox)
+		if err != nil {
+			return err
+		}
+		base = env["SBX_LLM_TAP"]
+	}
+	recs, err := loadRecords(fs.Args())
+	if err != nil {
+		return err
+	}
+	for _, r := range recs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !r.Ended || (r.Judge != nil && r.Judge.Error == "" && !*again) {
+			continue
+		}
+		r.Judge = judgeCall(ctx, base, *model, r)
+		fmt.Fprintf(stdout, "  %s  %d/5 role=%v %s\n", r.Name, r.Judge.Overall, r.Judge.RoleConsistent, clip(r.Judge.Summary+r.Judge.Error, 160))
+		b, _ := json.MarshalIndent(r, "", "  ")
+		if err := os.WriteFile(r.file, append(b, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func judgeInput(rec *CallRecord) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Request: %s\n\nBrief:\n%s\n\nTranscript:\n", sc.Request, orDash(rec.Details))
+	fmt.Fprintf(&b, "Request: %s\n\nBrief:\n%s\n\nTranscript:\n", rec.Request, orDash(rec.Details))
 	for _, l := range rec.Lines {
 		who := map[string]string{"jarvis": "JARVIS", "host": "BUSINESS", "caller": "HOUSEHOLD MEMBER (answering Jarvis by text, not on the line)", "event": "—"}[l.Who]
 		fmt.Fprintf(&b, "[%5.1fs] %s: %s\n", float64(l.AtMS)/1000, who, l.Text)

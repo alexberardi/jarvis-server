@@ -80,7 +80,7 @@ func (e errFailed) Error() string { return fmt.Sprintf("%d failed", e.n) }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: pipeline say|run|call|call-gen|call-report|tap|toolset ... (see the package doc)")
+		return errors.New("usage: pipeline say|run|call|call-gen|call-judge|call-report|tap|toolset ... (see the package doc)")
 	}
 	switch args[0] {
 	case "tap":
@@ -93,6 +93,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return runCalls(ctx, args[1:], stdout)
 	case "call-gen":
 		return runCallGen(ctx, args[1:], stdout)
+	case "call-judge":
+		return runCallJudge(ctx, args[1:], stdout)
 	case "call-report":
 		return runCallReport(args[1:], stdout)
 	case "toolset":
