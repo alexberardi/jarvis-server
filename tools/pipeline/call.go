@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/simline"
+	_ "modernc.org/sqlite"
 )
 
 // A call scenario is a phone call end to end against a sandbox up with --phone-sim: the request
@@ -29,6 +32,7 @@ type CallScenario struct {
 	Name    string `json:"name"`
 	Request string `json:"request"`
 	// Callee is who answers: a persona the model plays, with what they know and what they do.
+	// "{today}" is replaced by the day the call runs ("Friday, November 6, 2026").
 	Callee string `json:"callee"`
 	// Number, when set, is the number the plan must have found.
 	Number string `json:"number,omitempty"`
@@ -38,6 +42,9 @@ type CallScenario struct {
 	// Answers are what the caller answers Jarvis's mid-call questions with ("The call needs your
 	// input"), in order; a question past the last goes unanswered.
 	Answers []string `json:"answers,omitempty"`
+	// AnswerAfter delays each answer this many seconds (past the call's ~25 s escalation
+	// window, the caller answers too late).
+	AnswerAfter float64 `json:"answer_after,omitempty"`
 	// Expect is what must hold for the scenario to pass.
 	Expect CallExpect `json:"expect"`
 	// Contact, when set, is put in the household's phonebook first (a business the web
@@ -46,43 +53,28 @@ type CallScenario struct {
 	// NodeContext, when set, is what the household's commands share with the plan, answered
 	// by a stand-in node (callnode.go).
 	NodeContext *NodeContext `json:"node_context,omitempty"`
+	// Variant is how pipeline call-gen made this scenario (callvariant.go); none for a
+	// hand-written one.
+	Variant *Variant `json:"variant,omitempty"`
 }
 
-// CallExpect is a call scenario's checks. Text checks ignore case; Says and Never also match
-// with spaces, dashes and commas removed, so a number Jarvis reads digit by digit still counts.
+// CallExpect is a call scenario's checks (callcheck.go). Text checks ignore case; Says and Never
+// also match with spaces, dashes and commas removed, so a number Jarvis reads digit by digit
+// still counts.
 type CallExpect struct {
 	// Achieved is the result card's verdict (✅ true, ⚠️ false); nil accepts either.
 	Achieved *bool `json:"achieved,omitempty"`
-	// Card is text the result card must contain.
-	Card []string `json:"card,omitempty"`
+	// Card is text the result card must contain; CardTimes are times (h:mm) it must name,
+	// however written ("7:30 PM", "half seven").
+	Card      []string `json:"card,omitempty"`
+	CardTimes []string `json:"card_times,omitempty"`
 	// Says is text Jarvis must say during the call; Never is text it must not.
 	Says  []string `json:"says,omitempty"`
 	Never []string `json:"never,omitempty"`
-}
-
-// check reports what failed: the result card and everything Jarvis said.
-func (e CallExpect) check(card inboxItem, said string) []string {
-	var fails []string
-	achieved := strings.Contains(card.Title, "✅")
-	if e.Achieved != nil && achieved != *e.Achieved {
-		fails = append(fails, fmt.Sprintf("card verdict %v, want %v", achieved, *e.Achieved))
-	}
-	for _, t := range e.Card {
-		if !contains(card.Title+" "+card.Summary+" "+card.Body, t) {
-			fails = append(fails, fmt.Sprintf("card lacks %q", t))
-		}
-	}
-	for _, t := range e.Says {
-		if !contains(said, t) {
-			fails = append(fails, fmt.Sprintf("never said %q", t))
-		}
-	}
-	for _, t := range e.Never {
-		if contains(said, t) {
-			fails = append(fails, fmt.Sprintf("said %q", t))
-		}
-	}
-	return fails
+	// NoParty: the request gave no party size, so Jarvis must not state one.
+	NoParty bool `json:"no_party,omitempty"`
+	// NotUser are the names of the person Jarvis calls for: it never claims to be them.
+	NotUser []string `json:"not_user,omitempty"`
 }
 
 func contains(text, want string) bool {
@@ -114,6 +106,21 @@ Follow your character's instructions exactly: don't invent requirements, demands
 Your character:
 `
 
+// callOpts are a run's settings beyond the scenarios.
+type callOpts struct {
+	dial        string
+	sip         bool
+	out         string        // directory for one record per call
+	judgeModel  string        // "" skips the judge
+	judgeTap    string        // where the judge's model is reached
+	maxTurn     time.Duration // a turn slower than this is a long silence
+	retries     int           // harness failures retried; product failures never
+	voiceLine   bool          // the simulated line speaks (TTS/whisper both ways); see callee
+	dbPath      string        // the sandbox's database, for the session's transcript
+	tapLog      string
+	concurrency int
+}
+
 func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("call", flag.ContinueOnError)
 	sandbox := fs.String("sandbox", "", "sandbox name (scripts/sandbox up --phone-sim)")
@@ -123,13 +130,20 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	repeat := fs.Int("repeat", 1, "run each scenario this many times and report its pass rate")
 	dial := fs.String("dial", "", "call this number instead of the plan's, as if edited on its card (the SIP demo's softphone)")
 	you := fs.Bool("you", false, "you play the business (type its lines on stdin) and answer Jarvis's questions (lines starting with >)")
+	conc := fs.Int("concurrency", 1, "calls at once (plans are still made one at a time; keep it to 2-3 on a shared model)")
+	out := fs.String("out", "", "write one JSON record per call here (transcript, checks, judge) for pipeline call-report")
+	judge := fs.String("judge", "", "model label that judges each call (e.g. background); empty skips the judge")
+	judgeTap := fs.String("judge-tap", "", "tap the judge is reached through instead of the sandbox's")
+	maxTurn := fs.Duration("max-turn", 8*time.Second, "a call turn slower than this fails the silence check")
+	retries := fs.Int("retries", 2, "retry a call this many times when it failed alongside a harness error (tap, network, callee model); product failures are never retried")
+	voiceLine := fs.Bool("voice-line", false, "the sandbox's simulated line is in voice mode (real TTS and whisper both ways): the callee hears Jarvis through the line's Heard text")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 {
 		return errors.New("call: name scenario files (tools/pipeline/calls/*.json)")
 	}
-	env, _, _, err := sandboxEnv(*sandbox)
+	env, dir, _, err := sandboxEnv(*sandbox)
 	if err != nil {
 		return err
 	}
@@ -139,31 +153,29 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	if sip && !*you {
 		return errors.New("call: this sandbox has no simulated phone line (scripts/sandbox up --phone-sim); over SIP, pass --you")
 	}
+	if *you || sip {
+		*conc = 1
+	}
 	d, err := sandboxDriver(*sandbox)
 	if err != nil {
 		return err
 	}
-	var scs []CallScenario
-	for _, p := range fs.Args() {
-		b, err := os.ReadFile(p)
-		if err != nil {
+	scs, err := loadCallScenarios(fs.Args(), *only)
+	if err != nil {
+		return err
+	}
+	opts := callOpts{dial: *dial, sip: sip, out: *out, judgeModel: *judge, judgeTap: env["SBX_LLM_TAP"], maxTurn: *maxTurn,
+		retries: *retries, voiceLine: *voiceLine, dbPath: filepath.Join(dir, "home", "jarvis.db"), tapLog: filepath.Join(dir, "llm.jsonl"),
+		concurrency: max(1, *conc)}
+	if *judgeTap != "" {
+		opts.judgeTap = *judgeTap
+	}
+	if opts.out != "" {
+		if err := os.MkdirAll(opts.out, 0o755); err != nil {
 			return err
 		}
-		var many []CallScenario
-		if err := json.Unmarshal(b, &many); err != nil {
-			var one CallScenario
-			if err := json.Unmarshal(b, &one); err != nil {
-				return fmt.Errorf("%s: %w", filepath.Base(p), err)
-			}
-			many = []CallScenario{one}
-		}
-		for _, sc := range many {
-			if *only == "" || slices.Contains(strings.Split(*only, ","), sc.Name) {
-				scs = append(scs, sc)
-			}
-		}
 	}
-	cl := &callee{tap: env["SBX_LLM_TAP"], model: *model, out: stdout}
+	cl := &callee{tap: env["SBX_LLM_TAP"], model: *model, out: stdout, voice: *voiceLine}
 	if *calleeTap != "" {
 		cl.tap = *calleeTap
 	}
@@ -184,19 +196,50 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	failed := 0
-	passes := make([]int, len(scs))
-	for i, sc := range scs {
-		for n := 0; n < *repeat; n++ {
-			if err := runCall(ctx, d, env, cl, sc, *dial, sip, stdout); err != nil {
-				failed++
-				fmt.Fprintf(stdout, "  ✗ %s: %v\n\n", sc.Name, err)
-				continue
-			}
-			passes[i]++
-			fmt.Fprintf(stdout, "  ✓ %s\n\n", sc.Name)
+	if opts.concurrency > 1 {
+		api := newUserAPI(env)
+		if hh, err := api.household(ctx, env); err == nil {
+			_ = api.put(env["SBX_CC"]+"/api/v0/mobile/household/"+hh+"/settings/"+"phone_calls.max_concurrent_calls", map[string]any{"value": opts.concurrency + 2}) // +2: the next plan, and a call still in wrapup after its card
 		}
 	}
+
+	type job struct{ i, rep int }
+	var jobs []job
+	for i := range scs {
+		for n := range *repeat {
+			jobs = append(jobs, job{i, n})
+		}
+	}
+	run := &callRun{d: d, env: env, cl: cl, opts: opts, stdout: &lockedWriter{w: stdout}}
+	failed := 0
+	passes := make([]int, len(scs))
+	var mu sync.Mutex
+	queue := make(chan job)
+	var wg sync.WaitGroup
+	for range opts.concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range queue {
+				ok := run.one(ctx, scs[j.i], j.rep)
+				mu.Lock()
+				if ok {
+					passes[j.i]++
+				} else {
+					failed++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, j := range jobs {
+		if ctx.Err() != nil {
+			break
+		}
+		queue <- j
+	}
+	close(queue)
+	wg.Wait()
 	fmt.Fprintln(stdout, "── pass rate")
 	for i, sc := range scs {
 		fmt.Fprintf(stdout, "  %d/%d  %s\n", passes[i], *repeat, sc.Name)
@@ -204,52 +247,221 @@ func runCalls(ctx context.Context, args []string, stdout io.Writer) error {
 	if failed > 0 {
 		return errFailed{failed}
 	}
-	return nil
+	return ctx.Err()
 }
 
-func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, sc CallScenario, dial string, sip bool, stdout io.Writer) error {
-	fmt.Fprintf(stdout, "══ %s\n", sc.Name)
-	api := &userAPI{token: env["SBX_TOKEN"], authURL: env["SBX_AUTH"], email: env["SBX_EMAIL"], password: env["SBX_PASSWORD"]}
-	ctxJSON, _ := json.Marshal(sc.CallContext)
-	if sc.CallContext == nil {
-		ctxJSON = []byte("[]")
-	}
-	if err := api.put(env["SBX_CC"]+"/settings/phone_calls.call_context?user_id="+env["SBX_USER_ID"],
-		map[string]any{"value": string(ctxJSON)}); err != nil {
-		return fmt.Errorf("call context: %w", err)
-	}
-	if sc.Contact != nil {
-		var hhs struct {
-			Households []struct {
-				ID string `json:"id"`
-			} `json:"households"`
-		}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, env["SBX_CC"]+"/api/v0/nodes/pairings", nil)
-		if err := api.do(req, &hhs); err != nil || len(hhs.Households) == 0 {
-			return fmt.Errorf("household: %v", err)
-		}
-		// A second add of the same contact is refused; the first is what counts.
-		_ = api.send(http.MethodPost, env["SBX_CC"]+"/api/v0/mobile/household/"+hhs.Households[0].ID+"/phone-contacts",
-			map[string]any{"name": sc.Contact["name"], "number": sc.Contact["number"]}, nil)
-	}
-	if sc.NodeContext != nil {
-		stop, err := contextNode(ctx, env, *sc.NodeContext)
+func loadCallScenarios(paths []string, only string) ([]CallScenario, error) {
+	var scs []CallScenario
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
 		if err != nil {
-			return fmt.Errorf("stand-in node: %w", err)
+			return nil, err
 		}
-		defer stop()
+		var many []CallScenario
+		if err := json.Unmarshal(b, &many); err != nil {
+			var one CallScenario
+			if err := json.Unmarshal(b, &one); err != nil {
+				return nil, fmt.Errorf("%s: %w", filepath.Base(p), err)
+			}
+			many = []CallScenario{one}
+		}
+		for _, sc := range many {
+			if only == "" || slices.Contains(strings.Split(only, ","), sc.Name) {
+				scs = append(scs, sc)
+			}
+		}
 	}
-	since := time.Now().UTC().Add(-2 * time.Second)
+	return scs, nil
+}
 
-	log := d.Run(ctx, Scenario{Name: sc.Name, Speaker: "primary", Turns: []Turn{{Say: sc.Request}}})
-	printLog(stdout, log, false)
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
 
-	plan, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], since, "Call plan|Call not started", 90*time.Second)
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// callRun is one pipeline call run's shared state.
+type callRun struct {
+	d      *Driver
+	env    map[string]string
+	cl     *callee
+	opts   callOpts
+	planMu sync.Mutex // one plan at a time: plan cards are told apart by order only
+	stdout *lockedWriter
+}
+
+// harnessError is a failure of the harness, not the product: retried.
+type harnessError struct{ err error }
+
+func (h harnessError) Error() string { return "harness: " + h.err.Error() }
+
+// one runs a scenario (retrying harness failures), writes its record and reports it.
+func (r *callRun) one(ctx context.Context, sc CallScenario, rep int) bool {
+	var rec *CallRecord
+	for attempt := 0; ; attempt++ {
+		var buf bytes.Buffer
+		var out io.Writer = &buf
+		if r.opts.concurrency == 1 {
+			out = r.stdout
+		}
+		rec = r.attempt(ctx, sc, rep, out)
+		rec.Attempts = attempt + 1
+		if r.opts.concurrency > 1 {
+			r.stdout.Write(buf.Bytes())
+		}
+		if rec.HarnessError == "" || rec.passed() || attempt >= r.opts.retries || ctx.Err() != nil {
+			break
+		}
+		fmt.Fprintf(r.stdout, "  ↻ %s: %s, retrying\n", sc.Name, rec.HarnessError)
+	}
+	if rec.passed() {
+		fmt.Fprintf(r.stdout, "  ✓ %s\n\n", sc.Name)
+	} else {
+		fmt.Fprintf(r.stdout, "  ✗ %s: %s\n\n", sc.Name, strings.Join(rec.failures(), "; "))
+	}
+	if r.opts.out != "" {
+		name := strings.NewReplacer("/", "_", " ", "_").Replace(sc.Name)
+		b, _ := json.MarshalIndent(rec, "", "  ")
+		_ = os.WriteFile(filepath.Join(r.opts.out, fmt.Sprintf("%s.r%d.json", name, rep)), append(b, '\n'), 0o644)
+	}
+	return rec.passed()
+}
+
+func (r *callRun) attempt(ctx context.Context, sc CallScenario, rep int, out io.Writer) *CallRecord {
+	rec := &CallRecord{Name: sc.Name, Rep: rep, Variant: sc.Variant, Request: sc.Request, Expect: sc.Expect, Voice: r.opts.voiceLine,
+		CallContext: sc.CallContext}
+	start := time.Now()
+	tapFrom := tapSize(r.opts.tapLog)
+	err := r.call(ctx, sc, rec, out)
+	rec.Seconds = time.Since(start).Seconds()
+	var he harnessError
+	switch {
+	case errors.As(err, &he):
+		rec.HarnessError = he.err.Error()
+	case err != nil:
+		rec.Fails = append(rec.Fails, err.Error())
+	}
+	// A failure alongside a model error the harness caused (the tap, a busy upstream) or a
+	// callee that couldn't answer is the harness's; it is retried.
+	if rec.HarnessError == "" && !rec.passed() {
+		if n := upstreamErrors(readTap(r.opts.tapLog, tapFrom)); n > 0 {
+			rec.HarnessError = fmt.Sprintf("%d model calls failed upstream during the call", n)
+		} else if rec.CalleeErrors > 0 {
+			rec.HarnessError = fmt.Sprintf("the callee model failed %d times", rec.CalleeErrors)
+		}
+	}
+	return rec
+}
+
+// upstreamErrors counts tap entries that failed for reasons outside the product: no answer,
+// a 5xx or a broken connection.
+func upstreamErrors(es []TapEntry) int {
+	n := 0
+	for _, e := range es {
+		// "context canceled" is jarvisd giving up on a slow model call itself (its 20 s turn
+		// budget): the product's behaviour under load, not a broken harness.
+		if (e.Status == 0 || e.Status >= 500 || e.Error != "") && !strings.Contains(e.Error, "context canceled") {
+			n++
+		}
+	}
+	return n
+}
+
+func newUserAPI(env map[string]string) *userAPI {
+	return &userAPI{token: env["SBX_TOKEN"], authURL: env["SBX_AUTH"], email: env["SBX_EMAIL"], password: env["SBX_PASSWORD"]}
+}
+
+func (a *userAPI) household(ctx context.Context, env map[string]string) (string, error) {
+	var hhs struct {
+		Households []struct {
+			ID string `json:"id"`
+		} `json:"households"`
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, env["SBX_CC"]+"/api/v0/nodes/pairings", nil)
+	if err := a.do(req, &hhs); err != nil || len(hhs.Households) == 0 {
+		return "", fmt.Errorf("household: %v", err)
+	}
+	return hhs.Households[0].ID, nil
+}
+
+// call plays one call into rec. A returned harnessError is the harness's failure; any other
+// error is the product's.
+func (r *callRun) call(ctx context.Context, sc CallScenario, rec *CallRecord, stdout io.Writer) error {
+	env, cl := r.env, r.cl
+	fmt.Fprintf(stdout, "══ %s\n", sc.Name)
+	api := newUserAPI(env)
+	// One call is set up at a time, from its saved details to its start: the plan and the
+	// call's start both read the user's saved details, and plan cards are told apart by order.
+	r.planMu.Lock()
+	unlock := sync.OnceFunc(r.planMu.Unlock)
+	defer unlock()
+
+	plan, err := func() (inboxItem, error) {
+		ctxJSON, _ := json.Marshal(sc.CallContext)
+		if sc.CallContext == nil {
+			ctxJSON = []byte("[]")
+		}
+		if err := api.put(env["SBX_CC"]+"/settings/phone_calls.call_context?user_id="+env["SBX_USER_ID"],
+			map[string]any{"value": string(ctxJSON)}); err != nil {
+			return inboxItem{}, harnessError{fmt.Errorf("call context: %w", err)}
+		}
+		if sc.Contact != nil {
+			hh, err := api.household(ctx, env)
+			if err != nil {
+				return inboxItem{}, harnessError{err}
+			}
+			// A second add of the same contact is refused; the first is what counts.
+			_ = api.send(http.MethodPost, env["SBX_CC"]+"/api/v0/mobile/household/"+hh+"/phone-contacts",
+				map[string]any{"name": sc.Contact["name"], "number": sc.Contact["number"]}, nil)
+		}
+		if sc.NodeContext != nil {
+			stop, err := contextNode(ctx, env, *sc.NodeContext)
+			if err != nil {
+				return inboxItem{}, harnessError{fmt.Errorf("stand-in node: %w", err)}
+			}
+			defer stop() // the plan reads the node's context; the call itself doesn't
+		}
+		since := time.Now().UTC() // no margin: the call set up just before this one has a session from moments ago
+		log := r.d.Run(ctx, Scenario{Name: sc.Name, Speaker: "primary", Turns: []Turn{{Say: sc.Request}}})
+		printLog(stdout, log, false)
+		// The plan is this request's session: plan cards are posted once drafted, so a slow
+		// one would otherwise be taken for the next request's.
+		deadline := time.Now().Add(3 * time.Minute) // the plan is drafted on the background label, slow when it is shared
+		for time.Now().Before(deadline) {
+			if sid := newestSession(r.opts.dbPath, since, sc.Contact["name"]); sid != "" {
+				plan, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], since, "Call plan", time.Until(deadline), sid)
+				if err != nil {
+					return inboxItem{}, fmt.Errorf("no call plan: %w", err)
+				}
+				return plan, nil
+			}
+			if refused, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], since, "Call not started", 0, ""); err == nil {
+				return refused, nil
+			}
+			select {
+			case <-ctx.Done():
+				return inboxItem{}, harnessError{ctx.Err()}
+			case <-time.After(time.Second):
+			}
+		}
+		return inboxItem{}, errors.New("no call plan within 3 minutes")
+	}()
 	if err != nil {
-		return fmt.Errorf("no call plan: %w", err)
+		return err
 	}
+	rec.Plan = plan.Title
 	if strings.Contains(plan.Title, "not started") {
-		return fmt.Errorf("%s: %s", plan.Title, plan.Summary)
+		err := fmt.Errorf("%s: %s", plan.Title, plan.Summary)
+		if strings.Contains(plan.Summary, "already a call in progress") && r.opts.concurrency > 1 {
+			time.Sleep(30 * time.Second) // our own calls hold the household's slots: wait, then retry
+			return harnessError{err}
+		}
+		return err
 	}
 	confirm, ok := element(plan, "confirm_call")
 	if !ok {
@@ -270,9 +482,11 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 			}
 		}
 	}
+	rec.SessionID, _ = confirm.Data["session_id"].(string)
+	rec.Number, rec.Details = number, details
 	fmt.Fprintf(stdout, "   number: %s\n   details:\n%s\n", orDash(number), indent(details))
-	if dial != "" {
-		number = dial
+	if r.opts.dial != "" {
+		number = r.opts.dial
 	} else if sc.Number != "" && number != sc.Number {
 		return fmt.Errorf("the plan's number is %q, want %q", number, sc.Number)
 	}
@@ -280,70 +494,227 @@ func runCall(ctx context.Context, d *Driver, env map[string]string, cl *callee, 
 		return errors.New("the plan has no number to call")
 	}
 
-	ended := cl.expect(sc.Callee)
+	today := time.Now()
+	persona := strings.ReplaceAll(sc.Callee, "{today}", today.Format("Monday, January 2, 2006"))
+	st := cl.expect(rec.SessionID, persona, stdout)
+	defer cl.forget(rec.SessionID)
 	confirm.Data["dialed_number"], confirm.Data["details"] = number, details
 	confirmAt := time.Now().UTC().Add(-time.Second)
 	if err := api.tap(ctx, env["SBX_CC"], confirm, plan.Metadata["household_id"]); err != nil {
 		return fmt.Errorf("Call now: %w", err)
 	}
 	fmt.Fprintf(stdout, "\n☎  Call now → %s\n", number)
+	select { // the call has read the saved details once it speaks
+	case <-st.started:
+	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
+	}
+	unlock()
 	watch, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
-	go api.answerQuestions(watch, env, confirmAt, sc.Answers, cl.you, stdout)
+	note := func(who, text string) { cl.mu.Lock(); st.add(who, text); cl.mu.Unlock() }
+	go api.answerQuestions(watch, env, confirmAt, rec.SessionID, sc.Answers, time.Duration(sc.AnswerAfter*float64(time.Second)), cl.you, note, stdout)
 	resultWithin := 3 * time.Minute
-	if sip {
+	ended := true
+	if r.opts.sip {
 		resultWithin = 15 * time.Minute // a person on a real line: the result card says when it's over
 	} else {
 		select {
-		case <-ended:
+		case <-st.ended:
 		case <-time.After(12 * time.Minute):
-			return errors.New("the call did not end within 12 minutes")
+			ended = false
 		case <-ctx.Done():
-			return ctx.Err()
+			return harnessError{ctx.Err()}
 		}
 	}
-	result, err := api.waitItem(ctx, env["SBX_NOTIFICATIONS"], confirmAt, "Call finished", resultWithin)
-	if err != nil {
-		return fmt.Errorf("no result card: %w", err)
+	var result inboxItem
+	if ended {
+		result, err = api.waitItem(ctx, env["SBX_NOTIFICATIONS"], confirmAt, "Call finished", resultWithin, rec.SessionID)
+	}
+	stopWatch()
+	rec.Lines, rec.CalleeErrors = cl.snapshot(st)
+	rec.Card = result
+	rec.Achieved = strings.Contains(result.Title, "✅")
+	if s, err := readSession(r.opts.dbPath, rec.SessionID); err == nil {
+		rec.State, rec.Transcript, rec.Outcome = s.state, s.turns, s.outcome
+	} else {
+		fmt.Fprintf(stdout, "   (transcript: %v)\n", err)
+	}
+	if !ended {
+		rec.Fails = append(rec.Fails, "the call did not end within 12 minutes")
+	} else if err != nil {
+		rec.Fails = append(rec.Fails, "no result card: "+err.Error())
 	}
 	fmt.Fprintf(stdout, "\n📬 %s\n%s\n\n", result.Title, indent(result.Body))
 	if cl.you != nil {
 		return nil // a person played the business: the scenario's expectations are theirs to judge
 	}
-	if fails := sc.Expect.check(result, cl.saidSoFar()); len(fails) > 0 {
-		return errors.New(strings.Join(fails, "; "))
+	rec.Started, rec.Ended, rec.Contact = today, ended, sc.Contact
+	rec.Checks = runChecks(sc.Expect, rec.facts(), r.opts.maxTurn)
+	if r.opts.judgeModel != "" && ended {
+		rec.Judge = judgeCall(ctx, r.opts.judgeTap, r.opts.judgeModel, rec)
+		if rec.Judge.Error == "" {
+			fmt.Fprintf(stdout, "   ⚖ %d/5 role=%v: %s\n", rec.Judge.Overall, rec.Judge.RoleConsistent, clip(rec.Judge.Summary, 200))
+		}
 	}
 	return nil
 }
 
-// callee plays the far end of the current call: the simline driver.
+// CallRecord is one call as pipeline call --out writes it: everything call-report reads.
+type CallRecord struct {
+	Name         string              `json:"name"`
+	Rep          int                 `json:"rep"`
+	Variant      *Variant            `json:"variant,omitempty"`
+	Request      string              `json:"request"`
+	CallContext  []map[string]string `json:"call_context,omitempty"`
+	Expect       CallExpect          `json:"expect"`
+	Plan         string              `json:"plan,omitempty"`
+	SessionID    string              `json:"session_id,omitempty"`
+	Number       string              `json:"number,omitempty"`
+	Details      string              `json:"details,omitempty"`
+	Lines        []callLine          `json:"lines,omitempty"`
+	Transcript   []transcriptTurn    `json:"transcript,omitempty"` // the session's transcript_json
+	Outcome      json.RawMessage     `json:"outcome,omitempty"`
+	State        string              `json:"state,omitempty"`
+	Card         inboxItem           `json:"card"`
+	Achieved     bool                `json:"achieved"`
+	Fails        []string            `json:"fails,omitempty"` // the call failed before its checks
+	Checks       []CheckResult       `json:"checks,omitempty"`
+	Judge        *Judgement          `json:"judge,omitempty"`
+	HarnessError string              `json:"harness_error,omitempty"`
+	CalleeErrors int                 `json:"callee_errors,omitempty"`
+	Attempts     int                 `json:"attempts"`
+	Seconds      float64             `json:"seconds"`
+	Voice        bool                `json:"voice_line,omitempty"`
+	Started      time.Time           `json:"started"`
+	Ended        bool                `json:"ended"`
+	Contact      map[string]string   `json:"contact,omitempty"`
+	file         string
+}
+
+// facts are what the checks read, from the record alone (call-report --recheck re-runs them).
+func (c *CallRecord) facts() callFacts {
+	contact := c.Contact
+	if contact == nil {
+		contact = map[string]string{"number": c.Number}
+	}
+	return callFacts{Request: c.Request, Details: c.Details, Context: c.CallContext, Contact: contact, Lines: c.Lines,
+		Card: c.Card, Turns: c.Transcript, Ended: c.Ended, State: c.State, Today: c.Started}
+}
+
+func (c *CallRecord) failures() []string {
+	out := slices.Clone(c.Fails)
+	if c.HarnessError != "" {
+		out = append(out, "harness: "+c.HarnessError)
+	}
+	for _, ch := range c.Checks {
+		if !ch.Pass {
+			out = append(out, ch.Name+": "+ch.Detail)
+		}
+	}
+	return out
+}
+
+func (c *CallRecord) passed() bool { return len(c.failures()) == 0 }
+
+type sessionRow struct {
+	state   string
+	turns   []transcriptTurn
+	outcome json.RawMessage
+}
+
+// newestSession is the newest call session created since then (to contact, when given), or "".
+// Plans are drafted by a queued job, so a request from an earlier, interrupted run can still
+// create its session now: the contact tells them apart.
+func newestSession(path string, since time.Time, contact string) string {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+	var id string
+	_ = db.QueryRow(`SELECT id FROM cc_phone_call_sessions WHERE created_at >= ? AND (? = '' OR contact_name = ?)
+		ORDER BY created_at DESC LIMIT 1`, since.UTC().Format("2006-01-02T15:04:05.000Z"), contact, contact).Scan(&id)
+	return id
+}
+
+// readSession reads the call's session from the sandbox's database (read-only): its state,
+// transcript_json (with each turn's timings) and outcome_json.
+func readSession(path, id string) (sessionRow, error) {
+	var s sessionRow
+	if id == "" {
+		return s, errors.New("no session id")
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return s, err
+	}
+	defer db.Close()
+	var tj, oj sql.NullString
+	if err := db.QueryRow(`SELECT state, transcript_json, outcome_json FROM cc_phone_call_sessions WHERE id = ?`, id).Scan(&s.state, &tj, &oj); err != nil {
+		return s, err
+	}
+	if tj.Valid && tj.String != "" {
+		if err := json.Unmarshal([]byte(tj.String), &s.turns); err != nil {
+			return s, fmt.Errorf("transcript_json: %w", err)
+		}
+	}
+	if oj.Valid && json.Valid([]byte(oj.String)) {
+		s.outcome = json.RawMessage(oj.String)
+	}
+	return s, nil
+}
+
+// callee plays the far end of every call on the line, told apart by session.
 type callee struct {
 	tap, model string
 	out        io.Writer
 	you        *human // --you: a person types the business's lines
+	voice      bool   // the line is in voice mode: the persona hears what the line heard
 
-	mu       sync.Mutex
+	mu    sync.Mutex
+	calls map[string]*callState
+}
+
+// callState is one call's far end.
+type callState struct {
 	persona  string
+	out      io.Writer
+	start    time.Time
 	messages []map[string]string
-	said     []string // everything Jarvis said on this call
+	lines    []callLine
 	ended    chan struct{}
+	started  chan struct{} // closed on the call's first turn
+	hold     int           // >0: on hold (the persona said [HOLD]); counts turns spent there
+	errs     int
 }
 
-func (c *callee) saidSoFar() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return strings.Join(c.said, " ")
+func (s *callState) add(who, text string) {
+	s.lines = append(s.lines, callLine{Who: who, Text: text, AtMS: time.Since(s.start).Milliseconds()})
 }
 
-// expect readies the callee for the next call and returns a channel closed when it ends.
-func (c *callee) expect(persona string) <-chan struct{} {
+func (c *callee) snapshot(s *callState) ([]callLine, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.persona = persona
-	c.messages = nil
-	c.said = nil
-	c.ended = make(chan struct{})
-	return c.ended
+	return slices.Clone(s.lines), s.errs
+}
+
+// expect readies the callee for a call's session.
+func (c *callee) expect(session, persona string, out io.Writer) *callState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.calls == nil {
+		c.calls = map[string]*callState{}
+	}
+	st := &callState{persona: persona, out: out, start: time.Now(), ended: make(chan struct{}), started: make(chan struct{})}
+	c.calls[session] = st
+	return st
+}
+
+func (c *callee) forget(session string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.calls, session)
 }
 
 func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -352,12 +723,31 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	c.mu.Lock()
+	st := c.calls[t.SessionID]
+	if st == nil && len(c.calls) == 1 && t.SessionID == "" {
+		for _, s := range c.calls {
+			st = s
+		}
+	}
+	if st == nil {
+		c.mu.Unlock()
+		fmt.Fprintf(c.out, "   (a turn for unknown call %q)\n", t.SessionID)
+		_ = json.NewEncoder(w).Encode(simline.Reply{})
+		return
+	}
+	select {
+	case <-st.started:
+	default:
+		close(st.started)
+	}
 	said := strings.Join(t.Said, " ")
 	for _, u := range t.Understood {
 		fmt.Fprintf(c.out, "   👂 jarvis heard: %s\n", u)
 	}
 	if said != "" {
-		fmt.Fprintf(c.out, "   🤖 %s\n", said)
+		fmt.Fprintf(st.out, "   🤖 %s\n", said)
+		st.add("jarvis", said)
 	}
 	// Voice mode: the persona hears only whisper's transcription of Jarvis's audio; the exact
 	// text above stays in the log and the expectations.
@@ -367,36 +757,44 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if heard == "" {
 			heard = "(something you couldn't make out)"
 		}
-		fmt.Fprintf(c.out, "   👂 business heard: %s\n", heard)
+		fmt.Fprintf(st.out, "   👂 business heard: %s\n", heard)
 	}
-	c.mu.Lock()
-	c.said = append(c.said, t.Said...)
-	ended := c.ended
-	persona := c.persona
 	switch {
 	case said != "":
-		c.messages = append(c.messages, map[string]string{"role": "user", "content": heard})
+		st.messages = append(st.messages, map[string]string{"role": "user", "content": heard})
 	case t.Event == "silence":
-		c.messages = append(c.messages, map[string]string{"role": "user", "content": "(silence on the line)"})
+		st.add("event", "(silence)")
+		st.messages = append(st.messages, map[string]string{"role": "user", "content": "(silence on the line)"})
 	}
-	msgs := append([]map[string]string{{"role": "system", "content": calleeRules + persona}}, c.messages...)
-	c.mu.Unlock()
 	if t.Event == "ended" {
-		fmt.Fprintln(c.out, "   ── call ended")
-		if ended != nil {
-			select {
-			case <-ended:
-			default:
-				close(ended)
-			}
+		c.mu.Unlock()
+		fmt.Fprintln(st.out, "   ── call ended")
+		select {
+		case <-st.ended:
+		default:
+			close(st.ended)
 		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	// On hold the business says nothing until the line goes quiet or the caller has spoken
+	// twice into the silence; then it comes back.
+	if st.hold > 0 {
+		if t.Event != "silence" && st.hold < 3 {
+			st.hold++
+			c.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(simline.Reply{})
+			return
+		}
+		st.hold = 0
+		st.messages = append(st.messages, map[string]string{"role": "user", "content": "(you are back on the line after the hold)"})
+	}
+	msgs := append([]map[string]string{{"role": "system", "content": calleeRules + st.persona}}, st.messages...)
+	c.mu.Unlock()
 	var reply string
 	var err error
 	if c.you != nil {
-		fmt.Fprint(c.out, "   🧑 › ")
+		fmt.Fprint(st.out, "   🧑 › ")
 		select {
 		case reply = <-c.you.business:
 			if strings.HasSuffix(reply, "/hangup") {
@@ -408,43 +806,66 @@ func (c *callee) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		reply, err = c.chat(r.Context(), msgs)
 	}
+	c.mu.Lock()
 	if err != nil {
-		fmt.Fprintf(c.out, "   (callee model failed: %v)\n", err)
+		st.errs++
+		c.mu.Unlock()
+		fmt.Fprintf(st.out, "   (callee model failed: %v)\n", err)
 		_ = json.NewEncoder(w).Encode(simline.Reply{})
 		return
 	}
 	hangup := strings.Contains(reply, "[HANGUP]")
-	reply = strings.TrimSpace(strings.ReplaceAll(reply, "[HANGUP]", ""))
-	c.mu.Lock()
-	c.messages = append(c.messages, map[string]string{"role": "assistant", "content": reply})
+	hold := strings.Contains(reply, "[HOLD]")
+	reply = strings.TrimSpace(strings.NewReplacer("[HANGUP]", "", "[HOLD]", "").Replace(reply))
+	st.messages = append(st.messages, map[string]string{"role": "assistant", "content": reply})
 	replies := 0
-	for _, m := range c.messages {
+	for _, m := range st.messages {
 		if m["role"] == "assistant" {
 			replies++
 		}
 	}
-	c.mu.Unlock()
 	// The persona model sometimes ends the call on its greeting or mid-question; a person doesn't.
 	if hangup && c.you == nil && (replies < 2 || strings.Contains(reply, "?")) {
 		hangup = false
 	}
+	if hold && !hangup {
+		st.hold = 1
+	}
+	if reply != "" {
+		st.add("host", reply)
+	}
+	c.mu.Unlock()
 	if reply != "" && c.you == nil {
-		fmt.Fprintf(c.out, "   🧑 %s\n", reply)
+		fmt.Fprintf(st.out, "   🧑 %s\n", reply)
+	}
+	if hold && !hangup {
+		fmt.Fprintln(st.out, "   (puts the line on hold)")
 	}
 	if hangup {
-		fmt.Fprintln(c.out, "   (hangs up)")
+		fmt.Fprintln(st.out, "   (hangs up)")
 	}
 	_ = json.NewEncoder(w).Encode(simline.Reply{Say: reply, Hangup: hangup})
 }
 
 func (c *callee) chat(ctx context.Context, msgs []map[string]string) (string, error) {
-	body, _ := json.Marshal(map[string]any{"model": c.model, "messages": msgs, "max_tokens": 200, "temperature": 0.7})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.tap+"/v1/chat/completions", bytes.NewReader(body))
+	return chatComplete(ctx, c.tap, c.model, msgs, 200, 0.7, 0, nil)
+}
+
+// chatComplete is one OpenAI-style chat call through a tap (or any compatible base URL); seed
+// 0 sends none. extra adds fields (jarvisd's API takes reasoning_budget: 0 for no thinking).
+func chatComplete(ctx context.Context, base, model string, msgs []map[string]string, maxTokens int, temp float64, seed uint64, extra map[string]any) (string, error) {
+	req := map[string]any{"model": model, "messages": msgs, "max_tokens": maxTokens, "temperature": temp}
+	if seed != 0 {
+		req["seed"] = seed
+	}
+	maps.Copy(req, extra)
+	body, _ := json.Marshal(req)
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	hr.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(hr)
 	if err != nil {
 		return "", err
 	}
@@ -593,8 +1014,9 @@ func (a *userAPI) tap(ctx context.Context, cc string, el cardElement, hh any) er
 }
 
 // answerQuestions plays the caller's phone during a call: each "The call needs your input"
-// card gets the next of answers, tapped as Send answer; past the last, questions go unanswered.
-func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, since time.Time, answers []string, you *human, out io.Writer) {
+// card of this session gets the next of answers, after delay, tapped as Send answer; past the
+// last, questions go unanswered. note records the question and answer on the call's timeline.
+func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, since time.Time, session string, answers []string, delay time.Duration, you *human, note func(who, text string), out io.Writer) {
 	seen := map[string]bool{}
 	for ctx.Err() == nil {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, env["SBX_NOTIFICATIONS"]+"/api/v0/inbox?limit=20", nil)
@@ -604,12 +1026,13 @@ func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, si
 		var items []inboxItem
 		if a.do(req, &items) == nil {
 			for _, it := range items {
-				if seen[it.ID] || !strings.Contains(it.Title, "needs your input") || created(it).Before(since) {
+				if seen[it.ID] || !strings.Contains(it.Title, "needs your input") || created(it).Before(since) || !ofSession(it, session) {
 					continue
 				}
 				seen[it.ID] = true
 				n := len(seen)
 				fmt.Fprintf(out, "   📱 %s\n", it.Summary)
+				note("event", "(Jarvis asks the caller) "+it.Summary)
 				if you != nil {
 					fmt.Fprintln(out, "   📱 (answer with > …)")
 					select {
@@ -627,8 +1050,16 @@ func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, si
 				if !ok {
 					continue
 				}
+				if delay > 0 {
+					select {
+					case <-time.After(delay):
+					case <-ctx.Done():
+						return
+					}
+				}
 				el.Data["answer"] = answers[n-1]
 				fmt.Fprintf(out, "   📱 you answer: %s\n", answers[n-1])
+				note("caller", answers[n-1])
 				if err := a.tap(ctx, env["SBX_CC"], el, it.Metadata["household_id"]); err != nil {
 					fmt.Fprintf(out, "   📱 answer failed: %v\n", err)
 				}
@@ -642,6 +1073,11 @@ func (a *userAPI) answerQuestions(ctx context.Context, env map[string]string, si
 	}
 }
 
+// ofSession: the card is about this call (any card, when session is "").
+func ofSession(it inboxItem, session string) bool {
+	return session == "" || it.Metadata["session_id"] == session
+}
+
 func created(it inboxItem) time.Time {
 	at, err := time.Parse(time.RFC3339Nano, it.CreatedAt)
 	if err != nil { // the inbox's timestamps are UTC without a zone
@@ -650,8 +1086,9 @@ func created(it inboxItem) time.Time {
 	return at
 }
 
-// waitItem waits for the newest inbox item created after since whose title contains title.
-func (a *userAPI) waitItem(ctx context.Context, base string, since time.Time, title string, within time.Duration) (inboxItem, error) {
+// waitItem waits for the newest inbox item created after since whose title contains title
+// (one of "a|b"), of the session when one is given.
+func (a *userAPI) waitItem(ctx context.Context, base string, since time.Time, title string, within time.Duration, session string) (inboxItem, error) {
 	deadline := time.Now().Add(within)
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v0/inbox?limit=20", nil)
@@ -663,7 +1100,7 @@ func (a *userAPI) waitItem(ctx context.Context, base string, since time.Time, ti
 			return inboxItem{}, err
 		}
 		for _, it := range items {
-			if created(it).After(since) && slices.ContainsFunc(strings.Split(title, "|"), func(t string) bool { return strings.Contains(it.Title, t) }) {
+			if created(it).After(since) && ofSession(it, session) && slices.ContainsFunc(strings.Split(title, "|"), func(t string) bool { return strings.Contains(it.Title, t) }) {
 				return it, nil
 			}
 		}

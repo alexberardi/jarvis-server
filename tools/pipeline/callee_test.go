@@ -27,8 +27,8 @@ func TestCalleeHearsTheTranscriptionInVoiceMode(t *testing.T) {
 	defer tap.Close()
 	var out bytes.Buffer
 	cl := &callee{tap: tap.URL, model: "live", out: &out}
-	cl.expect("You are the host.")
-	turn, _ := json.Marshal(simline.Turn{Event: "spoke", Voice: true, Said: []string{"A table at 7:30?"},
+	st := cl.expect("s1", "You are the host.", &out)
+	turn, _ := json.Marshal(simline.Turn{SessionID: "s1", Event: "spoke", Voice: true, Said: []string{"A table at 7:30?"},
 		Heard: "A table at 730?", Understood: []string{"Papa V's."}})
 	rec := httptest.NewRecorder()
 	cl.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/turn", bytes.NewReader(turn)))
@@ -39,8 +39,8 @@ func TestCalleeHearsTheTranscriptionInVoiceMode(t *testing.T) {
 	if last := prompt[len(prompt)-1]; last["content"] != "A table at 730?" {
 		t.Fatalf("persona heard %q, want the transcription", last["content"])
 	}
-	if cl.saidSoFar() != "A table at 7:30?" {
-		t.Fatalf("checks see %q, want the exact text", cl.saidSoFar())
+	if lines, _ := cl.snapshot(st); len(lines) == 0 || lines[0].Who != "jarvis" || lines[0].Text != "A table at 7:30?" {
+		t.Fatalf("checks see %+v, want the exact text", lines)
 	}
 	for _, want := range []string{"jarvis heard: Papa V's.", "🤖 A table at 7:30?", "business heard: A table at 730?"} {
 		if !strings.Contains(out.String(), want) {
