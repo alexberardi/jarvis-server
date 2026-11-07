@@ -52,6 +52,11 @@ Music starts, stops and changes from many places, and nothing holds one answer t
 | P11 | **The mobile app checks playback once, at the root (Q2, 2026-11-07).** One React Query query beside `PresenceManager` in `App.tsx`; no screen subscribes. It checks every 2 s while any node plays and every 15 s when none does, only while signed in and in the foreground (wire React Query's `focusManager` to `AppState`, which the app doesn't do yet). A control shows the state jarvisd returns at once. A mini-player bar, drawn once in the tab navigator's tab bar, appears when something plays and opens the full list. It shows only on each tab's first screen: drill-in screens (a routine's edit screen, say) and the root stack's screens (Settings, Inbox) never show it. The tabs hold stack navigators that keep the tab bar on drill-ins, so "wherever the tab bar shows" is not the rule. |
 | P12 | **The node reports changes with an HTTP request (Q3, 2026-11-07).** The user was fine with MQTT or an API request. The node already sends everything to jarvisd over HTTP with its own credentials (the once-a-minute status message is `CC.Beat`, an HTTP call), and uses MQTT only for jarvisd's requests to it and its replies. So it sends each playback change to a node route, at most one a second, with the latest state winning; the status message carries the same record, so jarvisd catches up after a restart. The new route needs tier expectations and the user's review. Controls from jarvisd to the node use the existing MQTT request channel (P6). |
 | P13 | **Sources are an `IJarvisMusicCommand` in the SDK (Q4, 2026-11-07).** The user's idea: "an IMusicCommand that exposes these commands and inherits from IJarvisCommand so it's compatible as a regular command but also gets further customization." Named `IJarvisMusicCommand` after the SDK's `IJarvis*` convention. It adds `playback_status()`, `playback_control()` and `playback_binary` as abstract members, and `report()` as a helper. No new manifest component type. |
+| P14 | **The most recent source wins, and the older one stops (Q6, 2026-11-07).** The user: "most recent works, and when we discover that we should auto kill the old one's status." When a second source starts playing, by any route, the hub stops the older source (its `playback_control("pause")`, or takeover's stop for a player without one) and drops its state, so only one entry per node is ever shown. |
+| P15 | **A phone streaming over Bluetooth is a source in the first version, if it's easy (Q7, 2026-11-07).** BlueZ exposes the phone's remote-control profile as `org.bluez.MediaPlayer1` over D-Bus, which `internal/agent/bluetooth` already speaks (godbus): play, pause, next, previous, and the track's title, artist, album, duration and position. If that holds on real phones, it ships with the other sources; if it turns out hard, it moves after them and the rest doesn't wait. A phone that doesn't offer the profile shows as "Bluetooth: <phone name>" with no controls. |
+| P16 | **The display's own mpv is a built-in source (Q8, 2026-11-07),** over its existing status and controls (`GetPlaybackStatus`, `ControlMedia`); Cast and Playercast feed that mpv. |
+| P17 | **The hub polls the active source every 2 s while it plays (Q9, 2026-11-07),** and never while idle. A source that pushes with `report()` is still polled, every 10 s, as a check. |
+| P18 | **Go agent nodes only (Q10, 2026-11-07).** The user: the Python node is "totally deprecated." `jarvis-node-setup` gets none of this. |
 
 ## Design
 
@@ -88,10 +93,12 @@ pausing), so the hub doesn't have to wait for its next poll. The sidecar recogni
 ### Node (the hub)
 
 - **Registry:** sources come from the sidecar's package scan (declared commands) and from built-ins (the
-  display's mpv; a phone streaming over Bluetooth, Q7).
-- **Current state:** while something plays, the hub polls the active source (Q9) and takes `report()` pushes.
-  The active source is the one that most recently started playing (Q6). Takeover already stops the others
-  when a command plays, so one source plays at a time.
+  display's mpv, P16; a phone streaming over Bluetooth, P15).
+- **Current state:** while something plays, the hub polls the active source every 2 s (P17) and takes
+  `report()` pushes. The active source is the one that most recently started playing (P14). When the hub
+  sees a second source start, from anywhere (a voice command, the phone's Spotify app, a phone over
+  Bluetooth), it stops the older one and drops its state, so one source plays at a time. Takeover already
+  does the stopping for a music command's "play"; the hub extends it to sources started outside Jarvis.
 - **Controls:** every control, from voice, the display, the mobile card or the web UI, goes through
   `hub.Control(action)`, which calls the active source and returns the state read back afterwards.
 - **Ducking and takeover:** they use the registry's declared binaries instead of the hardcoded lists.
@@ -118,11 +125,6 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 | # | Question | Recommendation |
 |---|---|---|
 | Q5 | How does cover art reach the clients? | The source returns the image bytes through the sidecar; the node caches them per track and serves them to the display and to jarvisd. No client or core code fetches a service's image host. |
-| Q6 | Which source is active when two report playing? | The one that most recently started; takeover keeps it to one in practice. |
-| Q7 | Is a phone streaming over Bluetooth a source in the first version? | Yes, as "Bluetooth: <phone name>", with play, pause, next and previous over the phone's Bluetooth remote-control profile. Track details (title and artist from the phone) follow in a later piece; that is new work in `internal/agent/bluetooth`. |
-| Q8 | Is the display's own mpv (`display_media`, Cast, Playercast) a source? | Yes, built in: its status and controls already exist (`GetPlaybackStatus`, `ControlMedia`). |
-| Q9 | Poll cadence while something plays? | Every 2 s for a source that doesn't push, never while idle; a source that pushes is polled every 10 s as a check. |
-| Q10 | The Python node (`jarvis-node-setup`)? | Out of scope: it keeps working without a now-playing card. Go agent nodes only. |
 
 ## Pieces (in order)
 
@@ -134,7 +136,7 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 4. **Display:** the generic now-playing view.
 5. **Spotify package:** implements the contract from go-librespot's status (the first real source).
 6. **Mobile:** the now-playing card. Mobile merges ship to testers, so this lands as one batch.
-7. **Bluetooth source**, then track details from the phone.
+7. **Bluetooth source** (P15).
 8. **Clean-up:** remove `legacyTakeover` and the hardcoded player lists once the music packages declare
    themselves, and the packages' own pause and skip actions once the built-ins cover them.
 
