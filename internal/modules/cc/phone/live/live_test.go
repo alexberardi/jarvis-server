@@ -613,3 +613,21 @@ func TestEscalateExampleIsThePrompts(t *testing.T) {
 		t.Fatal("EscalateExample no longer matches the prompt's example")
 	}
 }
+
+func TestOrdinaryWordsWithNumbersAreSpokenNormally(t *testing.T) {
+	for in, want := range map[string]string{
+		// A real call: "a 2, 0, F as in Frank, O as in Ocean, O as in Ocean, T as in Tom extension ladder".
+		"Do you have a 20-foot extension ladder?": "Do you have a 20-foot extension ladder?",
+		"Thursday, November 12th at 10am works.":  "Thursday, November 12th at 10am works.",
+		"Could we do 7:30pm or 6pm on the 21st?":  "Could we do 7:30pm or 6pm on the 21st?",
+		"A 2nd floor, 3-bedroom unit.":            "A 2nd floor, 3-bedroom unit.",
+		"How about 10AM or 4:15PM on the 3RD?":    "How about 10AM or 4:15PM on the 3RD?",
+		"Unit 20-ABC is the code.":                "Unit 2, 0, A as in Apple, B as in Boy, C as in Cat is the code.",
+		"The member ID is XJH448812.":             "The member ID is X as in X-ray, J as in July, H as in Henry, 4, 4, 8, 8, 1, 2.",
+		"The plate is BKP-1102.":                  "The plate is B as in Boy, K as in King, P as in Paul, 1, 1, 0, 2.",
+	} {
+		if got := FormatForSpeech(in); got != want {
+			t.Errorf("FormatForSpeech(%q)\n got %q\nwant %q", in, got, want)
+		}
+	}
+}

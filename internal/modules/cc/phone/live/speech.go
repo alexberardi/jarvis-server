@@ -26,6 +26,11 @@ var (
 	spelledLettersRE = regexp.MustCompile(`^[A-Za-z](?:[-.][A-Za-z]){2,}$`)
 	identifierRE     = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.\-]*[A-Za-z0-9])?$`)
 	speechSplitRE    = regexp.MustCompile(`\s+`)
+	// Spoken as words, not dictated: an ordinal ("12th"), a clock time ("10am", "7:30pm"), a
+	// measurement or compound ("20-foot", "3-bedroom"). They have letters and two digits, so they
+	// read as IDs: real calls said "November 1, 2, T as in Tom, H as in Henry at 1, 0, A as in Apple".
+	ordinalOrTimeRE = regexp.MustCompile(`(?i)^(?:\d+(?:st|nd|rd|th)|\d{1,2}(?::\d{2})?(?:am|pm|a\.m\.?|p\.m\.?))$`)
+	measureRE       = regexp.MustCompile(`^\d+(?:\.\d+)?-[a-z]{2,}(?:-[a-z]+)*$`) // lower case: "20-ABC" is still a code
 )
 
 func isASCIILetter(c rune) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
@@ -49,6 +54,9 @@ func spell(token string) string {
 func isIdentifier(token string) bool {
 	if spelledLettersRE.MatchString(token) {
 		return true
+	}
+	if ordinalOrTimeRE.MatchString(token) || measureRE.MatchString(token) {
+		return false
 	}
 	if !identifierRE.MatchString(token) {
 		return false
