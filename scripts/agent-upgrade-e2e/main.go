@@ -170,9 +170,12 @@ func (e *e2e) run() {
 	if !strings.Contains(out, "up to date") {
 		fail("update --check with the server on %s:\n%s", vN, out)
 	}
+	// Queued after the restart: jarvisd hands a task out once, on the next heartbeat, and a beat
+	// from the process being stopped would take it with it (the sidecar's swap beats too). The
+	// new process's next beat carries it: within a heartbeat interval (node.Runner, 1 min).
+	e.restartAgent()
 	task := e.srv.queueUpdate(vNosig)
-	e.restartAgent() // a fresh process heartbeats at once
-	msg := e.srv.waitTaskFailed(task, 60*time.Second)
+	msg := e.srv.waitTaskFailed(task, 2*time.Minute)
 	if !strings.Contains(msg, "not signed") {
 		fail("the unsigned update request was reported as %q", msg)
 	}
@@ -194,8 +197,8 @@ func (e *e2e) run() {
 	}
 
 	say("4. a release that fails at start (%s) is rolled back to %s", vBroken, vNext)
-	task = e.srv.queueUpdate(vBroken)
 	e.restartAgent()
+	task = e.srv.queueUpdate(vBroken) // after the restart, as in step 2
 	r := e.waitResult(selfupdate.OutcomeRolledBack, vBroken, 4*time.Minute)
 	if !strings.Contains(r.Reason, "didn't come up") {
 		fail("rollback reason %q", r.Reason)
