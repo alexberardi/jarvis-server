@@ -42,3 +42,20 @@ export function secretIsSet(s: SettingResponse): boolean {
 export function restartAction(): (() => void) | null {
   return featureMissing('restart') ? null : () => void restartJarvisd()
 }
+
+/**
+ * whoIsOn says which households a household-scoped switch is on for: the default covers every
+ * household without its own value.
+ */
+export function whoIsOn(s: SettingResponse): string {
+  const own = s.household_values ?? []
+  const names = (on: boolean) => own.filter((h) => (h.value === true) === on).map((h) => h.household_name)
+  if (s.value === true) {
+    const off = names(false)
+    if (off.length === 0) return 'On for every household'
+    if ((s.households_using_default ?? 0) + names(true).length === 0) return 'Off for every household'
+    return `On for every household except ${off.join(', ')}`
+  }
+  const on = names(true)
+  return on.length ? `On for ${on.join(', ')}` : 'Off for every household'
+}
