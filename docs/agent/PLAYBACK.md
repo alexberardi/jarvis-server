@@ -46,8 +46,9 @@ Music starts, stops and changes from many places, and nothing holds one answer t
 | P5 | **Generic transport commands in core.** "Pause the music", "next", "turn it down" and "what's playing" are built-in commands that go to the active source through the hub. Packages keep only what is theirs: search and starting playback. |
 | P6 | **jarvisd keeps the latest state per node and relays controls.** The display, the mobile card and the web UI read that one state, and their buttons go back through the hub's control path. |
 | P7 | **Field names follow the catalogue's `media_player` type**, so one mobile media card can serve both Jarvis nodes and imported speakers. |
-| P8 | **Spotify stays a package.** `jarvis-cmd-spotify` works as a speaker with no setup (jarvis-cmd-spotify#2: Client ID optional) and implements the contract. #591 is closed with a pointer here. |
+| P8 | **Spotify stays a package.** `jarvis-cmd-spotify` works as a speaker with no setup (jarvis-cmd-spotify#2: Client ID optional) and implements the contract. #591 stays open until the user has verified and tested the replacement; it is then closed with a pointer here. |
 | P9 | **Ducking and takeover run on the hub's registry.** The hardcoded player lists and `legacyTakeover` go once every music package declares itself. |
+| P10 | **The mobile card shows the whole household (Q1, 2026-11-07).** Several nodes can play at once, and the card lists every node that is playing, each with its own controls. The first version is whatever is simplest beyond that: a plain list, no ordering by the user's own node and no grouping beyond one entry per node. The user's words: "whatever's easiest on the first pass, assuming you can play multiple nodes and view them in the household." |
 
 ## Design
 
@@ -99,14 +100,13 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 
 - **Display:** a generic now-playing view (cover, title and artist, seek bar, the source's actions, volume),
   full screen while playing, built from #591's view with the Spotify specifics removed.
-- **Mobile:** a now-playing card with controls (Q1 for its scope, Q2 for how it stays current).
+- **Mobile:** a now-playing card listing every playing node in the household, each with its controls (P10; Q2 for how it stays current).
 - **Web UI:** the same card, later; not in the first pieces.
 
 ## Open questions (recommendations; settle one at a time)
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | Does the mobile card show one node's music, or everything playing in the household? | The whole household, grouped by node, with the user's current node first. |
 | Q2 | How does the mobile app stay current? It has no live channel today except chat's stream. | Poll the household's playback while the card is on screen (every 2 s), and take the state a control returns immediately. A live stream can come later without changing the record. |
 | Q3 | How does the node report changes? The heartbeat runs once a minute. | Publish over the node's existing MQTT connection on each change, throttled to one message a second; the heartbeat carries the same record so jarvisd recovers after a restart. |
 | Q4 | Contract shape: optional methods on the existing command class, or a new `player` component type? | Optional methods on the command class, found by the sidecar's scan the way `takes_over_playback_binary` is, plus the `report()` helper. No new component type to install or list. |
