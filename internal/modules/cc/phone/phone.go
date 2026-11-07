@@ -163,6 +163,8 @@ type Service struct {
 	Go      func(fn func()) bool
 	Options Options
 	Now     func() time.Time
+	// Zone is the household's timezone ("tomorrow" in a brief is a weekday there). Nil: UTC.
+	Zone func(ctx context.Context, hh string) *time.Location
 	// Timing knobs (tests shorten them; zero = the legacy values).
 	StreamStartTimeout time.Duration
 	HeartbeatInterval  time.Duration
@@ -192,6 +194,16 @@ func (s *Service) now() time.Time {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// localNow is now in the household's timezone.
+func (s *Service) localNow(ctx context.Context, hh string) time.Time {
+	if s.Zone != nil {
+		if loc := s.Zone(ctx, hh); loc != nil {
+			return s.now().In(loc)
+		}
+	}
+	return s.now()
 }
 
 func (s *Service) log() *slog.Logger {

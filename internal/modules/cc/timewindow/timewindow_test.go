@@ -3,6 +3,7 @@ package timewindow
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // The golden cases are tests/test_time_window.py's: the ones the live model got wrong.
@@ -159,5 +160,19 @@ func TestCheckAllReadsNoon(t *testing.T) {
 	r := CheckAll("Acceptable times: Mon 5-8pm", "Maybe I could do Monday at noon")
 	if len(r) != 1 || *r[0].ProposedLabel != "Monday at 12 pm" || *r[0].Available {
 		t.Fatalf("noon: %+v", r)
+	}
+}
+
+func TestResolveRelativeDays(t *testing.T) {
+	// Friday 2026-11-06, 9:26 pm.
+	now := time.Date(2026, 11, 6, 21, 26, 0, 0, time.UTC)
+	got := ResolveRelativeDays("Acceptable times: Tomorrow at 7 p.m.\nDo not book: tonight", now)
+	if got != "Acceptable times: Saturday at 7 p.m.\nDo not book: Friday" {
+		t.Fatalf("got %q", got)
+	}
+	// The drafted brief from a real call: "I have 730" for a 7pm table tomorrow is in the grace.
+	env := ResolveRelativeDays("Acceptable times: Tomorrow at 7 p.m.", now)
+	if r := CheckAll(env, "Okay, I have 7:30, does that work?"); len(r) != 1 || !*r[0].Available {
+		t.Fatalf("7:30 tomorrow: %+v", r)
 	}
 }
