@@ -182,15 +182,23 @@ func (s *Service) createPlan(ctx context.Context, req PlanRequest) (string, erro
 		}
 	}
 
+	// The draft (the slowest model call, ~15 s on a 31B) doesn't wait for the categories call or
+	// the nodes' call_context: neither depends on it, and the card waited for all three in turn.
+	cats := make(chan []string, 1)
+	go func() { cats <- s.callCategories(ctx, req.Business, req.Goal) }()
+	nodeCh := make(chan []ContextField, 1)
+	go func() {
+		var f []ContextField
+		if s.NodeContext != nil {
+			f = s.NodeContext.CallContext(ctx, hh, req.UserID, req.Business, req.Goal)
+		}
+		nodeCh <- f
+	}()
 	initiator := s.initiatorName(ctx, req.UserID)
 	details := s.draftDetails(ctx, req.Business, req.Goal, initiator)
 	details, calendarSource := s.applyAvailability(ctx, hh, req.Goal, details, req.UserID)
-	var nodeFields []ContextField
-	if s.NodeContext != nil {
-		nodeFields = s.NodeContext.CallContext(ctx, hh, req.UserID, req.Business, req.Goal)
-	}
-	fields := SelectForCategories(mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields),
-		s.callCategories(ctx, req.Business, req.Goal))
+	nodeFields := <-nodeCh
+	fields := SelectForCategories(mergeContext(SelectForCall(s.loadCallContext(ctx, req.UserID)), nodeFields), <-cats)
 	if block := BuildContextBlock(fields); block != "" {
 		details = strings.TrimRight(details, " \t\n\r\v\f") + "\n\n" + block
 	}
