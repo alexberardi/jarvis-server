@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -132,4 +133,64 @@ func TestPlaybackControlRelaysAndReturnsTheReadBack(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("control didn't return after the node's report")
 	}
+}
+
+func TestPlaybackCover(t *testing.T) {
+	e := newEnv(t)
+	member := e.auth.addUser(1, "hh1", authn.RoleMember)
+	outsider := e.auth.addUser(2, "hh2", authn.RoleMember)
+	kitchen := e.createNode("kitchen", "hh1")
+	jpeg := hdr{"Content-Type": "image/jpeg"}
+	for k, v := range kitchen.h() {
+		jpeg[k] = v
+	}
+	get := func(tok string) *resp {
+		return e.do("GET", "/api/v0/mobile/playback/cover?node_id=kitchen", nil, bearer(tok))
+	}
+	withCover := func(title, cover string) map[string]any {
+		r := playingReport(title)
+		r["cover"] = cover
+		return r
+	}
+
+	// Uploads: a node key, a valid key and image type, at most 2 MiB.
+	e.do("PUT", "/api/v0/node/playback/cover?key=abc", "x", hdr{"Content-Type": "image/jpeg"}).want(400)
+	e.do("PUT", "/api/v0/node/playback/cover?key=a/b", "x", jpeg).want(422)
+	e.do("PUT", "/api/v0/node/playback/cover?key=abc", "x", kitchen.h()).want(415)
+	e.do("PUT", "/api/v0/node/playback/cover?key=abc", "", jpeg).want(422)
+	e.do("PUT", "/api/v0/node/playback/cover?key=abc", strings.Repeat("x", 2<<20+1), jpeg).want(413)
+	e.do("POST", "/api/v0/node/playback", withCover("x", "a b"), kitchen.h()).want(422)
+
+	// Nothing until the report names the uploaded cover.
+	e.do("PUT", "/api/v0/node/playback/cover?key=abc", "cover-one", jpeg).want(204)
+	get(member).want(404)
+	e.do("POST", "/api/v0/node/playback", withCover("One", "abc"), kitchen.h()).want(200)
+	r := get(member).want(200)
+	if string(r.body) != "cover-one" || r.header.Get("Content-Type") != "image/jpeg" || r.header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("cover = %q %v", r.body, r.header)
+	}
+	if p := e.do("GET", "/api/v0/mobile/playback?household_id=hh1", nil, bearer(member)).want(200).json()["playing"].([]any); p[0].(map[string]any)["cover"] != "abc" {
+		t.Fatalf("entry = %v", p)
+	}
+	get(outsider).detail(403, "User is not a member of this household")
+	e.do("GET", "/api/v0/mobile/playback/cover?node_id=nope", nil, bearer(member)).want(404)
+	e.do("GET", "/api/v0/mobile/playback/cover?node_id=kitchen", nil, nil).want(401)
+
+	// A new track without a cover: the old one is not shown for it.
+	e.do("POST", "/api/v0/node/playback", playingReport("Two"), kitchen.h()).want(200)
+	get(member).want(404)
+	// Reported before its upload: shown once the upload lands.
+	e.do("POST", "/api/v0/node/playback", withCover("Three", "def"), kitchen.h()).want(200)
+	get(member).want(404)
+	e.do("PUT", "/api/v0/node/playback/cover?key=def", "cover-three", jpeg).want(204)
+	if string(get(member).want(200).body) != "cover-three" {
+		t.Fatal("cover three not served")
+	}
+	// Stopped, or stale: gone with the record.
+	e.do("POST", "/api/v0/node/playback", map[string]any{"now": nil}, kitchen.h()).want(200)
+	get(member).want(404)
+	e.do("PUT", "/api/v0/node/playback/cover?key=def", "cover-three", jpeg).want(204)
+	e.do("POST", "/api/v0/node/playback", withCover("Three", "def"), kitchen.h()).want(200)
+	e.advance(playbackTTL + time.Second)
+	get(member).want(404)
 }

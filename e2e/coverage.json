@@ -91,6 +91,7 @@
     "ProvisioningNavigator/Success": { "manual": "provisioning-devmode-happy-path.yaml, tagged skip here: it runs on the iOS fake-node lane (jarvis-integration-tests)" },
     "RecentCommandsStackNavigator/RecentCommandDetail": { "pending": "no flow yet: jarvis-node-mobile .maestro/COVERAGE.md lists it as later, with no item yet" },
     "RecentCommandsStackNavigator/RecentCommandsList": { "flows": [".maestro/settings.yaml"] },
+    "RootNavigator/NowPlaying": { "pending": "no flow yet: needs a simulated node that reports playback (docs/agent/PLAYBACK.md, verification); the card and mini-player are covered by __tests__/components/NowPlaying.test.tsx" },
     "RootNavigator/HouseholdEdit": { "flows": [".maestro/household-edit.yaml", ".maestro/household-members.yaml", ".maestro/household-member-view.yaml", ".maestro/household-watches-errands.yaml"] },
     "RootNavigator/Settings": { "flows": [".maestro/settings.yaml", ".maestro/auth-roles.yaml", ".maestro/auth-logout.yaml"] },
     "RootNavigator/SignalAutomations": { "flows": [".maestro/signal-automations.yaml"] },

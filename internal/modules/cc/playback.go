@@ -2,6 +2,7 @@ package cc
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"slices"
 	"sync"
@@ -26,12 +27,28 @@ const (
 	// a pause queued for an offline node never plays out when it comes back.
 	playbackCommandTTL  = 10 * time.Second
 	playbackReportLimit = 16 << 10
+	// playbackCoverLimit is the SDK's ARTWORK_MAX_BYTES.
+	playbackCoverLimit = 2 << 20
 )
 
 var (
 	playbackStates  = []string{"playing", "paused", "idle"}
 	playbackActions = []string{"play", "pause", "next", "previous", "seek", "volume", "shuffle", "repeat", "like"}
+	coverTypes      = []string{"image/jpeg", "image/png", "image/webp"}
 )
+
+// validCoverKey: the node's name for a track's cover, 1-64 letters and digits.
+func validCoverKey(k string) bool {
+	if k == "" || len(k) > 64 {
+		return false
+	}
+	for _, c := range k {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return false
+		}
+	}
+	return true
+}
 
 // playbackNow is a node hub's playback.Now: the shown source and its state.
 type playbackNow struct {
@@ -81,28 +98,37 @@ func (n *playbackNow) valid() string {
 type playbackRecord struct {
 	householdID string
 	now         playbackNow
+	cover       string // the cover key the node reported for this track; "" without one
 	received    time.Time
 }
 
-// playbackStore holds the latest report per node; waiters hear about the next one.
+// playbackCover is the image a node uploaded for a cover key (P19: the apps get it from jarvisd).
+type playbackCover struct {
+	key, mime string
+	data      []byte
+}
+
+// playbackStore holds the latest report and cover per node; waiters hear about the next report.
 type playbackStore struct {
 	mu      sync.Mutex
 	byNode  map[string]playbackRecord
+	covers  map[string]playbackCover
 	waiters map[string][]chan struct{}
 }
 
 func newPlaybackStore() *playbackStore {
-	return &playbackStore{byNode: map[string]playbackRecord{}, waiters: map[string][]chan struct{}{}}
+	return &playbackStore{byNode: map[string]playbackRecord{}, covers: map[string]playbackCover{}, waiters: map[string][]chan struct{}{}}
 }
 
 // put keeps a report (nil: nothing plays) and wakes whoever waits on the node.
-func (s *playbackStore) put(nodeID, hh string, now *playbackNow, at time.Time) {
+func (s *playbackStore) put(nodeID, hh string, now *playbackNow, cover string, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if now == nil {
 		delete(s.byNode, nodeID)
+		delete(s.covers, nodeID)
 	} else {
-		s.byNode[nodeID] = playbackRecord{householdID: hh, now: *now, received: at}
+		s.byNode[nodeID] = playbackRecord{householdID: hh, now: *now, cover: cover, received: at}
 	}
 	for _, c := range s.waiters[nodeID] {
 		close(c)
@@ -138,19 +164,41 @@ func (s *playbackStore) get(nodeID, hh string, now time.Time) (playbackRecord, b
 	}
 	if now.Sub(r.received) > playbackTTL {
 		delete(s.byNode, nodeID)
+		delete(s.covers, nodeID)
 		return playbackRecord{}, false
 	}
 	return r, true
 }
 
+// putCover keeps one cover per node, the latest upload.
+func (s *playbackStore) putCover(nodeID string, c playbackCover) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.covers[nodeID] = c
+}
+
+// cover is the node's cover for the track it is playing now, if it uploaded that one.
+func (s *playbackStore) cover(nodeID, hh string, now time.Time) (playbackCover, bool) {
+	r, ok := s.get(nodeID, hh, now)
+	if !ok || r.cover == "" {
+		return playbackCover{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.covers[nodeID]
+	return c, ok && c.key == r.cover
+}
+
 func (m *Module) registerPlayback(mux *http.ServeMux) {
 	const v0 = "/api/v0"
 	mux.HandleFunc("POST "+v0+"/node/playback", m.node(m.handleNodePlayback))
+	mux.HandleFunc("PUT "+v0+"/node/playback/cover", m.node(m.handleNodePlaybackCover))
 	mux.HandleFunc("GET "+v0+"/mobile/playback", m.user(m.handlePlayback))
+	mux.HandleFunc("GET "+v0+"/mobile/playback/cover", m.user(m.handlePlaybackCover))
 	mux.HandleFunc("POST "+v0+"/mobile/playback/control", m.user(m.handlePlaybackControl))
 }
 
-// --- POST /node/playback: {"now": {...} | null} ---
+// --- POST /node/playback: {"now": {...} | null, "cover": "key"?} ---
 
 func (m *Module) handleNodePlayback(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
 	raw, ok := readRawObjectLimit(w, r, playbackReportLimit)
@@ -158,10 +206,15 @@ func (m *Module) handleNodePlayback(w http.ResponseWriter, r *http.Request, n *n
 		return
 	}
 	var in struct {
-		Now *playbackNow `json:"now"`
+		Now   *playbackNow `json:"now"`
+		Cover string       `json:"cover"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		detail(w, http.StatusUnprocessableEntity, "Invalid playback report: "+err.Error())
+		return
+	}
+	if in.Cover != "" && !validCoverKey(in.Cover) {
+		detail(w, http.StatusUnprocessableEntity, "Invalid playback report: cover must be 1-64 letters and digits")
 		return
 	}
 	if in.Now != nil {
@@ -177,8 +230,37 @@ func (m *Module) handleNodePlayback(w http.ResponseWriter, r *http.Request, n *n
 		detail(w, http.StatusConflict, "Node is not in a household")
 		return
 	}
-	m.playback.put(n.ID, n.HouseholdID, in.Now, m.now())
+	m.playback.put(n.ID, n.HouseholdID, in.Now, in.Cover, m.now())
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// --- PUT /node/playback/cover?key=K: the cover image's bytes, sent before the report naming K ---
+
+func (m *Module) handleNodePlaybackCover(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+	key := r.URL.Query().Get("key")
+	mime := r.Header.Get("Content-Type")
+	switch {
+	case !validCoverKey(key):
+		detail(w, http.StatusUnprocessableEntity, "key must be 1-64 letters and digits")
+		return
+	case !slices.Contains(coverTypes, mime):
+		detail(w, http.StatusUnsupportedMediaType, "Cover must be image/jpeg, image/png or image/webp")
+		return
+	case n.HouseholdID == "":
+		detail(w, http.StatusConflict, "Node is not in a household")
+		return
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, playbackCoverLimit))
+	if err != nil {
+		detail(w, http.StatusRequestEntityTooLarge, "Cover is larger than 2 MiB")
+		return
+	}
+	if len(data) == 0 {
+		detail(w, http.StatusUnprocessableEntity, "Cover is empty")
+		return
+	}
+	m.playback.putCover(n.ID, playbackCover{key: key, mime: mime, data: data})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- GET /mobile/playback?household_id=X: every node of the household that plays ---
@@ -211,8 +293,37 @@ func (m *Module) handlePlayback(w http.ResponseWriter, r *http.Request, u authn.
 }
 
 func playbackEntry(nodeID, nodeName string, rec playbackRecord) map[string]any {
-	return map[string]any{"node_id": nodeID, "node_name": nodeName, "source": rec.now.Source,
+	e := map[string]any{"node_id": nodeID, "node_name": nodeName, "source": rec.now.Source,
 		"name": rec.now.Name, "state": rec.now.State, "updated_at": rec.now.UpdatedAt}
+	if rec.cover != "" {
+		e["cover"] = rec.cover
+	}
+	return e
+}
+
+// --- GET /mobile/playback/cover?node_id=X: the cover of what X plays now (the entry's "cover" busts caches) ---
+
+func (m *Module) handlePlaybackCover(w http.ResponseWriter, r *http.Request, u authn.User) {
+	ctx := r.Context()
+	row, err := m.nodeByID(ctx, r.URL.Query().Get("node_id"))
+	if err != nil || !row.householdID.Valid {
+		detail(w, http.StatusNotFound, "Node not found")
+		return
+	}
+	hh := row.householdID.String
+	if err := m.requireRole(ctx, u.ID, hh, authn.RoleMember); err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	c, ok := m.playback.cover(row.nodeID, hh, m.now())
+	if !ok {
+		detail(w, http.StatusNotFound, "No cover")
+		return
+	}
+	w.Header().Set("Content-Type", c.mime)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	_, _ = w.Write(c.data)
 }
 
 // --- POST /mobile/playback/control: {node_id, action, volume?, position?} ---
