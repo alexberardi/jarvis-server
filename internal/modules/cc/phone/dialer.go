@@ -38,7 +38,10 @@ type callRuntime struct {
 	householdID string
 	brief       live.Brief
 	// now is the household's local time when the call started: it places an offer's "tomorrow".
-	now        time.Time
+	now time.Time
+	// suffix: the live model takes Qwen's /no_think directive (cc's resolved thinking switch);
+	// any other model gets the call's messages without it.
+	suffix     bool
 	maxSeconds int64
 	escalation *live.EscalationWindow
 	recorder   *live.Recorder
@@ -165,7 +168,7 @@ func (s *Service) runCall(id string, tel Telephony) {
 	}
 
 	rt := &callRuntime{
-		sessionID: id, householdID: sess.HouseholdID, brief: brief, now: now,
+		sessionID: id, householdID: sess.HouseholdID, brief: brief, now: now, suffix: s.thinkingSuffix(ctx),
 		maxSeconds: s.intSetting(ctx, SettingMaxCallSeconds, sess.HouseholdID, 600),
 		escalation: &live.EscalationWindow{Timeout: s.EscalationWindow},
 		recorder:   &live.Recorder{}, disclosure: disclosure, ctx: ctx, cancel: cancel,

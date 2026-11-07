@@ -95,6 +95,24 @@ func (s *Service) newTurnPipeline(rt *callRuntime, restricted []live.RestrictedF
 	return p
 }
 
+// wire is what goes to the model: the messages, with the call prompt's /no_think directive
+// (written for Qwen, which reads it as "answer without thinking") taken out unless the live
+// model takes it. Gemma 4 read it as text on every turn.
+func (rt *callRuntime) wire(ms []chatMsg) []llm.Message {
+	if rt == nil || rt.suffix {
+		return toLLM(ms)
+	}
+	out := make([]chatMsg, 0, len(ms))
+	for _, m := range ms {
+		t := strings.TrimSpace(strings.TrimSuffix(strings.TrimRight(m.content, " \n"), live.NoThinkDirective))
+		if t == "" && m.content != "" {
+			continue // a message that was only the directive
+		}
+		out = append(out, chatMsg{m.role, t})
+	}
+	return toLLM(out)
+}
+
 func toLLM(ms []chatMsg) []llm.Message {
 	out := make([]llm.Message, len(ms))
 	for i, m := range ms {
@@ -158,7 +176,7 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 	defer cancel()
 	maxTok := 400
 	t0 := time.Now()
-	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: toLLM(msgs), MaxTokens: &maxTok})
+	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
 	if err != nil {
 		return nil, "", nil, nil, nil, err
 	}
@@ -341,7 +359,7 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 		msgs = append(msgs, chatMsg{m[0], m[1]})
 	}
 	maxTok := live.ClassifyMaxTokens
-	resp, err := p.s.LLM.Chat(cctx, llm.ChatRequest{Label: "live", Messages: toLLM(msgs), MaxTokens: &maxTok})
+	resp, err := p.s.LLM.Chat(cctx, llm.ChatRequest{Label: "live", Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
 	if err != nil || resp == nil {
 		p.s.log().Warn("phone: ask-classifier unavailable, suppressing", "err", err)
 		return out
@@ -883,7 +901,7 @@ func (s *Service) assess(ctx context.Context, p *turnPipeline, goal string) (str
 	}
 	actx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: toLLM(msgs)})
+	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: p.rt.wire(msgs)})
 	if err != nil || resp == nil {
 		s.log().Error("phone: wrapup assessment failed", "err", err)
 		return fallback()

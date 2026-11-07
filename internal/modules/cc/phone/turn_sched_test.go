@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone/live"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 )
 
 // The brief's time window vetoes a time the business proposes, until the caller has answered a
@@ -143,5 +144,34 @@ func TestARepeatedOfferIsNotJudgedAgain(t *testing.T) {
 	}
 	if p.schedulingNote("Or Friday at 9:15 PM?") == "" {
 		t.Fatal("a new offer got no note")
+	}
+}
+
+func TestNoThinkOnlyForModelsThatTakeIt(t *testing.T) {
+	msgs := []chatMsg{{"system", "You are Jarvis.\n\n/no_think"}, {"assistant", "Hi."}, {"user", "Papa V's? /no_think"}, {"system", "/no_think"}}
+	text := func(ms []llm.Message) string {
+		var b strings.Builder
+		for _, m := range ms {
+			b.WriteString(m.Role + ":" + *m.Content.Text + "|")
+		}
+		return b.String()
+	}
+	if got := text((&callRuntime{suffix: true}).wire(msgs)); strings.Count(got, "/no_think") != 3 {
+		t.Fatalf("Qwen lost its directive: %s", got)
+	}
+	// Gemma 4 read "/no_think" as text on every turn of a real call.
+	if got := text((&callRuntime{}).wire(msgs)); got != "system:You are Jarvis.|assistant:Hi.|user:Papa V's?|" {
+		t.Fatalf("Gemma got: %s", got)
+	}
+}
+
+func TestCallRuntimeTakesTheResolvedThinkingSwitch(t *testing.T) {
+	s := &Service{}
+	if !s.thinkingSuffix(t.Context()) {
+		t.Fatal("unwired should keep the legacy directive")
+	}
+	s.ThinkingSuffix = func(context.Context) bool { return false }
+	if s.thinkingSuffix(t.Context()) {
+		t.Fatal("the hook was ignored")
 	}
 }
