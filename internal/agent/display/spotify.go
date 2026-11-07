@@ -96,7 +96,7 @@ func (e *Engine) StartSpotify(on bool) {
 		return
 	}
 	e.spotifyAddr = "127.0.0.1:" + strconv.Itoa(port)
-	e.StartReceiver("spotify", true, "go-librespot", "-config_dir", dir)
+	e.StartReceiver("spotify", true, "go-librespot", "--config_dir", dir)
 	if e.receivers["spotify"] != nil && !e.spotifyPolling {
 		e.spotifyPolling = true
 		go e.watchSpotify()

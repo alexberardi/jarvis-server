@@ -109,7 +109,7 @@ in the display settings to stop it. Without go-librespot installed it simply sho
 [go-librespot](https://github.com/devgianlu/go-librespot) (GPL-3.0, so it runs as its own program, never linked into the
 agent) and a Spotify Premium account is required. The agent writes its `config.yml` under the display folder
 (a speaker named like the other receivers, PulseAudio output, remembered pairing, API on `127.0.0.1` only) and starts
-it with `go-librespot -config_dir`. Choose the node in the Spotify app once; the first connection is paired by
+it with `go-librespot --config_dir`. Choose the node in the Spotify app once; the first connection is paired by
 Zeroconf. The agent reads the receiver's `GET /status` every second and the Media view then shows the track, artist,
 album and cover art with previous, play/pause, next, seek and volume buttons. The display browser cannot reach the
 internet, so the agent serves the cover art itself, fetching only from `i.scdn.co`. Voice pauses Spotify while you talk
