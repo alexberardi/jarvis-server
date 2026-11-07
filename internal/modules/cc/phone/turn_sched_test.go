@@ -222,3 +222,13 @@ func TestAnAppointmentDateIsNotTheDateOfBirth(t *testing.T) {
 		t.Fatal("a non-date field stopped being guarded")
 	}
 }
+
+func TestTheSummaryIsAskedAgainBeforeGivingUpItsVerdict(t *testing.T) {
+	f := &fakeLLM{assess: `{"summary": "Booked Wednesday at 3:30.", "goal_achieved": true}`, assessErr: 1}
+	p := (&Service{LLM: f}).newTurnPipeline(&callRuntime{brief: live.Brief{Goal: "book a cleaning"}}, nil)
+	p.records = []turnRecord{{n: 1, heard: "You're booked Wednesday at 3:30."}}
+	summary, achieved := p.s.assess(t.Context(), p, "book a cleaning")
+	if summary != "Booked Wednesday at 3:30." || achieved == nil || !*achieved || len(f.assessed) != 2 {
+		t.Fatalf("summary %q, achieved %v, asked %d times", summary, achieved, len(f.assessed))
+	}
+}

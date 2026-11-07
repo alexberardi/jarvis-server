@@ -91,6 +91,7 @@ type fakeLLM struct {
 	classifys int
 	assessed  []llm.ChatRequest // outcome assessments, in order
 	kinds     string            // the call-categories answer ("" = NONE)
+	assessErr int               // the next assessErr outcome assessments fail
 }
 
 func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -117,6 +118,10 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 		return &llm.ChatResponse{Content: f.verdict}, nil
 	default:
 		f.assessed = append(f.assessed, req)
+		if f.assessErr > 0 {
+			f.assessErr--
+			return nil, context.DeadlineExceeded
+		}
 		return &llm.ChatResponse{Content: f.assess}, nil
 	}
 }
