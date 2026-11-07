@@ -114,7 +114,12 @@ pausing), so the hub doesn't have to wait for its next poll. The sidecar recogni
 
 jarvisd keeps the latest record per node in memory (it is live state, not history), and drops a record
 that hasn't been refreshed for 30 s (a node that crashed or went offline) so the apps never show it (P14). It serves the records to members
-of that node's household. A control request is checked against the household and relayed to the node as a
+of that node's household. Covers (P19) take the same path: the node uploads the shown track's
+image once per track (`PUT /api/v0/node/playback/cover?key=K`, at most 2 MiB, JPEG, PNG or WebP) before
+the report that names it (`"cover": "K"`), jarvisd keeps one per node with the record, and members fetch it
+with `GET /api/v0/mobile/playback/cover?node_id=X`; the entry's `cover` key busts their caches. A cover is
+served only while the record names its key, so an old track's image never shows for a new one.
+A control request is checked against the household and relayed to the node as a
 command verb (the same channel `node.Runner.Verbs` already carries). New `/api` routes need tier expectations
 in the same PR and get the user's review (AGENTS.md merge policy).
 

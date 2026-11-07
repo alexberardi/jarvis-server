@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"sync"
@@ -189,9 +191,14 @@ func logPlayback(log *slog.Logger) func(*playback.Now) {
 // change (jarvisd drops a report not refreshed within 30 s, P14); and nil once when it stops.
 type playbackReporter struct {
 	cc   func() *node.CC
+	art  func(context.Context) ([]byte, string, bool) // the hub's Artwork; nil: no covers
 	log  *slog.Logger
 	now  func() time.Time
 	wake chan struct{}
+
+	// The cover jarvisd has (only run's goroutine touches these): coverKey is the track it was
+	// asked for, cover its key in reports, "" when the source had none.
+	coverKey, cover string
 
 	mu       sync.Mutex
 	latest   *playback.Now
@@ -204,8 +211,8 @@ const (
 	playbackResend = 10 * time.Second
 )
 
-func newPlaybackReporter(cc func() *node.CC, log *slog.Logger) *playbackReporter {
-	return &playbackReporter{cc: cc, log: log, now: time.Now, wake: make(chan struct{}, 1)}
+func newPlaybackReporter(cc func() *node.CC, art func(context.Context) ([]byte, string, bool), log *slog.Logger) *playbackReporter {
+	return &playbackReporter{cc: cc, art: art, log: log, now: time.Now, wake: make(chan struct{}, 1)}
 }
 
 // update is the hub's OnChange.
@@ -269,10 +276,39 @@ func (p *playbackReporter) send(ctx context.Context, n *playback.Now) {
 		p.force() // not connected: try again on the next pass
 		return
 	}
-	if err := cc.Do(ctx, "POST", "/api/v0/node/playback", map[string]any{"now": n}, nil); err != nil {
+	body := map[string]any{"now": n}
+	if c := p.uploadCover(ctx, cc, n); c != "" {
+		body["cover"] = c
+	}
+	if err := cc.Do(ctx, "POST", "/api/v0/node/playback", body, nil); err != nil {
 		p.log.Debug("playback: report failed", "err", err)
 		p.force()
 	}
+}
+
+// uploadCover sends the shown track's cover to jarvisd once per track and returns its key for
+// the report, "" without one. A failed upload is tried again on the next send.
+func (p *playbackReporter) uploadCover(ctx context.Context, cc *node.CC, n *playback.Now) string {
+	track := playback.TrackKey(n)
+	if p.art == nil || track == "" {
+		return ""
+	}
+	if track == p.coverKey {
+		return p.cover
+	}
+	sum := sha256.Sum256([]byte(track))
+	key := hex.EncodeToString(sum[:8])
+	data, mime, ok := p.art(ctx)
+	if ok {
+		if err := cc.UploadPlaybackCover(ctx, key, mime, data); err != nil {
+			p.log.Debug("playback: cover upload failed", "err", err)
+			return ""
+		}
+	} else {
+		key = ""
+	}
+	p.coverKey, p.cover = track, key
+	return key
 }
 
 // playbackVerb is jarvisd's playback_control command: a control from the app, sent to the

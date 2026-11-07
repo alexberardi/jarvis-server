@@ -845,10 +845,10 @@ func runAgent(ctx context.Context, args []string) error {
 	if tf.pkgs != nil {
 		listPkgs = tf.pkgs.List
 	}
-	reporter := newPlaybackReporter(liveCC.Load, log)
+	hub := &playback.Hub{Sources: playbackSources(tf.live, displayEngine, packageNames(tf.live, listPkgs))}
+	reporter := newPlaybackReporter(liveCC.Load, hub.Artwork, log)
 	logChange := logPlayback(log)
-	hub := &playback.Hub{Sources: playbackSources(tf.live, displayEngine, packageNames(tf.live, listPkgs)),
-		OnChange: func(n *playback.Now) { logChange(n); reporter.update(n) }}
+	hub.OnChange = func(n *playback.Now) { logChange(n); reporter.update(n) }
 	go runPlayback(ctx, hub, tf.live, log)
 	if displayEngine != nil {
 		displayEngine.SetPlayback(hub) // the now-playing view

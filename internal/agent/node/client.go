@@ -340,6 +340,12 @@ func (c *CC) UploadRecording(ctx context.Context, out map[string]any) error {
 	return c.do(ctx, http.MethodPost, "/api/v0/computer/recordings", out, nil)
 }
 
+// UploadPlaybackCover sends the cover of the track the node plays, named key, before the
+// playback report that names it (docs/agent/PLAYBACK.md P19).
+func (c *CC) UploadPlaybackCover(ctx context.Context, key, mime string, data []byte) error {
+	return c.do(ctx, http.MethodPut, "/api/v0/node/playback/cover?key="+url.QueryEscape(key), rawBody{data, mime}, nil)
+}
+
 // UploadKeyframe sends one click keyframe (crop: its crop) of a recording jarvisd has, a JPEG.
 func (c *CC) UploadKeyframe(ctx context.Context, recordingID string, seq int, crop bool, jpeg []byte) error {
 	path := "/api/v0/computer/recordings/" + url.PathEscape(recordingID) + "/keyframes/" + strconv.Itoa(seq)
