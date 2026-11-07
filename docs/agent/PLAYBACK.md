@@ -49,6 +49,7 @@ Music starts, stops and changes from many places, and nothing holds one answer t
 | P8 | **Spotify stays a package.** `jarvis-cmd-spotify` works as a speaker with no setup (jarvis-cmd-spotify#2: Client ID optional) and implements the contract. #591 stays open until the user has verified and tested the replacement; it is then closed with a pointer here. |
 | P9 | **Ducking and takeover run on the hub's registry.** The hardcoded player lists and `legacyTakeover` go once every music package declares itself. |
 | P10 | **The mobile card shows the whole household (Q1, 2026-11-07).** Several nodes can play at once, and the card lists every node that is playing, each with its own controls. The first version is whatever is simplest beyond that: a plain list, no ordering by the user's own node and no grouping beyond one entry per node. The user's words: "whatever's easiest on the first pass, assuming you can play multiple nodes and view them in the household." |
+| P11 | **The mobile app checks playback once, at the root (Q2, 2026-11-07).** One React Query query beside `PresenceManager` in `App.tsx`; no screen subscribes. It checks every 2 s while any node plays and every 15 s when none does, only while signed in and in the foreground (wire React Query's `focusManager` to `AppState`, which the app doesn't do yet). A control shows the state jarvisd returns at once. A mini-player bar, drawn once in the tab navigator's tab bar, appears when something plays and opens the full list. It shows only on each tab's first screen: drill-in screens (a routine's edit screen, say) and the root stack's screens (Settings, Inbox) never show it. The tabs hold stack navigators that keep the tab bar on drill-ins, so "wherever the tab bar shows" is not the rule. |
 
 ## Design
 
@@ -100,14 +101,13 @@ in the same PR and get the user's review (AGENTS.md merge policy).
 
 - **Display:** a generic now-playing view (cover, title and artist, seek bar, the source's actions, volume),
   full screen while playing, built from #591's view with the Spotify specifics removed.
-- **Mobile:** a now-playing card listing every playing node in the household, each with its controls (P10; Q2 for how it stays current).
+- **Mobile:** a now-playing card listing every playing node in the household, each with its controls (P10), behind a mini-player on the tabs' first screens (P11).
 - **Web UI:** the same card, later; not in the first pieces.
 
 ## Open questions (recommendations; settle one at a time)
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q2 | How does the mobile app stay current? It has no live channel today except chat's stream. | Poll the household's playback while the card is on screen (every 2 s), and take the state a control returns immediately. A live stream can come later without changing the record. |
 | Q3 | How does the node report changes? The heartbeat runs once a minute. | Publish over the node's existing MQTT connection on each change, throttled to one message a second; the heartbeat carries the same record so jarvisd recovers after a restart. |
 | Q4 | Contract shape: optional methods on the existing command class, or a new `player` component type? | Optional methods on the command class, found by the sidecar's scan the way `takes_over_playback_binary` is, plus the `report()` helper. No new component type to install or list. |
 | Q5 | How does cover art reach the clients? | The source returns the image bytes through the sidecar; the node caches them per track and serves them to the display and to jarvisd. No client or core code fetches a service's image host. |
