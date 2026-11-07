@@ -1,0 +1,110 @@
+[
+ {
+  "name": "playback: pause the music",
+  "tools": "../toolsets/node-music.json",
+  "turns": [
+   {
+    "say": "pause the music",
+    "expect": {
+     "any_tool": [
+      "playback_control",
+      "spotify"
+     ],
+     "not_tool": [
+      "control_node"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "playback: pause goes to playback_control",
+  "tools": "../toolsets/node-music.json",
+  "turns": [
+   {
+    "say": "pause the music",
+    "expect": {
+     "tool": "playback_control",
+     "args": {
+      "action": "pause"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "playback: skip (the package's own skip is also right until piece 8 removes it)",
+  "tools": "../toolsets/node-music.json",
+  "turns": [
+   {
+    "say": "skip this song",
+    "expect": {
+     "any_tool": [
+      "playback_control",
+      "spotify"
+     ],
+     "not_tool": [
+      "control_node"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "playback: what song is this",
+  "tools": "../toolsets/node-music.json",
+  "results": {
+   "playback_control": {
+    "success": true,
+    "message": "Karma Police by Radiohead is playing on Spotify.",
+    "title": "Karma Police",
+    "artist": "Radiohead",
+    "source": "Spotify",
+    "state": "playing"
+   }
+  },
+  "turns": [
+   {
+    "say": "what song is this",
+    "expect": {
+     "tool": "playback_control",
+     "args": {
+      "action": "status"
+     },
+     "reply": "(?i)karma police"
+    }
+   }
+  ]
+ },
+ {
+  "name": "playback: music volume",
+  "tools": "../toolsets/node-music.json",
+  "turns": [
+   {
+    "say": "turn the music down to 30",
+    "expect": {
+     "tool": "playback_control",
+     "args": {
+      "action": "volume",
+      "volume": 30
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "playback: play by name still goes to spotify",
+  "tools": "../toolsets/node-music.json",
+  "turns": [
+   {
+    "say": "play radiohead on spotify",
+    "expect": {
+     "tool": "spotify",
+     "not_tool": [
+      "playback_control"
+     ]
+    }
+   }
+  ]
+ }
+]

@@ -1,0 +1,179 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"sync"
+	"time"
+
+	displaynode "github.com/alexberardi/jarvis-server/internal/agent/display"
+	"github.com/alexberardi/jarvis-server/internal/agent/packages"
+	"github.com/alexberardi/jarvis-server/internal/agent/playback"
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+)
+
+// The node's playback hub (docs/agent/PLAYBACK.md piece 2): its sources are the packages'
+// music commands (the sidecar) and, on a display node, the display's own player. Nothing here
+// names a service.
+
+// packageSource is one IJarvisMusicCommand, reached through the sidecar in service.
+type packageSource struct {
+	live *sidecar.Live
+	cmd  sidecar.MusicCommand
+	name string
+}
+
+func (s packageSource) ID() string   { return "pkg:" + s.cmd.Name }
+func (s packageSource) Name() string { return s.name }
+func (s packageSource) Status(ctx context.Context) (*playback.State, error) {
+	raw, err := s.live.PlaybackStatus(ctx, s.cmd.Name)
+	if err != nil {
+		return nil, err
+	}
+	return playback.Parse(raw)
+}
+func (s packageSource) Control(ctx context.Context, action string, args map[string]any) (*playback.State, error) {
+	raw, err := s.live.PlaybackControl(ctx, s.cmd.Name, action, args)
+	if err != nil {
+		return nil, err
+	}
+	return playback.Parse(raw)
+}
+
+// displaySource is the touch display's mpv (display_media, Cast and Playercast all play there).
+type displaySource struct{ e *displaynode.Engine }
+
+func (displaySource) ID() string   { return "display" }
+func (displaySource) Name() string { return "Display" }
+func (d displaySource) Status(context.Context) (*playback.State, error) {
+	return displayState(d.e.GetPlaybackStatus()), nil
+}
+func (d displaySource) Control(ctx context.Context, action string, args map[string]any) (*playback.State, error) {
+	r := displaynode.MediaRequest{Action: action, Destination: "local"}
+	switch action {
+	case "play":
+		r.Action = "resume"
+	case "seek":
+		r.Seconds, _ = args["position"].(float64)
+	}
+	if _, err := d.e.ControlMedia(ctx, r); err != nil {
+		return nil, err
+	}
+	return displayState(d.e.GetPlaybackStatus()), nil
+}
+
+// displayState maps GetPlaybackStatus: only a controllable mpv that is playing counts.
+func displayState(m map[string]any) *playback.State {
+	if active, _ := m["active"].(bool); !active {
+		return nil
+	}
+	if ctl, _ := m["controllable"].(bool); !ctl {
+		return nil
+	}
+	st := &playback.State{State: "playing", Actions: []string{"pause", "play", "seek"}}
+	if paused, _ := m["paused"].(bool); paused {
+		st.State = "paused"
+	}
+	if p, ok := m["position"].(float64); ok {
+		st.Position = &p
+	}
+	if d, ok := m["duration"].(float64); ok {
+		st.Duration = &d
+	}
+	return st
+}
+
+// packageNames names a music command after its package's display_name ("Spotify"), else the
+// package or command name.
+// shortcut: remembered per package for the agent's life, so a renamed display_name shows after a restart.
+func packageNames(live *sidecar.Live, list func() []packages.Installed) func(string) string {
+	var mu sync.Mutex
+	known := map[string]string{}
+	return func(command string) string {
+		pkg := ""
+		if sc := live.Current(); sc != nil {
+			pkg = sc.Package(command)
+		}
+		if pkg == "" {
+			return command
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if name, ok := known[pkg]; ok {
+			return name
+		}
+		name := pkg
+		if list != nil {
+			for _, in := range list() {
+				if in.Manifest.Name == pkg && in.Manifest.DisplayName != "" {
+					name = in.Manifest.DisplayName
+				}
+			}
+		}
+		known[pkg] = name
+		return name
+	}
+}
+
+// playbackSources lists the sources now: the sidecar's music commands (a package install swaps
+// it, so this is read per tick) and the display.
+func playbackSources(live *sidecar.Live, display *displaynode.Engine, names func(string) string) func() []playback.Source {
+	return func() []playback.Source {
+		var out []playback.Source
+		if live != nil {
+			for _, mc := range live.MusicCommands() {
+				out = append(out, packageSource{live: live, cmd: mc, name: names(mc.Name)})
+			}
+		}
+		if display != nil {
+			out = append(out, displaySource{display})
+		}
+		return out
+	}
+}
+
+// runPlayback ticks the hub: each tick first takes what the packages pushed with report()
+// (queued in the sidecar until asked), then checks the sources that are due.
+func runPlayback(ctx context.Context, hub *playback.Hub, live *sidecar.Live, log *slog.Logger) {
+	t := time.NewTicker(playback.DefaultInterval)
+	defer t.Stop()
+	for {
+		if live != nil {
+			reports, err := live.PlaybackReports(ctx)
+			if err != nil {
+				log.Debug("playback: reports", "err", err)
+			}
+			for _, r := range reports {
+				st, err := playback.Parse(r.State)
+				if err != nil {
+					log.Warn("playback: bad report", "command", r.Command, "err", err)
+					continue
+				}
+				for _, s := range hub.Sources() {
+					if s.ID() == "pkg:"+r.Command {
+						hub.Report(s, st)
+					}
+				}
+			}
+		}
+		hub.Tick(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// logPlayback is the hub's OnChange until jarvisd takes the state (piece 3).
+func logPlayback(log *slog.Logger) func(*playback.Now) {
+	return func(n *playback.Now) {
+		if n == nil {
+			log.Info("playback: nothing playing")
+			return
+		}
+		b, _ := json.Marshal(n.State)
+		log.Info("playback: now", "source", n.Source, "state", string(b))
+	}
+}

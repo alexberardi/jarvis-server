@@ -57,6 +57,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/pkgagents"
+	"github.com/alexberardi/jarvis-server/internal/agent/playback"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -839,6 +840,14 @@ func runAgent(ctx context.Context, args []string) error {
 		displayEngine.Host = h
 		defer displayEngine.Close()
 	}
+	// The playback hub: what plays here, from any package or the display (PLAYBACK.md piece 2).
+	var listPkgs func() []packages.Installed
+	if tf.pkgs != nil {
+		listPkgs = tf.pkgs.List
+	}
+	hub := &playback.Hub{Sources: playbackSources(tf.live, displayEngine, packageNames(tf.live, listPkgs)), OnChange: logPlayback(log)}
+	go runPlayback(ctx, hub, tf.live, log)
+	tools = append(tools, &playback.Tools{Hub: hub})
 	var servedTools node.Toolset = tools
 	if displayEngine != nil {
 		servedTools = node.Multi{displayEngine, tools}
