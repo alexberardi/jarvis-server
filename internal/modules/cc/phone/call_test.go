@@ -399,7 +399,9 @@ func TestEscalationRoundTrip(t *testing.T) {
 	waitFor(t, "second generation", func() bool { e.llm.mu.Lock(); defer e.llm.mu.Unlock(); return len(e.llm.streams) == 2 })
 	msgs := e.llm.streams[1]
 	if got := *msgs[len(msgs)-1].Content.Text; got != `[You asked Alex: "what time works for the pickup?". Alex answered: "6pm". `+
-		`This is Alex's own instruction for this call; where it differs from your brief, follow it.]` {
+		`This is Alex's own instruction for this call; where it differs from your brief, follow it. `+
+		`If it doesn't actually give what you asked for ("whatever works", "I don't know"), never repeat their words as the detail: `+
+		`choose within your brief, or tell the business you don't have it.]` {
 		t.Fatalf("answer message: %q", got)
 	}
 	// No window open now: a late tap is told the call may have ended.
