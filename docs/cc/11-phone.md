@@ -13,7 +13,7 @@ Gateway (external, Python, frozen): `jarvis-phone-gateway`, port 7713. I read a 
 
 - **D16:** **jarvis-phone-gateway is absorbed into jarvisd** (Q1 option c). Phone becomes its own set of REST endpoints (Twilio voice webhook, Media Streams WebSocket, and the call/session/escalation routes), gated behind `phone_calls.enabled` (default off). Live calls use the in-process STT, LLM and TTS. **No Redis and no dial-queue shim** (Q2 is moot); dial hand-off is an in-process call or queue job. Twilio still needs the webhook/WS routes publicly reachable (a tunnel), configured only by households that turn phone on. Oddities caused by the two-process split are fixed (D8). Ported in Phase 5c; until cutover prod keeps the Python gateway. Prod: enabled, 17 calls 2026-08-06..08-30.
 - **D4:** `/internal/phone/*` stays open to any registered app for now; a future external-API connector concept will take this route over. (With D16 the absorbed gateway no longer calls it; see Q9.)
-- **D42:** call transcripts and audio are ported as-is (Q8 option a): no retention job, `audio_retention_days` stays inert, no notice-off mode. Revisit with a call-history screen. Prod: 4 of 17 calls have a transcript, none have audio.
+- **D42:** call transcripts and audio are ported as-is (Q8 option a): no retention job, `audio_retention_days` stays inert, no notice-off mode. Revisit with a call-history screen. Prod: 4 of 17 calls have a transcript, none have audio. **Superseded 2026-11-06** ([phone retention](../decisions/2026-11-06-phone-retention.md)): an hourly sweep deletes audio, transcripts and the call's personal details after `audio_retention_days`.
 - **D20:** account deletion keeps `phone_call_sessions` as activity history with `user_id` (and `confirmed_by`) → NULL; it hard-deletes the user's pending call drafts and their `phone_calls.call_context`. The phonebook is household-owned and stays.
 - **D21:** unknown or ambiguous speaker → `make_phone_call` refuses (today's behaviour). Approvals are not tightened: any household member may confirm (Q10).
 - **M14 (D47) / D35:** when speaker recognition is off, the no-speaker refusal says "speaker recognition is off" rather than "I'm not sure who's speaking".
@@ -392,7 +392,7 @@ terminal: done, failed, declined, expired
 - Sessions are **never deleted**.
 - `phone_calls.audio_retention_days` (default 30, "audio AND transcript") is declared and exposed in mobile settings, but **nothing reads it** in CC or the gateway.
 
-> **Kept by D42:** no retention job for now. **D20:** on account deletion, sessions are de-identified, not deleted.
+> **jarvisd (2026-11-06, superseding D42):** an hourly sweep deletes the audio, transcript, `details` and `node_context_json` of calls that ended more than `audio_retention_days` ago; rows, goal, outcome and cards stay ([phone retention](../decisions/2026-11-06-phone-retention.md)). **D20:** on account deletion, sessions are de-identified, not deleted.
 - Audio is stored in MinIO bucket `PHONE_CALLS_BUCKET` by the gateway (`services/recording.py`).
 
 **In-memory state in CC:** none. The gateway holds all live-call state in its own `call_runtimes` and its token registry.
@@ -414,7 +414,7 @@ Defined at `settings_definitions.py:776-859`. The mobile household-controllable 
 | `phone_calls.calls_per_day` | household | 10 | Counts every session created since UTC midnight, drafts included |
 | `phone_calls.monthly_minutes_cap` | household | 60 | Sum of `duration_seconds`. **Inert in practice** (§8) |
 | `phone_calls.max_concurrent_calls` | household | 1 | Counts `dialing|in_call|wrapup` (not `confirmed`) |
-| `phone_calls.audio_retention_days` | household | 30 | **Unread** |
+| `phone_calls.audio_retention_days` | household | 30 | **Unread** in legacy; jarvisd's hourly retention sweep (0 or less: delete once ended) |
 | `phone_calls.attempt_cap` | household | 2 | **Unread** |
 | `web_search.enabled` | household | (doc 04) | Gates the number search |
 | `household.location` | household | `""` | Search bias and state-mismatch warning. Also used for node `home_context` (`main.py:905`) |
@@ -533,7 +533,7 @@ func TestNormalizeUS(t *testing.T) {
 
 ### Write-only or unused data
 
-10. **Retention is unimplemented.** `audio_retention_days` is user-editable but has no reader. Transcripts (PII) and audio accumulate indefinitely.
+10. **Retention is unimplemented.** `audio_retention_days` is user-editable but has no reader. Transcripts (PII) and audio accumulate indefinitely. (Fixed in jarvisd 2026-11-06: [phone retention](../decisions/2026-11-06-phone-retention.md).)
 11. **Transcripts have no reader.** No route, admin page or mobile screen shows `transcript_json`. Mobile does not use `audio_object_key` either (it is not referenced in `jarvis-node-mobile/src`). Both are write-only today.
 12. **Unused columns and settings:** `constraints` (never written), `overlay_json`, `attempt_cap`, and the `source='web'` value.
 
@@ -760,7 +760,7 @@ The gateway has its own contract-half tests: `tests/test_session_client.py` and 
    - (d) Stop storing transcripts at all, since nothing reads them.
 
    **My recommendation: (b), with (c) if you still want notice-off.** Do you want a call-history screen? If not, (d) is simpler and safer.
-   **Decided (D42):** (a) port as-is for now: no retention job, `audio_retention_days` stays inert, no notice-off. Revisit with a call-history screen. Account deletion de-identifies sessions (D20).
+   **Decided (D42):** (a) port as-is for now: no retention job, `audio_retention_days` stays inert, no notice-off. Revisit with a call-history screen. Account deletion de-identifies sessions (D20). **Superseded 2026-11-06 by (b), hourly** ([phone retention](../decisions/2026-11-06-phone-retention.md)).
 
 9. **[change] Lock down the `/internal/phone/*` routes.**
 
