@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -52,4 +54,22 @@ func (fastPaths) FastPaths(command string) []nodesettings.FastPath {
 		return nil
 	}
 	return []nodesettings.FastPath{{ID: "routine.good_night", Example: "good night"}}
+}
+
+// A desktop runs wireNodeSettings without the Pi's tasks: it still answers call plans' context
+// requests (a desktop's calendar availability never reached a plan before).
+func TestDesktopAnswersContextRequests(t *testing.T) {
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &node.Runner{Creds: node.Creds{NodeID: "n1"}}
+	wireNodeSettings(r, st, nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := r.Requests[nodesettings.TopicContext]
+	if h == nil {
+		t.Fatal("no context/+ request handler")
+	}
+	if topic, body := h(context.Background(), "jarvis/nodes/n1/context/operations", []byte(`{"correlation_id":"c1"}`)); topic != "jarvis/nodes/n1/context/operations/response/c1" || string(body) != `{"ok":true,"providers":[]}` {
+		t.Fatalf("context = %q %s", topic, body)
+	}
 }

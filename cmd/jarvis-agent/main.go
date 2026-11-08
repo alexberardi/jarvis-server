@@ -945,7 +945,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()
-		wirePiTasks(r, st, filepath.Dir(path), tools, tf.pkgs, tf.host.Timers, quit, log)
+		wirePiTasks(r, st, filepath.Dir(path), tf.pkgs, tf.host.Timers, quit, log)
 	}
 	// Voice is an extra: if it can't start, the agent still serves its tools. The status icon's
 	// toggle turns it on and off while the agent runs (voiceSwitch).

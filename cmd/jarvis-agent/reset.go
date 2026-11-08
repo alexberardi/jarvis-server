@@ -33,12 +33,9 @@ var rebootPi = func() error {
 // nil for none) before the wipe, so neither writes its file back before the reboot. quit ends
 // the run when a reset can't reboot. Call it after
 // wireNodeSettings and wirePackages (it adds to their Topics, Requests and OnMQTTConnect).
-func wirePiTasks(r *node.Runner, st *nodesettings.Store, dir string, tools node.Multi, pm *packages.Manager, tm *timers.Service, quit func(), log *slog.Logger) {
+func wirePiTasks(r *node.Runner, st *nodesettings.Store, dir string, pm *packages.Manager, tm *timers.Service, quit func(), log *slog.Logger) {
 	if r.Topics == nil {
 		r.Topics = map[string]func(context.Context, *node.CC, []byte){}
-	}
-	if r.Requests == nil {
-		r.Requests = map[string]func(context.Context, string, []byte) (string, []byte){}
 	}
 	fr := &reset.Handler{NodeID: r.Creds.NodeID, Log: log, Reboot: func() error { return rebootPi() }, Exit: quit,
 		Wipe: func(context.Context) ([]string, error) { return reset.Wipe(dir) },
@@ -59,12 +56,6 @@ func wirePiTasks(r *node.Runner, st *nodesettings.Store, dir string, tools node.
 		}
 		_, _ = rt.Pull(ctx, cc) // N: pulls at boot; a reconnect also catches a nudge missed meanwhile
 	}
-
-	cx := &nodesettings.Context{Store: st, Log: log}
-	if sc := liveSidecar(tools); sc != nil {
-		cx.Providers = sc
-	}
-	r.Requests[nodesettings.TopicContext] = cx.Handle
 }
 
 // liveSidecar is the toolset's sidecar (the built-in commands and the Pantry packages), or nil.

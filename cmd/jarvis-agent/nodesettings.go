@@ -166,6 +166,13 @@ func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, 
 	}
 	r.OnMQTTConnect = func(ctx context.Context, cc *node.CC) { bind(cc).Backstop(ctx) }
 	cd := &nodesettings.CommandData{Store: st, Commands: dataCommands(tools), Log: log}
-	r.Requests = map[string]func(context.Context, string, []byte) (string, []byte){nodesettings.TopicCommandData: cd.Handle}
+	// Call plans ask every live node for context (calendar availability, the car's details):
+	// a desktop answers as a Pi does.
+	cx := &nodesettings.Context{Store: st, Log: log}
+	if sc := liveSidecar(tools); sc != nil {
+		cx.Providers = sc
+	}
+	r.Requests = map[string]func(context.Context, string, []byte) (string, []byte){
+		nodesettings.TopicCommandData: cd.Handle, nodesettings.TopicContext: cx.Handle}
 	r.NeedsK2 = func() bool { return !st.HasK2() }
 }
