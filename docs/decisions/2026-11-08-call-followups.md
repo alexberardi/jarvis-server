@@ -27,5 +27,10 @@ The first follow-ups (user): add to calendar, a reminder (the day before, to cal
 up), add to the to-do list, draft an email, and save a web-found number to the phonebook. Not the
 medication tracker.
 
-Spec: [../cc/phone-followups.md](../cc/phone-followups.md). Open: how follow-ups pass the
-`proposals.enabled` gate (Q1 there).
+Follow-ups pass the dispatcher's `proposals.enabled` gate on their own: it also accepts an
+idempotency key the server issued as a call follow-up for that household, so turning on phone
+calls is enough. The user also thinks `proposals.enabled` itself is probably unnecessary (every
+proposal already needs a tap and a declared action); removing it is a separate change, not part
+of this one.
+
+Spec: [../cc/phone-followups.md](../cc/phone-followups.md).
