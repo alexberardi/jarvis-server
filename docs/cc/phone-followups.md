@@ -93,8 +93,8 @@ household, the command must still advertise the action as proposable, the params
 against its declaration again, and the idempotency key runs it once. Its result card ("Added to
 your calendar", or "Couldn't run that: no device is available") is the existing behaviour.
 
-**The household gate (open, Q1).** The dispatcher refuses every proposal while `proposals.enabled`
-is off, its default, so as written no follow-up would ever run. Proposed: the gate also passes for
+**The household gate (decided, user 2026-11-08).** The dispatcher refuses every proposal while
+`proposals.enabled` is off, its default, so as written no follow-up would ever run. Decided: the gate also passes for
 an idempotency key the server issued as a call follow-up for that household (kept with the call's
 session and its retention), so a household that turned on phone calls gets follow-ups without
 turning on agent proposals in general. A key can't be forged into another household's, and a
@@ -117,7 +117,7 @@ user; the reminder covers a pharmacy pickup).
 ## 6. Build order
 
 1. **SDK**: `offer_after_calls`, its validation, the `jdt test` fixture.
-2. **Server**: gather, pick, check, the issued-key gate (Q1), the card's elements, and save to
+2. **Server**: gather, pick, check, the issued-key gate, the card's elements, and save to
    phonebook.
 3. **Agent built-ins**: `offer_after_calls` for reminder `set_at`; to-do's proposable add.
 4. **Packages**: calendar `create_event`, email's proposable draft.
