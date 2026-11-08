@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -714,5 +716,55 @@ func TestSpeechUnderTheChimeIsKept(t *testing.T) {
 		if c.preRoll == 0 && tr.PreRollSecs != 0 {
 			t.Errorf("pre-roll off but %.2f s kept", tr.PreRollSecs)
 		}
+	}
+}
+
+// lockedBuf is a log sink the pipeline goroutine writes while the test reads.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *lockedBuf) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+// A woken command logs where its time went, stage by stage, so a slow turn on a Pi can be
+// told apart from a slow server (every stage a number, the wake to the first reply audio too).
+func TestATurnLogsItsStageTimings(t *testing.T) {
+	r := newRig(t, oneWake(), newServer())
+	var logs lockedBuf
+	r.p.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	stop := r.run(t)
+	r.turn(t)
+	r.waitResets(t, 2)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	var line string
+	for _, l := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(l, `msg="voice timing"`) {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("no timing line:\n%s", logs.String())
+	}
+	for _, k := range []string{"record_ms", "stt_ms", "warmup_wait_ms", "server_ms", "first_audio_ms", "play_ms", "wake_to_reply_ms"} {
+		if !regexp.MustCompile(` ` + k + `=\d+`).MatchString(line) {
+			t.Errorf("%s is not a number: %s", k, line)
+		}
+	}
+}
+
+func TestStageTimesOfAnUnreachedStageAreADash(t *testing.T) {
+	t0 := time.Unix(0, 0)
+	args := stageTimes{wake: t0, recorded: t0.Add(2100 * time.Millisecond), transcribed: t0.Add(2250 * time.Millisecond)}.logArgs()
+	got := fmt.Sprint(args...)
+	if !strings.Contains(fmt.Sprint(args[1]), "2100") || !strings.Contains(fmt.Sprint(args[3]), "150") || fmt.Sprint(args[13]) != "-" {
+		t.Fatalf("args: %s", got)
 	}
 }

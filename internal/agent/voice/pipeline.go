@@ -517,7 +517,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 	}()
 
 	s := &session{id: t.ConversationID, log: log, chunks: chunks, wakeClip: w.clip, held: h,
-		preWakeSpeech: preSecs, selfPlaying: w.selfPlaying}
+		preWakeSpeech: preSecs, selfPlaying: w.selfPlaying, at: stageTimes{wake: start}}
 	p.cue(CueListening, 0)
 	defer func() {
 		p.releaseComputer(s)
@@ -535,6 +535,9 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 			"recorded_s", fmt.Sprintf("%.2f", t.RecordedSecs), "pre_roll_s", fmt.Sprintf("%.2f", t.PreRollSecs), "reply_s", fmt.Sprintf("%.2f", t.ReplySecs),
 			"follow_ups", len(t.FollowUps), "follow_up_end", t.FollowUpEnd,
 			"took", t.Took.Round(time.Millisecond), "err", t.Err)
+		if !s.at.recorded.IsZero() {
+			log.Info("voice timing", append([]any{"outcome", t.Outcome}, s.at.logArgs()...)...)
+		}
 		p.afterWake(log, &t, w.selfPlaying)
 		release() // before the restore: what it switches applies from the next listen on
 		// The music back, then a command's deferred step (music.go). Off the pipeline
@@ -560,6 +563,7 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 	t.Threshold = p.Cfg.Endpointing.Threshold(preRMS)
 	s.threshold = t.Threshold
 	pcm, hitMax, err := p.record(ctx, s)
+	s.at.recorded = p.Now()
 	// The level reference leaves the pre-roll out: it may hold the chime's own echo.
 	if db, ok := SpeechLevel(pcm, s.threshold); ok {
 		s.wakeLevel = &db // the follow-up gate's level reference
@@ -603,6 +607,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	log := s.log
 	// Row 9: STT. The command is normalised; speaker_audio is the wake clip + command.
 	tr, ok := p.transcribe(ctx, s, ex, pcm)
+	s.at.transcribed = p.Now()
 	if !ok {
 		return "", false
 	}
@@ -640,7 +645,9 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	if s.selfPlaying {
 		req.SelfPlaybackKind = "music"
 	}
+	s.at.sent = p.Now()
 	reply, err := p.Server.VoiceStream(sctx, req)
+	s.at.streamOpen = p.Now()
 	if err != nil {
 		p.fail(ctx, ex, fmt.Errorf("voice/command/stream: %w", err))
 		return "", false
@@ -785,6 +792,9 @@ func (p *Pipeline) speak(ctx context.Context, text string, s *session) (float64,
 // drops it) and returns errBargeIn.
 func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *Audio, s *session) (float64, error) {
 	defer a.Close()
+	if s != nil { // every reply, a tool round's included: the timing line's play_ms ends here
+		defer func() { s.at.replyDone = p.Now() }()
+	}
 	pb, err := p.Playback(a.Rate, a.Channels)
 	if err != nil {
 		return 0, fmt.Errorf("speaker: %w", err)
@@ -816,6 +826,9 @@ func (p *Pipeline) playAudio(ctx context.Context, cancel context.CancelFunc, a *
 				p.level(pcm)
 				if err := pb.Write(pcm); err != nil {
 					return float64(frames) / float64(a.Rate), fmt.Errorf("speaker: %w", err)
+				}
+				if s != nil && s.at.firstAudio.IsZero() {
+					s.at.firstAudio = p.Now()
 				}
 				frames += usable / frameBytes
 				pending = append(pending[:0], pending[usable:]...)
