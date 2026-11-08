@@ -100,16 +100,32 @@ session and its retention), so a household that turned on phone calls gets follo
 turning on agent proposals in general. A key can't be forged into another household's, and a
 member can only reach actions the command declared proposable.
 
-## 5. Build order
+## 5. The first follow-ups (user, 2026-11-08)
+
+| Follow-up | Command | What exists | Work |
+|---|---|---|---|
+| Add to Calendar | Calendar package, `create_event` | Proposable (title, start, end, location editable) | `offer_after_calls` |
+| Remind me… (the day before an appointment, to call back, to pick up an order) | Built-in reminder, `set_at` | Proposable, absolute time | `offer_after_calls` on the Go side |
+| Add to your to-do ("bring your insurance card") | Built-in to-do | Not proposable yet | A proposable add action |
+| Draft an email ("email us the photos at …") | Email package | Drafts flow exists | A proposable draft action |
+| Save to phonebook (a number found by web search) | Core, not a command | Phonebook | A server-built proposal on the same card |
+
+Not a fit: media, weather, sports, news and lookups (nothing to do after a call); locks and
+security (an irreversible action from what a stranger said); medication tracker (left out by the
+user; the reminder covers a pharmacy pickup).
+
+## 6. Build order
 
 1. **SDK**: `offer_after_calls`, its validation, the `jdt test` fixture.
-2. **Server**: gather, pick, check, the issued-key gate (Q1), the card's elements.
-3. **Calendar package**: `add_event` declared proposable with `offer_after_calls`.
+2. **Server**: gather, pick, check, the issued-key gate (Q1), the card's elements, and save to
+   phonebook.
+3. **Agent built-ins**: `offer_after_calls` for reminder `set_at`; to-do's proposable add.
+4. **Packages**: calendar `create_event`, email's proposable draft.
 
 No new node code: nodes already report proposable actions through `report_tools`, and older nodes
 simply report none with the new field.
 
-## 6. Later
+## 7. Later
 
 - **Editable params** (`ProposableAction.editable`): fix a mis-heard time on the card before
   confirming. The SDK has the field; the card does not show it yet.
