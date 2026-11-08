@@ -280,3 +280,52 @@ func TestContextDescription(t *testing.T) {
 		t.Fatalf("none: %q", got)
 	}
 }
+
+// fastStore is a Storage whose fast-path switch is off for one pattern.
+type fastStore struct {
+	Storage
+	off string
+}
+
+func (f fastStore) FastPathEnabled(command, id string) bool { return command+"/"+id != f.off }
+
+func TestSidecarDirectRunsAPackagesFastPath(t *testing.T) {
+	py := python(t)
+	sc, err := Start(context.Background(), py, "testdata/fastpath", slog.New(slog.NewTextHandler(io.Discard, nil)), fastStore{off: "echo_fast/echo.fail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+
+	// The patterns reach the app's inspect screen.
+	cmds := sc.Commands()
+	if len(cmds) != 1 || len(cmds[0].FastPaths) != 2 || cmds[0].FastPaths[0].ID != "echo.say" {
+		t.Fatalf("commands = %+v", cmds)
+	}
+	ctx := context.Background()
+	out, ok := sc.Direct(ctx, "echo hello there")
+	if !ok || out["message"] != "HELLO THERE" || !node.TakeSignals(out).Speak {
+		t.Fatalf("direct = %v, %v", out, ok)
+	}
+	for name, said := range map[string]string{"no pattern": "what time is it", "switched off": "fail now"} {
+		if out, ok := sc.Direct(ctx, said); ok {
+			t.Errorf("%s: claimed %q: %v", name, said, out)
+		}
+	}
+	// A command that is off is not offered.
+	if _, ok := sc.Direct(node.WithEnabled(ctx, func(string) bool { return false }), "echo hello"); ok {
+		t.Error("a disabled command ran")
+	}
+}
+
+func TestSidecarWithoutFastPathsNeverAsks(t *testing.T) {
+	py := python(t)
+	sc, err := Start(context.Background(), py, "testdata/commands", slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	if _, ok := sc.Direct(context.Background(), "shout hello"); ok {
+		t.Error("claimed with no fast paths")
+	}
+}

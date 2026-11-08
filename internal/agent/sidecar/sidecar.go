@@ -87,9 +87,10 @@ type Sidecar struct {
 	extras  map[string]extras
 	browser []nodesettings.DataCommand
 	context []nodesettings.ContextCommand
-	pkgOf   map[string]string // command -> the installed package it came from
-	player  map[string]string // command -> its takes_over_playback_binary
-	failed  map[string]string // package -> why its commands didn't load
+	pkgOf   map[string]string                  // command -> the installed package it came from
+	player  map[string]string                  // command -> its takes_over_playback_binary
+	fast    map[string][]nodesettings.FastPath // command -> the patterns it can claim without the model
+	failed  map[string]string                  // package -> why its commands didn't load
 	agents  []AgentDef
 
 	devMu   sync.Mutex
@@ -178,7 +179,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 	out.Buffer(make([]byte, 64<<10), 16<<20)
 	s := &Sidecar{cmd: cmd, stdin: stdin, out: out, log: log, logged: logged, dir: dir, store: o.Storage, host: o.Host, now: time.Now,
 		secrets: map[string][]nodesettings.SecretSpec{}, extras: map[string]extras{}, pkgOf: map[string]string{},
-		player: map[string]string{}}
+		player: map[string]string{}, fast: map[string][]nodesettings.FastPath{}}
 	var desc struct {
 		Tools []struct {
 			Name        string                    `json:"name"`
@@ -190,6 +191,7 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			ContextOps  []json.RawMessage         `json:"context_operations"`
 			ContextDesc string                    `json:"call_context_description"`
 			Player      string                    `json:"takes_over_playback_binary"`
+			FastPaths   []nodesettings.FastPath   `json:"fast_paths"`
 			extras
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
@@ -216,6 +218,9 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			Description: contextDescription(t.ContextDesc, t.ContextOps)})
 		if t.Player != "" {
 			s.player[t.Name] = t.Player
+		}
+		if len(t.FastPaths) > 0 {
+			s.fast[t.Name] = t.FastPaths
 		}
 		if b := t.DataBrowser; b != nil { // nil: its settings couldn't be read, so it stays out
 			b.Name = t.Name
@@ -244,7 +249,7 @@ func (s *Sidecar) Commands() []nodesettings.Command {
 		desc, _ := t.Command["description"].(string)
 		x := s.extras[t.Name]
 		c := nodesettings.Command{Name: t.Name, Description: desc, Secrets: s.secrets[t.Name],
-			AssociatedService: x.AssociatedService, SetupGuide: x.SetupGuide}
+			AssociatedService: x.AssociatedService, SetupGuide: x.SetupGuide, FastPaths: s.fast[t.Name]}
 		for _, cc := range s.context {
 			if cc.Name == t.Name && len(cc.Operations) > 0 {
 				c.SharesContext, c.CallContextDescription = true, cc.Description
@@ -477,6 +482,52 @@ func (s *Sidecar) Call(ctx context.Context, name string, args map[string]any, re
 		res.Output[node.SignalsKey] = sig
 	}
 	return res.Output, true
+}
+
+// Direct is the packages' LLM bypass (node.Director): a command that declares fast-path patterns
+// may claim what was said and run with no model. The patterns the household switched off in the app, and
+// commands that are off, are not offered. Like the built-in fast paths, a claim that fails or has nothing to
+// say falls through to the model (false).
+func (s *Sidecar) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	if len(s.fast) == 0 {
+		return nil, false
+	}
+	switches, _ := s.store.(interface{ FastPathEnabled(command, id string) bool })
+	disabled, off := map[string][]string{}, []string{}
+	for name, ps := range s.fast {
+		if !node.Enabled(ctx, name) {
+			off = append(off, name)
+			continue
+		}
+		for _, p := range ps {
+			if switches != nil && !switches.FastPathEnabled(name, p.ID) {
+				disabled[name] = append(disabled[name], p.ID)
+			}
+		}
+	}
+	var hit struct {
+		Command string         `json:"command_name"`
+		Args    map[string]any `json:"arguments"`
+		Spoken  *string        `json:"spoken_response"`
+	}
+	if err := s.roundTrip("pre_route", map[string]any{"said": said, "disabled": disabled, "off": off}, &hit); err != nil || hit.Command == "" {
+		return nil, false
+	}
+	out, ok := s.Call(ctx, hit.Command, hit.Args, node.Request{VoiceCommand: said})
+	if !ok {
+		return nil, false
+	}
+	if hit.Spoken != nil && *hit.Spoken != "" {
+		out["message"] = *hit.Spoken
+	}
+	msg, _ := out["message"].(string)
+	if success, _ := out["success"].(bool); !success || msg == "" {
+		return nil, false
+	}
+	sig := node.TakeSignals(out)
+	sig.Speak = true
+	out[node.SignalsKey] = sig
+	return out, true
 }
 
 // Close ends the child (closing stdin lets it exit cleanly) and removes its script.

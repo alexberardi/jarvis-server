@@ -71,6 +71,31 @@ Port 3678 is the port the agent's music handling already uses for go-librespot, 
 - The agent pauses Spotify while you talk to Jarvis and resumes it afterwards, unless you had paused it.
 - A music command that starts other playback pauses Spotify first.
 
+## Say "play X on Spotify"
+
+Install the [`spotify_play`](https://github.com/opticon454/jarvis-cmd-spotify) Pantry package and enter your own
+Spotify developer app's client ID and secret in its settings. It finds the music with that app and plays it on this
+node's receiver.
+
+| You say                                  | Plays                      |
+| ---------------------------------------- | -------------------------- |
+| "Play Hysteria by Muse on Spotify"       | The song                   |
+| "Play the album Rumours from Spotify"    | The album                  |
+| "Play Taylor Swift on Spotify"           | The artist (an exact name) |
+| "Play my Chill Hits playlist on Spotify" | The playlist               |
+| "Spotify, play Discover Weekly"          | Best match                 |
+
+The phrase needs the word "Spotify", so a bare "play some jazz" still goes to the model and to any other music
+command. The package declares these as fast paths, which the agent runs with no model (see
+[Package fast paths](#package-fast-paths)); each can be switched off in the app's Inspect fast-paths screen. The
+package expects the receiver on port 3678, which a display node now prefers.
+
+### Package fast paths
+
+Any Pantry package may declare `fast_path_patterns` (the SDK's `FastPathPattern`) and a `pre_route` handler. The
+agent asks the installed packages, after its own built-in fast paths, whether one claims what was said. A claim that
+fails or has nothing to say falls through to the model. Switched-off patterns and commands that are off are skipped.
+
 ## Discovery
 
 The node advertises `_spotify-connect._tcp` on UDP port 5353 of its own network only. mDNS does not cross subnets or

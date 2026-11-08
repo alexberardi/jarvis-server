@@ -11,6 +11,8 @@ JSON-lines requests on stdin:
     -> {"id": 2, "method": "call", "params": {"command_name", "arguments", "request": {...}}}
     <- {"id": 2, "result": {"output": {...}, "signals": {"wait_for_input", "clear_history",
                                                           "on_response_complete"?}}}
+    -> {"id": 9, "method": "pre_route", "params": {"said", "disabled": {"command": ["pattern id"]}, "off": ["command"]}}
+    <- {"id": 9, "result": {"command_name", "arguments", "spoken_response"} | {}}   a package's LLM bypass
     -> {"id": 3, "method": "complete", "params": {"token": "1"}}
     <- {"id": 3, "result": {"ran": true}}
     -> {"id": 4, "method": "data_summaries", "params": {"command_name", "records": [{...}, ...]}}
@@ -627,6 +629,36 @@ def _optional(cmd, attr):
         return None
 
 
+def _fast_paths(cmd) -> list:
+    """The command's declared fast-path patterns (id, description, example), for the app's inspect screen."""
+    try:
+        return [{"id": p.id, "description": p.description, "example": p.example}
+                for p in (getattr(cmd, "fast_path_patterns", None) or [])]
+    except Exception as exc:
+        print(f"sidecar: {cmd.command_name}: fast_path_patterns failed: {exc}", file=sys.stderr)
+        return []
+
+
+def pre_route(commands: dict, params: dict) -> dict:
+    """The first command whose pre_route claims what was said (the SDK's LLM bypass). params:
+    said, disabled ({command: [pattern ids the user switched off]}) and off (commands that are off). Only commands that declare
+    fast paths are asked, so a package without any costs nothing."""
+    said = params.get("said") or ""
+    disabled = params.get("disabled") or {}
+    for name, cmd in commands.items():
+        if name in (params.get("off") or []) or not _fast_paths(cmd):
+            continue
+        try:
+            hit = cmd.pre_route(said, disabled_pattern_ids=frozenset(disabled.get(name) or []))
+        except Exception as exc:
+            print(f"sidecar: {name}: pre_route failed: {exc}", file=sys.stderr)
+            continue
+        if hit is not None:
+            return {"command_name": name, "arguments": dict(hit.arguments or {}),
+                    "spoken_response": hit.spoken_response}
+    return {}
+
+
 def _context_ops(cmd) -> list:
     """The command's declared context operations (N:services/context_handler.py _declared_ops):
     a bad implementation declares none rather than breaking describe."""
@@ -655,7 +687,7 @@ def describe(commands: dict) -> dict:
                           "setup_guide": _optional(cmd, "setup_guide"), "package": PACKAGE_OF.get(name),
                           "context_operations": _context_ops(cmd),
                           "call_context_description": _optional(cmd, "call_context_description"),
-                          "takes_over_playback_binary": _takeover(cmd)})
+                          "takes_over_playback_binary": _takeover(cmd), "fast_paths": _fast_paths(cmd)})
         except Exception as exc:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:
@@ -1424,6 +1456,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": describe(commands)}
             elif method == "call":
                 reply = {"id": msg_id, "result": call(commands, msg.get("params") or {})}
+            elif method == "pre_route":
+                reply = {"id": msg_id, "result": pre_route(commands, msg.get("params") or {})}
             elif method == "action":
                 reply = {"id": msg_id, "result": action(commands, msg.get("params") or {})}
             elif method == "callback":

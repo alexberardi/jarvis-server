@@ -74,6 +74,14 @@ func (l *Live) Call(ctx context.Context, name string, args map[string]any, req n
 	return nil, false
 }
 
+// Direct is the current sidecar's Direct (node.Director).
+func (l *Live) Direct(ctx context.Context, said string) (map[string]any, bool) {
+	if sc := l.Current(); sc != nil {
+		return sc.Direct(ctx, said)
+	}
+	return nil, false
+}
+
 // Commands are the packages' commands with their secrets, for the settings snapshot.
 func (l *Live) Commands() []nodesettings.Command {
 	if sc := l.Current(); sc != nil {
