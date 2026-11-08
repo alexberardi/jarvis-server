@@ -23,5 +23,9 @@ The model's picks are suggestions: the server keeps only declared params of the 
 dates and times said on the call, no private call details, at most 3 buttons, and nothing runs
 without a tap. Only commands with Share with phone calls on are considered.
 
+The first follow-ups (user): add to calendar, a reminder (the day before, to call back, to pick
+up), add to the to-do list, draft an email, and save a web-found number to the phonebook. Not the
+medication tracker.
+
 Spec: [../cc/phone-followups.md](../cc/phone-followups.md). Open: how follow-ups pass the
 `proposals.enabled` gate (Q1 there).
