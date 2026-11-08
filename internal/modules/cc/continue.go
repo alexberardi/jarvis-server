@@ -255,6 +255,13 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		content := strings.Join(notes, "; ")
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
 		res = engineResult{Stop: stopComplete, Message: content, IslandOnly: true, IslandChoice: choice}
+	} else if said, ok := deviceConfirmation(msgs, results); ok {
+		// Device commands that worked: a fixed confirmation, no formatting call (device_confirm.go).
+		if !conv.mode.Native() {
+			msgs = withoutRole(msgs, "tool")
+		}
+		msgs = append(msgs, chatMsg{Role: "assistant", Content: said})
+		res = engineResult{Stop: stopComplete, Message: said, EndOfExchange: true}
 	} else if native := conv.mode.Native(); native || typingPending(conv, msgs) {
 		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)
