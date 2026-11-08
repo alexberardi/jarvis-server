@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
@@ -45,6 +46,28 @@ type session struct {
 	// The wake's pre_wake_speech_seconds and self-playback snapshot, sent with the woken command.
 	preWakeSpeech float64
 	selfPlaying   bool
+	// at marks the woken command's stages, for the "voice timing" log line.
+	at stageTimes
+}
+
+// stageTimes are when a woken command passed each stage (zero: it didn't get there).
+type stageTimes struct {
+	wake, recorded, transcribed, sent, streamOpen, firstAudio, replyDone time.Time
+}
+
+// logArgs are the stages as milliseconds: each from the stage before, and the wake to the
+// first reply audio (what the user waits through).
+func (t stageTimes) logArgs() []any {
+	ms := func(from, to time.Time) any {
+		if from.IsZero() || to.IsZero() {
+			return "-"
+		}
+		return to.Sub(from).Milliseconds()
+	}
+	return []any{"record_ms", ms(t.wake, t.recorded), "stt_ms", ms(t.recorded, t.transcribed),
+		"warmup_wait_ms", ms(t.transcribed, t.sent), "server_ms", ms(t.sent, t.streamOpen),
+		"first_audio_ms", ms(t.streamOpen, t.firstAudio), "play_ms", ms(t.firstAudio, t.replyDone),
+		"wake_to_reply_ms", ms(t.wake, t.firstAudio)}
 }
 
 // ValidationRequest is a 202's validation_request.
