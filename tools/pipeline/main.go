@@ -187,6 +187,7 @@ func runTap(ctx context.Context, args []string) error {
 	listen := fs.String("listen", "127.0.0.1:17799", "address to serve on")
 	upstream := fs.String("upstream", "http://127.0.0.1:7704", "where model calls go: the installed jarvisd's LLM API (default) or any OpenAI-compatible base URL")
 	logPath := fs.String("log", "llm.jsonl", "JSONL log to append to")
+	live := fs.Bool("live", false, "don't mark chat calls background: for a demo call that must not queue behind the house's background work")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -202,7 +203,7 @@ func runTap(ctx context.Context, args []string) error {
 		h.Set("X-Jarvis-App-Key", key)
 	}
 	up := *upstream
-	srv := &http.Server{Addr: *listen, Handler: &Tap{Upstream: func() (string, error) { return up, nil }, Header: h, Log: f, Client: &http.Client{}}}
+	srv := &http.Server{Addr: *listen, Handler: &Tap{Upstream: func() (string, error) { return up, nil }, Header: h, Log: f, Client: &http.Client{}, Live: *live}}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
