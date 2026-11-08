@@ -44,7 +44,7 @@ func TestWirePiTasks(t *testing.T) {
 	quit := make(chan struct{})
 	tm := &timers.Service{Path: filepath.Join(dir, "timers.json"), Log: log}
 	tm.Start()
-	wirePiTasks(r, st, dir, tools, nil, tm, func() { close(quit) }, log)
+	wirePiTasks(r, st, dir, nil, tm, func() { close(quit) }, log)
 
 	var topics, requests []string
 	for k := range r.Topics {
