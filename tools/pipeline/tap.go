@@ -88,6 +88,9 @@ type Tap struct {
 	Header   http.Header
 	Log      io.Writer
 	Client   *http.Client
+	// Live sends calls at the priority they came with (a demo call ahead of the house's
+	// background work) instead of marking them background.
+	Live bool
 
 	mu  sync.Mutex
 	seq int
@@ -100,7 +103,9 @@ func (t *Tap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	body = withBackgroundPriority(r.URL.Path, body)
+	if !t.Live {
+		body = withBackgroundPriority(r.URL.Path, body)
+	}
 	entry := TapEntry{Time: start.UTC(), Path: r.URL.Path}
 	if json.Valid(body) {
 		entry.Request = body
