@@ -370,7 +370,7 @@ jobs:
             scripts/macos/notarize.sh "$zip"
             rm -f "$zip"
             for app in apps/*.app; do
-              xcrun stapler staple "$app"
+              retry xcrun stapler staple "$app"
               retry xcrun stapler validate "$app"
               v="$(retry spctl --assess --type execute --verbose=4 "$app" 2>&1 || true)"; echo "$v"
               echo "$v" | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept $app as notarized"; exit 1; }
@@ -380,7 +380,7 @@ jobs:
           if [ "$SIGNED" = true ]; then
             for dmg in dmgs/*.dmg; do
               scripts/macos/notarize.sh "$dmg"
-              xcrun stapler staple "$dmg"
+              retry xcrun stapler staple "$dmg"
               retry xcrun stapler validate "$dmg"
               v="$(retry spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1 || true)"; echo "$v"
               echo "$v" | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept $dmg as notarized"; exit 1; }
