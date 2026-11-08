@@ -187,6 +187,37 @@ not expose its Intel touchscreen. The original kernel remains available for roll
 the user confirmed finger navigation, the full-screen speech circle and PIN exit with voice
 continuing. This hardware acceptance does not establish subscription or stock Cast sender support.
 
+### Testing on a Pi with no screen
+
+How the now-playing view was checked on a Pi 4 with no monitor (2026-11-07). Everything runs as the node
+user (`pi`, with lingering on); put it all back afterwards.
+
+1. **Build the shell into the agent.** `npm ci && npm run build` in `web/admin` first, then
+   `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o jarvis-agent ./cmd/jarvis-agent`. Without the
+   web build the agent embeds only `placeholder.html` and there is no display.
+2. **Give it a screen.** `sudo apt-get install --no-install-recommends xvfb x11-apps imagemagick xdotool`
+   (Chromium, mpv and openbox were already there), then
+   `systemd-run --user --unit=display-test-xvfb --collect Xvfb :99 -screen 0 1280x800x24 -nolisten tcp` and
+   `systemd-run --user --unit=display-test-openbox --collect --setenv=DISPLAY=:99 openbox`.
+3. **Run the agent with `--display` on it.** A drop-in for the node's unit:
+   `[Service]`, `Environment=DISPLAY=:99`, `ExecStart=` (empty, to clear it), then the unit's own
+   `ExecStart` line with `--display` added; `daemon-reload` and restart.
+4. **Turn display mode on.** As a superuser, `PUT /api/v0/display/config/defaults` with
+   `{"overrides": {}, "pin": "<4-20 digits>"}`, then `PUT /api/v0/display/config/<node id>` with
+   `{"overrides": {"enabled": true}}`. Chromium opens on `:99` within about 30 seconds.
+5. **Look and touch.** `DISPLAY=:99 xwd -root -silent | convert xwd:- png:shot.png` takes a screenshot;
+   `DISPLAY=:99 xdotool mousemove X Y click 1` taps.
+6. **Put it back.** Remove the drop-in (`daemon-reload`, restart), stop the two user units, and
+   `apt-get purge` exactly the packages step 2 added (they are listed in its output); don't use autoremove
+   blindly.
+
+A music source on the node is needed for the now-playing view: a package that is an `IJarvisMusicCommand`,
+installed on that node (the view shows the node's own hub). On a sandbox, a node installs a package from a
+branch with `POST /api/v0/nodes/<node id>/package-install`, body
+`{"command_name": …, "github_repo_url": …, "git_tag": "<branch>"}`, once the household has `pantry.enabled`
+on. A computer can't install packages that need apt packages or post-install steps (Music Assistant's
+AirPlay receiver, for one), so test those on a Pi.
+
 ## Screenshots
 
 Captured from the rendered touch shell and admin pages, and from the Surface itself. Home, Devices and Media come from the
