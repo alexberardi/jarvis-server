@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,7 +28,7 @@ func TestWriteConfigListensOnLoopbackAndQuotesTheName(t *testing.T) {
 			t.Errorf("config lacks %q:\n%s", want, got)
 		}
 	}
-	if info, _ := os.Stat(dir); info.Mode().Perm() != 0700 {
+	if info, _ := os.Stat(dir); runtime.GOOS != "windows" && info.Mode().Perm() != 0700 { // Windows has no Unix modes
 		t.Errorf("config dir mode %v, want 0700", info.Mode().Perm())
 	}
 }

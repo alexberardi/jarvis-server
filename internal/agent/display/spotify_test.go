@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,7 +84,7 @@ func TestSpotifyConfigListensOnLoopbackAndUsesTheReceiverName(t *testing.T) {
 			t.Errorf("config lacks %q:\n%s", want, raw)
 		}
 	}
-	if info, _ := os.Stat(filepath.Join(dir, "config.yml")); info.Mode().Perm() != 0600 {
+	if info, _ := os.Stat(filepath.Join(dir, "config.yml")); runtime.GOOS != "windows" && info.Mode().Perm() != 0600 { // Windows has no Unix modes
 		t.Errorf("config mode %v", info.Mode().Perm())
 	}
 }
