@@ -3,6 +3,7 @@ package spotifyconnect
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,5 +62,48 @@ func TestRunReportsAMissingBinaryAtOnce(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run kept going without go-librespot installed")
+	}
+}
+
+func TestLanInterfacesSkipsContainersVPNsAndInterfacesWithNoIPv4(t *testing.T) {
+	up := net.FlagUp | net.FlagMulticast
+	got := lanInterfaces([]iface{
+		{Name: "lo", Flags: up | net.FlagLoopback, HasIPv4: true},
+		{Name: "wlp1s0", Flags: up | net.FlagBroadcast, HasIPv4: true},
+		{Name: "eth0", Flags: up, HasIPv4: true},
+		{Name: "docker0", Flags: up, HasIPv4: true},
+		{Name: "br-1313ba7f575d", Flags: up, HasIPv4: true},
+		{Name: "tailscale0", Flags: up | net.FlagPointToPoint, HasIPv4: true},
+		{Name: "veth12ab", Flags: up, HasIPv4: true},
+		{Name: "wlan1", Flags: up, HasIPv4: false},              // no address yet
+		{Name: "eth1", Flags: net.FlagMulticast, HasIPv4: true}, // down
+		{Name: "eth2", Flags: net.FlagUp, HasIPv4: true},        // no multicast
+	})
+	if len(got) != 2 || got[0] != "wlp1s0" || got[1] != "eth0" {
+		t.Fatalf("lanInterfaces = %v, want [wlp1s0 eth0]", got)
+	}
+}
+
+func TestWriteConfigAnnouncesOnLanInterfacesOnly(t *testing.T) {
+	defer func(f func() []iface) { interfaces = f }(interfaces)
+	interfaces = func() []iface {
+		return []iface{{Name: "wlp1s0", Flags: net.FlagUp | net.FlagMulticast, HasIPv4: true}, {Name: "docker0", Flags: net.FlagUp | net.FlagMulticast, HasIPv4: true}}
+	}
+	dir := t.TempDir()
+	if err := WriteConfig(dir, "Test", Port); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "config.yml"))
+	if !strings.Contains(string(raw), `zeroconf_interfaces_to_advertise: ["wlp1s0"]`) {
+		t.Errorf("config:\n%s", raw)
+	}
+	// No usable interface: leave the option out, so go-librespot keeps its default.
+	interfaces = func() []iface { return nil }
+	if err := WriteConfig(dir, "Test", Port); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, "config.yml"))
+	if strings.Contains(string(raw), "zeroconf_interfaces_to_advertise") {
+		t.Errorf("option written with no interfaces:\n%s", raw)
 	}
 }

@@ -101,7 +101,10 @@ fails or has nothing to say falls through to the model. Switched-off patterns an
 The node advertises `_spotify-connect._tcp` on UDP port 5353 of its own network only. mDNS does not cross subnets or
 VLANs. If the Spotify app is on a different subnet, the speaker does not appear. Either join the phone to the node's
 network for the first pairing, or enable an mDNS repeater or reflector between the networks (in UniFi Network this is
-the multicast DNS setting). To check from a Linux machine on the node's network:
+the multicast DNS setting). The receiver announces on the node's LAN interfaces only (up, multicast-capable, with an IPv4 address; Docker, VPN
+and other virtual interfaces are skipped). Without that, a node that runs Docker announced a bridge address such as
+`172.19.0.1`, which a phone on another VLAN cannot reach. This sets go-librespot's `zeroconf_interfaces_to_advertise`.
+To check from a Linux machine on the node's network:
 
 ```bash
 avahi-browse -rt _spotify-connect._tcp
