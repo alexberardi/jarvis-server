@@ -81,7 +81,11 @@ func (e *Engine) StartSpotify(on bool) {
 	}
 	// shortcut: a free port is picked by binding and releasing it, so another process could take it first;
 	// the receiver then fails and shows as failed, and the next apply picks again.
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	// Port 3678 first: it is where the Pantry spotify_play command and the agent's ducking look by default.
+	l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(spotifyconnect.Port))
+	if err != nil {
+		l, err = net.Listen("tcp", "127.0.0.1:0")
+	}
 	if err != nil {
 		e.receiverStatus["spotify"] = "unavailable"
 		return
