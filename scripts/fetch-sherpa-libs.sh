@@ -32,7 +32,10 @@ for p in "$@"; do
   fi
   tmp="$(mktemp -d)"
   echo "$p: downloading $name"
-  curl -fsSL "$BASE/$name.tar.bz2" | tar xj -C "$tmp"
+  # GitHub's release downloads 504 in bursts: retry, and download whole before extracting so a
+  # retry never feeds tar a half archive.
+  curl -fsSL --retry 6 --retry-all-errors --retry-delay 15 -o "$tmp/$name.tar.bz2" "$BASE/$name.tar.bz2"
+  tar xjf "$tmp/$name.tar.bz2" -C "$tmp"
   rm -rf "$out" && mkdir -p "$out"
   # Keep only the two runtime libraries we load.
   find "$tmp" -type f \( -name 'libonnxruntime*.so*' -o -name 'libsherpa-onnx-c-api.so' \
