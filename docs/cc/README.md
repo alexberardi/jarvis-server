@@ -23,7 +23,7 @@ Source: `jarvis-command-center` (about 62k LOC, `app/`).
 | 10 | [10-signals-attention-proposals.md](10-signals-attention-proposals.md) | Signals ingest and reactions, signal automations, attention broker, proposals and suppressions, situation matcher, presence |
 | 11 | [11-phone.md](11-phone.md) | Phone calls, call context, number search, phone-gateway sessions, contacts, phone tool |
 | — | [phone-sip.md](phone-sip.md) | SIP provider (FreePBX etc.): design, gotchas, testing without a PBX |
-| — | [phone-followups.md](phone-followups.md) | Call follow-ups: commands offer buttons on the Call finished card (model picks, server checks) |
+| — | [phone-followups.md](phone-followups.md) | Call follow-ups: proposable actions offered on the Call finished card (model picks, server checks) |
 | 12 | [12-packages-and-command-data.md](12-packages-and-command-data.md) | Package install/uninstall/revert, test install, mobile command-data browser, node tools view |
 | 13 | [13-mobile-chat-inbox-settings.md](13-mobile-chat-inbox-settings.md) | Mobile SSE chat, inbox notifications, callbacks, household settings, settings definitions |
 
