@@ -22,6 +22,8 @@ import (
 type Sidecar interface {
 	// Failed are the packages whose commands didn't load, with why.
 	Failed() map[string]string
+	// PackageCommands are the names of the commands that loaded from package pkg.
+	PackageCommands(pkg string) []string
 	Close() error
 }
 
@@ -84,6 +86,7 @@ type Manager struct {
 	mu     sync.Mutex
 	now    func() time.Time  // time.Now; tests move it
 	failed map[string]string // of the sidecar in service
+	served Sidecar            // the sidecar in service (nil: none)
 }
 
 // Builtins are a node's built-in commands: a pip requirement Boot installs into the venv (once
@@ -272,7 +275,7 @@ func (m *Manager) start(ctx context.Context) (Sidecar, error) {
 // commit puts sc in service (nil: none).
 func (m *Manager) commit(sc Sidecar) {
 	m.Sidecars.Swap(sc)
-	m.failed = nil
+	m.served, m.failed = sc, nil
 	if sc != nil {
 		m.failed = sc.Failed()
 	}
