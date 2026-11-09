@@ -44,8 +44,9 @@ class CalendarCommand(IJarvisCommand):
 - **New:** `offer_after_calls: str | None` on `ProposableAction` (≤ 200 chars). Set, the action may
   be offered after a call when that sentence fits; unset (the default), it never is.
   Everything else is the existing contract: typed params, labels, blast tier, idempotency.
-- Only commands whose **Share with phone calls** switch is on are considered (the switch that
-  already gates call-plan context).
+- **Not gated by Share with phone calls** (user, 2026-11-08). That switch keeps a command's data
+  out of calls; a follow-up sends call details into the user's own command, only on a tap. A
+  household that turned calendar sharing off still wants "Add to Calendar".
 - `jdt test` gains a sample call transcript, and a check that every action with
   `offer_after_calls` names a real `@callback` and has typed params.
 
@@ -54,7 +55,7 @@ class CalendarCommand(IJarvisCommand):
 ```
 call ends ─▶ assess (background model): summary, facts, goal_achieved           (today)
           ─▶ gather: every live node's report_tools (nodeTools, cached 30 s): the proposable
-             actions with offer_after_calls, from commands with Share with phone calls on
+             actions with offer_after_calls
           ─▶ pick (background model): which apply, with params
           ─▶ check (server, §3)
           ─▶ post the Call finished card with ≤ 3 confirm buttons
@@ -63,8 +64,11 @@ call ends ─▶ assess (background model): summary, facts, goal_achieved       
 - **Pick** is one background-model call with the transcript, the assessment and the candidate
   actions as tools (name, `offer_after_calls`, params). It may call none, or each at most once. It
   runs only when there is a transcript and at least one candidate.
-- **The card waits** for the pick (budget 90 s; past it, the card posts without buttons and a late
-  pick is dropped). A call with no candidates posts exactly as today.
+- **The card waits** for the pick (budget 2 minutes, as the assessment; past it, the card posts
+  without buttons). A call with no candidates posts exactly as today. On prod's 31B a pick took
+  5-45 s, once 94 s.
+- The action's `idempotency_param` is never shown to the model: the server fills it with the
+  follow-up's key.
 
 ## 3. The server's check
 
@@ -72,9 +76,11 @@ Each pick is dropped unless:
 
 1. It names a gathered action and only its declared params, each of the declared type, with every
    required param present (the dispatcher's `validateAgainstParams`, run early).
-2. **Every date and datetime is grounded**: it resolves (timewindow's `ParseProposed` and
-   `ResolveRelativeDays`) from a date or time said in the call's transcript, in the household's
-   time zone, and lies in the future. A time nobody said is a dropped button, never a guess.
+2. **Every date and datetime is grounded**: a line of the call (either side) names it, read as the
+   live call reads offers (`ResolveRelativeDays`, `spokenClock`, `ParseProposed`: a weekday or
+   "tomorrow" plus a time, in the household's zone); or, for a reminder, it is up to 48 hours
+   before such a time ("the evening before"). It lies in the future. A time nobody said is a
+   dropped button, never a guess.
 3. No string carries one of the call's **Only if they ask** details (`live.FindRestricted`).
 
 At most 3 survive, in the model's order. A button's label is the action's `confirm_label` plus the
@@ -108,17 +114,18 @@ member can only reach actions the command declared proposable.
 | Remind me… (the day before an appointment, to call back, to pick up an order) | Built-in reminder, `set_at` | Proposable, absolute time | `offer_after_calls` on the Go side |
 | Add to your to-do ("bring your insurance card") | Built-in to-do | Not proposable yet | A proposable add action |
 | Draft an email ("email us the photos at …") | Email package | Drafts flow exists | A proposable draft action |
-| Save to phonebook (a number found by web search) | Core, not a command | Phonebook | A server-built proposal on the same card |
 
 Not a fit: media, weather, sports, news and lookups (nothing to do after a call); locks and
 security (an irreversible action from what a stranger said); medication tracker (left out by the
 user; the reminder covers a pharmacy pickup).
 
+Save to phonebook was dropped: every completed call already saves or refreshes the business in
+the household's phonebook (`upsertContactFromCall`).
+
 ## 6. Build order
 
-1. **SDK**: `offer_after_calls`, its validation, the `jdt test` fixture.
-2. **Server**: gather, pick, check, the issued-key gate, the card's elements, and save to
-   phonebook.
+1. **SDK**: `offer_after_calls` and its validation (jarvis-command-sdk#20).
+2. **Server**: gather, pick, check, the issued-key gate, the card's elements.
 3. **Agent built-ins**: `offer_after_calls` for reminder `set_at`; to-do's proposable add.
 4. **Packages**: calendar `create_event`, email's proposable draft.
 

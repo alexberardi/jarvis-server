@@ -846,3 +846,67 @@ func TestAutomationAutomaticBeatsHouseholdBlock(t *testing.T) {
 	ae.wantRanCard(policy.ScopeAutomation)
 	ae.wantEvent(policy.OutcomeRan)
 }
+
+// --- call follow-ups (docs/cc/phone-followups.md) ---
+
+func TestCallFollowUpCandidatesComeFromNodeReports(t *testing.T) {
+	se := newSigEnv(t)
+	n := se.createNode("n1", sigHH)
+	rep := nodeReport()
+	cmds := rep["available_commands"].([]any)
+	cmds[3] = map[string]any{"command_name": "add_event", "proposable_actions": []any{map[string]any{"callback": "create",
+		"card_title": "Add to calendar?", "offer_after_calls": "the call booked a time", "blast_tier": "reversible",
+		"params": []any{map[string]any{"name": "title", "type": "string", "required": true},
+			map[string]any{"name": "start", "type": "datetime", "description": "When it starts"}}}}}
+	se.runNode(n, &fakeNodeAgent{report: rep})
+	got := nodeContext{se.m}.FollowUpCandidates(context.Background(), sigHH)
+	// The reminder's action never opted in (no offer_after_calls), so only add_event is offered.
+	if len(got) != 1 {
+		t.Fatalf("candidates: %+v", got)
+	}
+	c := got[0]
+	if c.NodeID != "n1" || c.Command != "add_event" || c.Callback != "create" || c.Label != "Add to calendar?" ||
+		c.When != "the call booked a time" || len(c.Params) != 2 || !c.Params[0].Required || c.Params[1].Type != "datetime" {
+		t.Fatalf("candidate: %+v", c)
+	}
+}
+
+func TestCallFollowUpPassesTheProposalGate(t *testing.T) {
+	se := newSigEnv(t)
+	n := se.createNode("n1", sigHH)
+	agent := &fakeNodeAgent{report: nodeReport()}
+	agent.callback = func(jobID string) {
+		if err := nodeCallback(se.srv.URL, n, jobID, map[string]any{"success": true, "context_data": map[string]any{"message": "Added to your calendar"}}); err != nil {
+			t.Error(err)
+		}
+	}
+	se.runNode(n, agent)
+	issue := func(session, hh string) {
+		outcome := `{"summary": "Booked.", "followups": [{"key": "call:` + session + `:1", "node_id": "n1", "command": "add_event",
+			"callback": "create", "label": "Add to calendar?", "blast_tier": "reversible", "params": {"title": "Dentist"}}]}`
+		if _, err := se.d.Write.Exec(`INSERT INTO cc_phone_call_sessions (id, household_id, goal, created_at, outcome_json)
+			VALUES (?, ?, 'book', '2026-11-08T10:00:00', ?)`, session, hh, outcome); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issue("s1", sigHH)
+	issue("s2", "hh-other")
+	exec, _ := se.m.SignalCallback(proposableCommand, "execute")
+	ctx := context.Background()
+	tap := func(key string) SignalCallbackResult {
+		return exec(ctx, SignalCallbackContext{HouseholdID: sigHH, Data: map[string]any{"_action": map[string]any{
+			"target_command": "add_event", "target_callback": "create", "node_id": "n1", "idempotency_key": key}, "title": "Dentist"}})
+	}
+	// proposals.enabled is off (the default): only a key this household's call issued gets through.
+	for _, key := range []string{"call:s1:2", "call:s2:1", "proposal-1"} {
+		if res := tap(key); res.Error != "proposals disabled" {
+			t.Errorf("%s: %+v", key, res)
+		}
+	}
+	if res := tap("call:s1:1"); !res.Success || res.ContextData["inbox"].(map[string]any)["title"] != "Added to your calendar" {
+		t.Fatalf("issued follow-up: %+v", res)
+	}
+	if res := tap("call:s1:1"); res.ContextData["inbox"].(map[string]any)["title"] != "Already done" {
+		t.Fatalf("second tap: %+v", res)
+	}
+}

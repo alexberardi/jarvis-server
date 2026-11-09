@@ -92,6 +92,12 @@ func (s *Service) postOutcomeCard(ctx context.Context, sess *Session, corrective
 	if sess.AudioKey != "" {
 		meta["audio_object_key"] = sess.AudioKey
 	}
+	var stored struct {
+		FollowUps []FollowUp `json:"followups"`
+	}
+	if sess.OutcomeJSON != "" && json.Unmarshal([]byte(sess.OutcomeJSON), &stored) == nil && len(stored.FollowUps) > 0 {
+		meta["interactive_elements"] = followUpElements(stored.FollowUps)
+	}
 	cardSummary := summary
 	if corrective {
 		// D40 11.Q11: the reaper already reported a failure; this corrects it.

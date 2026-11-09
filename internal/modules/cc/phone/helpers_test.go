@@ -92,6 +92,8 @@ type fakeLLM struct {
 	assessed  []llm.ChatRequest // outcome assessments, in order
 	kinds     string            // the call-categories answer ("" = NONE)
 	assessErr int               // the next assessErr outcome assessments fail
+	followups string            // the post-call follow-up pick ("" = none picked)
+	picks     []llm.ChatRequest // follow-up picks, in order
 }
 
 func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -113,6 +115,12 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 			return nil, f.draftErr
 		}
 		return &llm.ChatResponse{Content: f.draft}, nil
+	case lastHas(req, followUpMarker):
+		f.picks = append(f.picks, req)
+		if f.followups == "" {
+			return &llm.ChatResponse{Content: `{"followups": []}`}, nil
+		}
+		return &llm.ChatResponse{Content: f.followups}, nil
 	case req.Label == "live":
 		f.classifys++
 		return &llm.ChatResponse{Content: f.verdict}, nil
@@ -124,6 +132,14 @@ func (f *fakeLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespons
 		}
 		return &llm.ChatResponse{Content: f.assess}, nil
 	}
+}
+
+func lastHas(req llm.ChatRequest, marker string) bool {
+	if len(req.Messages) == 0 {
+		return false
+	}
+	m := req.Messages[len(req.Messages)-1]
+	return m.Content != nil && m.Content.Text != nil && strings.Contains(*m.Content.Text, marker)
 }
 
 func (f *fakeLLM) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.Frame, error) {

@@ -21,11 +21,12 @@ its own table and callback, which duplicated proposable actions.
 
 The model's picks are suggestions: the server keeps only declared params of the declared types,
 dates and times said on the call, no private call details, at most 3 buttons, and nothing runs
-without a tap. Only commands with Share with phone calls on are considered.
+without a tap. Follow-ups are not gated by Share with phone calls (user): that switch keeps a command's
+data out of calls, while a follow-up sends call details into the user's own command on a tap.
 
 The first follow-ups (user): add to calendar, a reminder (the day before, to call back, to pick
-up), add to the to-do list, draft an email, and save a web-found number to the phonebook. Not the
-medication tracker.
+up), add to the to-do list and draft an email. Not the medication tracker; not save to phonebook,
+which every completed call already does.
 
 Follow-ups pass the dispatcher's `proposals.enabled` gate on their own: it also accepts an
 idempotency key the server issued as a call follow-up for that household, so turning on phone

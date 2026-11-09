@@ -495,13 +495,16 @@ func (m *Module) proposalExecute(ctx context.Context, sc SignalCallbackContext) 
 	if command == "" || callback == "" {
 		return SignalCallbackResult{Error: "malformed proposal"}
 	}
-	// (A) fail-closed household gate.
-	if !m.proposalsEnabled(ctx, hh) {
+	// (A) fail-closed household gate. A call follow-up passes on its own: the household's call
+	// issued exactly this action (decision 2026-11-08-call-followups); turning on phone calls is
+	// the opt-in.
+	nodeID, _ := meta["node_id"].(string)
+	followUp := m.phone != nil && m.phone.IssuedFollowUp(ctx, hh, idem, command, callback, nodeID)
+	if !followUp && !m.proposalsEnabled(ctx, hh) {
 		return SignalCallbackResult{Error: "proposals disabled",
 			ContextData: inboxCard(hh, "Action not run", "Agent action cards are turned off for this household.")}
 	}
 	// (B) the node. D4: a card's node must belong to the caller's household.
-	nodeID, _ := meta["node_id"].(string)
 	if nodeID != "" && !m.nodeInHousehold(ctx, nodeID, hh) {
 		m.deps.Log.Warn("cc: proposal refused: node outside the household", "node", nodeID, "household", hh)
 		return SignalCallbackResult{Error: "no node",
