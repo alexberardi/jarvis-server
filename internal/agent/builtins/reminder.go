@@ -54,8 +54,12 @@ const (
 var recurrences = []string{"daily", "weekdays", "weekly", "biweekly", "monthly"}
 
 func (r *Reminder) Available(context.Context) []node.ToolDef {
-	return []node.ToolDef{def(reminderName)}
+	return []node.ToolDef{withProposable(def(reminderName), map[string]any{"callback": "set_at", "offer_after_calls": reminderAfterCalls})}
 }
+
+// reminderAfterCalls offers set_at on a call's card (docs/cc/phone-followups.md).
+const reminderAfterCalls = "the person has something to do at a later time because of this call: " +
+	"attend a booked appointment (remind them the evening before), call the business back, or pick something up"
 
 func (r *Reminder) now() time.Time {
 	if r.Now != nil {

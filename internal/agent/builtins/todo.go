@@ -23,7 +23,52 @@ type Todo struct {
 
 const todoName = "todo_list"
 
-func (t *Todo) Available(context.Context) []node.ToolDef { return []node.ToolDef{def(todoName)} }
+func (t *Todo) Available(context.Context) []node.ToolDef {
+	return []node.ToolDef{withProposable(def(todoName), todoAddFromCall)}
+}
+
+// todoAddFromCall is add_item as a proposable action offered on a call's card: what the business
+// asked the person to do or bring (docs/cc/phone-followups.md).
+var todoAddFromCall = map[string]any{
+	"callback": "add_item", "card_title": "Add to your to-do list?", "confirm_label": "Add to to-do",
+	"dismiss_label": "Dismiss", "blast_tier": "reversible", "editable": []any{"task"}, "outputs": []any{},
+	"idempotency_param": "idempotency_key",
+	"offer_after_calls": "the business asked the person to do or bring something themselves, such as bring a document, " +
+		"arrive early, fast beforehand or send photos",
+	"params": []any{
+		map[string]any{"name": "task", "type": "string", "required": true, "description": "The task, in a few words."},
+		map[string]any{"name": "idempotency_key", "type": "string", "required": true, "description": "Stable de-dup key."},
+	},
+}
+
+// Callback is add_item: one task from a confirmed card. handled is false for another command's.
+// The list keys tasks by their text, so a repeated tap reports "already on it".
+func (t *Todo) Callback(params map[string]any) (map[string]any, bool) {
+	if params["command_name"] != todoName {
+		return nil, false
+	}
+	if enabled, ok := params["enabled"].(bool); ok && !enabled {
+		return map[string]any{"success": false, "error": "Command '" + todoName + "' not found on this node"}, true
+	}
+	if params["callback_name"] != "add_item" {
+		return map[string]any{"success": false, "error": "Callback '" + pyStr(params["callback_name"]) + "' not registered on '" + todoName + "'"}, true
+	}
+	data, _ := params["data"].(map[string]any)
+	task := strings.TrimSpace(pyStr(data["task"]))
+	if task == "" {
+		return map[string]any{"success": false, "error": "add_item requires a task.",
+			"context_data": map[string]any{"message": "I need the task to add."}}, true
+	}
+	var by *int64
+	if uid, err := pyInt(params["user_id"]); err == nil && params["user_id"] != nil {
+		u := int64(uid)
+		by = &u
+	}
+	out := t.add([]string{task}, by)
+	ok, _ := out["success"].(bool)
+	msg, _ := out["message"].(string)
+	return map[string]any{"success": ok, "error": nil, "context_data": map[string]any{"message": msg}}, true
+}
 
 func (t *Todo) now() time.Time {
 	if t.Now != nil {

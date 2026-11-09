@@ -232,3 +232,20 @@ func browserDef(name string) nodesettings.DataCommand {
 func noCreate(command string) error {
 	return &nodesettings.ErrRejected{Message: command + " doesn't create records from the app"}
 }
+
+// withProposable adds or extends a definition's proposable actions after the pinned Python
+// defs (which predate them and offer_after_calls): action is merged into the entry with the
+// same callback, or appended. docs/cc/phone-followups.md.
+func withProposable(d node.ToolDef, action map[string]any) node.ToolDef {
+	list, _ := d.Command["proposable_actions"].([]any)
+	for _, e := range list {
+		if m, ok := e.(map[string]any); ok && m["callback"] == action["callback"] {
+			for k, v := range action {
+				m[k] = v
+			}
+			return d
+		}
+	}
+	d.Command["proposable_actions"] = append(list, action)
+	return d
+}
