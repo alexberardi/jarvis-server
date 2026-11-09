@@ -32,7 +32,8 @@ func TestWirePackages(t *testing.T) {
 		topics = append(topics, k)
 	}
 	sort.Strings(topics)
-	want := "config/push,k2/provision,package-install,package-revert,package-uninstall,settings/request"
+	// A computer answers Forge test installs as a Pi does: they run no system setup.
+	want := "config/push,k2/provision,package-install,package-revert,package-uninstall,settings/request,test-install"
 	if strings.Join(topics, ",") != want {
 		t.Fatalf("topics = %v", topics)
 	}
