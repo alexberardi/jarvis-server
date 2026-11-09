@@ -78,6 +78,7 @@ func (m *Module) registerPhone(mux *http.ServeMux) {
 		p.Calendar = nodeContext{m}
 	}
 	p.NodeContext = nodeContext{m}
+	p.FollowUpCandidates = nodeContext{m}.FollowUpCandidates
 	p.Twilio, p.EnvCredentials, p.NewTwilio = m.Phone.Twilio, m.Phone.EnvCredentials, m.Phone.NewTwilio
 	p.Options, p.Now, p.Go = m.Phone.Options, m.now, m.tasks.Go
 	p.Zone = m.householdLocation

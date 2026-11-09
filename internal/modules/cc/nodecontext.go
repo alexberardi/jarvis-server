@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -211,3 +212,55 @@ type nodeContextError string
 func (e nodeContextError) Error() string { return string(e) }
 
 const errNoNodeContext = nodeContextError("no node answered")
+
+// FollowUpCandidates are the proposable actions the household's live nodes offer after calls
+// (offer_after_calls), from each node's report_tools (cached 30 s), at most one per
+// command+callback (the most recently seen node offers it). docs/cc/phone-followups.md.
+func (n nodeContext) FollowUpCandidates(ctx context.Context, hh string) []phone.FollowUpCandidate {
+	var out []phone.FollowUpCandidate
+	seen := map[string]bool{}
+	for _, node := range n.liveNodes(ctx, hh) {
+		rep, err := n.m.nodeTools(ctx, node, probeTimeout)
+		if err != nil {
+			continue
+		}
+		for _, c := range rep.Commands {
+			for _, a := range c.ProposableActions {
+				when, _ := a["offer_after_calls"].(string)
+				callback, _ := a["callback"].(string)
+				if strings.TrimSpace(when) == "" || callback == "" || seen[c.CommandName+"/"+callback] {
+					continue
+				}
+				seen[c.CommandName+"/"+callback] = true
+				out = append(out, followUpCandidate(node, c.CommandName, callback, when, a))
+			}
+		}
+	}
+	return out
+}
+
+func followUpCandidate(node, command, callback, when string, a map[string]any) phone.FollowUpCandidate {
+	label, _ := a["confirm_label"].(string)
+	if label == "" || label == "Confirm" {
+		if t, _ := a["card_title"].(string); t != "" {
+			label = t
+		}
+	}
+	if label == "" {
+		label = callback
+	}
+	tier, _ := a["blast_tier"].(string)
+	idem, _ := a["idempotency_param"].(string)
+	c := phone.FollowUpCandidate{NodeID: node, Command: command, Callback: callback, Label: label,
+		When: when, BlastTier: tier, IdempotencyParam: idem}
+	for _, p := range paramSpecs(a) {
+		name, _ := p["name"].(string)
+		if name == "" {
+			continue
+		}
+		typ, _ := p["type"].(string)
+		desc, _ := p["description"].(string)
+		c.Params = append(c.Params, phone.FollowUpParam{Name: name, Type: typ, Required: pyTruthyValue(p["required"]), Description: desc})
+	}
+	return c
+}

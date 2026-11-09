@@ -345,6 +345,9 @@ func (s *Service) wrapup(ctx context.Context, rt *callRuntime, sess *Session) {
 		"summary": summary, "goal_achieved": ga, "facts": facts, "turns": len(p.records),
 		"escalation_unanswered": p.escalationUnanswered, "audio_available": audioKey != "",
 	}
+	if fus := s.followUps(ctx, p, sess, summary); len(fus) > 0 {
+		outcome["followups"] = fus
+	}
 	if err := s.recordOutcome(ctx, rt.sessionID, outcome, audioKey); err != nil {
 		s.log().Error("phone: outcome report failed", "session", rt.sessionID, "err", err)
 	}

@@ -168,6 +168,9 @@ type Service struct {
 	ThinkingSuffix func(ctx context.Context) bool
 	// Zone is the household's timezone ("tomorrow" in a brief is a weekday there). Nil: UTC.
 	Zone func(ctx context.Context, hh string) *time.Location
+	// FollowUpCandidates are the proposable actions the household's nodes offer after calls
+	// (offer_after_calls). Nil: no follow-ups (docs/cc/phone-followups.md).
+	FollowUpCandidates func(ctx context.Context, hh string) []FollowUpCandidate
 	// Timing knobs (tests shorten them; zero = the legacy values).
 	StreamStartTimeout time.Duration
 	HeartbeatInterval  time.Duration
