@@ -60,7 +60,7 @@ func TestRequestsTestInstall(t *testing.T) {
 		q.Handle(ctx, api, TopicTestInstall, []byte(`{"request_id":"`+rid+`"}`))
 	}
 	want := map[string]map[string]any{
-		"t1": {"success": true, "details": map[string]any{"package_name": "hello", "files_installed": 3.0, "pip_packages_added": 1.0}},
+		"t1": {"success": true, "details": map[string]any{"commands": []any{"hello_cmd"}, "package_name": "hello", "files_installed": 3.0, "pip_packages_added": 1.0}},
 		"t2": {"success": false, "error": "No files in draft"},
 		"t3": {"success": false, "error": `test install: path "../../x.py" is not inside the package`},
 		"t4": {"success": false, "error": "Verification failed"},

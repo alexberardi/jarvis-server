@@ -182,7 +182,9 @@ func (m *Manager) TestInstall(ctx context.Context, name string, files []DraftFil
 	}
 	time.AfterFunc(testTTL+time.Second, func() { m.ExpireTests(context.Background()) })
 	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands)
-	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs)}, nil
+	// commands: the tool names that loaded; jarvisd records their runs for Send to Forge.
+	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
+		"commands": m.served.PackageCommands(testPrefix + name)}, nil
 }
 
 // readRequirements are requirements.txt's requirements; options, URLs and markers are skipped.

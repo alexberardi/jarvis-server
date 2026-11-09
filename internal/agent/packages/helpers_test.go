@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -116,7 +117,15 @@ type fakeSidecar struct {
 }
 
 func (s *fakeSidecar) Failed() map[string]string { return s.failed }
-func (s *fakeSidecar) Close() error              { s.closed = true; return nil }
+
+// PackageCommands: a fake package that loaded has one command, named after it.
+func (s *fakeSidecar) PackageCommands(pkg string) []string {
+	if slices.Contains(s.packages, pkg) && s.failed[pkg] == "" {
+		return []string{strings.TrimPrefix(pkg, testPrefix) + "_cmd"}
+	}
+	return []string{}
+}
+func (s *fakeSidecar) Close() error { s.closed = true; return nil }
 
 // fakeSidecars starts fakeSidecars from the real commands file; packages named in fail don't
 // load.
