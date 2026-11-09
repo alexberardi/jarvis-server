@@ -501,3 +501,38 @@ func TestPurgeUserCallbacks(t *testing.T) {
 		t.Fatal(mine, theirs)
 	}
 }
+
+// A failed new_notification tap is shown, not silent (mobile and server, 2026-11-08): the failure's
+// own inbox card when it sent one, else "Couldn't finish that" with its error. A failure with no
+// context_data (the unreachable path, the sweeper) has its own card or none, as before.
+func TestCallbackFailureCard(t *testing.T) {
+	ce := newCBEnv(t)
+	n := ce.onlineNode("n1", cbHH)
+	c := ce.dialNode(n)
+	c.subscribe("jarvis/nodes/n1/commands")
+	tap := func() string {
+		r := ce.do("POST", "/api/v0/callbacks", `{"command_name": "add_event", "callback_name": "create_event",
+			"data": {}, "target_node_id": "n1"}`, bearer(ce.member)).want(201).json()
+		c.next()
+		return r["id"].(string)
+	}
+	items := func() []string {
+		ce.notify.mu.Lock()
+		defer ce.notify.mu.Unlock()
+		var out []string
+		for _, it := range ce.notify.items {
+			out = append(out, it.Title+" | "+it.Summary)
+		}
+		return out
+	}
+	const why = "Your iCloud calendar credentials aren't set up yet."
+	ce.do("POST", "/api/v0/callbacks/"+tap()+"/result", map[string]any{"success": false, "error": why,
+		"context_data": map[string]any{"message": why}}, n.h()).want(200)
+	ce.do("POST", "/api/v0/callbacks/"+tap()+"/result", map[string]any{"success": false, "error": "x",
+		"context_data": map[string]any{"inbox": map[string]any{"title": "Calendar not set up", "summary": "Add your account first."}}}, n.h()).want(200)
+	ce.do("POST", "/api/v0/callbacks/"+tap()+"/result", map[string]any{"success": false, "error": "quiet"}, n.h()).want(200)
+	got := items()
+	if len(got) != 2 || got[0] != "Couldn't finish that | "+why || got[1] != "Calendar not set up | Add your account first." {
+		t.Fatalf("cards: %q", got)
+	}
+}
