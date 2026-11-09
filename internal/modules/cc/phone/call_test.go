@@ -441,6 +441,24 @@ func TestUnansweredEscalationCarriesOn(t *testing.T) {
 	}
 }
 
+// A question the caller left unanswered is the caller's own, so the card never lists it as
+// something the business said.
+func TestOutcomeCardSeparatesUnansweredQuestions(t *testing.T) {
+	e := newEnv(t)
+	e.s.postOutcomeCard(context.Background(), &Session{HouseholdID: "hh", ContactName: "Quick Auto Body",
+		OutcomeJSON: `{"goal_achieved": false, "summary": "They need photos first.", "facts": [` +
+			`"email photos to photos@quickautobody.example", "` + unansweredFact + `Should I send the photos?"]}`}, false)
+	c := e.notify.titled("⚠️ Call finished: Quick Auto Body")
+	if len(c) != 1 {
+		t.Fatalf("cards: %v", e.notify.all())
+	}
+	if !strings.Contains(c[0].Body, "What the business said:\n- email photos to photos@quickautobody.example\n\n") ||
+		strings.Contains(c[0].Body, unansweredFact) ||
+		!strings.Contains(c[0].Body, "Jarvis asked you, but got no answer in time:\n- Should I send the photos?") {
+		t.Fatalf("body: %q", c[0].Body)
+	}
+}
+
 // The far end says its last line and hangs up before the VAD's hangover: that line is still a
 // turn, so it reaches the transcript and the outcome.
 func TestLastWordsBeforeHangupCount(t *testing.T) {

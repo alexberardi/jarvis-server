@@ -76,10 +76,15 @@ func (s *Service) postOutcomeCard(ctx context.Context, sess *Session, corrective
 	if summary == "" {
 		summary = "The call ended."
 	}
-	factLines := renderFacts(outcome["facts"])
+	facts, unanswered := splitUnanswered(outcome["facts"])
+	factLines := renderFacts(facts)
 	factsBlock := ""
 	if factLines != "" {
 		factsBlock = "\n\nWhat the business said:\n" + factLines
+	}
+	unansweredBlock := ""
+	if len(unanswered) > 0 {
+		unansweredBlock = "\n\nJarvis asked you, but got no answer in time:\n- " + strings.Join(unanswered, "\n- ")
 	}
 	icon := "⚠️"
 	switch {
@@ -109,9 +114,31 @@ func (s *Service) postOutcomeCard(ctx context.Context, sess *Session, corrective
 		Summary: cardSummary,
 		Body: summary + factsBlock + "\n\n" +
 			"_Summary generated from the call transcript; statements above " +
-			"are the business's, not Jarvis's._",
+			"are the business's, not Jarvis's._" + unansweredBlock,
 		Metadata: meta,
 	})
+}
+
+// unansweredFact prefixes the fact the call loop records for a question the caller didn't answer.
+const unansweredFact = "escalation unanswered: "
+
+// splitUnanswered takes the caller's unanswered questions out of a facts list: they are
+// Jarvis's questions, not something the business said.
+func splitUnanswered(v any) (any, []string) {
+	list, ok := v.([]any)
+	if !ok {
+		return v, nil
+	}
+	var rest []any
+	var asked []string
+	for _, x := range list {
+		if s, ok := x.(string); ok && strings.HasPrefix(s, unansweredFact) {
+			asked = append(asked, strings.TrimPrefix(s, unansweredFact))
+			continue
+		}
+		rest = append(rest, x)
+	}
+	return rest, asked
 }
 
 func renderFacts(v any) string {
