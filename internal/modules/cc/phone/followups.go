@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -309,19 +310,29 @@ func groundedTimes(lines []string, now time.Time) []time.Time {
 	var out []time.Time
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	for _, l := range lines {
-		// spokenClock as the live call judges offers: "one o'clock", "quarter past two".
-		pp, ok := timewindow.ParseProposed(spokenClock(timewindow.ResolveRelativeDays(l, now)))
-		if !ok {
-			continue
-		}
-		ahead := (pp.Day - mondayIndex(now) + 7) % 7
-		day := today.AddDate(0, 0, ahead)
-		for _, m := range pp.Minutes {
-			out = append(out, day.Add(time.Duration(m)*time.Minute))
+		// One sentence at a time: "booked this Friday … call back Monday after 9 AM" pairs the
+		// 9 AM with Monday, never Friday (ParseProposed takes a line's first weekday).
+		for _, sentence := range sentenceSplitRE.Split(meridiemDotsRE.ReplaceAllString(l, "${1}m"), -1) {
+			// spokenClock as the live call judges offers: "one o'clock", "quarter past two".
+			pp, ok := timewindow.ParseProposed(spokenClock(timewindow.ResolveRelativeDays(sentence, now)))
+			if !ok {
+				continue
+			}
+			ahead := (pp.Day - mondayIndex(now) + 7) % 7
+			day := today.AddDate(0, 0, ahead)
+			for _, m := range pp.Minutes {
+				out = append(out, day.Add(time.Duration(m)*time.Minute))
+			}
 		}
 	}
 	return out
 }
+
+var (
+	// meridiemDotsRE: "1:30 p.m." → "1:30 pm", so its dots don't end a sentence.
+	meridiemDotsRE  = regexp.MustCompile(`(?i)\b([ap])\.m\.?`)
+	sentenceSplitRE = regexp.MustCompile(`[.!?;]+(?:\s+|$)`)
+)
 
 func mondayIndex(t time.Time) int { return (int(t.Weekday()) + 6) % 7 }
 

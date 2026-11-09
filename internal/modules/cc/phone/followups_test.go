@@ -232,3 +232,24 @@ func TestFollowUpsIdempotencyKeyIsTheServers(t *testing.T) {
 		t.Fatal("the prompt offers the idempotency param to the model")
 	}
 }
+
+// A line naming two days grounds each time with its own day: the real call that showed it said
+// "fully booked this Friday … call back Monday after 9 AM", and Monday 9 AM was dropped.
+func TestFollowUpsGroundEachSentenceOnItsOwn(t *testing.T) {
+	lines := []string{
+		"I'm sorry, but we are fully booked this Friday. The manager keeps the waitlist, so you should call back Monday after 9 AM and ask for Gina. Goodbye.",
+		"Okay, Wednesday at 1:30 p.m. works. See you then.",
+	}
+	for _, at := range []string{"2026-11-09T09:00:00-05:00", "2026-11-11T13:30:00-05:00"} {
+		got := checkFollowUps([]followUpPick{pick(1, map[string]any{"text": "x", "at": at})},
+			[]FollowUpCandidate{reminderCand()}, lines, fuNow, nil, "s1")
+		if len(got) != 1 {
+			t.Errorf("%s not grounded", at)
+		}
+	}
+	// Friday 9 AM was never said: the 9 AM belongs to Monday.
+	if got := checkFollowUps([]followUpPick{pick(1, map[string]any{"text": "x", "at": "2026-11-13T09:00:00-05:00"})},
+		[]FollowUpCandidate{reminderCand()}, lines, fuNow, nil, "s1"); len(got) != 0 {
+		t.Error("Friday 9 AM grounded from Monday's sentence")
+	}
+}
