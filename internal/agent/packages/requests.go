@@ -19,7 +19,7 @@ const (
 	TopicInstall   = "package-install"
 	TopicUninstall = "package-uninstall"
 	TopicRevert    = "package-revert"
-	// TopicTestInstall is a Forge test install (cc testinstall.go); the Pi profile answers it.
+	// TopicTestInstall is a Forge test install (cc testinstall.go); Pi and desktop nodes answer it.
 	TopicTestInstall = "test-install"
 )
 
