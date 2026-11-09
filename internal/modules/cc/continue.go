@@ -238,6 +238,7 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 	}
 	defer conv.mu.Unlock()
 	stashReferenced(conv, results)
+	m.recordTestRuns(ctx, conv, results)
 	m.notePendingConfirm(conv, results)
 	m.noteConfirmGate(conv, results)
 	results = m.prepareToolImages(ctx, results)
@@ -327,6 +328,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 		return nil // nothing to stream: the blocking continue ends the turn silently
 	}
 	stashReferenced(conv, results)
+	m.recordTestRuns(ctx, conv, results)
 	m.notePendingConfirm(conv, results)
 	m.noteConfirmGate(conv, results)
 	results = m.prepareToolImages(ctx, results)

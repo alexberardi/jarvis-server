@@ -62,6 +62,7 @@ func (m *Module) registerTestInstall(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/{request_id}/verify", m.node(m.handleVerifyTestInstall))
 	mux.HandleFunc("POST "+base+"/{request_id}/results", m.node(m.handleTestInstallResults))
 	mux.HandleFunc("GET "+base+"/{request_id}", m.handlePollTestInstall)
+	mux.HandleFunc("POST "+base+"/{request_id}/feedback", m.handleTestInstallFeedback)
 }
 
 // --- store ---
@@ -321,7 +322,17 @@ func (m *Module) handlePollTestInstall(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// TestInstallPollResponse: every key present; details only when completed.
+	out := tiPoll(t)
+	// runs: the draft's commands' runs so far, shown before Send to Forge (jarvisd-only).
+	if out["runs"], err = m.testRuns(ctx, t.id); err != nil {
+		m.internalError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// tiPoll is TestInstallPollResponse: every key present; details only when completed.
+func tiPoll(t *tiRequest) map[string]any {
 	out := map[string]any{"status": t.status, "request_id": t.id, "package_name": t.packageName,
 		"error_message": nil, "details": nil}
 	switch t.status {
@@ -337,7 +348,7 @@ func (m *Module) handlePollTestInstall(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	return out
 }
 
 // cleanupTestInstalls sweeps request rows after 30 days, as for package requests (D40 12.Q7).

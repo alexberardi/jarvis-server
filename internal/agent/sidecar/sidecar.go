@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -241,6 +242,18 @@ func (s *Sidecar) Failed() map[string]string { return s.failed }
 
 // Package is the installed package a command came from ("" for none).
 func (s *Sidecar) Package(command string) string { return s.pkgOf[command] }
+
+// PackageCommands are the names of the commands that came from package pkg, sorted.
+func (s *Sidecar) PackageCommands(pkg string) []string {
+	out := []string{}
+	for c, p := range s.pkgOf {
+		if p == pkg {
+			out = append(out, c)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
 
 // Commands are the sidecar's commands with their declared secrets, for the settings snapshot.
 func (s *Sidecar) Commands() []nodesettings.Command {

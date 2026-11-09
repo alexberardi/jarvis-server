@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -23,14 +24,28 @@ type fakePantry struct {
 	drafts   map[string]string // code -> raw JSON body
 	commands map[string]string // command name -> raw JSON body
 	status   int               // when non-zero, every request answers this
+	feedback map[string]string // code -> the last Send to Forge body POSTed for it
 }
 
 func newFakePantry(t *testing.T) *fakePantry {
 	t.Helper()
 	p := &fakePantry{drafts: map[string]string{
 		"ABC123": `{"package_name":"weather_test","files":[{"filename":"command.py","content":"x","language":"python"}]}`,
-	}, commands: map[string]string{}}
+	}, commands: map[string]string{}, feedback: map[string]string{}}
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if code, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/v1/forge/drafts/"), "/feedback"); ok && r.Method == http.MethodPost {
+			raw, _ := io.ReadAll(r.Body)
+			p.mu.Lock()
+			_, found := p.drafts[code]
+			p.feedback[code] = string(raw)
+			p.mu.Unlock()
+			if !found {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
 		p.mu.Lock()
 		var key, body string
 		var found bool
@@ -141,7 +156,7 @@ func TestTestInstallFlow(t *testing.T) {
 
 	poll := e.do("GET", base+"/"+rid, nil, bearer(member)).want(200).json()
 	if poll["status"] != "pending" || poll["request_id"] != rid || poll["package_name"] != "weather_test" ||
-		poll["error_message"] != nil || poll["details"] != nil || len(poll) != 5 {
+		poll["error_message"] != nil || poll["details"] != nil || len(poll["runs"].([]any)) != 0 || len(poll) != 6 {
 		t.Fatal(poll)
 	}
 	// Legacy skipped the household check on the poll (§8); Go doesn't.
