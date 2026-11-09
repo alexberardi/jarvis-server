@@ -549,8 +549,27 @@ func safeCallback(ctx context.Context, h serverCallbackFunc, c callbackContext) 
 
 // --- the shared result recorder ---
 
+// failureInbox is a failed result's card: its own context_data.inbox when titled, else "Couldn't
+// finish that" with the error (or the result's message).
+func failureInbox(contextData map[string]any, errMsg string) map[string]any {
+	if inbox, _ := contextData["inbox"].(map[string]any); inbox != nil {
+		if title, _ := inbox["title"].(string); title != "" {
+			return contextData
+		}
+	}
+	summary := errMsg
+	if summary == "" {
+		summary, _ = contextData["message"].(string)
+	}
+	if summary == "" {
+		summary = "Something went wrong."
+	}
+	return map[string]any{"inbox": map[string]any{"title": "Couldn't finish that", "summary": summary}}
+}
+
 // recordCallbackResult is _record_callback_result, shared by both planes: mark the row, wake a
-// waiter, then (new_notification + success + context_data.inbox.title) fan out an inbox card.
+// waiter, then (new_notification + context_data) fan out an inbox card: on success its
+// context_data.inbox, on failure failureInbox.
 // errMsg "" stores NULL; nil contextData leaves the column as it was. sourceNode is the executing
 // node (stamped into the card's metadata) or "" for the server plane.
 func (m *Module) recordCallbackResult(ctx context.Context, job *callbackJob, success bool, errMsg string,
@@ -582,8 +601,14 @@ func (m *Module) recordCallbackResult(ctx context.Context, job *callbackJob, suc
 	m.cbWait.wake(job.id)
 	m.deps.Log.Info("cc: callback job result", "job", job.id, "status", status, "nav", job.nav, "error", errMsg)
 
-	if job.nav != "new_notification" || !success || contextData == nil {
+	if job.nav != "new_notification" || contextData == nil {
 		return
+	}
+	if !success {
+		// A failure is shown, not silent (2026-11-08; legacy fanned out successes only): its own
+		// card, else "Couldn't finish that" with the error. A failure without context_data
+		// (unreachable, swept) posts its own card or none, as before.
+		contextData = failureInbox(contextData, errMsg)
 	}
 	inbox, _ := contextData["inbox"].(map[string]any)
 	title, _ := inbox["title"].(string)
