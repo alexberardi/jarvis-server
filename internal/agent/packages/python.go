@@ -40,7 +40,7 @@ var uvReleaseBase = "https://github.com/astral-sh/uv/releases/download/"
 // SDKRequirement is the jarvis-command-sdk every venv gets, pinned to a commit (the SDK isn't
 // on PyPI; CI's sidecar test installs the same tree). JARVIS_AGENT_SDK overrides it, e.g. with
 // a local checkout's path. Move it forward when the sidecar script needs a newer SDK.
-const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/826e3154e7f34a5077ddf8b94e50f31b01c7f751.tar.gz"
+const SDKRequirement = "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/08bc3965fb0cb6c640c2046238a8c0990618938a.tar.gz"
 
 // NodeCommandsRequirement is the Pi's built-in commands: jarvis-node-setup pinned to a commit
 // (its pyproject packages commands*, core*, services*, …, and needs only the SDK >= 0.13.0).
