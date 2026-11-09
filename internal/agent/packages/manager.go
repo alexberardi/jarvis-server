@@ -86,7 +86,7 @@ type Manager struct {
 	mu     sync.Mutex
 	now    func() time.Time  // time.Now; tests move it
 	failed map[string]string // of the sidecar in service
-	served Sidecar            // the sidecar in service (nil: none)
+	served Sidecar           // the sidecar in service (nil: none)
 }
 
 // Builtins are a node's built-in commands: a pip requirement Boot installs into the venv (once
