@@ -13,9 +13,16 @@ pending migrations at `serve` start, so there is no separate migrate step.
 
 ## 1. Write the file
 
-`internal/modules/<module>/migrations/<NNNNN>_<what>.sql`. Pick a number above the module's
-highest. cc steps by tens (`00150_node_contacted.sql`, `00160_test_install.sql`,
-`00170_node_kind.sql`); the others count up by one (`auth/00002_display_name.sql`).
+`internal/modules/<module>/migrations/<YYYYMMDDHHMMSS>_<what>.sql`: the version is the UTC time
+you create the file (`date -u +%Y%m%d%H%M%S`), e.g. `20261110051500_device_notes.sql`. **Never the
+next counter.** Two branches that each took "the next number" both made cc's `00360`, and jarvisd
+wouldn't start until one was renumbered; a timestamp doesn't collide, and goose applies versions
+out of order, so each database runs whatever it hasn't seen. `TestMigrationVersions`
+(`internal/platform/db/naming_test.go`) fails on a new counter or a duplicate version. The
+existing counters (`00001`…, cc's `00010`…`00370` by tens) stay as they are.
+
+Because migrations from parallel branches can apply in either order, a migration must not depend
+on another branch's unmerged migration (a column it adds, a table it creates).
 
 ```sql
 -- Why this exists (plan item / decision / doc section). What NULL means for old rows.
@@ -53,7 +60,7 @@ ALTER TABLE cc_nodes DROP COLUMN node_kind;
   or a column with a legacy equivalent, needs the import updated and `import_test.go` with it.
 - **Recipes import** (`jarvisd import-recipes`, `cmd/jarvisd/import_recipes*.go`) for recipes tables.
 - **Docs:** describe the table or column in `docs/schema/<module>.md` and the subsystem doc
-  (`docs/cc/NN-*.md`), and name the migration number there (e.g. "cc migration 00160").
+  (`docs/cc/NN-*.md`), and name the migration there (e.g. "cc migration 20261110051500").
 - **Contract:** if the column surfaces in a response, use the `wire-change` skill.
 
 ## 4. Release note
