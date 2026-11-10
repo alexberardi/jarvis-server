@@ -1015,6 +1015,12 @@ four slices, 17b–17e, still to build).
 | The node's own music starts / stops | The HAT's mic PGA drops to 49% / goes back to what it was (a no-op on the installer's 49% baseline); at start, a PGA left at the music level is put back |
 | A music command's call with `action: "play"` | `sdkhost.Host.BeforeCall` stops every other player that has an uncorked stream: mpd by `stop`+`clear` on :6600, go-librespot by `POST :3678/player/pause`, the rest by SIGINT; the command's own player (`takes_over_playback_binary`, else N:'s legacy map) is left alone |
 
+Routine steps retain their successful commands' `on_response_complete` callbacks in step
+order. Voice routines run them after the spoken reply, follow-up and music restore, including
+when a trigger phrase runs the routine directly. Run-now and scheduled routines run them
+after posting their silent result. One callback failure is reported without preventing the
+remaining callbacks from running; the callbacks themselves never leave the node.
+
 The voice pipeline runs the duck and restore steps in order on one background queue
 (`voice/music.go`), so a restore never overtakes a slow duck and listening never waits for
 pactl; `Run` waits for the queue, so a stopping agent still restores the music. It runs on a Pi

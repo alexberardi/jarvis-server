@@ -61,10 +61,17 @@ func wireRoutineVerb(r *node.Runner, tools node.Toolset, log *slog.Logger) {
 			if !handled {
 				out = node.Fail("The routine command is turned off on this node")
 			}
-			node.TakeSignals(out)
+			sig := node.TakeSignals(out)
 			log.Info("routine", "routine", slug, "success", out["success"], "passed", out["passed"], "failed", out["failed"])
 			if err := cc.PostToolResult(ctx, rid, out); err != nil {
 				log.Warn("routine: result not posted", "request_id", rid, "err", err)
+			}
+			// Run-now and scheduled routines are silent, so media can start now, just as
+			// it does after an ordinary MQTT tool_call result is posted.
+			if sig.OnResponseComplete != nil {
+				if err := sig.OnResponseComplete(); err != nil {
+					log.Warn("routine: on_response_complete failed", "routine", slug, "err", err)
+				}
 			}
 		},
 	})
