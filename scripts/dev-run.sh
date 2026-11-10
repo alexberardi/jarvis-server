@@ -130,7 +130,7 @@ if [ "$WAS_ACTIVE" = 1 ]; then
 fi
 
 # Migrations the installed release doesn't have make the move one-way: ask first.
-PENDING=$(as "$BIN" migrate status --home "$HOMEDIR" 2>/dev/null | awk 'NR > 1 && $4 > 0 {printf "%s%s(+%s)", sep, $1, $4; sep=", "}')
+PENDING=$(as "$BIN" migrate status --home "$HOMEDIR" | awk 'NR > 1 && $4 > 0 {printf "%s%s(+%s)", sep, $1, $4; sep=", "}') || die "could not check database migrations; see the error above"
 if [ -n "$PENDING" ] && [ -z "$OWNHOME" ]; then
   say "this build adds database migrations: $PENDING"
   say "after it runs, the installed release won't start on $HOMEDIR until the next release (or serve --allow-downgrade)"

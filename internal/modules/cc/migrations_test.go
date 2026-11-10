@@ -3,9 +3,12 @@ package cc
 import (
 	"context"
 	"database/sql"
+	"io/fs"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 	"github.com/pressly/goose/v3"
@@ -256,6 +259,112 @@ func TestBaselineRerun(t *testing.T) {
 	}
 	if st.Current < 1 || st.Pending != 0 {
 		t.Fatalf("status %+v", st)
+	}
+}
+
+// Simple routines reached main with version 360 before the Forge events change.
+// Upgrading that database must keep its saved instructions and add the events table.
+func TestMigrationsAfterSimpleRoutines(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	before := fstest.MapFS{}
+	entries, err := fs.ReadDir(Migrations(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name > "00360_simple_routines.sql" || strings.HasSuffix(name, "_test_install_events.sql") {
+			continue
+		}
+		data, err := fs.ReadFile(Migrations(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[name] = &fstest.MapFile{Data: data}
+	}
+	if err := db.Migrate(ctx, d, "cc", before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`INSERT INTO cc_routines (id, household_id, slug, name, mode, utterance)
+		VALUES ('r', 'h', 'hello', 'Hello', 'simple', 'Say hello')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, d, "cc", Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	var mode, utterance string
+	if err := d.Read.QueryRow(`SELECT mode, utterance FROM cc_routines WHERE id = 'r'`).Scan(&mode, &utterance); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "simple" || utterance != "Say hello" {
+		t.Fatalf("routine changed during upgrade: mode=%q utterance=%q", mode, utterance)
+	}
+	if !slices.Contains(tables(t, d.Read), "cc_test_install_events") {
+		t.Fatal("upgrade did not add Forge test events")
+	}
+	st, err := db.Status(ctx, d, "cc", Migrations())
+	if err != nil || st.Pending != 0 {
+		t.Fatalf("migration status: %+v, %v", st, err)
+	}
+}
+
+// A pre-merge Forge dev build also called its migration 360. Its history must be
+// corrected to 370 before upgrading, without recreating or dropping the event data.
+func TestMigrationsAfterForgeVersionRepair(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "jarvis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	before := fstest.MapFS{}
+	entries, err := fs.ReadDir(Migrations(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name >= "00360" && name != "00370_test_install_events.sql" {
+			continue
+		}
+		data, err := fs.ReadFile(Migrations(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[strings.Replace(name, "00370_", "00360_", 1)] = &fstest.MapFile{Data: data}
+	}
+	if err := db.Migrate(ctx, d, "cc", before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`
+		INSERT INTO cc_routines (id, household_id, slug, name) VALUES ('r', 'h', 'hello', 'Hello');
+		INSERT INTO cc_nodes (node_id, room) VALUES ('n', 'room');
+		INSERT INTO cc_test_install_requests (id, node_id, household_id, share_code, package_name, created_at, expires_at)
+		VALUES ('t', 'n', 'h', 'share', 'package', 'now', 'later');
+		INSERT INTO cc_test_install_events (request_id, kind, event, created_at) VALUES ('t', 'log', 'keep me', 'now');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`UPDATE goose_cc SET version_id = 370 WHERE version_id = 360 AND is_applied = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, d, "cc", Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	var mode, utterance, event string
+	if err := d.Read.QueryRow(`SELECT mode, utterance FROM cc_routines WHERE id = 'r'`).Scan(&mode, &utterance); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "advanced" || utterance != "" {
+		t.Fatalf("old routine changed: mode=%q utterance=%q", mode, utterance)
+	}
+	if err := d.Read.QueryRow(`SELECT event FROM cc_test_install_events WHERE request_id = 't'`).Scan(&event); err != nil || event != "keep me" {
+		t.Fatalf("event lost: %q, %v", event, err)
 	}
 }
 
