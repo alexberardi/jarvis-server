@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 )
@@ -106,6 +107,41 @@ func TestSidecarSignalsAndDeferredStep(t *testing.T) {
 	// One run per call.
 	if err := sig.OnResponseComplete(); err == nil {
 		t.Fatal("a deferred step ran twice")
+	}
+}
+
+// Music packages report success after resolving a track and start playback only when the
+// host completes their response. A routine must preserve that round trip to Python.
+func TestRoutineRunsDeferredPythonCommand(t *testing.T) {
+	ctx := context.Background()
+	sc, err := Start(ctx, python(t), "testdata/commands", slog.New(slog.DiscardHandler), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	marker := filepath.Join(t.TempDir(), "played")
+	routine := &builtins.Routine{Tools: sc, CC: func() *node.CC { return nil }}
+	out, _ := routine.Call(ctx, "routine", map[string]any{
+		"routine_name": "radio_time",
+		"routine_definition": map[string]any{"steps": []any{
+			map[string]any{"command": "deferred", "args": map[string]any{"marker": marker}},
+		}},
+	}, node.Request{})
+	if out["success"] != true || out["passed"] != 1 {
+		t.Fatalf("routine = %v", out)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("playback wasn't deferred: %v", err)
+	}
+	sig := node.TakeSignals(out)
+	if sig.OnResponseComplete == nil {
+		t.Fatal("routine discarded the Python playback callback")
+	}
+	if err := sig.OnResponseComplete(); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(marker); err != nil || string(b) != "played" {
+		t.Fatalf("deferred Python playback: %q, %v", b, err)
 	}
 }
 

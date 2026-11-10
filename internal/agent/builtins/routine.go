@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"regexp"
@@ -112,6 +114,7 @@ func (t *Routine) Call(ctx context.Context, name string, args map[string]any, re
 		return node.Fail("Routine '%s' has no steps configured.", slug), true
 	}
 	results, errs := map[string]any{}, map[string]string{}
+	var deferred []func() error
 	for _, raw := range steps {
 		step, _ := raw.(map[string]any)
 		cmd, _ := step["command"].(string)
@@ -137,12 +140,20 @@ func (t *Routine) Call(ctx context.Context, name string, args map[string]any, re
 			errs[label] = "Command '" + cmd + "' not available"
 			continue
 		}
-		node.TakeSignals(out)
+		sig := node.TakeSignals(out)
 		if ok, _ := out["success"].(bool); !ok {
 			msg, _ := out["error"].(string)
 			errs[label] = cmp.Or(msg, "Unknown error")
 			t.log().Warn("routine: step failed", "label", label, "error", msg)
 			continue
+		}
+		if f := sig.OnResponseComplete; f != nil {
+			deferred = append(deferred, func() error {
+				if err := f(); err != nil {
+					return fmt.Errorf("routine step %q: %w", label, err)
+				}
+				return nil
+			})
 		}
 		data := maps.Clone(out)
 		delete(data, "success")
@@ -157,8 +168,32 @@ func (t *Routine) Call(ctx context.Context, name string, args map[string]any, re
 		typ, _ := def["type"].(string)
 		length = cmp.Or(typeLengths[typ], "short")
 	}
-	return map[string]any{"success": true, "message": t.compose(ctx, results, errs, cmp.Or(instruction, "Summarize the results conversationally."), length),
-		"passed": len(results), "failed": len(errs)}, true
+	out := map[string]any{"success": true, "message": t.compose(ctx, results, errs, cmp.Or(instruction, "Summarize the results conversationally."), length),
+		"passed": len(results), "failed": len(errs)}
+	if len(deferred) > 0 {
+		// Media steps start after the routine's reply, using the same completion boundary
+		// as an ordinary tool call. Keep every step, even if an earlier callback fails.
+		out[node.SignalsKey] = node.Signals{OnResponseComplete: func() error {
+			var err error
+			completed := false
+			for _, f := range deferred {
+				if e := f(); e != nil {
+					err = errors.Join(err, e)
+				} else {
+					completed = true
+				}
+			}
+			if completed {
+				// The voice loop must engage its music handling when any playback started.
+				if err != nil {
+					t.log().Warn("routine: some deferred steps failed", "routine", slug, "err", err)
+				}
+				return nil
+			}
+			return err
+		}}
+	}
+	return out, true
 }
 
 func (t *Routine) log() *slog.Logger {
@@ -232,7 +267,9 @@ func (t *Routine) Direct(ctx context.Context, said string) (map[string]any, bool
 		t.log().Info("routine: run by its trigger phrase", "routine", slug, "said", said)
 		out, _ := t.Call(ctx, routineSpec.Name, map[string]any{"routine_name": slug},
 			node.Request{UserID: node.Speaker(ctx), VoiceCommand: said})
-		out[node.SignalsKey] = node.Signals{Speak: true}
+		sig := node.TakeSignals(out)
+		sig.Speak = true
+		out[node.SignalsKey] = sig
 		return out, true
 	}
 	return nil, false

@@ -692,6 +692,9 @@ func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text st
 		return "", false
 	}
 	sig := node.TakeSignals(out)
+	if sig.OnResponseComplete != nil {
+		s.onComplete = append(s.onComplete, sig.OnResponseComplete)
+	}
 	success, _ := out["success"].(bool)
 	choice, _ := out[node.ChoiceKey].(bool)
 	ex.Outcome = OutcomeSilent
