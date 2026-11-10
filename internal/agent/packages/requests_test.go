@@ -37,7 +37,7 @@ func (f *fakeAPI) Do(_ context.Context, method, path string, body, out any) erro
 		}
 		b, _ := json.Marshal(v)
 		return json.Unmarshal(b, out)
-	case method == "POST" && strings.HasSuffix(path, "/results"):
+	case method == "POST" && (strings.HasSuffix(path, "/results") || strings.HasSuffix(path, "/events")):
 		b, _ := json.Marshal(body)
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)

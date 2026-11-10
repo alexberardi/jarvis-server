@@ -163,6 +163,7 @@ one auth rate limit.
 | `admin/logs.spec.ts` | lines sent through jarvis-logs' ingest found with the module, text and level filters; context opens; no match says so |
 | `admin/traces.spec.ts` | a chat turn becomes a trace: on the dashboard's recent requests, in the list, and its detail is that turn |
 | `admin/nodes.spec.ts` | a pairing computer approved into a household (it then registers and is listed), another denied (told so, gone); a signed-out node behind Show signed-out nodes. Skipped: rename/remove (not in the web admin) |
+| `admin/node-test.spec.ts` | a simulated computer comes online; its card's Test a Forge command link opens `/admin/nodes/:id/test`; the share code is cleaned up and sent; cc refuses because the sandbox household's Pantry is off, and the page says so. The install, chat and Send to Forge against a real Pantry are checked by hand |
 | `admin/users.spec.ts` | every account with households, roles and badges; a generated and a chosen temporary password both sign the user in to the forced change; a deactivated account (seeded) marked and not resettable. Skipped: invite, role change, disable (mobile only in v1) |
 | `admin/update.spec.ts` | checks off: says so, the running version, no update offered; the switch saved on the server both ways; apply is blocked throughout. Skipped: an available update and applying it |
 

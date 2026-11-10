@@ -102,3 +102,52 @@ func TestTestRunsWindowAndCap(t *testing.T) {
 		t.Fatal(len(runs), runs)
 	}
 }
+
+// What a test install did on the node besides chat tool calls (log lines, scans, device
+// controls): only its node sends them, only during the test window; the poll shows them and
+// Send to Forge sends the newest ones.
+func TestTestInstallEvents(t *testing.T) {
+	e := newEnv(t)
+	pantry := newFakePantry(t)
+	pantry.set(func() { pantry.drafts["ABC123"] = `{"package_name":"countdown"}` })
+	setPantry(t, e, "hh1", pantry.URL)
+	member := e.auth.addUser(1, "hh1", authn.RoleMember)
+	n := e.createNode("n1", "hh1")
+	other := e.createNode("n2", "hh1")
+	completedTI(t, e, "ti1", e.clock())
+	const base = "/api/v0/nodes/n1/test-install/ti1"
+
+	events := []any{
+		map[string]any{"seq": 1, "kind": "log", "level": "WARNING", "message": "Zigbee2MQTT broker host is not configured"},
+		map[string]any{"seq": 2, "kind": "scan", "protocol": "zigbee", "count": 0},
+	}
+	e.do("POST", base+"/events", map[string]any{"events": events}, other.h()).detail(403, "Node mismatch")
+	e.do("POST", base+"/events", map[string]any{}, n.h()).want(400)
+	if r := e.do("POST", base+"/events", map[string]any{"events": events}, n.h()).want(200).json(); r["kept"] != float64(2) {
+		t.Fatal(r)
+	}
+	poll := e.do("GET", base, nil, bearer(member)).want(200).json()
+	got, _ := poll["events"].([]any)
+	if len(got) != 2 || got[0].(map[string]any)["message"] != "Zigbee2MQTT broker host is not configured" {
+		t.Fatal(poll["events"])
+	}
+
+	// An oversized event is kept without its text.
+	big := map[string]any{"seq": 3, "kind": "log", "message": string(make([]byte, maxTestEvent+1))}
+	e.do("POST", base+"/events", map[string]any{"events": []any{big}}, n.h()).want(200)
+	got, _ = e.do("GET", base, nil, bearer(member)).want(200).json()["events"].([]any)
+	if got[2].(map[string]any)["message"] != "[too long: cut]" {
+		t.Fatal(got[2])
+	}
+
+	e.do("POST", base+"/feedback", map[string]any{}, bearer(member)).want(200)
+	var sent map[string]any
+	pantry.set(func() { _ = json.Unmarshal([]byte(pantry.feedback["ABC123"]), &sent) })
+	if ev, _ := sent["events"].([]any); len(ev) != 3 {
+		t.Fatal(sent["events"])
+	}
+
+	// After the window, nothing more.
+	e.advance(testRunWindow + 2*time.Minute)
+	e.do("POST", base+"/events", map[string]any{"events": events}, n.h()).detail(409, "The test window is over")
+}

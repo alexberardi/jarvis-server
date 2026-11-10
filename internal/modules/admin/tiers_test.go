@@ -91,6 +91,9 @@ var wantTiers = map[string]tier{
 	"GET /api/cc/api/v0/households/{household_id}/pantry/commands/{command_name}": tierSuperuser,
 	"POST /api/cc/api/v0/nodes/{node_id}/package-install":                         tierSuperuser,
 	"GET /api/cc/api/v0/nodes/{node_id}/package-install/{request_id}":             tierSuperuser,
+	"POST /api/cc/api/v0/nodes/{node_id}/test-install":                            tierSuperuser,
+	"GET /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}":                tierSuperuser,
+	"POST /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}/feedback":      tierSuperuser,
 	// The desktop agent download (install plan 3.1): a public release asset, verified here.
 	"GET /api/addons/agent/{os}/{arch}": tierUser,
 

@@ -21,9 +21,15 @@ import (
 const (
 	// testRunWindow is how long a node serves a test install (agent packages testTTL).
 	testRunWindow = 20 * time.Minute
-	// maxTestRuns and maxTestRunOutput keep a report inside Pantry's 256 KB limit.
+	// maxTestRuns and maxTestRunOutput keep a report inside Pantry's 256 KB limit, with room
+	// for the events sent in it (maxReportEvents, each up to maxTestEvent).
 	maxTestRuns      = 20
 	maxTestRunOutput = 8 << 10
+	// maxTestEvents is how many events a test install keeps; the report sends the newest
+	// maxReportEvents of them.
+	maxTestEvents   = 500
+	maxReportEvents = 80
+	maxTestEvent    = 2 << 10
 )
 
 // recordTestRuns keeps the results of the node's test-installed commands. conv.mu is held.
@@ -102,6 +108,88 @@ func (m *Module) testRuns(ctx context.Context, rid string) ([]any, error) {
 	return out, rows.Err()
 }
 
+// handleTestInstallEvents keeps what a test install did on the node (its sidecar's log lines,
+// scans and device controls, secrets already masked there), for the poll and Send to Forge. Only
+// the node that runs it, only while the test window lasts, at most maxTestEvents.
+func (m *Module) handleTestInstallEvents(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
+	nodeID := r.PathValue("node_id")
+	if n.ID != nodeID {
+		detail(w, http.StatusForbidden, "Node mismatch")
+		return
+	}
+	b, _, ok := readBody(w, r, false)
+	if !ok {
+		return
+	}
+	list, _ := b.m["events"].([]any)
+	if !b.has("events") {
+		b.fail("events", "Field required")
+	}
+	if !b.done(w) {
+		return
+	}
+	ctx := r.Context()
+	t, err := loadTI(ctx, m.deps.DB.Read, r.PathValue("request_id"), nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		detail(w, http.StatusNotFound, "Test install request not found")
+		return
+	}
+	if err != nil {
+		m.internalError(w, err)
+		return
+	}
+	if t.status != pkgCompleted || !t.completedAt.Valid || parseTS(t.completedAt.String).Before(m.now().Add(-testRunWindow-time.Minute)) {
+		detail(w, http.StatusConflict, "The test window is over")
+		return
+	}
+	now := dbTime(m.now())
+	kept := 0
+	for _, e := range list {
+		ev, isObj := e.(map[string]any)
+		if !isObj {
+			continue
+		}
+		kind, _ := ev["kind"].(string)
+		raw, _ := json.Marshal(ev)
+		if len(raw) > maxTestEvent {
+			ev["message"], ev["data"], ev["error"] = "[too long: cut]", nil, nil
+			raw, _ = json.Marshal(ev)
+		}
+		res, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_test_install_events (request_id, kind, event, created_at)
+			SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM cc_test_install_events WHERE request_id = ?) < ?`,
+			t.id, kind, string(raw), now, t.id, maxTestEvents)
+		if err != nil {
+			m.internalError(w, err)
+			return
+		}
+		if c, _ := res.RowsAffected(); c > 0 {
+			kept++
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"kept": kept})
+}
+
+// testEvents are a request's events, oldest first, as the node sent them.
+func (m *Module) testEvents(ctx context.Context, rid string) ([]any, error) {
+	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT event FROM cc_test_install_events WHERE request_id = ? ORDER BY id`, rid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []any{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var v any
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			out = append(out, v)
+		}
+	}
+	return out, rows.Err()
+}
+
 func jsonOrText(s sql.NullString) any {
 	if !s.Valid {
 		return nil
@@ -154,9 +242,17 @@ func (m *Module) handleTestInstallFeedback(w http.ResponseWriter, r *http.Reques
 		m.internalError(w, err)
 		return
 	}
+	events, err := m.testEvents(ctx, t.id)
+	if err != nil {
+		m.internalError(w, err)
+		return
+	}
+	if len(events) > maxReportEvents { // the newest: what happened last is what needs fixing
+		events = events[len(events)-maxReportEvents:]
+	}
 	poll := tiPoll(t)
 	report := map[string]any{"install": map[string]any{"package_name": t.packageName, "status": t.status,
-		"error": poll["error_message"], "details": poll["details"]}, "runs": runs}
+		"error": poll["error_message"], "details": poll["details"]}, "runs": runs, "events": events}
 	if note != nil && *note != "" {
 		report["note"] = *note
 	}

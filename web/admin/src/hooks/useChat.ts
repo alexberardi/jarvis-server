@@ -91,9 +91,14 @@ export function useChatNodes(householdId: string) {
   })
 }
 
-export function useChat(userId: number | string, householdId: string): UseChat {
+/**
+ * With fixedNode the chat is pinned to that node and kept only while the page is open (the Forge
+ * test page): no default chain, nothing read from or written to the chat page's saved conversation.
+ * Its tools are fetched fresh on mount, so mount it after an install to see the new commands.
+ */
+export function useChat(userId: number | string, householdId: string, fixedNode?: string): UseChat {
   const key = chatKey(userId, householdId)
-  const [chat, setChat] = useState<ChatState>(() => loadChat(key) ?? emptyChat())
+  const [chat, setChat] = useState<ChatState>(() => (fixedNode ? emptyChat(fixedNode) : (loadChat(key) ?? emptyChat())))
   const [loadedKey, setLoadedKey] = useState(key)
   const [busy, setBusy] = useState(false)
   // The node+conversation a warmup last settled for; warming is "not yet for this one".
@@ -102,14 +107,14 @@ export function useChat(userId: number | string, householdId: string): UseChat {
   const toolsRef = useRef<NodeTools | null>(null)
 
   // Another household (or user) is another conversation: swap it in while rendering.
-  if (loadedKey !== key) {
+  if (loadedKey !== key && !fixedNode) {
     setLoadedKey(key)
     setChat(loadChat(key) ?? emptyChat())
   }
 
   useEffect(() => {
-    if (loadedKey === key) saveChat(key, chat)
-  }, [key, loadedKey, chat])
+    if (loadedKey === key && !fixedNode) saveChat(key, chat)
+  }, [key, loadedKey, chat, fixedNode])
 
   // Stop a running turn when the page goes away.
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -139,7 +144,7 @@ export function useChat(userId: number | string, householdId: string): UseChat {
 
   // The default chain, when the conversation has no node, or its node left the household.
   // Adjusted while rendering (not in an effect), like the household swap above.
-  if (chainReady && loadedKey === key && !(chat.nodeId && nodes.some((n) => n.node_id === chat.nodeId))) {
+  if (!fixedNode && chainReady && loadedKey === key && !(chat.nodeId && nodes.some((n) => n.node_id === chat.nodeId))) {
     const { node: pick } = pickDefaultNode({
       nodes,
       primaryId: primaryQ.data ?? '',

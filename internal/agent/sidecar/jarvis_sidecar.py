@@ -167,7 +167,7 @@ def _log_client_shim():
         def _emit(self, level, msg, fields):
             if fields:
                 msg = f"{msg} " + " ".join(f"{k}={v}" for k, v in fields.items())
-            self._log.log(level, msg)
+            self._log.log(level, msg, stacklevel=3)  # the caller's file, not this shim's
 
         def debug(self, msg, **fields):
             self._emit(logging.DEBUG, msg, fields)
@@ -369,6 +369,129 @@ PACKAGE_OF: dict = {}
 # The installed packages' device families by protocol_name, and device managers by name.
 FAMILIES: dict = {}
 MANAGERS: dict = {}
+# The package each device family and manager came from.
+FAMILY_PACKAGE: dict = {}
+MANAGER_PACKAGE: dict = {}
+
+# Forge test installs ("test:<name>" packages): what they did during the test window (their log
+# lines, scans and device controls), read by the agent through test_events for Send to Forge.
+TEST_ROOTS: dict = {}  # package root (resolved) -> package name
+TEST_EVENTS: dict = {}  # package name -> its newest events
+_TEST_LOCK = threading.Lock()
+_TEST_SEQ = 0
+_MAX_TEST_EVENTS = 300
+_MAX_EVENT_CHARS = 4000
+
+
+def _test_event(package, kind: str, **fields) -> None:
+    """Keep one event of a test package (other packages are not recorded)."""
+    global _TEST_SEQ
+    if not package or not package.startswith("test:"):
+        return
+    import collections
+    from datetime import datetime, timezone
+
+    with _TEST_LOCK:
+        _TEST_SEQ += 1
+        ev = {"seq": _TEST_SEQ, "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"), "kind": kind, **fields}
+        TEST_EVENTS.setdefault(package, collections.deque(maxlen=_MAX_TEST_EVENTS)).append(ev)
+
+
+def _test_package_of(path: str):
+    """The test package a source file belongs to, or None."""
+    import os
+
+    real = os.path.realpath(path or "")
+    for root, package in TEST_ROOTS.items():
+        if real.startswith(root + os.sep):
+            return package
+    return None
+
+
+class _TestLogHandler(__import__("logging").Handler):
+    """A test package's log records (by the file that logged them) as its events."""
+
+    def emit(self, record):
+        package = _test_package_of(record.pathname)
+        if package is None:
+            return
+        try:
+            msg = record.getMessage()
+            if record.exc_info:
+                msg += "\n" + "".join(traceback.format_exception(*record.exc_info))
+        except Exception as exc:  # a bad format string must not break the package's call
+            msg = f"{record.msg!r} (unformattable: {exc})"
+        _test_event(package, "log", level=record.levelname, logger=record.name, message=msg[:_MAX_EVENT_CHARS])
+
+
+def _install_test_log_handler() -> None:
+    """Catch test packages' records down to INFO. A desktop node has no logging set up (records
+    reached stderr only at WARNING, through logging's last resort): keep that, alongside."""
+    import logging
+
+    root = logging.getLogger()
+    if not root.handlers:
+        stderr = logging.StreamHandler(sys.stderr)
+        stderr.setLevel(logging.WARNING)
+        stderr.setFormatter(logging.Formatter("%(name)s %(levelname)s: %(message)s"))
+        root.addHandler(stderr)
+    handler = _TestLogHandler()
+    handler.setLevel(logging.INFO)
+    root.addHandler(handler)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+
+
+def _sensitive_values(package: str) -> list:
+    """The values of the sensitive secrets a package declares (its families', managers' and
+    commands'), longest first, to mask in what leaves the node. User-scoped ones are left out:
+    there is no user to read them as."""
+    from jarvis_command_sdk.storage import get_backend
+
+    owners = [o for n, o in FAMILIES.items() if FAMILY_PACKAGE.get(n) == package]
+    owners += [o for n, o in MANAGERS.items() if MANAGER_PACKAGE.get(n) == package]
+    owners += [o for n, o in COMMANDS.items() if PACKAGE_OF.get(n) == package]
+    backend, values = get_backend(), set()
+    for owner in owners:
+        try:
+            declared = owner.required_secrets or []
+        except Exception:
+            continue
+        for secret in declared:
+            scope = getattr(secret, "scope", "integration")
+            if not getattr(secret, "is_sensitive", True) or scope == "user" or backend is None:
+                continue
+            try:
+                value = backend.get_secret(secret.key, scope)
+            except Exception:
+                value = None
+            if value and len(str(value)) >= 4:
+                values.add(str(value))
+    return sorted(values, key=len, reverse=True)
+
+
+def _mask(value, secrets: list):
+    if isinstance(value, str):
+        for s in secrets:
+            value = value.replace(s, "[secret]")
+        return value
+    if isinstance(value, dict):
+        return {k: _mask(v, secrets) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask(v, secrets) for v in value]
+    return value
+
+
+def test_events(params: dict) -> dict:
+    """{"events": [...], "last": seq, "head": seq}: a test package's events after params["after"],
+    with its sensitive secrets masked (they leave the node with Send to Forge). head is the newest
+    event of any package: below "after", this sidecar is a new one and counts from 0 again."""
+    package, after = params.get("package") or "", int(params.get("after") or 0)
+    with _TEST_LOCK:
+        events = [dict(e) for e in TEST_EVENTS.get(package, ()) if e["seq"] > after]
+        head = _TEST_SEQ
+    secrets = _sensitive_values(package) if events else []
+    return {"events": [_mask(e, secrets) for e in events], "last": events[-1]["seq"] if events else after, "head": head}
 # The installed packages' background agents by name, and the package each came from.
 AGENTS: dict = {}
 AGENT_PACKAGE: dict = {}
@@ -393,6 +516,8 @@ def load_packages(listing: str) -> dict:
     _share_top_level([pkg["root"] for pkg in packages])
     for pkg in packages:
         name, root = pkg["name"], pkg["root"]
+        if name.startswith("test:"):
+            TEST_ROOTS[str(pathlib.Path(root).resolve())] = name
         top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
         spec = importlib.machinery.ModuleSpec(top, None, is_package=True)
         spec.submodule_search_locations = [root]
@@ -535,6 +660,7 @@ def _load_device_component(package: str, top: str, rel: str, key: str, into: dic
             FAILED[package] = f"{rel}: no {base.__name__} in it"
         for obj in found:
             into[getattr(obj, key)] = obj
+            (FAMILY_PACKAGE if into is FAMILIES else MANAGER_PACKAGE)[getattr(obj, key)] = package
     except BaseException as exc:
         print(f"sidecar: {package}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
         FAILED[package] = f"{rel}: {type(exc).__name__}: {exc}"
@@ -830,6 +956,10 @@ async def _discover_all() -> list:
     import asyncio
 
     families = _active_families()
+    for name in FAMILIES:
+        if name not in families:  # a test protocol left out of the scan says why
+            _test_event(FAMILY_PACKAGE.get(name), "scan", protocol=name,
+                        error="not scanned: the protocol says it isn't configured (validate_secrets)")
 
     async def one(fam):
         return await fam.discover(timeout=SCAN_TIMEOUT)
@@ -840,8 +970,13 @@ async def _discover_all() -> list:
     for name, result in zip(names, results):
         if isinstance(result, BaseException):
             print(f"sidecar: {name}: discover failed: {result}", file=sys.stderr)
+            _test_event(FAMILY_PACKAGE.get(name), "scan", protocol=name,
+                        error="".join(traceback.format_exception(result))[:_MAX_EVENT_CHARS])
             continue
         print(f"sidecar: {name}: discovered {len(result)} devices", file=sys.stderr)
+        _test_event(FAMILY_PACKAGE.get(name), "scan", protocol=name, count=len(result),
+                    devices=[{"name": getattr(d, "name", ""), "entity_id": getattr(d, "entity_id", ""),
+                              "domain": getattr(d, "domain", "")} for d in result[:20]])
         for dev in result:
             key = (dev.mac_address or "").lower() or dev.local_ip or dev.cloud_id or dev.entity_id
             by_key[key] = dev
@@ -1413,7 +1548,16 @@ async def _family_control(action_name: str, context: dict):
                            domain=context.get("domain") or "switch", manufacturer=protocol,
                            model=context.get("model") or "", protocol=protocol, cloud_id=context.get("cloud_id"),
                            local_ip=context.get("local_ip"), mac_address=context.get("mac_address"))
-    return await fam.control(dev, action_name, context)
+    package = FAMILY_PACKAGE.get(protocol)
+    try:
+        result = await fam.control(dev, action_name, context)
+    except Exception:
+        _test_event(package, "control", protocol=protocol, entity_id=entity_id, action=action_name,
+                    data=context, success=False, error=traceback.format_exc()[:_MAX_EVENT_CHARS])
+        raise
+    _test_event(package, "control", protocol=protocol, entity_id=entity_id, action=action_name, data=context,
+                success=bool(getattr(result, "success", False)), error=getattr(result, "error", None))
+    return result
 
 
 def action(commands: dict, params: dict) -> dict:
@@ -1488,7 +1632,8 @@ def callback(commands: dict, params: dict) -> dict:
 
 
 DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "device_state": device_state,
-                  "device_removed": device_removed, "device_families": lambda params: device_families()}
+                  "device_removed": device_removed, "device_families": lambda params: device_families(),
+                  "test_events": test_events}
 
 
 def main() -> None:
@@ -1496,6 +1641,7 @@ def main() -> None:
     register_playback_backend()
     if "--backends" in sys.argv[2:]:
         register_backends()
+    _install_test_log_handler()
     commands = None
     while True:
         line = sys.stdin.readline()  # not `for line in sys.stdin`: _ask reads replies from it too

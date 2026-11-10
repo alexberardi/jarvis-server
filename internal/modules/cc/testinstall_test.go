@@ -156,7 +156,8 @@ func TestTestInstallFlow(t *testing.T) {
 
 	poll := e.do("GET", base+"/"+rid, nil, bearer(member)).want(200).json()
 	if poll["status"] != "pending" || poll["request_id"] != rid || poll["package_name"] != "weather_test" ||
-		poll["error_message"] != nil || poll["details"] != nil || len(poll["runs"].([]any)) != 0 || len(poll) != 6 {
+		poll["error_message"] != nil || poll["details"] != nil || len(poll["runs"].([]any)) != 0 ||
+		len(poll["events"].([]any)) != 0 || len(poll) != 7 {
 		t.Fatal(poll)
 	}
 	// Legacy skipped the household check on the poll (§8); Go doesn't.
