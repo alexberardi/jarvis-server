@@ -19,6 +19,7 @@ Source: `jarvis-command-center` (about 62k LOC, `app/`).
 | 06 | [06-media-and-voice-identity.md](06-media-and-voice-identity.md) | TTS/Whisper media proxy, mobile audio, voice profiles (enroll/verify), speaker resolution and stickiness |
 | 07 | [07-smart-home.md](07-smart-home.md) | Rooms, devices, control/state, scans, config push, cameras/HLS, Bluetooth, provider OAuth, device tools |
 | 08 | [08-routines-and-schedules.md](08-routines-and-schedules.md) | Routines CRUD/run, routine scheduler, schedules, time windows, step value resolution |
+| — | [simple-routines.md](simple-routines.md) | Mobile Simple / Advanced editor and saved instructions interpreted at runtime |
 | 09 | [09-errands-and-workflows.md](09-errands-and-workflows.md) | Errand planner/executor/service, workflow engine, errand tools |
 | 10 | [10-signals-attention-proposals.md](10-signals-attention-proposals.md) | Signals ingest and reactions, signal automations, attention broker, proposals and suppressions, situation matcher, presence |
 | 11 | [11-phone.md](11-phone.md) | Phone calls, call context, number search, phone-gateway sessions, contacts, phone tool |

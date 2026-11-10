@@ -103,11 +103,14 @@ func (t *Routine) Call(ctx context.Context, name string, args map[string]any, re
 	}
 	slug, _ := args["routine_name"].(string)
 	def, _ := args["routine_definition"].(map[string]any) // the verb's; never the model's
-	if steps, _ := def["steps"].([]any); len(steps) == 0 {
+	if steps, _ := def["steps"].([]any); len(steps) == 0 && (def["mode"] == nil || def["mode"] == "advanced") {
 		def = t.definition(slug)
 	}
 	if def == nil {
 		return node.Fail("Unknown routine: %s", slug), true
+	}
+	if mode, _ := def["mode"].(string); mode != "" && mode != "advanced" {
+		return node.Fail("Run this Simple routine using its voice shortcut or the app."), true
 	}
 	steps, _ := def["steps"].([]any)
 	if len(steps) == 0 {
@@ -260,9 +263,18 @@ func (t *Routine) Direct(ctx context.Context, said string) (map[string]any, bool
 		if t.Store != nil && !t.Store.FastPathEnabled(routineSpec.Name, patternID(slug)) {
 			continue // the household turned this routine's phrases off
 		}
-		phrases, _ := t.definition(slug)["trigger_phrases"].([]any)
+		def := t.definition(slug)
+		phrases, _ := def["trigger_phrases"].([]any)
 		if !matchesTrigger(text, phrases) {
 			continue
+		}
+		if def["mode"] == "simple" {
+			utterance, _ := def["utterance"].(string)
+			if strings.TrimSpace(utterance) == "" {
+				return map[string]any{"success": false, "message": "This routine needs an instruction. Edit it in the app.",
+					node.SignalsKey: node.Signals{Speak: true}}, true
+			}
+			return map[string]any{"success": true, node.SignalsKey: node.Signals{RoutineName: slug, RoutineUtterance: utterance}}, true
 		}
 		t.log().Info("routine: run by its trigger phrase", "routine", slug, "said", said)
 		out, _ := t.Call(ctx, routineSpec.Name, map[string]any{"routine_name": slug},
@@ -293,7 +305,7 @@ func (t *Routine) FastPaths(command string) []nodesettings.FastPath {
 		}
 		first, _ := phrases[0].(string)
 		out = append(out, nodesettings.FastPath{ID: patternID(slug),
-			Description: "Run the '" + slug + "' routine without the LLM", Example: first})
+			Description: "Run the '" + slug + "' routine by voice", Example: first})
 	}
 	return out
 }

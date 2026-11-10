@@ -51,16 +51,17 @@ const wakeVerifyWait = 1200 * time.Millisecond
 // turnInput is VoiceCommandRequest (speaker_user_id is accepted and ignored, D2, unless
 // Module.DevSpeakerHints).
 type turnInput struct {
-	VoiceCommand      string
-	ConversationID    string
-	SpeakerHint       int64 // speaker_user_id
-	PreWakeSeconds    *float64
-	Affect            map[string]any
-	Source            string // turn_source ("" = not sent)
-	WakeConfidence    *float64
-	FollowUpIteration *int
-	SelfPlayback      *bool
-	SelfPlaybackKind  string
+	RoutineName, RoutineUtterance string
+	VoiceCommand                  string
+	ConversationID                string
+	SpeakerHint                   int64 // speaker_user_id
+	PreWakeSeconds                *float64
+	Affect                        map[string]any
+	Source                        string // turn_source ("" = not sent)
+	WakeConfidence                *float64
+	FollowUpIteration             *int
+	SelfPlayback                  *bool
+	SelfPlaybackKind              string
 	// LevelVsWake is the node's measure of a follow-up's speech level against the wake
 	// request's, in dB (level_vs_wake_db; the follow-up gate's level signal).
 	LevelVsWake *float64
@@ -180,7 +181,20 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		return turnOutcome{res: engineResult{Stop: stopNotForMe, StoodDown: true}, conv: conv}, nil
 	}
 
+	if in.Source != "follow_up" || in.RoutineUtterance != "" {
+		conv.simpleRoutine = in.RoutineUtterance != "" || simpleRun(ctx) != nil
+	}
+	if in.RoutineUtterance != "" {
+		// Gate the original speech first, then interpret the saved instruction just
+		// like user input. The request trace retains the original voice command.
+		end := tr.measure("routine_expansion", "cc", map[string]any{"routine": in.RoutineName, "mode": "simple"})
+		in.VoiceCommand = in.RoutineUtterance
+		end(nil)
+	}
 	msgs := stripTransient(cloneMsgs(conv.messages))
+	if conv.simpleRoutine {
+		msgs = append(msgs, transientSys("This turn executes a saved instruction. Complete all requested actions. If a required parameter is absent from the instruction and conversation (for example a timer duration), ask the user with request_validation before calling that tool. Do not invent a duration or other required value from a tool example."))
+	}
 	maxTurns := int(m.settings.Int(ctx, settingMaxTurns, settings.Scope{HouseholdID: conv.householdID}))
 	msgs = trimHistory(msgs, maxTurns)
 

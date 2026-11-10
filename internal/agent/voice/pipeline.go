@@ -95,14 +95,15 @@ const (
 // Exchange is one utterance and what came of it: the command after the wake word, or one
 // answer in the follow-up window.
 type Exchange struct {
-	RecordedSecs float64
-	Transcript   string
-	Outcome      Outcome
-	Message      string       // the final thing said back
-	ReplySecs    float64      // reply audio played, validation questions included
-	Tools        []ToolRun    // client tools run, in order
-	Validations  []Validation // questions command-center asked, and the answers heard
-	Err          error
+	RoutineName, RoutineUtterance string // original speech stays in Transcript
+	RecordedSecs                  float64
+	Transcript                    string
+	Outcome                       Outcome
+	Message                       string       // the final thing said back
+	ReplySecs                     float64      // reply audio played, validation questions included
+	Tools                         []ToolRun    // client tools run, in order
+	Validations                   []Validation // questions command-center asked, and the answers heard
+	Err                           error
 }
 
 // Validation is one validation_required question and the spoken answer sent back.
@@ -640,6 +641,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req := StreamRequest{VoiceCommand: tr.Text, ConversationID: s.id, TurnSource: "wake", WakeConfidence: &conf,
+		RoutineName: ex.RoutineName, RoutineUtterance: ex.RoutineUtterance,
 		SpeechLevel: s.wakeLevel, Affect: tr.Affect, Computer: activity,
 		PreWakeSpeechSecs: &s.preWakeSpeech, SelfPlayback: &s.selfPlaying}
 	if s.selfPlaying {
@@ -692,6 +694,11 @@ func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text st
 		return "", false
 	}
 	sig := node.TakeSignals(out)
+	if sig.RoutineName != "" && sig.RoutineUtterance != "" {
+		ex.RoutineName, ex.RoutineUtterance = sig.RoutineName, sig.RoutineUtterance
+		s.log.Info("routine: expanding voice shortcut", "routine", sig.RoutineName)
+		return "", false
+	}
 	if sig.OnResponseComplete != nil {
 		s.onComplete = append(s.onComplete, sig.OnResponseComplete)
 	}

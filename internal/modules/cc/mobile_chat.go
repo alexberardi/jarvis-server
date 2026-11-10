@@ -70,6 +70,7 @@ func (m *Module) registerMobileChat(mux *http.ServeMux) {
 
 // chatRequest is MobileChatRequest / WarmupRequest.
 type chatRequest struct {
+	routine          *simpleRoutineRun // internal unattended invocation; never accepted from HTTP
 	Message          string
 	NodeID           string
 	HouseholdID      string
@@ -229,7 +230,7 @@ func (m *Module) chatWarmup(ctx context.Context, u authn.User, row *nodeRow, req
 	}
 	n := &nodeCtx{ID: row.nodeID, HouseholdID: req.HouseholdID, HouseholdMemberIDs: []int64{u.ID}, row: row}
 	return m.warmup(ctx, n, startRequest{ConversationID: cid, NodeContext: nc, Commands: commands,
-		ClientTools: clientTools, chatUserID: u.ID})
+		ClientTools: clientTools, chatUserID: u.ID, unattended: req.routine != nil})
 }
 
 // setChatSpeaker makes the chat owner the conversation's speaker: name, User Profile memories
@@ -308,13 +309,14 @@ func (m *Module) chatDeviceAgents(ctx context.Context, hh string) *pyjson.Object
 // sseWriter writes `data: <json>\n\n` events, each as one write plus one flush (Q12).
 // json is Python's json.dumps (", " / ": " separators, ASCII-escaped).
 type sseWriter struct {
-	w    io.Writer
-	rc   *http.ResponseController
-	dead bool
+	silent bool // shared orchestration for an unattended routine, with no SSE client
+	w      io.Writer
+	rc     *http.ResponseController
+	dead   bool
 }
 
 func (s *sseWriter) send(ev *pyjson.Object) {
-	if s.dead {
+	if s.dead || s.silent {
 		return
 	}
 	if _, err := io.WriteString(s.w, "data: "+pyjson.Dumps(ev, true)+"\n\n"); err != nil {
@@ -378,12 +380,20 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 	// The pipeline's spans land on tr; a turn still waiting for the conversation gives up with
 	// the client.
 	llmCtx := withTurnWait(withTrace(context.WithoutCancel(ctx), tr), ctx)
+	if req.routine != nil {
+		llmCtx = withTrace(ctx, tr) // the entire unattended run shares its deadline
+	}
 	cid := req.ConversationID
 	if cid == "" {
 		cid = newMobileConversationID()
 	}
 	trace := Trace{ConversationID: cid, RequestType: "mobile_chat", Source: "mobile", NodeID: row.nodeID,
 		HouseholdID: req.HouseholdID, UserID: u.ID, UserCommand: withImageMarkers(req.Message, len(req.Images))}
+	if req.routine != nil {
+		trace.RequestType, trace.Source = "routine", "routine"
+		end := tr.measure("simple_routine", "cc", map[string]any{"routine_id": req.routine.id})
+		end(nil)
+	}
 	finish := func(answer, errMsg string) {
 		trace.AssistantMessage, trace.TotalDurationMS, trace.Spans = answer, tr.totalMS(), tr.spans()
 		if errMsg != "" {
@@ -392,6 +402,9 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 		m.recordTraceAsync(trace)
 	}
 	fatal := func(msg string) {
+		if req.routine != nil {
+			req.routine.fail(msg)
+		}
 		tr.status = "error"
 		sse.send(servertools.Obj("type", "error", "message", msg, "conversation_id", cid, "trace_summary", tr.summary()))
 		finish("", msg)
@@ -444,6 +457,9 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 		}
 		switch res.Stop {
 		case stopComplete, stopServerToolComplete:
+			if req.routine != nil {
+				req.routine.finish(res, &st)
+			}
 			answer := stripToolData(res.Message)
 			m.replayWords(ctx, sse, answer)
 			done := servertools.Obj("type", "done", "conversation_id", cid, "full_text", answer,
@@ -463,6 +479,9 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 			return
 
 		case stopValidation:
+			if req.routine != nil {
+				req.routine.finish(res, &st)
+			}
 			v := res.Validation
 			if v == nil {
 				v = &validationRequest{}
@@ -503,6 +522,14 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 				sse.send(servertools.Obj("type", "delta", "text", intermediate+" "))
 			}
 			results := m.runChatTools(ctx, sse, tr, u, row.nodeID, req.Message, res.ToolCalls, res.ImageArgs, &st)
+			if req.routine != nil && req.routine.incomplete {
+				finish(fmt.Sprint(req.routine.result.Message), "")
+				return
+			}
+			if req.routine != nil && (ctx.Err() != nil || req.routine.timedOut) {
+				fatal("A command may still be running; it has not been retried.")
+				return
+			}
 			if ctx.Err() != nil {
 				// The client is gone: nobody will read the answer. The exchange stays pending
 				// and the next turn flushes it (transcripts.go).
@@ -527,6 +554,9 @@ func (m *Module) chatStream(ctx context.Context, sse *sseWriter, u authn.User, r
 			return
 
 		default: // not_for_me
+			if req.routine != nil {
+				req.routine.finish(res, &st)
+			}
 			done := servertools.Obj("type", "done", "conversation_id", cid, "full_text", res.Message,
 				"stop_reason", res.Stop, "trace_summary", tr.summary())
 			if req.IncludeReasoning && st.reasoning != "" {
@@ -564,7 +594,7 @@ func stripToolData(s string) string {
 // the last with its trailing space), pausing chatWordPause after each when there are more
 // than 3 words.
 func (m *Module) replayWords(ctx context.Context, sse *sseWriter, answer string) {
-	if answer == "" {
+	if answer == "" || sse.silent {
 		return
 	}
 	words := strings.Split(answer, " ")
@@ -596,13 +626,18 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 	}
 	results := make([]toolResult, 0, len(calls))
 	for _, c := range calls {
+		if run := simpleRun(ctx); run != nil && (run.timedOut || run.incomplete) {
+			break
+		}
 		id := c.ID
 		if id == "" {
 			id = uuid4()
 		}
 		var output *pyjson.Object
 		var imgs []chatImage
-		if !online {
+		if simpleRun(ctx) != nil && c.Function.Name == "routine" {
+			output = servertools.Obj("success", false, "error", "A Simple routine cannot run another routine.")
+		} else if !online {
 			output = servertools.Obj("success", false, "error", "the node is offline", "offline", true, "error_code", "offline")
 		} else {
 			meta := map[string]any{"command": c.Function.Name}
@@ -612,6 +647,7 @@ func (m *Module) runChatTools(ctx context.Context, sse *sseWriter, tr *reqTrace,
 			end(nil)
 		}
 		results = append(results, toolResult{ToolCallID: id, Output: output, images: imgs})
+		recordRoutineTool(ctx, c.Function.Name, output)
 		harvestActions(st, c.Function.Name, output)
 	}
 	return results
@@ -632,7 +668,13 @@ func (m *Module) chatToolCall(ctx context.Context, nodeID, toolCallID string, c 
 	rid := uuid4()
 	args := wireArguments(c.Function.Arguments, imgs) // a JSON string (the node decodes it), or an object with photos
 	details := map[string]any{"command_name": c.Function.Name, "arguments": args, "tool_call_id": toolCallID,
-		"reply_request_id": rid, "user_id": userID}
+		"reply_request_id": rid}
+	if userID != 0 {
+		details["user_id"] = userID
+	}
+	if simpleRun(ctx) != nil {
+		details["wait_for_completion"] = true
+	}
 	if message != "" {
 		details["voice_command"] = message
 	}

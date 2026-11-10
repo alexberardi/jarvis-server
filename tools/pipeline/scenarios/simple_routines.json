@@ -1,0 +1,65 @@
+[
+  {
+    "name": "simple routines: shortcut expands into a device action",
+    "turns": [
+      {
+        "say": "Good morning",
+        "routine_name": "good_morning",
+        "routine_utterance": "Turn on the kitchen lights",
+        "expect": {
+          "tool": "control_device",
+          "args": {
+            "action": "turn_on"
+          },
+          "args_match": {
+            "device_name": "(?i)kitchen"
+          },
+          "not_tool": [
+            "routine"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "simple routines: device action continues to timer",
+    "turns": [
+      {
+        "say": "Breakfast time",
+        "routine_name": "breakfast_time",
+        "routine_utterance": "Turn on the kitchen lights and set a timer for five minutes",
+        "expect": {
+          "tool": "set_timer",
+          "not_tool": [
+            "routine"
+          ],
+          "not_reply": "(?i)can't|cannot|unable",
+          "any_tool": [
+            "control_device"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "simple routines: missing timer duration asks a question",
+    "turns": [
+      {
+        "say": "Cooking time",
+        "routine_name": "cooking_time",
+        "routine_utterance": "Set a timer",
+        "expect": {
+          "no_tool": true,
+          "reply": "(?i)how long|duration|how much time|minutes|length",
+          "not_tool": [
+            "routine"
+          ]
+        }
+      }
+    ],
+    "tags": [
+      "needs-review",
+      "known-model-failure"
+    ]
+  }
+]

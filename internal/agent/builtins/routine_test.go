@@ -13,6 +13,22 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
+func TestSimpleRoutineNeverRunsInactiveSteps(t *testing.T) {
+	steps := &stepTools{calls: map[string]map[string]any{}, outs: map[string]map[string]any{"stale_step": {"success": true}}}
+	def := map[string]any{"mode": "simple", "utterance": "Play the radio", "trigger_phrases": []any{"radio time"},
+		"steps": []any{map[string]any{"command": "stale_step"}}}
+	r := &Routine{Tools: steps, CC: func() *node.CC { return nil }, Pantry: func() map[string]map[string]any { return map[string]map[string]any{"radio_time": def} }}
+	out, ok := r.Direct(context.Background(), "Radio time!")
+	if !ok || len(steps.calls) != 0 {
+		t.Fatalf("Simple ran inactive steps: %v, calls=%v", out, steps.calls)
+	}
+	// A model-directed routine call cannot enter a nested loop or fall back to steps.
+	out, _ = r.Call(context.Background(), "routine", map[string]any{"routine_name": "radio_time", "routine_definition": def}, node.Request{})
+	if out["success"] != false || len(steps.calls) != 0 {
+		t.Fatalf("Simple fell back to steps: %v, calls=%v", out, steps.calls)
+	}
+}
+
 func TestRoutinePreservesDeferredSteps(t *testing.T) {
 	for _, direct := range []bool{false, true} {
 		t.Run(map[bool]string{false: "call", true: "trigger phrase"}[direct], func(t *testing.T) {

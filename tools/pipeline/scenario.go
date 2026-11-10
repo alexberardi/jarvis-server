@@ -73,7 +73,9 @@ type Scenario struct {
 }
 
 type Turn struct {
-	Say string `json:"say"`
+	Say              string `json:"say"`
+	RoutineName      string `json:"routine_name,omitempty"`
+	RoutineUtterance string `json:"routine_utterance,omitempty"`
 	// Source is the turn's turn_source: "" sends none (a typed turn), "wake" a woken command,
 	// "follow_up" an answer in the follow-up window (the follow-up gate runs on it).
 	Source string `json:"source,omitempty"`
@@ -88,6 +90,9 @@ type Turn struct {
 // wire is the turn's extra /voice/command fields.
 func (t Turn) wire() map[string]any {
 	b := map[string]any{}
+	if t.RoutineName != "" || t.RoutineUtterance != "" {
+		b["routine_name"], b["routine_utterance"] = t.RoutineName, t.RoutineUtterance
+	}
 	switch t.Source {
 	case "":
 	case "follow_up":

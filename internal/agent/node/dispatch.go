@@ -138,13 +138,36 @@ func (d *Dispatcher) toolCall(ctx context.Context, det map[string]any) {
 		}
 		cctx, cancel := context.WithTimeout(ctx, timeout)
 		out, handled := d.Tools.Call(cctx, name, args, req)
-		cancel()
+		if det["wait_for_completion"] == true {
+			defer cancel()
+		} else {
+			cancel()
+		}
 		if !handled {
 			out = Fail("Unknown command: %s", name)
 		}
 		output = out
 	}
 	sig := TakeSignals(output)
+	if det["wait_for_completion"] == true {
+		output["wait_for_input"] = sig.WaitForInput
+		if NeedsUserInput(output) {
+			output["requires_follow_up"] = true
+			sig.OnResponseComplete = nil
+		}
+	}
+	// An unattended Simple run needs the deferred effect's outcome in its result.
+	// Ordinary chat retains its existing result-before-callback contract.
+	if det["wait_for_completion"] == true && sig.OnResponseComplete != nil {
+		if output["success"] == true {
+			if err := sig.OnResponseComplete(); err != nil {
+				output["success"], output["error_code"] = false, "completion_failed"
+				output["error"] = "Could not complete the command: " + err.Error()
+				delete(output, "message")
+			}
+		}
+		sig.OnResponseComplete = nil
+	}
 	d.Log.Info("tool_call", "command", name, "args", LogArgs(args), "success", output["success"], "error_code", output["error_code"])
 	if err := d.CC.PostToolResult(ctx, rid, output); err != nil {
 		d.Log.Warn("tool_call: post failed", "err", err)

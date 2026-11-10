@@ -19,6 +19,14 @@ import (
 
 type routineMusic struct{ play func() error }
 
+func TestRoutineVerbAdvertisesSimpleSupport(t *testing.T) {
+	r := &node.Runner{Capabilities: func() map[string]any { return map[string]any{"led_mode": "on"} }}
+	wireRoutineVerb(r, routineMusic{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if caps := r.Capabilities(); caps["simple_routines"] != true || caps["led_mode"] != "on" {
+		t.Fatalf("capabilities=%v", caps)
+	}
+}
+
 func (routineMusic) Available(context.Context) []node.ToolDef { return nil }
 func (m routineMusic) Call(context.Context, string, map[string]any, node.Request) (map[string]any, bool) {
 	return map[string]any{"success": true, "message": "Now playing the radio.",

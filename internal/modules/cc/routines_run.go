@@ -95,6 +95,9 @@ func (m *Module) runRoutineOnce(ctx context.Context, rt *routineRow, nodeID stri
 		return routineResult{Status: "failed", Message: note, Error: note}
 	}
 	defer m.rt.release(rt.id)
+	if rt.mode == "simple" {
+		return m.runSimpleRoutine(ctx, rt, nodeID)
+	}
 	// run_workflow steps run here (a saved workflow replays on a computer, piece 31); the node
 	// gets the rest, and nothing when there is no rest.
 	wfSteps, nodeRT := rt.splitWorkflowSteps()

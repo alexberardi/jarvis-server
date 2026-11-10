@@ -185,6 +185,7 @@ func (s *routineSchedule) location() *time.Location {
 
 type routineRow struct {
 	id, householdID, slug, name     string
+	mode, utterance                 string
 	triggerPhrases, steps           string
 	responseInstruction, respLength string
 	schedule                        sql.NullString
@@ -193,12 +194,12 @@ type routineRow struct {
 }
 
 const routineCols = `id, household_id, slug, name, trigger_phrases, steps, response_instruction, response_length,
-	schedule, enabled, created_at, updated_at`
+	schedule, enabled, created_at, updated_at, mode, utterance`
 
 func scanRoutine(s scanner) (*routineRow, error) {
 	var r routineRow
 	err := s.Scan(&r.id, &r.householdID, &r.slug, &r.name, &r.triggerPhrases, &r.steps, &r.responseInstruction,
-		&r.respLength, &r.schedule, &r.enabled, &r.createdAt, &r.updatedAt)
+		&r.respLength, &r.schedule, &r.enabled, &r.createdAt, &r.updatedAt, &r.mode, &r.utterance)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +239,7 @@ func (r *routineRow) mobile() map[string]any {
 	}
 	return map[string]any{
 		"id": r.id, "slug": r.slug, "name": r.name,
+		"mode": r.mode, "utterance": r.utterance,
 		"trigger_phrases":      rawJSON(r.triggerPhrases, "[]"),
 		"steps":                rawJSON(r.steps, "[]"),
 		"response_instruction": r.responseInstruction,
@@ -252,6 +254,8 @@ func (r *routineRow) mobile() map[string]any {
 // nodeRoutine is the node-native definition (_routine_to_node), the shape the node pull and
 // the D24 `routine` command carry.
 type nodeRoutine struct {
+	Mode                string          `json:"mode,omitempty"`
+	Utterance           string          `json:"utterance,omitempty"`
 	TriggerPhrases      json.RawMessage `json:"trigger_phrases"`
 	Steps               []nodeStep      `json:"steps"`
 	ResponseInstruction string          `json:"response_instruction"`
@@ -265,6 +269,10 @@ type nodeStep struct {
 }
 
 func (r *routineRow) node() nodeRoutine {
+	if r.mode == "simple" {
+		return nodeRoutine{Mode: "simple", Utterance: r.utterance,
+			TriggerPhrases: rawJSON(r.triggerPhrases, "[]"), Steps: []nodeStep{}, ResponseLength: "short"}
+	}
 	var steps []map[string]any
 	dec := json.NewDecoder(strings.NewReader(r.steps))
 	dec.UseNumber()
@@ -363,6 +371,7 @@ func uniqueSlug(ctx context.Context, tx *sql.Tx, householdID, name string) (stri
 
 type routineInput struct {
 	name                           *string
+	mode, utterance                *string
 	triggerPhrases                 []string
 	steps                          []routineStep
 	responseInstruction, respLen   *string
@@ -376,6 +385,16 @@ type routineInput struct {
 // clears it).
 func parseRoutineBody(b *body, patch bool) routineInput {
 	var in routineInput
+	if s, ok := b.str("mode", false); ok {
+		if s != "simple" && s != "advanced" {
+			b.fail("mode", "Input should be 'simple' or 'advanced'")
+		}
+		in.mode = &s
+	}
+	if s, ok := b.str("utterance", false); ok {
+		b.strLen("utterance", s, 0, chatMessageMax)
+		in.utterance = &s
+	}
 	if s, ok := b.str("name", !patch); ok {
 		in.name = &s
 	}
@@ -622,7 +641,7 @@ func (m *Module) handleListRoutines(w http.ResponseWriter, r *http.Request) {
 		m.internalError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"routines": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"routines": out, "supported_modes": []string{"advanced", "simple"}})
 }
 
 func (m *Module) handleCreateRoutine(w http.ResponseWriter, r *http.Request) {
@@ -635,6 +654,14 @@ func (m *Module) handleCreateRoutine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := parseRoutineBody(b, false)
+	mode, utterance := "advanced", ""
+	if in.mode != nil {
+		mode = *in.mode
+	}
+	if in.utterance != nil {
+		utterance = *in.utterance
+	}
+	validateRoutineMode(b, mode, utterance, len(in.steps), in.mode != nil)
 	if !b.done(w) || !m.pathHouseholdAccess(w, r, auth) {
 		return
 	}
@@ -675,6 +702,10 @@ func (m *Module) handleCreateRoutine(w http.ResponseWriter, r *http.Request) {
 		instr = *in.responseInstruction
 	}
 	enabled := in.enabled == nil || *in.enabled
+	m.validateSimpleSchedule(ctx, b, hh, mode, enabled, in.schedule)
+	if !b.done(w) {
+		return
+	}
 	id, now := uuid4(), dbTime(m.now())
 	err = m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		slug, err := uniqueSlug(ctx, tx, hh, *in.name)
@@ -682,9 +713,9 @@ func (m *Module) handleCreateRoutine(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO cc_routines (id, household_id, slug, name, trigger_phrases, steps,
-			response_instruction, response_length, schedule, enabled, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, hh, slug, strings.TrimSpace(*in.name), string(pj), string(sj), instr, length, sched, enabled, now, now)
+			response_instruction, response_length, schedule, enabled, created_at, updated_at, mode, utterance)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, hh, slug, strings.TrimSpace(*in.name), string(pj), string(sj), instr, length, sched, enabled, now, now, mode, utterance)
 		return err
 	})
 	if err != nil {
@@ -734,6 +765,16 @@ func (m *Module) handlePatchRoutine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prevTiming := m.routineTiming(rt)
+	if rt.mode == "simple" && in.mode == nil && (in.hasSteps || in.utterance != nil || in.responseInstruction != nil || in.respLen != nil) {
+		detail(w, http.StatusConflict, "Update the app to edit a Simple routine")
+		return
+	}
+	if in.mode != nil {
+		rt.mode = *in.mode
+	}
+	if in.utterance != nil {
+		rt.utterance = *in.utterance
+	}
 	// The slug never changes: it is the node's data key.
 	if in.name != nil && *in.name != "" {
 		rt.name = strings.TrimSpace(*in.name)
@@ -765,10 +806,17 @@ func (m *Module) handlePatchRoutine(w http.ResponseWriter, r *http.Request) {
 	if in.enabled != nil {
 		rt.enabled = *in.enabled
 	}
+	var activeSteps []routineStep
+	_ = json.Unmarshal([]byte(rt.steps), &activeSteps)
+	validateRoutineMode(b, rt.mode, rt.utterance, len(activeSteps), in.mode != nil)
+	m.validateSimpleSchedule(ctx, b, hh, rt.mode, rt.enabled, rt.sched())
+	if !b.done(w) {
+		return
+	}
 	_, err = m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_routines SET name = ?, trigger_phrases = ?, steps = ?,
-		response_instruction = ?, response_length = ?, schedule = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+		response_instruction = ?, response_length = ?, schedule = ?, enabled = ?, updated_at = ?, mode = ?, utterance = ? WHERE id = ?`,
 		rt.name, rt.triggerPhrases, rt.steps, rt.responseInstruction, rt.respLength, rt.schedule, rt.enabled,
-		dbTime(m.now()), rt.id)
+		dbTime(m.now()), rt.mode, rt.utterance, rt.id)
 	if err != nil {
 		m.internalError(w, err)
 		return
@@ -821,7 +869,7 @@ func (m *Module) handleNodePullRoutines(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	rows, err := m.deps.DB.Read.QueryContext(ctx,
-		`SELECT `+routineCols+` FROM cc_routines WHERE household_id = ? AND enabled = 1`, n.HouseholdID)
+		`SELECT `+routineCols+` FROM cc_routines WHERE household_id = ? AND (enabled = 1 OR mode = 'simple')`, n.HouseholdID)
 	if err != nil {
 		m.internalError(w, err)
 		return
@@ -833,7 +881,11 @@ func (m *Module) handleNodePullRoutines(w http.ResponseWriter, r *http.Request, 
 			m.internalError(w, err)
 			return
 		}
-		out[rt.slug] = rt.node()
+		if rt.mode == "simple" && (!rt.enabled || r.URL.Query().Get("simple_routines") != "1") {
+			out[rt.slug] = unavailableSimpleRoutine()
+		} else {
+			out[rt.slug] = rt.node()
+		}
 	}
 	if err := rows.Err(); err != nil {
 		m.internalError(w, err)

@@ -77,6 +77,8 @@ type Transcript struct {
 
 // StreamRequest is the VoiceCommandRequest body of /voice/command/stream and /voice/command.
 type StreamRequest struct {
+	RoutineName       string         `json:"routine_name,omitempty"`
+	RoutineUtterance  string         `json:"routine_utterance,omitempty"`
 	VoiceCommand      string         `json:"voice_command"`
 	ConversationID    string         `json:"conversation_id"`
 	TurnSource        string         `json:"turn_source,omitempty"` // "wake" or "follow_up"

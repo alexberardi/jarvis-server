@@ -61,8 +61,9 @@ type roundResult struct {
 	toolMessage string // the first successful call's own "message"
 	// islandOnly: every call's result said the island showed it (island_only, a desktop
 	// command): nothing is spoken for the round, a failure gets the error chime instead.
-	islandOnly bool
-	choice     bool // one of them is a list on the island to pick from
+	islandOnly   bool
+	choice       bool // one of them is a list on the island to pick from
+	pendingInput bool // Simple action parked until the person answers
 	// signals: wait_for_input and clear_history if any call set them; the last deferred step.
 	signals node.Signals
 }
@@ -74,14 +75,38 @@ func (p *Pipeline) runRound(ctx context.Context, s *session, ex *Exchange, calls
 	r.allFailed = len(calls) > 0
 	r.islandOnly = len(calls) > 0
 	for _, c := range calls {
+		if r.pendingInput {
+			r.results = append(r.results, ToolResult{ToolCallID: c.ID, Output: node.Fail("Not run: waiting for user input")})
+			continue
+		}
 		args := node.DecodeArgs(c.Function.Arguments)
 		start := p.Now()
-		out := p.callTool(ctx, c.Function.Name, args, node.Request{ToolCallID: c.ID, UserID: s.userID, VoiceCommand: StripNonSpeech(ex.Transcript)})
+		command := StripNonSpeech(ex.Transcript)
+		if ex.RoutineUtterance != "" {
+			command = ex.RoutineUtterance
+		}
+		out := p.callTool(ctx, c.Function.Name, args, node.Request{ToolCallID: c.ID, UserID: s.userID, VoiceCommand: command})
 		sig := node.TakeSignals(out)
+		if ex.RoutineUtterance != "" && node.NeedsUserInput(out) {
+			r.pendingInput = true
+			sig.OnResponseComplete = nil
+			r.toolMessage, _ = out["question"].(string)
+			if r.toolMessage == "" {
+				r.toolMessage, _ = out["message"].(string)
+			}
+			if r.toolMessage == "" {
+				r.toolMessage = "Please answer the pending question before I continue."
+			}
+		}
 		r.signals.WaitForInput = r.signals.WaitForInput || sig.WaitForInput
 		r.signals.ClearHistory = r.signals.ClearHistory || sig.ClearHistory
 		if sig.OnResponseComplete != nil {
-			r.signals.OnResponseComplete = sig.OnResponseComplete
+			if ex.RoutineUtterance != "" {
+				// Several tools in the same model round may defer their effects.
+				s.onComplete = append(s.onComplete, sig.OnResponseComplete)
+			} else {
+				r.signals.OnResponseComplete = sig.OnResponseComplete
+			}
 		}
 		ok, _ := out["success"].(bool)
 		if only, _ := out[node.IslandOnlyKey].(bool); !only {
