@@ -45,7 +45,7 @@ func (r *Routines) Pull(ctx context.Context, api API) (int, error) {
 	var resp struct {
 		Routines map[string]Object `json:"routines"`
 	}
-	if err := api.Do(ctx, http.MethodGet, "/api/v0/nodes/"+url.PathEscape(r.NodeID)+"/routines", nil, &resp); err != nil {
+	if err := api.Do(ctx, http.MethodGet, "/api/v0/nodes/"+url.PathEscape(r.NodeID)+"/routines?simple_routines=1", nil, &resp); err != nil {
 		r.Log.Warn("routines: pull failed; keeping the routines this node has", "err", err)
 		return 0, err
 	}

@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -418,6 +419,11 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			}
 			endExec := tr.measure("tool_exec_iter_"+strconv.Itoa(iter+1), "cc", map[string]any{"tools": names})
 			for i, c := range calls {
+				if run := simpleRun(ctx); run != nil && (run.incomplete || validationRes != nil) {
+					serverResults = append(serverResults, chatMsg{Role: "tool", ToolCallID: c.ID, Name: c.Function.Name,
+						Content: `{"success":false,"error":"Not run: waiting for user input"}`})
+					continue
+				}
 				if c.Function.Name == "request_validation" {
 					validation = true
 				}
@@ -450,6 +456,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				turn := in.turn
 				turn.Images = conv.turnImages(msgs)
 				res := m.tools.Execute(ctx, servertools.Call{ID: c.ID, Name: c.Function.Name, Args: argsObject(c.Function.Arguments)}, turn)
+				recordRoutineTool(ctx, c.Function.Name, res)
 				endTool(nil)
 				if o, ok := res.(*pyjson.Object); ok && c.Function.Name == "request_validation" {
 					if v, _ := o.Get("_validation_request"); v == true {
@@ -461,10 +468,16 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			}
 			endExec(nil)
 			msgs = append(msgs, serverResults...)
+			if run := simpleRun(ctx); run != nil && run.incomplete {
+				msgs = m.closeDanglingCalls(msgs, clientCalls)
+				return withReasoning(engineResult{Stop: stopComplete, Message: fmt.Sprint(run.result.Message)}), msgs
+			}
 			others := len(calls) > 1 || len(clientCalls) > 0
 			if validation && others {
 				msgs = m.closeDanglingCalls(msgs, clientCalls)
-				continue
+				if simpleRun(ctx) == nil {
+					continue
+				}
 			}
 			if validation && validationRes != nil {
 				q, _ := validationRes.Get("question")

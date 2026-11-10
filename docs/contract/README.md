@@ -16,6 +16,11 @@ the verified MQTT commands and their sanitized responses. It exercises household
 isolation and secret exclusion without provisioning K2. Python nodes continue to
 use the existing send-only update command.
 
+Simple routines are **jarvisd-only**: `TestCCSimpleRoutines` freezes mode/instruction
+fields, list capabilities, sync nudges, current-node projection, old-node and disabled
+sentinels, and old-client edit protection. The Advanced routine MQTT contract remains
+in `TestCCMQTTCatalogue/routine_sync_and_run_now`.
+
 ## Running
 
 ```sh

@@ -91,11 +91,29 @@ func TestToolCallVerifiesRunsAndReplies(t *testing.T) {
 }
 
 // signalTools answers with node-local signals, as the sidecar does for a media command.
-type signalTools struct{ deferred func() error }
+type signalTools struct {
+	deferred func() error
+	pending  bool
+}
 
 func (signalTools) Available(context.Context) []ToolDef { return nil }
 func (s signalTools) Call(context.Context, string, map[string]any, Request) (map[string]any, bool) {
-	return map[string]any{"success": true, SignalsKey: Signals{WaitForInput: true, OnResponseComplete: s.deferred}}, true
+	out := map[string]any{"success": true, SignalsKey: Signals{WaitForInput: true, OnResponseComplete: s.deferred}}
+	if s.pending {
+		out["status"] = "awaiting_confirmation"
+	}
+	return out, true
+}
+
+func TestUnattendedToolStopsBeforePendingCallback(t *testing.T) {
+	cc := newFakeCC()
+	cc.valid["r1"] = true
+	d := &Dispatcher{CC: cc, Log: quiet, Tools: signalTools{pending: true, deferred: func() error { t.Error("ran pending action"); return nil }}}
+	d.Handle(context.Background(), publish(t, "tool_call", map[string]any{"command_name": "play", "reply_request_id": "r1", "wait_for_completion": true}))
+	got := cc.results["r1"]
+	if got["requires_follow_up"] != true || got["wait_for_input"] != true {
+		t.Fatalf("lost pending input: %v", got)
+	}
 }
 
 func TestToolCallNeverPostsSignalsAndRunsTheDeferredStepAfterPosting(t *testing.T) {
@@ -128,6 +146,32 @@ func TestUnverifiedToolCallIsDroppedUnrun(t *testing.T) {
 	}
 	if len(cc.verified) != 1 {
 		t.Fatalf("verify not asked: %v", cc.verified)
+	}
+}
+
+func TestToolCallWaitsForDeferredCompletionWhenRequested(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		cc := newFakeCC()
+		cc.valid["r1"] = true
+		played := 0
+		d := &Dispatcher{CC: cc, Log: quiet, Tools: signalTools{deferred: func() error {
+			played++
+			if len(cc.results) != 0 {
+				t.Error("posted success before the deferred effect")
+			}
+			if fail {
+				return errors.New("speaker unavailable")
+			}
+			return nil
+		}}}
+		d.Handle(context.Background(), publish(t, "tool_call", map[string]any{"command_name": "play", "reply_request_id": "r1", "wait_for_completion": true}))
+		got := cc.results["r1"]
+		if got["success"] != !fail || played != 1 || got[SignalsKey] != nil {
+			t.Fatalf("completion result=%v, played=%d", got, played)
+		}
+		if fail && got["error_code"] != "completion_failed" {
+			t.Fatalf("lost callback failure: %v", got)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"sync/atomic"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/builtins"
@@ -28,6 +29,14 @@ func connectCC(r *node.Runner, live *atomic.Pointer[node.CC]) {
 // N:'s handle_routine: the routine tool runs jarvisd's definition (D24) on tools, and its
 // output goes to the device-control result sink.
 func wireRoutineVerb(r *node.Runner, tools node.Toolset, log *slog.Logger) {
+	previousCaps := r.Capabilities
+	r.Capabilities = func() map[string]any {
+		caps := map[string]any{"simple_routines": true}
+		if previousCaps != nil {
+			maps.Copy(caps, previousCaps())
+		}
+		return caps
+	}
 	addVerbs(r, map[string]func(context.Context, *node.CC, map[string]any){
 		"routine": func(ctx context.Context, cc *node.CC, det map[string]any) {
 			rid, _ := det["reply_request_id"].(string)

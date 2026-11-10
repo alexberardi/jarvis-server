@@ -69,7 +69,7 @@ func TestRoutinesPullAppliesAndPrunes(t *testing.T) {
 	if err != nil || n != 2 {
 		t.Fatalf("Pull = %d, %v; want 2 applied", n, err)
 	}
-	if !slices.Equal(cc.paths, []string{"GET /api/v0/nodes/n1/routines"}) {
+	if !slices.Equal(cc.paths, []string{"GET /api/v0/nodes/n1/routines?simple_routines=1"}) {
 		t.Fatalf("calls = %v", cc.paths)
 	}
 	got := routines(st)

@@ -180,9 +180,27 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 			return EndError
 		}
 		c = next
+		if rr.pendingInput && c.StopReason != "validation_required" {
+			if c.StopReason == "tool_calls" {
+				// Close calls from an older server before a new user turn enters the
+				// conversation. Never leave guessed actions dangling in native history.
+				var skipped []ToolResult
+				for _, call := range c.ToolCalls {
+					skipped = append(skipped, ToolResult{ToolCallID: call.ID, Output: map[string]any{"success": false, "requires_follow_up": true, "question": rr.toolMessage, "error": "Not run: waiting for user input"}})
+				}
+				closed, err := p.Server.ContinueTools(ctx, s.id, skipped)
+				if err != nil || closed.StopReason == "tool_calls" {
+					p.fail(ctx, ex, errors.New("could not close unconfirmed tool calls"))
+					return EndError
+				}
+			}
+			// A model cannot supply the person's answer or declare a parked action done.
+			c = &Control{StopReason: "complete", AssistantMessage: &rr.toolMessage}
+			break
+		}
 		// A command waiting for input gets the model one reply to its results, never another
 		// tool round (Python breaks here so a chatty command can't loop).
-		if rr.signals.WaitForInput && c.StopReason != "not_for_me" {
+		if rr.signals.WaitForInput && c.StopReason != "not_for_me" && ex.RoutineUtterance == "" {
 			break
 		}
 	}

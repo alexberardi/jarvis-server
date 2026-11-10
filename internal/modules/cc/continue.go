@@ -247,7 +247,13 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		msgs = append(msgs, toolMsg(tr))
 	}
 	var res engineResult
-	if notes, ok := islandNotes(results); ok {
+	if question := simpleRoutineQuestion(conv, results); question != "" {
+		// The actual tool question is shown before another model call can guess an
+		// answer. All issued calls already have results; a new user turn can answer.
+		msgs = append(msgs, chatMsg{Role: "assistant", Content: question})
+		conv.confirmGate.shown()
+		res = engineResult{Stop: stopComplete, Message: question}
+	} else if notes, ok := islandNotes(results); ok && !conv.simpleRoutine {
 		choice := islandChoice(results)
 		// A desktop command's result was shown on the node's island: no formatting call.
 		if !conv.mode.Native() {
@@ -256,14 +262,14 @@ func (m *Module) continueBlocking(ctx context.Context, convID string, results []
 		content := strings.Join(notes, "; ")
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: content})
 		res = engineResult{Stop: stopComplete, Message: content, IslandOnly: true, IslandChoice: choice}
-	} else if said, ok := deviceConfirmation(msgs, results); ok {
+	} else if said, ok := deviceConfirmation(msgs, results); ok && !conv.simpleRoutine {
 		// Device commands that worked: a fixed confirmation, no formatting call (device_confirm.go).
 		if !conv.mode.Native() {
 			msgs = withoutRole(msgs, "tool")
 		}
 		msgs = append(msgs, chatMsg{Role: "assistant", Content: said})
 		res = engineResult{Stop: stopComplete, Message: said, EndOfExchange: true}
-	} else if native := conv.mode.Native(); native || typingPending(conv, msgs) {
+	} else if native := conv.mode.Native(); native || conv.simpleRoutine || typingPending(conv, msgs) {
 		msgs = append(msgs, failedNote(results)...)
 		utterance := lastUserContent(msgs)
 		maxIter := 10
@@ -321,7 +327,7 @@ func (m *Module) planContinueStream(ctx context.Context, convID string, results 
 		return nil
 	}
 	defer conv.mu.Unlock()
-	if len(conv.messages) == 0 || typingPending(conv, conv.messages) {
+	if len(conv.messages) == 0 || conv.simpleRoutine || typingPending(conv, conv.messages) {
 		return nil // the typing is still owed: the blocking continue runs the loop
 	}
 	if _, ok := islandNotes(results); ok {

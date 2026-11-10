@@ -1,12 +1,24 @@
-# Node settings implementation
+# Simple routines implementation
 
-Approved scope: docs/agent/NODE-SETTINGS.md. Implement without another planning approval.
+Scope: [feature spec](../docs/cc/simple-routines.md). The user authorized building
+after confirming Save activates the selected mode and voice can ask follow-ups.
+Use the proposed incomplete result for unattended runs.
 
-Use the existing verified command/result channel for non-secret readback and
-confirmed writes. Share an explicit schema between the Go node and server;
-construct responses from allowed scalar values, never from encrypted snapshots.
-Local desktop settings use the protected setup page and user-only control socket.
-Older Pi nodes retain explicit unconfirmed updates through the existing command.
+Keep one resource with additive `mode` and `utterance` fields and existing Advanced
+content. The list advertises `supported_modes`; old servers leave it out. Require
+explicit mode awareness when editing an existing Simple routine's content.
 
-Order and verification are tracked in todo.md. New API access registrations hold
-merge for review. No installed assistant or production operations.
+Agents advertise `simple_routines` and opt in on routine pulls. Older nodes receive
+an inert replacement: no triggers and a nonempty unsupported step. This overwrites
+protected/stale definitions without the old empty-step fallback. Run and schedules
+check capability before execution.
+
+Voice expands once into the existing conversation flow. Silent runs reuse chat
+orchestration without an inferred speaker, with bounded cancellation, tracked tool
+outcomes and explicit clarification handling. Simple tool results acknowledge deferred
+effects so callback failures reach the result. Never create a second model tool loop.
+
+Tasks and checks: [todo.md](todo.md). Use isolated server/mobile worktrees and verify
+each slice. Prove stale defaults, unattended identity and callbacks first. Update the
+spec for implementation adjustments. No production writes. Hold coordinated PRs for
+user review: merging mobile ships builds, which must not precede server/agent support.

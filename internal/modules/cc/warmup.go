@@ -34,6 +34,7 @@ type startRequest struct {
 	ClientTools    []*pyjson.Object
 	// chatUserID marks a mobile chat warmup (mobile_chat.go): the JWT user is the speaker.
 	chatUserID int64
+	unattended bool // internal routine invocation; never infer a desktop owner
 }
 
 // readJSONBody reads a JSON object body twice over: as a validation map (pydantic-shaped 400s)
@@ -176,7 +177,7 @@ func (m *Module) handleConversationStart(w http.ResponseWriter, r *http.Request,
 // the warmup inference.
 func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*conversation, error) {
 	hh := n.HouseholdID
-	if req.chatUserID == 0 {
+	if req.chatUserID == 0 && !req.unattended {
 		m.wakes.started(hh, n.ID, req.ConversationID) // a node starts at wake time (wake arbitration)
 	}
 	prompt, err := m.resolvePrompt(ctx, hh)
@@ -204,7 +205,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	if nc := req.NodeContext; nc != nil {
 		if tz, ok := nc.Get("timezone"); ok {
 			conv.timezone, _ = tz.(string)
-			if req.chatUserID == 0 { // a phone's zone says nothing about where the node is
+			if req.chatUserID == 0 && !req.unattended { // a phone or schedule's zone says nothing about where the node is
 				m.recordNodeTimezone(ctx, n.ID, conv.timezone)
 			}
 		}
@@ -240,10 +241,13 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	conv.recognitionOff = !recognition
 	if req.chatUserID != 0 {
 		m.setChatSpeaker(ctx, conv) // mobile chat: the speaker is known from the JWT
-	} else if conv.ownerUserID = deviceOwner(n); conv.ownerUserID != 0 {
-		m.setKnownSpeaker(ctx, conv, conv.ownerUserID) // a desktop agent: its signed-in member
+	} else if !req.unattended {
+		conv.ownerUserID = deviceOwner(n)
+		if conv.ownerUserID != 0 {
+			m.setKnownSpeaker(ctx, conv, conv.ownerUserID) // a desktop agent: its signed-in member
+		}
 	}
-	conv.desktopVoice = req.chatUserID == 0 && n != nil && n.row != nil && n.row.desktop()
+	conv.desktopVoice = !req.unattended && req.chatUserID == 0 && n != nil && n.row != nil && n.row.desktop()
 	// An explicitly set household zone wins over the reported one (timezone.go).
 	conv.timezone = m.turnTimezone(ctx, hh, conv.timezone)
 	conv.ambient = m.ambientBundle(ctx, hh)
@@ -324,6 +328,9 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 	in := prompts.Inputs{Context: pctx, Tools: conv.tools, Flags: commandFlags(conv.commands), ToolCalling: mode.ToolCalling}
 	m.lastInputs.set(n.ID, in)
 	system, _ := prompts.SystemPrompt(text, in, prompts.Characterization{})
+	if req.unattended {
+		system += "\nThis is an unattended saved routine. Execute its instruction using the available tools. Never run another routine. If information or confirmation is missing, use request_validation; do not guess. Only when the whole request is complete, end your answer with <exchange_complete/>. Report failed or unfinished actions honestly."
+	}
 	conv.commit([]chatMsg{sysMsg(system)})
 
 	m.convs.put(conv)

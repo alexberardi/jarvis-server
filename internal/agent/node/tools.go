@@ -240,6 +240,28 @@ func Fail(format string, a ...any) map[string]any {
 // MQTT dispatcher, the voice pipeline) takes them out with TakeSignals before posting it.
 const SignalsKey = "_jarvis_node_signals"
 
+// NeedsUserInput identifies a parked action or choice, unlike WaitForInput which
+// also keeps listening open after ordinary successful SDK commands.
+func NeedsUserInput(out map[string]any) bool {
+	if out["status"] == "awaiting_confirmation" || out[ChoiceKey] == true {
+		return true
+	}
+	switch actions := out["actions"].(type) {
+	case []any:
+		if len(actions) > 0 {
+			return true
+		}
+	case []map[string]any:
+		if len(actions) > 0 {
+			return true
+		}
+	}
+	if c, ok := out["context"].(map[string]any); ok {
+		return NeedsUserInput(c)
+	}
+	return false
+}
+
 // IslandKey and IslandOnlyKey mark a result whose outcome the node's island showed (a desktop
 // command, DESKTOP-COMMANDS.md Q9): IslandKey is the text shown, IslandOnlyKey true tells the
 // voice loop and command-center that nothing is to be spoken for it. Unlike the signals they go
@@ -255,6 +277,9 @@ const (
 // Signals are the jarvis-command-sdk CommandResponse fields only the node acts on
 // (N:utils/command_execution_service.py ToolExecutionResult). Go's built-in tools set none.
 type Signals struct {
+	// RoutineName/Utterance send a matched Simple shortcut through the normal
+	// voice turn. They never execute steps or recursively match another shortcut.
+	RoutineName, RoutineUtterance string
 	// WaitForInput: the command expects the user to say more. A voice turn sends the results,
 	// then speaks what comes back without running further tool calls, preferring the
 	// command's own "message" (SDK default: true).

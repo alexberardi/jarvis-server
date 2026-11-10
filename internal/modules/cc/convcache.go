@@ -173,6 +173,9 @@ type conversation struct {
 	dateKeys         []string // the last turn's extracted date keys (native continue reuses them)
 	// voiceCommand is the last turn's voice command as heard (the continue path's typed-app fill).
 	voiceCommand string
+	// simpleRoutine keeps compound shortcut requests in the normal tool loop,
+	// including their clarification answers, instead of single-command shortcuts.
+	simpleRoutine bool
 	// computer is the last turn's computer_activity (computer_activity.go; nil: idle).
 	computer *computerActivity
 

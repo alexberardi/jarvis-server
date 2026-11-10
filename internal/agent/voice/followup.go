@@ -288,6 +288,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		iter := it
 		activity := p.computerTurn(s, text, true) // "I'm done" stops a recording at once (#288)
 		c, err := p.Server.VoiceCommand(ctx, StreamRequest{VoiceCommand: text, ConversationID: s.id,
+			RoutineName: ex.RoutineName, RoutineUtterance: ex.RoutineUtterance,
 			TurnSource: "follow_up", FollowUpIteration: &iter, LevelVsWake: level, Computer: activity})
 		if err == nil && c.StopReason == "not_for_me" && c.KeepListening {
 			ignored++
