@@ -53,7 +53,11 @@ server clone; an umbrella checkout also supplies workspace-wide guidance.
   HTTP error handling, job queues or logging. Module wiring lives in `cmd/jarvisd`.
 - SQLite uses one writer pool and a separate read pool. Use `DB.Write`/`DB.Tx`
   for writes and `DB.Read` for reads. Migrations are embedded goose SQL under
-  `internal/modules/<module>/migrations/`; follow the module's naming and scope.
+  `internal/modules/<module>/migrations/`; follow the module's scope. **Name a new
+  migration by its UTC creation time, `YYYYMMDDHHMMSS_<name>.sql`, never the next
+  counter**: parallel branches pick the same counter and jarvisd won't start
+  (`TestMigrationVersions` in `internal/platform/db` enforces it). Migrations may
+  apply out of order, so don't depend on another branch's unmerged migration.
 - Preserve household/user isolation at the server boundary. UI visibility does
   not authorize an operation. Route tiers and auth changes follow the merge
   holds below.

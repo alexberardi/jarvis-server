@@ -30,6 +30,8 @@ CGO_ENABLED=1 go test -race ./...   # CLAUDE.md: required before committing (cgo
   (`scripts/hooks/go-edit.sh`). It does not replace the gate.
 - Behaviour visible to a voice user: also run the `pipeline-test` skill. Wire changes: the
   `wire-change` skill.
+- A new migration is named `YYYYMMDDHHMMSS_<name>.sql` (UTC, when you create it), never the
+  next counter; `TestMigrationVersions` fails on a counter or a duplicate version.
 
 ## 3. STATUS.md and decisions (same branch, same PR)
 
