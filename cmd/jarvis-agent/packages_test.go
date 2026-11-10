@@ -26,7 +26,7 @@ func TestWirePackages(t *testing.T) {
 	}
 	r := &node.Runner{Creds: node.Creds{NodeID: "n1"}, Log: log}
 	wireNodeSettings(r, st, tools, nil, nil, nil, log)
-	wirePackages(r, newPackages(t.TempDir(), live, st, nil, log), log)
+	wirePackages(r, newPackages(t.TempDir(), live, st, nil, log), live, log)
 	var topics []string
 	for k := range r.Topics {
 		topics = append(topics, k)
@@ -47,9 +47,9 @@ func TestWirePackages(t *testing.T) {
 	pi := &node.Runner{Creds: node.Creds{NodeID: "n1"}, Log: log}
 	pm := newPackages(t.TempDir(), live, st, nil, log)
 	pm.System = packages.NewSystem(log)
-	wirePackages(pi, pm, log)
+	wirePackages(pi, pm, &sidecar.Live{}, log)
 	if pi.Topics[packages.TopicTestInstall] == nil || len(packages.Topics) != 3 {
 		t.Fatalf("pi topics = %v", pi.Topics)
 	}
-	wirePackages(r, nil, log) // the spike's --sidecar-commands: no package requests
+	wirePackages(r, nil, nil, log) // the spike's --sidecar-commands: no package requests
 }

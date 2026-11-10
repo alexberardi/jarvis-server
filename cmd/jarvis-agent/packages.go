@@ -39,7 +39,7 @@ func newPackages(root string, live *sidecar.Live, st sidecar.Storage, host *sdkh
 // wirePackages answers the app's package install, uninstall and revert requests and Forge test
 // installs, and lists
 // the installed packages in report_tools. Call it after wireNodeSettings (which sets Topics).
-func wirePackages(r *node.Runner, pm *packages.Manager, log *slog.Logger) {
+func wirePackages(r *node.Runner, pm *packages.Manager, live *sidecar.Live, log *slog.Logger) {
 	if pm == nil {
 		return
 	}
@@ -53,4 +53,14 @@ func wirePackages(r *node.Runner, pm *packages.Manager, log *slog.Logger) {
 		r.Topics[topic] = func(ctx context.Context, cc *node.CC, payload []byte) { q.Handle(ctx, cc, topic, payload) }
 	}
 	r.Packages = pm.Report
+	// What a Forge test install does (logs, scans, device controls) goes to jarvisd for Send to Forge.
+	serve := r.OnConnected
+	r.OnConnected = func(ctx context.Context, cc *node.CC) {
+		go q.ShipTestEvents(ctx, cc, live.DeviceCall, 5*time.Second)
+		if serve != nil {
+			serve(ctx, cc)
+		} else {
+			<-ctx.Done()
+		}
+	}
 }

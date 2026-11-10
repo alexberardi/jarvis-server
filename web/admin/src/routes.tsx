@@ -17,6 +17,7 @@ import LoginPage from '@/pages/LoginPage'
 import LogsPage from '@/pages/LogsPage'
 import ModelsPage from '@/pages/ModelsPage'
 import NodesPage from '@/pages/NodesPage'
+import NodeTestPage from '@/pages/NodeTestPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import PhonePage from '@/pages/PhonePage'
 import RecordingsPage from '@/pages/RecordingsPage'
@@ -54,6 +55,7 @@ const adminPages: { path: string; element: ReactNode }[] = [
   { path: 'traces', element: <TracesPage /> },
   { path: 'traces/:id', element: <TraceDetailPage /> },
   { path: 'nodes', element: <NodesPage /> },
+  { path: 'nodes/:id/test', element: <NodeTestPage /> },
   { path: 'users', element: <UsersPage /> },
   { path: 'phone', element: <PhonePage /> },
   { path: 'update', element: <UpdatePage /> },

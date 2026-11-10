@@ -33,9 +33,10 @@ type DraftFile struct {
 }
 
 type testPkg struct {
-	name, dir string
-	commands  []string
-	expires   time.Time
+	name, dir, rid     string
+	commands           []string
+	families, managers []string
+	expires            time.Time
 }
 
 func (m *Manager) testsDir() string { return filepath.Join(m.Root, "tests") }
@@ -61,13 +62,17 @@ func (m *Manager) readTests() []testPkg {
 		dir := filepath.Join(m.testsDir(), e.Name())
 		var meta struct {
 			ExpiresAt time.Time `json:"expires_at"`
+			RequestID string    `json:"request_id"`
 			Commands  []string  `json:"commands"`
+			Families  []string  `json:"families"`
+			Managers  []string  `json:"managers"`
 		}
 		b, err := os.ReadFile(filepath.Join(dir, testMeta))
 		if err != nil || json.Unmarshal(b, &meta) != nil {
 			continue // not finished writing, or not ours: removeTests sweeps it
 		}
-		out = append(out, testPkg{name: e.Name(), dir: dir, commands: meta.Commands, expires: meta.ExpiresAt})
+		out = append(out, testPkg{name: e.Name(), dir: dir, rid: meta.RequestID, commands: meta.Commands, families: meta.Families,
+			managers: meta.Managers, expires: meta.ExpiresAt})
 	}
 	return out
 }
@@ -131,8 +136,9 @@ var requirementRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9
 
 // TestInstall serves a Forge draft as the test command name for testTTL: its files under
 // tests/<name>/, its requirements.txt in the venv (best effort, as on the Python node), and a
-// sidecar that loads it. A draft whose commands don't load is removed again.
-func (m *Manager) TestInstall(ctx context.Context, name string, files []DraftFile) (map[string]any, error) {
+// sidecar that loads it. A draft whose commands don't load is removed again. rid is jarvisd's
+// request: the test's events go back under it (ShipTestEvents).
+func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []DraftFile) (map[string]any, error) {
 	if !nameRE.MatchString(name) {
 		return nil, fmt.Errorf("test install: invalid package name %q", name)
 	}
@@ -163,12 +169,14 @@ func (m *Manager) TestInstall(ctx context.Context, name string, files []DraftFil
 		m.Log.Warn("packages: test install: pip failed", "package", name, "err", err)
 	}
 	commands := draftCommands(dir)
-	if len(commands) == 0 {
+	families, managers := draftDevices(dir)
+	if len(commands) == 0 && len(families) == 0 && len(managers) == 0 {
 		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("%s has no commands", name)
+		return nil, fmt.Errorf("%s has no commands or device protocols", name)
 	}
-	meta, _ := json.Marshal(map[string]any{"package_name": name, "installed_at": m.clock().UTC(),
-		"expires_at": m.clock().Add(testTTL).UTC(), "commands": commands, "pip_requirements": reqs})
+	meta, _ := json.Marshal(map[string]any{"package_name": name, "request_id": rid, "installed_at": m.clock().UTC(),
+		"expires_at": m.clock().Add(testTTL).UTC(), "commands": commands, "families": families,
+		"managers": managers, "pip_requirements": reqs})
 	if err := os.WriteFile(filepath.Join(dir, testMeta), meta, 0o644); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
@@ -181,10 +189,31 @@ func (m *Manager) TestInstall(ctx context.Context, name string, files []DraftFil
 		return nil, err
 	}
 	time.AfterFunc(testTTL+time.Second, func() { m.ExpireTests(context.Background()) })
-	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands)
+	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands,
+		"families", families, "managers", managers)
 	// commands: the tool names that loaded; jarvisd records their runs for Send to Forge.
 	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
-		"commands": m.served.PackageCommands(testPrefix + name)}, nil
+		"commands": m.served.PackageCommands(testPrefix + name), "protocols": componentNames(families),
+		"managers": componentNames(managers)}, nil
+}
+
+// draftDevices are a draft's device protocols and managers: its manifest's, or by the Pi's
+// conventions (device_families/<name>/protocol.py, device_managers/<name>/manager.py).
+func draftDevices(dir string) (families, managers []string) {
+	man, err := LoadManifest(dir)
+	if err != nil {
+		man = &Manifest{Components: inferComponents(dir, filepath.Base(dir))}
+	}
+	return man.Paths("device_protocol"), man.Paths("device_manager")
+}
+
+// componentNames are the component directories' names (device_families/<name>/protocol.py).
+func componentNames(paths []string) []string {
+	out := []string{}
+	for _, p := range paths {
+		out = append(out, filepath.Base(filepath.Dir(filepath.FromSlash(p))))
+	}
+	return out
 }
 
 // readRequirements are requirements.txt's requirements; options, URLs and markers are skipped.

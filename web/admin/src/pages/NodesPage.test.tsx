@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { apiClient } from '@/api/client'
 import NodesPage from './NodesPage'
 
@@ -36,7 +37,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     expect(await screen.findByText('connected')).toBeInTheDocument()
@@ -46,6 +49,20 @@ describe('NodesPage', () => {
     // Computer control is shown, read-only, for the computer only.
     expect(screen.getAllByText(/Computer control:/)).toHaveLength(1)
     expect(screen.getByText('Computer control:').parentElement).toHaveTextContent('Computer control: on')
+  })
+
+  it('links each active node to its Forge test page', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const card = await screen.findByTestId('node-pc1')
+    expect(within(card).getByRole('link', { name: 'Test a Forge command' })).toHaveAttribute('href', '/admin/nodes/pc1/test')
+    expect(screen.getAllByRole('link', { name: 'Test a Forge command' })).toHaveLength(2)
   })
 
   it('shows computer control off for a computer that never reported it', async () => {
@@ -60,7 +77,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     expect(await screen.findByText('Computer control:')).toBeInTheDocument()
@@ -90,7 +109,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     expect(await screen.findByTestId('node-pc1')).toHaveTextContent('Browser extension: connected, website access off')
@@ -103,7 +124,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     expect(await screen.findByText('Office-PC')).toBeInTheDocument()
@@ -118,7 +141,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     expect(screen.getByRole('status', { name: 'Loading nodes' })).toBeInTheDocument()
@@ -136,7 +161,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     const alert = await screen.findByRole('alert')
@@ -155,7 +182,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     expect(await screen.findByText('No nodes yet')).toBeInTheDocument()
@@ -167,7 +196,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     const leds = await screen.findByLabelText('LEDs')
@@ -214,7 +245,9 @@ describe('NodesPage', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NodesPage />
+        <MemoryRouter>
+          <NodesPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     await screen.findByTestId('node-pi2')

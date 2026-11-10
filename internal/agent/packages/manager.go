@@ -249,7 +249,8 @@ func (m *Manager) writeList() (int, error) {
 		list = append(list, e)
 	}
 	for _, tp := range m.tests() {
-		list = append(list, entry{Name: testPrefix + tp.name, Root: tp.dir, Commands: tp.commands})
+		list = append(list, entry{Name: testPrefix + tp.name, Root: tp.dir, Commands: tp.commands,
+			Families: tp.families, Managers: tp.managers})
 	}
 	doc := map[string]any{"packages": list}
 	if bi := m.Builtins; bi != nil {

@@ -168,6 +168,11 @@ var passRoutes = []passRoute{
 	ccStoreRoute("GET /api/cc/api/v0/households/{household_id}/pantry/commands/{command_name}"),
 	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/package-install"),
 	ccStoreRoute("GET /api/cc/api/v0/nodes/{node_id}/package-install/{request_id}"),
+	// The Nodes page's Forge test (decision 2026-11-09-web-forge-test): the same tier and the
+	// same cc checks, plus the household's Pantry switch, as mobile's test install.
+	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/test-install"),
+	ccStoreRoute("GET /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}"),
+	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}/feedback"),
 
 	// Inbox (webapp 01 P5): the caller's own rows. Creating and updating items is app-to-app
 	// only and not exposed.

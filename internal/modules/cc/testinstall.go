@@ -63,6 +63,7 @@ func (m *Module) registerTestInstall(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+base+"/{request_id}/results", m.node(m.handleTestInstallResults))
 	mux.HandleFunc("GET "+base+"/{request_id}", m.handlePollTestInstall)
 	mux.HandleFunc("POST "+base+"/{request_id}/feedback", m.handleTestInstallFeedback)
+	mux.HandleFunc("POST "+base+"/{request_id}/events", m.node(m.handleTestInstallEvents))
 }
 
 // --- store ---
@@ -325,6 +326,11 @@ func (m *Module) handlePollTestInstall(w http.ResponseWriter, r *http.Request) {
 	out := tiPoll(t)
 	// runs: the draft's commands' runs so far, shown before Send to Forge (jarvisd-only).
 	if out["runs"], err = m.testRuns(ctx, t.id); err != nil {
+		m.internalError(w, err)
+		return
+	}
+	// events: what else it did on the node (log lines, scans, device controls; jarvisd-only).
+	if out["events"], err = m.testEvents(ctx, t.id); err != nil {
 		m.internalError(w, err)
 		return
 	}

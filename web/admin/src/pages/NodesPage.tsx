@@ -1,10 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Cpu, Laptop, RefreshCw, Trash2 } from 'lucide-react'
+import { Cpu, FlaskConical, Laptop, RefreshCw, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import NodeSettings from '@/components/nodes/NodeSettings'
 import DisplaySettings from '@/components/display/DisplaySettings'
 import PendingPairings from '@/components/nodes/PendingPairings'
-import { Badge, Banner, Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, toast } from '@/components/ui'
+import { Badge, Banner, Button, Card, EmptyState, ErrorState, PageHeader, Select, SkeletonList, buttonStyles, toast } from '@/components/ui'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
 import { errorMessage } from '@/lib/errors'
 import { formatVersion } from '@/lib/format'
@@ -187,6 +188,12 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
       {(node.is_active || removable) && (
         <div className="mt-4 flex flex-wrap items-start gap-2">
           {node.is_active && <NodeSettings nodeId={node.node_id} name={node.name} online={live?.online === true} desktop={desktop} />}
+          {node.is_active && (
+            <Link to={`/admin/nodes/${encodeURIComponent(node.node_id)}/test`} className={buttonStyles({ size: 'sm' })}>
+              <FlaskConical size={14} aria-hidden="true" />
+              Test a Forge command
+            </Link>
+          )}
           {removable && <RemoveNode nodeId={node.node_id} name={node.name} desktop={desktop} />}
         </div>
       )}

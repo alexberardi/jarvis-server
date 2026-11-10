@@ -160,7 +160,7 @@ func (q *Requests) testInstall(ctx context.Context, api API, rid string) {
 		q.post(ctx, api, op, rid, nil, "No files in draft")
 		return
 	}
-	details, err := q.Manager.TestInstall(ctx, v.PackageName, draft.Files)
+	details, err := q.Manager.TestInstall(ctx, v.PackageName, rid, draft.Files)
 	if err != nil {
 		q.Log.Error("packages: test install failed", "request_id", rid, "err", err)
 		q.post(ctx, api, op, rid, nil, err.Error())
