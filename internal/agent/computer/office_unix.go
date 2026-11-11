@@ -83,3 +83,12 @@ func findOffice() (soffice, python string, err error) {
 	}
 	return soffice, python, nil
 }
+
+// OfficeStatus is `jarvis-agent status`'s line on documents (doc_read/doc_edit).
+func OfficeStatus() string {
+	soffice, python, err := findOffice()
+	if err != nil {
+		return "off: " + err.Error() + "\n  -> Install LibreOffice to let Jarvis read and write documents and spreadsheets as files."
+	}
+	return fmt.Sprintf("LibreOffice %s (python %s)", soffice, python)
+}
