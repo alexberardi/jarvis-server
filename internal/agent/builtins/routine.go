@@ -341,39 +341,53 @@ func normalizeSaid(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// matchesTrigger is RoutineCommand._matches: the phrase exactly, the phrase inside what was
-// said, what was said inside the phrase, or 80% of either side's words shared. Unlike N:, the
-// last two need two words said: a lone "good" (a follow-up's "Good.") isn't "good morning".
+// matchesTrigger is RoutineCommand._matches, tightened so room talk doesn't run a routine:
+// with filler words ("okay", "jarvis", "now") left out of both, the phrase exactly, what was
+// said inside the phrase, or 80% of the words shared both ways. N: also took the phrase inside
+// anything said and 80% either way, so "good night everyone" ran good_night; that now goes to
+// the model, which can still run it. The last two need two words said: a lone "good" (a
+// follow-up's "Good.") isn't "good morning".
 func matchesTrigger(text string, phrases []any) bool {
-	words := strings.Fields(text)
+	words := withoutFiller(text)
+	said := strings.Join(words, " ")
+	if said == "" {
+		return false
+	}
 	loose := len(words) >= 2
 	for _, p := range phrases {
 		s, _ := p.(string)
-		phrase := normalizeSaid(s)
+		pw := withoutFiller(normalizeSaid(s))
+		phrase := strings.Join(pw, " ")
 		if phrase == "" {
 			continue
 		}
-		if text == phrase || strings.Contains(text, phrase) {
+		if said == phrase {
 			return true
 		}
 		if !loose {
 			continue
 		}
-		if strings.Contains(phrase, text) {
+		if strings.Contains(" "+phrase+" ", " "+said+" ") {
 			return true
 		}
-		pw := strings.Fields(phrase)
 		shared := 0
 		for _, w := range uniq(pw) {
 			if slices.Contains(words, w) {
 				shared++
 			}
 		}
-		if float64(shared)/float64(len(uniq(pw))) >= 0.8 || float64(shared)/float64(len(uniq(words))) >= 0.8 {
+		if float64(shared)/float64(len(uniq(pw))) >= 0.8 && float64(shared)/float64(len(uniq(words))) >= 0.8 {
 			return true
 		}
 	}
 	return false
+}
+
+// fillerWords are left out when a trigger phrase is matched.
+var fillerWords = []string{"okay", "ok", "hey", "jarvis", "now", "please", "alright", "then"}
+
+func withoutFiller(text string) []string {
+	return slices.DeleteFunc(strings.Fields(text), func(w string) bool { return slices.Contains(fillerWords, w) })
 }
 
 // uniq is a word list as a set (Python's set(text.split())).
