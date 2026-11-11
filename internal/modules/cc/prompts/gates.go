@@ -78,7 +78,7 @@ func ServerToolAllowed(name string, g ToolGates) bool {
 		return g.Watches && g.SpeakerKnown
 	case "start_recording", "stop_recording", "enable_computer_control", "disable_computer_control", "computer_control_status":
 		return g.Computers && g.SpeakerKnown
-	case "read_computer_file", "write_spreadsheet":
+	case "read_computer_file", "write_spreadsheet", "write_document":
 		return false // errand steps only: the planner offers them with computer_task
 	case "run_workflow":
 		return g.Computers && g.Workflows && g.SpeakerKnown

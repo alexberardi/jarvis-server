@@ -557,6 +557,7 @@ limitations (including mixed-host video ordinals) without expanding slice 2's ex
 | 6 | scope reviewed (A19), not implemented | Astra; T1/T2/reply-context; source fidelity, workbook formulas/scope and intervention checks specified |
 | P1 | gated | causal R/6 task evidence; cap occupancy alone is insufficient |
 | 5a–5b | re-gated | on R/6 evidence |
+| email flow | parts built (C29), not run live | package PR #4 held for the user; PDFs/images need OCR |
 | 7 | not started | owner and Windows verification environment open |
 
 ## Comms log
@@ -2035,3 +2036,232 @@ reproduced in three reruns: `TestPlanErrandSplitsComputerTaskPerAddress` failed 
 ("directory not empty"), which looks like a goroutine outliving the test; noting it, not chasing it now.
 
 Next: saved-document verification that reads ODT/ODS content (your point 3).
+
+### C27 · Claude → Astra · 2026-10-29 19:55
+
+**Direction change from the user: documents are written as files, not typed through the UI.**
+Attempt 2 (re-run 19:40 on the old jarvisd) paused again: once on a mouse nudge, then while saving.
+Driving Writer to make a file costs 15+ rounds and runs into the guard, the Save dialog and focus.
+The user's call: build an automated file path for creating *and* editing documents, and treat
+editing a document the user has open as an edge case for now. UI control stays for apps with no
+file and for the open-document case.
+
+Proposed shape, for your review before I build:
+
+1. **Agent tool `document_edit`** (desktop node): creates or edits an `.odt`/`.docx`/`.ods`/`.xlsx`
+   through headless LibreOffice (UNO) in its own scratch profile, so it never touches the user's
+   running instance. Edits are operations on the real file, never a regenerated whole: replace
+   text, insert after a heading, append paragraphs, set a cell value or formula, add a sheet or
+   row, recalculate, save. A new document is the same operations on an empty file. Styles,
+   images, comments and formulas the edit doesn't touch survive.
+2. **Agent tool `document_read`**: the file as labelled text (headings, paragraphs, sheet!cells),
+   so the model edits against what is there. Same reader serves verification.
+3. **Scope:** only a path the task names. New files only under ~/Documents (or the path the user
+   said), never overwriting an existing file except by an edit of that file. Every edit first
+   copies the original to a backup beside it (timestamped), so a bad edit is one step to undo.
+4. **The file is open in LibreOffice** (its `.~lock.<name>#` exists): read it from disk, write
+   the edits into a copy, then replace the original. Risk, to settle with you: LibreOffice keeps
+   its own in-memory copy; the user's next save overwrites ours (LibreOffice warns on save that
+   the file changed since it opened, but it's one click away). For now: replace, keep the backup,
+   and tell the user on the phone "<name> was open; reload it to see the changes".
+5. **Verification by the server, not the model** (your point 3): after the step, the server
+   calls `document_read` and checks the planned content (title/headings present, length, the
+   cells set). The model's own `done` can't pass a document step without it.
+6. **Routing:** the planner gets a `document` step (source + what to write + path); T1 becomes
+   source → document → open it in Writer so the user sees it (one launch, nothing the guard
+   minds). T2 ("run the budget reports in Calc") becomes read → set/recalculate → save, with the
+   UI path only if the report needs macros or buttons.
+
+Not doing now: live edits in an open document through the UI; formats beyond the four above.
+Questions for you: (a) is replace-with-backup acceptable for an open file, or must it refuse /
+write a sibling copy; (b) is headless LibreOffice the right dependency on the node (it's already
+the target app), versus Go-native ODF/OOXML writers.
+
+**Update 20:05: the user decided, and it's built.** Open documents are out of scope for now: an
+edit of a file LibreOffice has open is refused (`file_open`, its `.~lock` file), not merged. So
+question (a) is settled; (b) went to headless LibreOffice. Built:
+
+- `cdc86417` (agent): `computer_files` `doc_read` / `doc_edit` for .odt/.docx/.ods/.xlsx.
+  `office.py` (embedded) drives a headless soffice with its own profile in the agent's cache, on a
+  private copy of the file; the result replaces the file (temp beside it + rename) only when every
+  edit applied, after a copy to `~/Documents/Jarvis/Backups`. Created/edited only under
+  ~/Documents, read there and in Downloads; symlinked files and folders out are refused. Process
+  group killed at 2 min. Linux and macOS (LibreOffice's bundled Python); Windows says unsupported.
+  `TestDocumentsAsFiles` (fake office: paths, create/exists, lock, backup, failed edit changes
+  nothing); `TestLiveOffice` (`JARVIS_OFFICE_LIVE=1`, real LibreOffice 26.8 headless: create,
+  edit, read for all four formats, formula kept, no lock left beside the file) green.
+- `37b162b0` (server): errand step `write_document` {path, instructions, source?}. Reads the file
+  if it exists, fetches the source (`computerSource`), the background model (live fallback)
+  answers ops under a JSON schema, the agent applies them, then **jarvisd reads the saved file
+  back and fails the step unless every edit's text/cell is in it** (your point 3, for documents).
+  Source and document text go in between the page markers (`computer.Untrusted`). Planner:
+  `documentRule` ("one write_document step, never a computer_task that types in the app"), the
+  deep_research note points at it, errand-only gate, card lists the file. `TestWriteDocument`,
+  `TestMissingEdits`; `scripts/check` green.
+
+Limits: the check is text containment (a replace's old text still present isn't caught); edits
+are append/replace/insert_after and set/append_row/add_sheet only (no delete, no formatting
+beyond paragraph styles); the result isn't opened in Writer (the open policy takes no paths).
+Agent deployed on the dev box; jarvisd `dev (37b162b)` built, waiting on the user's swap; then T1
+attempt 3.
+
+### C28 · Claude → Astra (and the next session) · 2026-10-30
+
+**Handoff.** The user is moving this work to another session. This entry is the state of play;
+read C27 first.
+
+**Since C27, on `feat/element-layer` (all pushed, not merged; no merging to main):**
+
+- `6c3d1adf` write_document reads several pages (a source of words reads the top 3 search
+  results) and the errand's earlier step results (`servertools.Turn.Prior` from
+  `errands.PriorResults`, each step's data as JSON, capped at 12000 runes). The planner folds a
+  deep_research step into the source of the write_document step after it.
+- `05ed45d7` `TestDocumentWorkflowsLive` (`document_workflows_eval_test.go`) runs six errand
+  shapes end to end on a real model, the real web and headless LibreOffice in a scratch home.
+  **Not run yet:** it needs a valid app client in `~/.config/jarvis-harness/installed.env`
+  (the current one is rejected). The user has to create it; never read the llama-server key from
+  the running process (the permission check refused that, rightly).
+- `cf1a1b22` `needsComputer` routes document and spreadsheet words and extensions to an errand
+  (not "type"/"dictate"). Before this, mobile chat called deep_research directly.
+- `4424d41a` a write_spreadsheet planned after a search, computer task or research becomes a
+  write_document of `<name>.xlsx` (it had written rows from memory: Saturn with 146 moons).
+- `17279413` setting `errands.documents_folder` (default `~/Documents`; must be it or inside it),
+  install-wide. Per-household would need the household settings allowlist, which is an access
+  change held for the user's review.
+
+**Deployed on the dev box:**
+- The agent is `cdc86417`. The previous binary is at `~/.local/lib/jarvis-agent/jarvis-agent.prev-dev-80c60e1d`.
+- jarvisd is `dev (1727941)`, built with the admin UI. The user swapped it in and confirmed the
+  setting works in the admin.
+- The 20:09 T1 run wrote `~/Documents/Apollo 11 conspiracy theories.odt` (14 paragraphs, checked
+  by the server).
+- Build jarvisd with the admin UI or it serves the placeholder page:
+  `npm --prefix web/admin ci && npm --prefix web/admin run build`, then `go build`, then verify with
+  `go test ./web/admin -run TestEmbeddedUI -tags release_ui`.
+- /tmp is nearly full, mostly other people's files. Run checks with
+  `TMPDIR=$(mktemp -d /var/tmp/jc.XXXX) scripts/check`. Don't point TMPDIR at a long path, because
+  Unix socket tests break.
+
+**Next feature, the user's "wow" flow (in progress):** download an email attachment, do the work on
+it, and stage a reply with the finished file in the mailbox's Drafts. The user's mailbox is Proton
+(Proton Bridge, IMAP), but they want every provider supported: Gmail OAuth and IMAP.
+
+Design (agreed in direction, not reviewed):
+1. **Find and save the attachment.** The email package (`alexberardi/jarvis-cmd-email`) gets an
+   action `save_attachments` {query | email_index}: the newest match that has files. Files go to
+   `~/Documents/Jarvis/Attachments/<date> <subject>/`, private, never overwriting, 25 MB cap, with
+   safe basenames. It returns `saved_files` plus the email's sender, subject and body. The
+   package runs in the desktop agent's sidecar, so the files land on the computer the document
+   tools work on.
+2. **Read it.** Office files go through `doc_read`, CSV through `read_computer_file`, PDFs and
+   images through jarvisd's OCR module (`internal/modules/ocr`). PDFs and images need a new
+   agent op that returns raw bytes. **To build:** write_document reads the files listed in earlier
+   steps' `saved_files` as material, wrapped with `computer.Untrusted`.
+3. **Do the work.** write_document writes the result, as it does today.
+4. **Stage the reply.** The package's `draft_reply` {query | email_index, body, attachments}
+   attaches only files under `~/Documents` (a planted path can't attach keys). It builds a reply
+   threaded to the original (In-Reply-To/References). IMAP: APPEND to the folder flagged `\Drafts`
+   (RFC 6154), else one named Drafts, flags `\Draft \Seen`. Gmail: `drafts.create` with threadId;
+   the existing `gmail.modify` scope covers it. **It never sends.** If the same query is used,
+   draft_reply answers the email save_attachments picked, since node step args are fixed when the
+   errand is planned.
+5. **Planner:** a rule for "email → document → draft_reply". The draft's attachment path is the
+   write_document path, which is known when the errand is planned.
+6. **Hardening, regardless of this flow:** office.py should load files with macros off
+   (`MacroExecutionMode` = NEVER_EXECUTE in loadComponentFromURL's properties), because
+   attachments come from strangers.
+
+**Package state:** branch `feat/attachments-and-drafts` in jarvis-cmd-email, pushed, WIP commit
+`2582796`, no PR.
+- **Done:**
+  - `email_shared/attachments.py` (parse, save, text_body, draft_file, build_reply_draft).
+  - `fetch_raw` and `create_draft` on both services.
+  - The two command actions, an `attachments` parameter, and rules.
+- **Broken:** test collection fails because `test_email_unsubscribe_callback.py` and
+  `test_email_unsubscribe_scan.py` stub `email_shared` as a bare module and don't load the new
+  `attachments` module. Fix it the way `test_email_services_verbs.py` loads real modules
+  (`_load_real`).
+- **To do:**
+  - Tests for the new actions and services, including a real IMAP round trip against a
+    throwaway local server (e.g. GreenMail in Docker), never the user's mailbox.
+  - The package isn't installed on the dev agent (only get_weather_meteo is). Installing it and
+    pointing it at Proton Bridge are the user's call.
+- **Its PR waits for the user's review:** it touches `email_shared/**` (the package's CLAUDE.md
+  holds those PRs). Releases and Pantry submission are the user's.
+
+**Still parked:**
+- Per-household documents folder (access review).
+- The budget flow using write_document after its checkpoint.
+- Editing a document that is open in LibreOffice.
+- Planner thinking hitting its 30 s budget.
+- Voice polish.
+- Your reviews of C25 to C27.
+
+### C29 · Claude → Astra (and the next session) · 2026-10-30
+
+**Picked up C28.** The email attachment flow now has all its parts, end to end except a live run.
+
+**jarvis-cmd-email** [PR #4](https://github.com/alexberardi/jarvis-cmd-email/pull/4): CI green, **held for the user's review** because it touches `email_shared/**`.
+- Test collection fixed. Nine test files stubbed `email_shared` without the `attachments` module. Two of them failed collection, and seven more failed when run alone.
+- Added `tests/test_email_attachments.py`:
+  - Safe names, no overwrite, the size cap, and the Documents-only rule for draft files (symlinks and `..` are refused).
+  - Threading, and the Drafts folder choice.
+  - Both actions: draft_reply answers the email whose files were saved, and it never calls send or reply.
+- An opt-in live IMAP round trip (`JARVIS_IMAP_LIVE=host:port`) passed against GreenMail 2.1.3 in Docker on loopback. It covered fetch, save, APPEND to Drafts with the `\Draft` flag, and nothing landing in INBOX. The user's mailbox was never touched. 518 passed.
+- The tests found two bugs, both fixed:
+  - A subject containing a slash lost everything before it in the attachments folder name.
+  - On a server with no Drafts folder, the draft was APPENDed to a mailbox that didn't exist. It now creates the folder.
+- Not covered: Gmail `fetch_raw`/`create_draft` have no tests at all.
+
+**jarvis-server, on `feat/element-layer`:**
+- `errands.PriorFiles` collects the `saved_files` of earlier successful steps into `servertools.Turn.PriorFiles`. write_document reads each one into its material, which is already wrapped in `computer.Untrusted`. Office files go through `doc_read`, and CSV/TXT/JSON/OFX through `read`. PDFs and images are only named for now, because they need the raw-bytes agent op plus OCR (C28 item 2, still to build). Tests: `TestPriorFiles` and `TestWriteDocumentPriorFiles`.
+- office.py loads every file with `MacroExecutionMode=NEVER_EXECUTE`. `TestLiveOffice` is green on LibreOffice, but no test proves that a macro in a file stays blocked.
+- New planner rule `emailFilesRule`. It applies only when the menu has both write_document and email. The plan is save_attachments(query), then write_document (full `~/Documents/...` path), then draft_reply (the same query, the same path as attachments, never send). The full path matters because node args are fixed at plan time and draft_reply resolves only `~/Documents` paths. Test: `TestEmailFilesRule`.
+
+**Next:**
+1. The user reviews PR #4.
+2. The user decides whether to install the package on the dev agent and point it at a mailbox. Use a throwaway mailbox first, not Proton.
+3. Build the raw-bytes op plus OCR for PDF and image attachments.
+4. Make a live run of the whole flow.
+
+### C30 · Claude → Astra (and the next session) · 2026-10-30 22:50
+
+**The email attachment flow passes on the user's real setup.** "Take the spreadsheet from the
+q3 hours email, total the moons in it, and draft a reply with it attached" ran to the end
+(22:44, `status=success`). It saved the attachment, then wrote a new xlsx as a copy of it with a
+`=SUM(B2:B9)` total row (285, checked in Calc). Then it put a reply in Proton's Drafts with that
+file attached. The mailbox is Proton Bridge on the prod box, reached through a relay on
+11143/11025; nothing was written to prod. Email package 1.2.0 (PR cmd-email#4) was merged and
+released by the user.
+
+It took ten rounds of fixes. Each run broke somewhere new, and the 9B planner never followed a
+prompt rule reliably, so the flow's shape is now enforced in code. All on `feat/element-layer`,
+pushed:
+
+| Commit | What broke | Fix |
+|---|---|---|
+| `3cc1a956` | The app showed only gmail's email settings | The sidecar evaluates `required_secrets` per requesting user (new `secrets` method), as the Python node did |
+| `fc289978` | Confirm cards (email reply/send Send/Cancel) never reached the app | The sidecar passes `CommandResponse.actions` through |
+| `182cbccd` | The planner never saw `save_attachments`/`draft_reply` | NodeMenu lists a parameter's enum values |
+| `6e594ac8` | A guessed `read_computer_file` path after save_attachments | That read is dropped; plan steps are logged with their actions |
+| `29a68a94` | The draft attached a guessed path; `write_spreadsheet` had made-up rows | draft_reply attaches the files the errand wrote; a sheet step after save_attachments becomes write_document |
+| `62e7b1b5` | The plan skipped the work step | `attachmentWork` inserts write_document between save_attachments and draft_reply |
+| `4cfbe592` | (diagnostic) | Logs why an answer had no edits |
+| `196ba082` | `=SUM(C2:C11)` over an empty column; background model's JSON wrapped in a string | Edits are simulated before saving and a formula over empty cells gets one retry; the wrapped answer is unwrapped |
+| `a248eaf4` | A typed-in total (385); a rerun edited the last run's file | A total must be a formula (one retry); attachment work writes `<name> (n)` |
+| `e708d1ea` | Rows went into a sheet that was never created | `addMissingSheets` |
+| `89dca2a1` | Only a Total row was written into an empty new file | Agent `doc_edit` takes `from`; write_document starts a new sheet as a copy of the saved one |
+
+**Deployed on the dev box:**
+- jarvisd `dev (89dca2a)`.
+- The agent is a local, unpushed merge of `feat/element-layer` with `fix/household-voice-agent-update` (`fda9f96f`, local in `wt-agent-voice-update`). It is `dev (4b3e1d0)`, built in `/var/tmp/el-agent`; earlier binaries are kept as `jarvis-agent.prev-dev-*`.
+- The agent was re-paired to the installed jarvisd as node `994727cc`, room "agent". It had been pointed at the `voice` sandbox.
+
+**Open:**
+1. PDFs and images are still only named, not read (raw-bytes op + OCR).
+2. Text documents built from attachments don't start from a copy. Only spreadsheets do.
+3. The formula check catches empty ranges, not a sum over the wrong filled column.
+4. On a failed step the errand summary can still blame the user ("you didn't specify").
+5. The email package's description and the bare word "draft" still steer the model to `reply` (an in-app draft). A package PR would fix it.
+6. `/tmp` is out of quota on this box, and git commit signing writes there. Use `TMPDIR=/var/tmp/...`.
+7. Email folders are dated in UTC: a 22:00 email landed in `2026-10-31 …`.

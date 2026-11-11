@@ -60,6 +60,11 @@ type Turn struct {
 	Timezone  string
 	Utterance string
 	Speaker   Speaker
+	// Prior is an errand step's earlier steps' results, as text ("" outside errands): what a
+	// step that writes something up works from (write_document).
+	Prior string
+	// PriorFiles are files earlier errand steps saved on the computer (their saved_files).
+	PriorFiles []string
 	// Agents is the node's read-only agent payload from /conversation/start (may be nil).
 	Agents *pyjson.Object
 	// MemberIDs are the household's validated member ids.
