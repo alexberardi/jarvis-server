@@ -35,3 +35,12 @@ setting without its protocol leaves the household in a state nothing can control
   package, so its devices stay through a fix round. They do **not** survive into a real install
   of the published package (user: "purely a dev testing scenario... safer that way"): re-add
   them after it. Re-importing a device through a protocol no running test provides clears its tag.
+
+## A desktop has the node's alerts
+
+2026-11-10, user ("the desktop node not having alerts... that's bad"). A desktop had an alert
+queue only for its reminders, built where nothing else could reach it, and no `check_alerts`. Now
+every node has one queue (`nodeAlerts`: the Pi host's, or the desktop's own), shared by reminders,
+the packages' agents (a test install's on a desktop), the announcer (speaks priority 3 between
+turns) and `check_alerts` ("what's up"). Forwarding high-priority agent alerts to the household's
+inbox and push (the attention gate deciding) is not built: the user's call is to start here.

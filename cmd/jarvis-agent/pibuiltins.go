@@ -66,17 +66,14 @@ func newPiHost(ctx context.Context, stateDir string, mic *voice.Mic, log *slog.L
 	return h
 }
 
-// alertQueue is the queue startAlerts runs on: the Pi host's, or on a desktop (no host) one of
-// its own, so the reminders it takes still fire and are said. nil: neither (no store, no
-// reminders).
-func alertQueue(h *sdkhost.Host, rem *builtins.Reminder) *sdkhost.Alerts {
+// nodeAlerts is the node's alert queue: the Pi host's, or on a desktop (no host) one of its own.
+// Reminders, the packages' agents (a test install's on a desktop), the announcer and
+// check_alerts all use it, so a desktop's alerts are said and "what's up" reads them, as on a Pi.
+func nodeAlerts(h *sdkhost.Host) *sdkhost.Alerts {
 	if h != nil {
 		return h.Alerts
 	}
-	if rem != nil {
-		return &sdkhost.Alerts{}
-	}
-	return nil
+	return &sdkhost.Alerts{}
 }
 
 // startAlerts runs the node's alerts: the announcer, which says q's announceable alerts between
