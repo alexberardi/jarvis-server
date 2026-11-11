@@ -197,10 +197,29 @@ func (m *Module) householdNodes(ctx context.Context, hh string) ([]*nodeRow, err
 // pickDeviceNode is the node that reads and drives d: one running the device's manager (its
 // source) for a manager's device, else one with its protocol; failing that, as pickNode.
 func (m *Module) pickDeviceNode(ctx context.Context, hh string, d *deviceRow) (*nodeRow, error) {
+	if d.nodeID.String != "" {
+		return m.boundDeviceNode(ctx, hh, d.nodeID.String)
+	}
 	if source := d.sourceOr(); source != "direct" {
 		return m.pickNodeBy(ctx, hh, source, "device manager", func(n *nodeRow) sql.NullString { return n.managers })
 	}
 	return m.pickNode(ctx, hh, d.protocol.String)
+}
+
+// A bound node is never replaced with another household node: its credentials and LAN
+// may be different, even if both advertise the same protocol.
+func (m *Module) boundDeviceNode(ctx context.Context, hh, id string) (*nodeRow, error) {
+	n, err := m.nodeByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (!n.isActive || n.householdID.String != hh)) {
+		return nil, fail(http.StatusServiceUnavailable, "This device's node is no longer available")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !n.online(m.now()) {
+		return nil, fail(http.StatusServiceUnavailable, "This device's node is offline")
+	}
+	return n, nil
 }
 
 func (m *Module) pickNode(ctx context.Context, hh, protocol string) (*nodeRow, error) {

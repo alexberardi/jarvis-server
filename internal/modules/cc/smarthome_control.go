@@ -83,7 +83,7 @@ func (m *Module) handleControlDevice(w http.ResponseWriter, r *http.Request, a p
 		m.writeErr(w, err)
 		return
 	}
-	m.controlDevice(w, r, hh, action, data)
+	m.controlDevice(w, r, hh, action, data, a.user.ID)
 }
 
 // handleNodeControlDevice is the household route's control for a node (a touch display): a
@@ -112,7 +112,7 @@ func (m *Module) handleNodeControlDevice(w http.ResponseWriter, r *http.Request,
 		detail(w, status, msg)
 		return
 	}
-	m.controlDevice(w, r, n.HouseholdID, action, data)
+	m.controlDevice(w, r, n.HouseholdID, action, data, 0)
 }
 
 // parameterActions take a value in data; the device's manager checks they fit its domain.
@@ -196,7 +196,7 @@ func nodeActionValue(key string, value any) string {
 	return ""
 }
 
-func (m *Module) controlDevice(w http.ResponseWriter, r *http.Request, hh, action string, data map[string]any) {
+func (m *Module) controlDevice(w http.ResponseWriter, r *http.Request, hh, action string, data map[string]any, userID int64) {
 	ctx := r.Context()
 	d, err := m.device(ctx, hh, r.PathValue("device_id"))
 	if err != nil {
@@ -207,7 +207,7 @@ func (m *Module) controlDevice(w http.ResponseWriter, r *http.Request, hh, actio
 		detail(w, http.StatusBadRequest, "Device is not controllable")
 		return
 	}
-	node, err := m.pickDeviceNode(ctx, hh, d)
+	node, err := m.deviceInputNode(ctx, hh, d, userID, action, data)
 	if err != nil {
 		m.writeErr(w, err)
 		return
@@ -216,7 +216,23 @@ func (m *Module) controlDevice(w http.ResponseWriter, r *http.Request, hh, actio
 		detail(w, http.StatusServiceUnavailable, "MQTT not available")
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, m.controlDeviceAction(ctx, node, d, action, data))
+	result := m.controlDeviceAction(ctx, node, d, action, data)
+	prompt, _ := result["input_required"].(map[string]any)
+	if action == "pair_start" && (result["success"] == true || getStr(prompt, "session_id", "") != "") {
+		bound, err := m.pinDeviceNode(ctx, hh, d, node)
+		if err != nil {
+			m.writeErr(w, err)
+			return
+		}
+		if bound.nodeID != node.nodeID {
+			detail(w, http.StatusConflict, "Device pairing moved to its assigned node; start pairing again")
+			return
+		}
+	}
+	if prompt != nil {
+		m.deviceInputs.remember(m.now(), d, node.nodeID, userID, prompt)
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 // controlDeviceAction publishes an `action` for the node's control_device command and waits
@@ -230,7 +246,11 @@ func (m *Module) controlDeviceAction(ctx context.Context, node *nodeRow, d *devi
 		"mac_address": nullable(d.mac), "source": d.sourceOr(),
 	}
 	for k, v := range data {
-		actx[k] = v
+		// Action values (including pairing answers) cannot replace the registered
+		// device identity. Its node and credentials are scoped to this identity.
+		if _, identity := actx[k]; !identity {
+			actx[k] = v
+		}
 	}
 	wait := controlWait
 	if strings.HasPrefix(action, "pair") {

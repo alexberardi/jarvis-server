@@ -125,6 +125,18 @@ var passRoutes = []passRoute{
 	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/actions"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
+	// Devices: member operations, with household/node checks in CC.
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/rooms"),
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/devices"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/devices/import"),
+	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/devices/{device_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/households/{household_id}/devices/{device_id}"),
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/devices/{device_id}/state"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/devices/{device_id}/control"),
+	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/device-scan/request"),
+	ccUserRoute("GET /api/cc/api/v0/nodes/{node_id}/device-scan/{request_id}"),
+	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/device-list/request"),
+	ccUserRoute("GET /api/cc/api/v0/nodes/{node_id}/device-list/{request_id}"),
 	// The household's prompt (Models page editor): cc requires the household admin role.
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/prompt"),
 	ccUserRoute("PUT /api/cc/api/v0/households/{household_id}/prompt"),

@@ -17,6 +17,7 @@ import {
   Video,
   Phone,
   Store,
+  Radio,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useUnreadCount } from '@/hooks/useInbox'
@@ -36,6 +37,7 @@ interface NavItem {
 /** Every user's pages (webapp 01 §4.1). */
 const memberNav: NavItem[] = [
   { label: 'Chat', icon: MessageSquare, path: '/chat' },
+  { label: 'Devices', icon: Radio, path: '/devices' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
   { label: 'Workflows', icon: Workflow, path: '/workflows' },

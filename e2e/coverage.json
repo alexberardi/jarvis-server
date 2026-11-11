@@ -6,6 +6,7 @@
     "/login": { "tests": ["e2e/web/tests/auth.spec.ts", "e2e/web/tests/setup-wizard.spec.ts"] },
     "/": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/chat": { "tests": ["e2e/web/tests/chat.spec.ts", "e2e/web/tests/household.spec.ts"] },
+    "/devices": { "tests": ["e2e/web/tests/devices.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/addons": { "tests": ["e2e/web/tests/addons.spec.ts"] },
     "/inbox": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/household.spec.ts"] },
     "/inbox/:id": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/push.spec.ts"] },

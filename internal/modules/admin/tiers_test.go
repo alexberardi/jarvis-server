@@ -58,6 +58,18 @@ var wantTiers = map[string]tier{
 	"GET /api/cc/api/v0/mobile/nodes/{node_id}/tools":                tierUser,
 	"POST /api/cc/api/v0/nodes/{node_id}/actions":                    tierUser,
 	"GET /api/cc/api/v0/households/{household_id}/smart-home/config": tierUser,
+	// Member Devices: CC retains household and node authorization.
+	"GET /api/cc/api/v0/households/{household_id}/rooms":                        tierUser,
+	"GET /api/cc/api/v0/households/{household_id}/devices":                      tierUser,
+	"POST /api/cc/api/v0/households/{household_id}/devices/import":              tierUser,
+	"PATCH /api/cc/api/v0/households/{household_id}/devices/{device_id}":        tierUser,
+	"DELETE /api/cc/api/v0/households/{household_id}/devices/{device_id}":       tierUser,
+	"GET /api/cc/api/v0/households/{household_id}/devices/{device_id}/state":    tierUser,
+	"POST /api/cc/api/v0/households/{household_id}/devices/{device_id}/control": tierUser,
+	"POST /api/cc/api/v0/nodes/{node_id}/device-scan/request":                   tierUser,
+	"GET /api/cc/api/v0/nodes/{node_id}/device-scan/{request_id}":               tierUser,
+	"POST /api/cc/api/v0/nodes/{node_id}/device-list/request":                   tierUser,
+	"GET /api/cc/api/v0/nodes/{node_id}/device-list/{request_id}":               tierUser,
 	// The household prompt: cc enforces the household admin role.
 	"GET /api/cc/api/v0/households/{household_id}/prompt":          tierUser,
 	"PUT /api/cc/api/v0/households/{household_id}/prompt":          tierUser,

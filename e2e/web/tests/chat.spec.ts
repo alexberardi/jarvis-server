@@ -1,12 +1,8 @@
 // Chat through a node with the scripted model (e2e/llm/web.json): the reply shown, a tool
 // call's effect on the server, a photo reaching the model, and the device picker.
-import { asSuperuser, memories, modelCalls, setSetting, useScript } from '../helpers/api'
+import { asSuperuser, memories, modelCalls, newUser, provisionNode, setSetting, unique, useScript } from '../helpers/api'
 import { env, stateFile } from '../helpers/env'
 import { expect, test } from '../helpers/fixtures'
-
-// The seeded nodes (scripts/seed-dev.py): Kitchen is the primary, Living Room the other.
-const KITCHEN = '5eed0000-0000-4000-8000-00000000a0de'
-const LIVING = '5eed0000-0000-4000-8000-00000000117e'
 
 // An 8x8 red PNG.
 const PNG = Buffer.from(
@@ -47,7 +43,14 @@ test('a tool call does what it says: remember saves a memory', async ({ page }) 
   expect(added.map((m) => m.content)).toEqual(['The e2e code word is marmalade'])
 })
 
-test('picking a device sends the turn through it, and the choice is remembered', async ({ page }) => {
+test('picking a device sends the turn through it, and the choice is remembered', async ({ asUser }) => {
+  // A private household keeps the exact two-option assertion independent of Forge,
+  // Store and device-discovery tests that provision nodes in the seeded household.
+  const u = await newUser('chat-picker')
+  const KITCHEN = unique('kitchen'), LIVING = unique('living')
+  await provisionNode(u.token, u.householdId, { id: KITCHEN, name: 'Kitchen', room: 'kitchen' })
+  await provisionNode(u.token, u.householdId, { id: LIVING, name: 'Living Room', room: 'living room' })
+  const page = await asUser(u)
   await page.goto('/chat')
   const picker = page.getByLabel('Device')
   await expect(picker.locator('option')).toHaveCount(2)

@@ -2,7 +2,7 @@
 import { call, asSuperuser, login, newUser } from '../helpers/api'
 import { env } from '../helpers/env'
 import { expect, test } from '../helpers/fixtures'
-import { pressSignIn, submitLogin } from '../helpers/login'
+import { pressSignIn, signInUI, submitLogin } from '../helpers/login'
 
 const ACCESS = 'jarvis-admin:access_token'
 const REFRESH = 'jarvis-admin:refresh_token'
@@ -17,7 +17,7 @@ test('an anonymous visitor is sent to the login page', async ({ freshPage }) => 
 
 test('the superuser signs in and gets the admin pages', async ({ freshPage }) => {
   const page = await freshPage()
-  await submitLogin(page, env('SBX_EMAIL'), env('SBX_PASSWORD'))
+  await signInUI(page, env('SBX_ADMIN'), env('SBX_EMAIL'), env('SBX_PASSWORD'))
   // A superuser goes through /setup, which resumes the wizard while the install's setup is
   // unfinished (the seeded sandbox's is) and otherwise forwards home.
   await expect(page).not.toHaveURL(/\/login$/)

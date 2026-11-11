@@ -85,3 +85,16 @@ No changes required. Contracts to keep working:
 - `jarvis-cmd-calendar`'s `calendar_alerts` agent: `/signals` ingest of `appt.upcoming`, and the node-local alert path (D46).
 - Secrets with `value_type='user'` (member picker) used by commands that act for a person (D41).
 - `proposable_actions` and the generic proposal dispatcher (doc 10).
+
+## Device discovery in the member web app (2026-11-10)
+
+Web import now supplies optional `node_id`; server-routed state/control/removal retain
+that node. Older imports of unbound devices are unchanged. Mobile should pass the scan's
+node ID when re-importing a bound device with changed connection fields; otherwise CC
+returns 409 instead of replacing its addressing from an unspecified network.
+
+Go and Python local voice control still read the household-wide device cache and dispatch
+locally. Binding-aware local voice dispatch is follow-up client work, separate from this
+web feature. Preserve household-wide display/media selection when adding it: route a
+remote bound device through CC rather than hiding it from the shared registry. See the
+[decision](decisions/2026-11-10-member-web-devices.md).
