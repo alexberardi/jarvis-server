@@ -1231,6 +1231,7 @@ function snapCollect(gen, max, viewport) {
           visited++;
           const owner = node.parentElement;
           if (!owner || owner.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [aria-hidden=true], [hidden], [inert], script, style, noscript")) continue;
+          if (!visible(owner)) continue; // display:none or visibility:hidden (A8)
           const chunk = clean(node.nodeValue);
           if (!chunk) continue;
           const part = chunk.slice(0, contextLimit - size);
@@ -1245,15 +1246,29 @@ function snapCollect(gen, max, viewport) {
     }
     return "";
   };
+  // targetOf is a link's destination, or "" when it is over TARGET_MAX UTF-8 bytes (computeruse.TargetMax):
+  // dropped here, never cut (a cut URL points elsewhere), so one huge data: URL can't push the
+  // snapshot past the native message cap (A9). A string longer than the limit is over it in bytes.
+  const TARGET_MAX = 2048;
   const targetOf = (el, role) => {
     if (role !== "link") return "";
-    const anchor = el.localName === "a" ? el : el.closest("a[href]");
-    return anchor?.href || "";
+    const href = (el.localName === "a" ? el : el.closest("a[href]"))?.href || "";
+    if (href.length > TARGET_MAX) return "";
+    let bytes = 0;
+    for (const ch of href) {
+      const c = ch.codePointAt(0);
+      bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+    }
+    return bytes > TARGET_MAX ? "" : href;
   };
+  // positionOf is where the element's centre sits in the viewport, one of nine labels; "" when the
+  // centre is off screen, or in a subframe (its viewport isn't the page's: not mapped yet).
   const positionOf = (el) => {
+    if (window.top !== window) return "";
     const r = el.getBoundingClientRect();
     const x = (r.left + r.width / 2) / Math.max(innerWidth, 1);
     const y = (r.top + r.height / 2) / Math.max(innerHeight, 1);
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return "";
     const horizontal = x < 1 / 3 ? "left" : x > 2 / 3 ? "right" : "center";
     const vertical = y < 1 / 3 ? "top" : y > 2 / 3 ? "bottom" : "middle";
     return `${vertical}-${horizontal}`;
@@ -1294,11 +1309,13 @@ function snapCollect(gen, max, viewport) {
     if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]") || (viewport && !onScreen(el))) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
-    if (viewport) {
-      e.context = contextOf(el);
-      e.position = positionOf(el);
-      e.target = targetOf(el, role);
-    }
+    // Both snapshot kinds: voice targeting and computer tasks (ELEMENT-LAYER-WORK.md §2).
+    const context = contextOf(el);
+    const position = positionOf(el);
+    const target = targetOf(el, role);
+    if (context) e.context = context;
+    if (position) e.position = position;
+    if (target) e.target = target;
     // Voice target snapshots only need names and context; don't read drafts from visible fields.
     if (!viewport) {
       const v = valueOf(el);

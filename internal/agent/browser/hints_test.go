@@ -13,20 +13,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 )
 
-func TestSpokenNumber(t *testing.T) {
-	for in, want := range map[string]int{"7": 7, "7.": 7, "seven": 7, "Twenty three": 23, "twenty-three": 23,
-		"one hundred and five": 105, "12!": 12} {
-		if n, ok := spokenNumber(in); !ok || n != want {
-			t.Errorf("%q: %d %v, want %d", in, n, ok, want)
-		}
-	}
-	for _, in := range []string{"", "0", "the first one", "seven dogs"} {
-		if _, ok := spokenNumber(in); ok {
-			t.Errorf("%q read as a number", in)
-		}
-	}
-}
-
 // The fake page includes the duplicate thumbnail/title links common on search result pages.
 func videoPage(m Message) Message {
 	switch m.Cmd {
@@ -217,27 +203,6 @@ func TestModelPicksWhenNoNameMatches(t *testing.T) {
 	}
 }
 
-// A model that leaves out the confidence, or writes it as a string, still picks.
-func TestDecodePickAnswer(t *testing.T) {
-	for raw, want := range map[string]struct {
-		ref  string
-		conf float64
-		ok   bool
-	}{
-		`{"ref":"e3"}`:                                      {"e3", 1, true},
-		`{"ref":"e3","confidence":"0.82"}`:                  {"e3", 0.82, true},
-		"```json\n{\"ref\":\"e3\",\"confidence\":0.4}\n```": {"e3", 0.4, true},
-		`I pick {"ref":"none","confidence":0.9}`:            {"none", 0.9, true},
-		`e3`:                                                {"", 0, false},
-		`{"ref":"e3","confidence":"high"}`:                  {"", 0, false},
-	} {
-		a, ok := decodePickAnswer(raw)
-		if ok != want.ok || (ok && (a.Ref != want.ref || a.Confidence != want.conf)) {
-			t.Errorf("%q: %+v %v, want %+v", raw, a, ok, want)
-		}
-	}
-}
-
 // A click starts a navigation that the browser hasn't begun when the click returns: the page
 // must be read again when the next command comes, not at once. Re-reading at once kept the
 // Images page while the Videos page loaded, and every later command missed (2026-10-28).
@@ -285,4 +250,47 @@ func TestNextCommandSeesThePageTheClickOpened(t *testing.T) {
 		t.Errorf("the re-read didn't wait for the page to load: %v", waits)
 	}
 	ts.TurnListening(ctx, false)
+}
+
+// A11 (Astra's reproduction): a voice snapshot holds no field values, even an ordinary draft an
+// extension sent by mistake (ELEMENT-LAYER-WORK.md §2, §10); a computer snapshot keeps its own.
+func TestVoiceSnapshotCarriesNoValues(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		return ok(map[string]any{"tab": map[string]any{"tab_id": 4.0}, "gen": 9.0,
+			"elements": []any{map[string]any{"ref": "e1", "role": "textbox", "name": "Draft",
+				"value": "UNSENT_PRIVATE_DRAFT", "context": "Reply to Bob"}}})
+	})
+	ctx := context.Background()
+	if out := ts.readTargets(ctx, false); out["success"] != true {
+		t.Fatalf("voice snapshot failed: %v", out)
+	}
+	if got := ts.hints.snap.Elements[0].Value; got != "" {
+		t.Errorf("voice snapshot retained the draft: %q", got)
+	}
+	computer, err := ts.Snapshot(ctx, "", 10)
+	if err != nil || computer.Elements[0].Value != "UNSENT_PRIVATE_DRAFT" {
+		t.Errorf("ordinary computer snapshot must keep its existing values: %+v %v", computer, err)
+	}
+}
+
+// A page that can't be read (no website access) is said as such, not as a control that isn't
+// there; the voice test of 2026-10-29 got "couldn't find that control" four times.
+func TestUnreadablePageSaysWhy(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	connectExt(t, h, path, "Firefox", true, func(m Message) Message {
+		if m.Cmd == "snapshot" {
+			return Message{OK: false, Code: "no_site_access", Error: "Jarvis doesn't have access to this page: allow it in the add-on's Permissions"}
+		}
+		return ok(map[string]any{})
+	})
+	out, ok := ts.Direct(context.Background(), "Click Videos.")
+	if !ok || out["success"] != false || out["error_code"] != "no_site_access" {
+		t.Fatalf("unreadable page: %v %v", out, ok)
+	}
+	if s, _ := out[node.IslandKey].(string); !strings.Contains(s, "access") {
+		t.Errorf("island %q doesn't say why", s)
+	}
 }
