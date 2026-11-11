@@ -58,8 +58,10 @@ type DeviceComponent struct {
 	Secrets []SecretSpec
 }
 
-// Devices are the snapshot's device_families and device_managers.
-type Devices struct{ Families, Managers []DeviceComponent }
+// Devices are the snapshot's device_families and device_managers, and its agents: the
+// packages' background agents (an Entry of agent_name, description, enabled, schedule), which
+// the app's Tasks tab lists with their settings.
+type Devices struct{ Families, Managers, Agents []DeviceComponent }
 
 // deviceEntries are a snapshot list of device components, their secrets' values read here as N:
 // does: no requesting user, and a manager's sensitive values never (honor_include_values=False).
@@ -121,7 +123,7 @@ func (h *Handler) nodeConfig() map[string]any {
 }
 
 // Snapshot is build_snapshot for the agent: its commands with their secrets and enabled state;
-// no background agents; the sidecar's device families and managers (a Pi's); and nodeConfig as
+// the packages' background agents with theirs; the sidecar's device families and managers (a Pi's); and nodeConfig as
 // node_config (DesktopNodeConfig on a computer, the HAT and voice settings on a Pi).
 func (st *Store) Snapshot(cmds []Command, dev Devices, nodeConfig map[string]any, includeValues bool, uid *int64) map[string]any {
 	entries := []map[string]any{}
@@ -156,7 +158,7 @@ func (st *Store) Snapshot(cmds []Command, dev Devices, nodeConfig map[string]any
 		"schema_version":          SchemaVersion,
 		"commands_schema_version": CommandsSchemaVersion,
 		"commands":                entries,
-		"agents":                  []any{},
+		"agents":                  st.deviceEntries(dev.Agents, includeValues),
 		"device_families":         st.deviceEntries(dev.Families, includeValues),
 		"device_managers":         st.deviceEntries(dev.Managers, false),
 		"node_config":             nodeConfig,

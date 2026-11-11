@@ -641,8 +641,13 @@ def describe_agents() -> list:
     for name in sorted(AGENTS):
         try:
             sched = AGENTS[name].schedule
+            try:
+                description = str(AGENTS[name].description or "")
+            except Exception:
+                description = ""
             out.append({"name": name, "package": AGENT_PACKAGE[name], "interval_seconds": int(sched.interval_seconds),
-                        "run_on_startup": bool(sched.run_on_startup)})
+                        "run_on_startup": bool(sched.run_on_startup), "description": description,
+                        "secrets": _secrets_of(AGENTS[name], name)})
         except Exception as exc:
             print(f"sidecar: skipping agent {name}: {exc}", file=sys.stderr)
             FAILED[AGENT_PACKAGE[name]] = f"agent {name}: schedule: {type(exc).__name__}: {exc}"

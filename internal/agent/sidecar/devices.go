@@ -41,11 +41,14 @@ func (s *Sidecar) setDevices(d deviceComponents) {
 }
 
 // Devices are the installed packages' device families and managers (with the built-in
-// jarvis_direct manager) as last described: at start, after StoreAuth and on RefreshDevices.
+// jarvis_direct manager) as last described: at start, after StoreAuth and on RefreshDevices;
+// and their background agents, described at start.
 func (s *Sidecar) Devices() nodesettings.Devices {
 	s.devMu.Lock()
 	defer s.devMu.Unlock()
-	return s.devices
+	d := s.devices
+	d.Agents = s.agentComps
+	return d
 }
 
 // RefreshDevices describes the families again: whether each is configured follows the secrets

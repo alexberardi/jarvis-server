@@ -138,6 +138,19 @@ func TestATestInstallsAgentsRunAtOnceAsTestEvents(t *testing.T) {
 
 	(&Scheduler{Sidecar: live, Log: log, TestsOnly: true}).Tick(context.Background())
 
+	// The app's Tasks tab lists them, with their settings to fill in (the settings snapshot).
+	if err := st.SetSecret("CRASHY_URLS", "https://example.com", "integration", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	snap := st.Snapshot(nil, live.Devices(context.Background()), nil, false, nil)
+	agents, _ := json.Marshal(snap["agents"])
+	for _, want := range []string{`"agent_name":"crashy"`, `"description":"Fails every run."`, `"interval_seconds":3600`,
+		`"key":"CRASHY_URLS"`, `"value":"https://example.com"`, `"agent_name":"ticker"`} {
+		if !strings.Contains(string(agents), want) {
+			t.Fatalf("snapshot agents %s: no %s", agents, want)
+		}
+	}
+
 	events := func(pkg string) []map[string]any {
 		t.Helper()
 		out, err := live.DeviceCall("test_events", map[string]any{"package": pkg})

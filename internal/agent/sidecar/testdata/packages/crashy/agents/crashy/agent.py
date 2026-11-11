@@ -1,6 +1,6 @@
 """A background agent whose every run raises, as a Forge draft's first try might."""
 
-from jarvis_command_sdk import AgentSchedule, IJarvisAgent
+from jarvis_command_sdk import AgentSchedule, IJarvisAgent, JarvisSecret
 
 
 class CrashyAgent(IJarvisAgent):
@@ -18,7 +18,7 @@ class CrashyAgent(IJarvisAgent):
 
     @property
     def required_secrets(self):
-        return []
+        return [JarvisSecret("CRASHY_URLS", "Sites to watch", "integration", "string", is_sensitive=False)]
 
     @property
     def include_in_context(self):

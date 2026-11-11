@@ -94,6 +94,8 @@ type Sidecar struct {
 	music   []MusicCommand    // the IJarvisMusicCommand sources, in load order
 	failed  map[string]string // package -> why its commands didn't load
 	agents  []AgentDef
+	// agentComps are the agents as the settings snapshot lists them (Devices().Agents).
+	agentComps []nodesettings.DeviceComponent
 
 	devMu   sync.Mutex
 	devices nodesettings.Devices
@@ -198,10 +200,12 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
 		Agents []struct {
-			Name         string `json:"name"`
-			Package      string `json:"package"`
-			Interval     int    `json:"interval_seconds"`
-			RunOnStartup bool   `json:"run_on_startup"`
+			Name         string                    `json:"name"`
+			Package      string                    `json:"package"`
+			Interval     int                       `json:"interval_seconds"`
+			RunOnStartup bool                      `json:"run_on_startup"`
+			Description  string                    `json:"description"`
+			Secrets      []nodesettings.SecretSpec `json:"secrets"`
 		} `json:"agents"`
 		deviceComponents
 	}
@@ -234,6 +238,11 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 	for _, a := range desc.Agents {
 		s.agents = append(s.agents, AgentDef{Name: a.Name, Package: a.Package,
 			Interval: time.Duration(a.Interval) * time.Second, RunOnStartup: a.RunOnStartup, Sidecar: gen})
+		// The settings snapshot's agents (the app's Tasks tab), with their settings.
+		s.agentComps = append(s.agentComps, nodesettings.DeviceComponent{Secrets: a.Secrets, Entry: map[string]any{
+			"agent_name": a.Name, "description": a.Description, "enabled": true,
+			"schedule": map[string]any{"interval_seconds": a.Interval, "run_on_startup": a.RunOnStartup},
+		}})
 	}
 	s.setDevices(desc.deviceComponents)
 	return s, nil
