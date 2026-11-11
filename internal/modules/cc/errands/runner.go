@@ -411,13 +411,16 @@ func (s *Service) resolveNodeArgs(rc *runCtx, args *pyjson.Object) *pyjson.Objec
 // nodeOutcome is _node_step_outcome.
 // attachWrittenFiles makes an email draft_reply attach the files this errand's earlier steps
 // wrote: the planner names the path before the file exists and guessed it wrong
-// (~/Documents/Q3 Hours Totals.xlsx for ~/Documents/Jarvis/Q3 Hours Totals.xlsx, C29).
+// (~/Documents/Q3 Hours Totals.xlsx for ~/Documents/Jarvis/Q3 Hours Totals.xlsx, C29). With no
+// written file it attaches nothing: a reply goes to whoever sent the email, so an injected
+// email must not choose which of the user's files it carries (PR #547 review O2).
+// shortcut: "reply with my Taxes.xlsx attached" loses the file; allow a path the user said when the turn's own words can be told from the email's.
 func attachWrittenFiles(cmd string, args *pyjson.Object, results []Result) *pyjson.Object {
 	if cmd != "email" || truthyStr(args, "action") != "draft_reply" {
 		return args
 	}
 	_, files := stepFiles(results)
-	if len(files) == 0 {
+	if len(files) == 0 && truthyStr(args, "attachments") == "" {
 		return args
 	}
 	paths := make([]string, len(files))
@@ -426,10 +429,13 @@ func attachWrittenFiles(cmd string, args *pyjson.Object, results []Result) *pyjs
 	}
 	out := pyjson.NewObject()
 	for _, k := range args.Keys() {
-		v, _ := args.Get(k)
-		out.Set(k, v)
+		if v, _ := args.Get(k); k != "attachments" {
+			out.Set(k, v)
+		}
 	}
-	out.Set("attachments", strings.Join(paths, ","))
+	if len(paths) > 0 {
+		out.Set("attachments", strings.Join(paths, ","))
+	}
 	return out
 }
 

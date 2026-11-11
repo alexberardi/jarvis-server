@@ -34,6 +34,10 @@ const (
 
 	// recordingCallTimeout bounds asking the agent to start or stop (stop waits for the browser).
 	recordingCallTimeout = 20 * time.Second
+	// documentCallTimeout bounds computer_files doc_read/doc_edit: longer than the agent's own
+	// officeWait (2 m, a cold LibreOffice start alone can take 60 s), so jarvisd never reports a
+	// failure while the agent goes on and saves (PR #547 review R1).
+	documentCallTimeout = 150 * time.Second
 )
 
 // recordingPhrases are start_recording's own phrases (compactName): a model passing one as the
@@ -56,7 +60,11 @@ func (m *Module) agentRecordingCall(ctx context.Context, nodeID, tool string, ar
 	if up, _ := m.bus.NodeSession(nodeID); !up {
 		return map[string]any{"success": false, "error": "the computer is offline", "error_code": "offline"}
 	}
-	return m.dispatchNodeCommand(ctx, nodeID, tool, args, &uid, recordingCallTimeout)
+	timeout := recordingCallTimeout
+	if op, _ := args["op"].(string); tool == computeruse.ToolFiles && (op == "doc_read" || op == "doc_edit") {
+		timeout = documentCallTimeout
+	}
+	return m.dispatchNodeCommand(ctx, nodeID, tool, args, &uid, timeout)
 }
 
 // hasComputer is whether the household has a computer (a desktop agent), switch on or off: the

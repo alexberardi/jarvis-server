@@ -327,8 +327,13 @@ func TestAttachWrittenFiles(t *testing.T) {
 	if truthyStr(args, "attachments") != "~/Documents/Q3 Hours Totals.xlsx" {
 		t.Fatal("the plan's own args were changed")
 	}
-	if attachWrittenFiles("email", args, written[:1]) != args {
-		t.Fatal("changed without a written file")
+	// Nothing written: the plan's own path is dropped, not attached (review O2).
+	if got := attachWrittenFiles("email", args, written[:1]); truthyStr(got, "attachments") != "" || truthyStr(got, "query") != "q3 hours" {
+		t.Fatalf("without a written file: %s", pyjson.Dumps(got, false))
+	}
+	bare := servertools.Obj("action", "draft_reply", "query", "q3 hours")
+	if attachWrittenFiles("email", bare, nil) != bare {
+		t.Fatal("a reply without attachments was copied")
 	}
 	if got := attachWrittenFiles("email", servertools.Obj("action", "send"), written); truthyStr(got, "attachments") != "" {
 		t.Fatal("another action got attachments")
