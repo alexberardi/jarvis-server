@@ -1,7 +1,9 @@
 # Ordinary speech that funnel stage 1 (every node.Director) must never carry out: room talk a
 # follow-up window hears without the wake word, and sentences that only share a command's words.
 # One per line; "#" lines are comments. Tests run a Director over it with nodetest.NeverDirect.
-# Idea from omarchy-utter's never-match corpus (2026-11-10).
+# Idea from omarchy-utter's never-match corpus (2026-11-10). A line that is also a real command
+# ("type two diabetes runs in our family") doesn't belong here: right after a reply such a
+# follow-up passes command-center's gate first (voice.TestFollowUpAfterAReplySteersOnlyOnTheNode).
 
 I can't switch to the new phone plan until next month.
 We should switch to oat milk, it's cheaper.
@@ -20,7 +22,6 @@ Stop scrolling and eat your food.
 I can type really fast now.
 What type of dog is that?
 She's not really my type.
-Type two diabetes runs in our family.
 I typed up the notes yesterday.
 Click your seatbelt in.
 The pen keeps clicking, it drives me crazy.

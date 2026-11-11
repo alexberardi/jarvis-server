@@ -33,6 +33,14 @@ func (g Gate) Call(ctx context.Context, name string, args map[string]any, req no
 
 // Direct passes funnel stage 1 through (node.Director), telling it which commands are on: its
 // own calls don't come back through the gate.
+func (g Gate) DirectSteering(ctx context.Context, said string) (map[string]any, bool) {
+	d, ok := g.Tools.(node.SteeringDirector)
+	if !ok {
+		return nil, false
+	}
+	return d.DirectSteering(node.WithEnabled(ctx, g.Store.Enabled), said)
+}
+
 func (g Gate) Direct(ctx context.Context, said string) (map[string]any, bool) {
 	d, ok := g.Tools.(node.Director)
 	if !ok {

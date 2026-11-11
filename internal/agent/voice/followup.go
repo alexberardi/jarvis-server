@@ -273,7 +273,7 @@ func (p *Pipeline) followUp(ctx context.Context, s *session, t *Turn) {
 		// transcript goes to command-center, whose gate tells the node's voice from the user's.
 		if heardAfterReply && sharesAWord(text, lastSaid) {
 			s.log.Info("follow-up: like our reply, so no shortcut", "transcript", text)
-		} else if end, ok := p.direct(ctx, s, &ex, text); ok { // funnel stage 1: done here, no command-center turn
+		} else if end, ok := p.direct(ctx, s, &ex, text, heardAfterReply); ok { // funnel stage 1: done here, no command-center turn
 			t.FollowUps = append(t.FollowUps, ex)
 			if end != "" {
 				t.FollowUpEnd = end

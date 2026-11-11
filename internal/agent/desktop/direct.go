@@ -176,3 +176,9 @@ func (t *Tools) answerMixed(ctx context.Context, said string) (map[string]any, b
 	out, err := acts[n-1](ctx)
 	return t.directResult(out, err), true
 }
+
+// DirectSteering is Direct: stage 1 here only switches to a tab or window, which changes
+// nothing and is seen at once (node.SteeringDirector).
+func (t *Tools) DirectSteering(ctx context.Context, said string) (map[string]any, bool) {
+	return t.Direct(ctx, said)
+}

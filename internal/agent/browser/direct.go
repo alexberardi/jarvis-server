@@ -60,3 +60,10 @@ func (t *Tools) directScroll(ctx context.Context, said string) (map[string]any, 
 }
 
 var _ node.Director = (*Tools)(nil)
+
+// DirectSteering is scrolling (node.SteeringDirector): clicks, typing into the page, media and
+// web searches change something, so a follow-up right after a reply leaves them to
+// command-center's gate.
+func (t *Tools) DirectSteering(ctx context.Context, said string) (map[string]any, bool) {
+	return t.directScroll(ctx, said)
+}

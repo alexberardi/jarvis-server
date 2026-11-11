@@ -34,3 +34,14 @@ func NeverDirect(t *testing.T, d node.Director) {
 		}
 	}
 }
+
+// NeverActs fails t for every corpus line d carries out successfully: unlike NeverDirect, d may
+// take the line and answer that nothing on screen matched (a "click …" naming no control).
+func NeverActs(t *testing.T, d node.Director) {
+	t.Helper()
+	for _, said := range OrdinarySpeech() {
+		if out, ok := d.Direct(context.Background(), said); ok && out["success"] == true {
+			t.Errorf("%q was carried out on the node: %v", said, out)
+		}
+	}
+}
