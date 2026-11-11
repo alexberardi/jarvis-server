@@ -936,6 +936,14 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, tf.live, log)
+	if tf.agents != nil {
+		// The Forge test page's "Run agents now" (jarvisd's run_test_agents).
+		addVerbs(r, map[string]func(context.Context, *node.CC, map[string]any){
+			"run_test_agents": func(ctx context.Context, _ *node.CC, _ map[string]any) {
+				log.Info("pkgagents: running the test agents now", "agents", tf.agents.RunTests(ctx))
+			},
+		})
+	}
 	// action, callback and toggle_command: the app's device control, a command's buttons and
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
 	wireActions(r, sc, tools, st, sayNow(mic), log)
@@ -1157,6 +1165,8 @@ type toolFlags struct {
 	// the sidecar on them and leaves pkgs to answer the app's install requests.
 	pkgRoot string
 	pkgs    *packages.Manager
+	// agents runs the packages' background agents (a Pi's), or only test installs' (a computer).
+	agents *pkgagents.Scheduler
 	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools; its
 	// sidecar also loads the node's built-in commands, whose SDK backends host answers.
 	pi   bool
@@ -1288,12 +1298,14 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 			// in the Pi's queue; one that keeps failing marks its package failed in the app.
 			agents := &pkgagents.Scheduler{Sidecar: live, Alerts: f.host.Alerts, Log: log}
 			f.pkgs.AgentHealth = agents.Failing
+			f.agents = agents
 			go agents.Run(ctx)
 			go boot()
 		} else {
 			// A desktop runs no package's agents, but a test install's do run, so the Forge
 			// can test one here (their runs are test events).
-			go (&pkgagents.Scheduler{Sidecar: live, Log: log, TestsOnly: true}).Run(ctx)
+			f.agents = &pkgagents.Scheduler{Sidecar: live, Log: log, TestsOnly: true}
+			go f.agents.Run(ctx)
 			boot()
 		}
 	}

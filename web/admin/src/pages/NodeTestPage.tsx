@@ -8,7 +8,7 @@ import NodeSettings from '@/components/nodes/NodeSettings'
 import { getDeviceConfig, listDeviceRooms } from '@/api/devices'
 import { Badge, Banner, Button, Card, CardHeader, EmptyState, Input, PageHeader, buttonStyles } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
-import { normalizeShareCode, pollTestInstall, requestTestInstall, sendToForge } from '@/api/testInstall'
+import { normalizeShareCode, pollTestInstall, requestTestInstall, runTestAgents, sendToForge } from '@/api/testInstall'
 import type { TestEvent, TestInstall, TestRun } from '@/api/testInstall'
 import { useAuth } from '@/hooks/useAuth'
 import { useChat } from '@/hooks/useChat'
@@ -219,7 +219,7 @@ function TestRunView({
         protocols={t.details?.protocols ?? []}
       />
       <div className="space-y-4">
-        <InstallCard t={t} again={again} tools={tools} />
+        <InstallCard t={t} again={again} tools={tools} nodeId={nodeId} requestId={requestId} />
         <RunsCard runs={t.runs ?? []} />
         {(t.events?.length ?? 0) > 0 && <EventsCard events={t.events ?? []} />}
         <SendCard nodeId={nodeId} requestId={requestId} />
@@ -228,7 +228,20 @@ function TestRunView({
   )
 }
 
-function InstallCard({ t, again, tools }: { t: TestInstall; again: ReactNode; tools: ReactNode }) {
+function InstallCard({
+  t,
+  again,
+  tools,
+  nodeId,
+  requestId,
+}: {
+  t: TestInstall
+  again: ReactNode
+  tools: ReactNode
+  nodeId: string
+  requestId: string
+}) {
+  const run = useMutation({ mutationFn: () => runTestAgents(nodeId, requestId) })
   const commands = t.details?.commands ?? []
   const protocols = t.details?.protocols ?? []
   const agents = t.details?.agents ?? []
@@ -259,8 +272,23 @@ function InstallCard({ t, again, tools }: { t: TestInstall; again: ReactNode; to
         ends.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
+        {agents.length > 0 && (
+          <Button size="sm" variant="primary" loading={run.isPending} onClick={() => run.mutate()}>
+            Run agents now
+          </Button>
+        )}
         {tools}
         {again}
+        {run.isSuccess && !run.isPending && (
+          <p role="status" className="basis-full text-small text-text-muted">
+            Sent. Its run shows in Node events in a few seconds.
+          </p>
+        )}
+        {run.isError && (
+          <p role="alert" className="basis-full text-small text-danger">
+            {errorMessage(run.error, "Couldn't run the agents")}
+          </p>
+        )}
       </div>
     </Card>
   )

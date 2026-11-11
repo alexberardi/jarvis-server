@@ -103,6 +103,7 @@ beforeEach(() => {
   post.mockImplementation(async (url: string) => {
     if (url === TI) return { data: { id: 'r1', status: 'pending', package_name: 'coin_flip' } }
     if (url === `${TI}/r1/feedback`) return { data: { status: 'sent', runs: 1 } }
+    if (url === `${TI}/r1/run-agents`) return { data: { status: 'sent', agents: ['zigbee_watch'] } }
     throw new Error(`unexpected POST ${url}`)
   })
   api.listChatNodes.mockResolvedValue([live])
@@ -230,6 +231,11 @@ describe('NodeTestPage', () => {
     expect(screen.getByText(/Each ran once at the install/)).toBeInTheDocument()
     expect(screen.getByText('Agent zigbee_watch: ran in 42 ms, 2 alerts')).toBeInTheDocument()
     expect(screen.getByText("Agent zigbee_watch: KeyError: 'state'")).toBeInTheDocument()
+
+    // Run agents now: the node runs them at once; their runs come back as events.
+    fireEvent.click(screen.getByRole('button', { name: 'Run agents now' }))
+    expect(await screen.findByText(/Its run shows in Node events/)).toBeInTheDocument()
+    expect(post).toHaveBeenCalledWith(`${TI}/r1/run-agents`)
   })
 
   it("offers the node's settings and a device scan on it for any draft, a command's too", async () => {

@@ -59,6 +59,11 @@ export async function pollTestInstall(nodeId: string, requestId: string): Promis
 }
 
 /** sendToForge has jarvisd send the install result, the runs and the note to the Forge draft. */
+/** runTestAgents asks the node to run the draft's background agents now; their runs arrive as events. */
+export async function runTestAgents(nodeId: string, requestId: string): Promise<void> {
+  await apiClient.post(`${base(nodeId)}/${encodeURIComponent(requestId)}/run-agents`)
+}
+
 export async function sendToForge(nodeId: string, requestId: string, note: string): Promise<void> {
   const n = note.trim()
   await apiClient.post(`${base(nodeId)}/${encodeURIComponent(requestId)}/feedback`, n ? { note: n } : {})

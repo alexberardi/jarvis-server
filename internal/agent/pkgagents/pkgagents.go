@@ -97,7 +97,26 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 // Tick runs every agent that is due, one at a time (the sidecar serves one request at a time).
 func (s *Scheduler) Tick(ctx context.Context) {
-	for _, a := range s.due() {
+	s.runAll(ctx, s.due())
+}
+
+// RunTests runs every test install's agent now (the Forge test page's "Run agents now"); each
+// then runs again one interval later. It returns the agents it ran.
+func (s *Scheduler) RunTests(ctx context.Context) []string {
+	s.due() // a test agent loaded since the last tick gets its state first
+	var tests []sidecar.AgentDef
+	var names []string
+	for _, a := range s.Sidecar.Agents() {
+		if strings.HasPrefix(a.Package, TestPrefix) {
+			tests, names = append(tests, a), append(names, a.Name)
+		}
+	}
+	s.runAll(ctx, tests)
+	return names
+}
+
+func (s *Scheduler) runAll(ctx context.Context, agents []sidecar.AgentDef) {
+	for _, a := range agents {
 		if ctx.Err() != nil {
 			return
 		}

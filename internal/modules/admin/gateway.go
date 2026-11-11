@@ -185,6 +185,7 @@ var passRoutes = []passRoute{
 	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/test-install"),
 	ccStoreRoute("GET /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}"),
 	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}/feedback"),
+	ccStoreRoute("POST /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}/run-agents"),
 
 	// Inbox (webapp 01 P5): the caller's own rows. Creating and updating items is app-to-app
 	// only and not exposed.

@@ -174,3 +174,26 @@ func TestSchedulerRunsTestAgentsAtOnce(t *testing.T) {
 	s = &Scheduler{Sidecar: sc, Now: func() time.Time { return now }}
 	at(0, "comfyui_jobs", "zigbee_watch")
 }
+
+// "Run agents now" runs every test agent at once, due or not, and no installed package's; each
+// then waits a whole interval again.
+func TestRunTestsRunsTheTestAgentsNow(t *testing.T) {
+	now := time.Date(2026, 11, 10, 21, 30, 0, 0, time.UTC)
+	sc := &fakeSidecar{agents: []sidecar.AgentDef{
+		{Name: "comfyui_jobs", Package: "comfyui", Interval: time.Hour, Sidecar: 1},
+		{Name: "site_watch", Package: "test:site_watch", Interval: 5 * time.Minute, Sidecar: 1},
+	}}
+	s, _ := newScheduler(sc, &now)
+	s.Tick(context.Background()) // site_watch's run at load
+	sc.ran = nil
+	now = now.Add(time.Minute)
+	if got := s.RunTests(context.Background()); strings.Join(got, ",") != "site_watch" || strings.Join(sc.ran, ",") != "site_watch" {
+		t.Fatalf("RunTests = %v, ran %v", got, sc.ran)
+	}
+	sc.ran = nil
+	now = now.Add(4 * time.Minute) // five since load, four since the manual run
+	s.Tick(context.Background())
+	if len(sc.ran) != 0 {
+		t.Fatalf("ran %v before its interval after the manual run", sc.ran)
+	}
+}

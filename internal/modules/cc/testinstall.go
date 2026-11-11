@@ -64,6 +64,7 @@ func (m *Module) registerTestInstall(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/{request_id}", m.handlePollTestInstall)
 	mux.HandleFunc("POST "+base+"/{request_id}/feedback", m.handleTestInstallFeedback)
 	mux.HandleFunc("POST "+base+"/{request_id}/events", m.node(m.handleTestInstallEvents))
+	mux.HandleFunc("POST "+base+"/{request_id}/run-agents", m.handleRunTestAgents)
 }
 
 // --- store ---
