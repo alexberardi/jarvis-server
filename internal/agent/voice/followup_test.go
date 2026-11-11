@@ -678,35 +678,63 @@ func TestAnswerBrokenByDropoutsIsHeard(t *testing.T) {
 }
 
 // turnWatch records what the voice loop tells a toolset about the turn.
+// turnWatch records TurnListening calls on seen, in the order they arrive; hold, when set,
+// keeps the first end call waiting until it is closed.
 type turnWatch struct {
 	node.Toolset
-	mu  sync.Mutex
-	got []bool
+	seen  chan bool
+	hold  chan struct{}
+	ended sync.Once
 }
 
 func (w *turnWatch) TurnListening(_ context.Context, on bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.got = append(w.got, on)
+	if !on && w.hold != nil {
+		w.ended.Do(func() { <-w.hold })
+	}
+	w.seen <- on
 }
 
-func (w *turnWatch) calls() []bool { w.mu.Lock(); defer w.mu.Unlock(); return slices.Clone(w.got) }
+// calls waits for the next n calls.
+func (w *turnWatch) calls(t *testing.T, n int) []bool {
+	t.Helper()
+	var got []bool
+	for range n {
+		got = append(got, <-w.seen)
+	}
+	return got
+}
 
 // The browser's numbers show while a turn listens: the toolset hears the turn start and end.
 func TestTurnStartAndEndReachTheTools(t *testing.T) {
 	srv := newServer()
 	mic := oneWake()
 	r := newRig(t, mic, srv)
-	w := &turnWatch{Toolset: node.Multi{}}
+	w := &turnWatch{Toolset: node.Multi{}, seen: make(chan bool, 4)}
 	r.p.Tools = node.Multi{w}
 	stop := r.run(t)
 	r.turn(t)
 	_ = stop()
-	deadline := time.Now().Add(5 * time.Second)
-	for !slices.Equal(w.calls(), []bool{true, false}) {
-		if time.Now().After(deadline) {
-			t.Fatalf("turn calls %v, want start then end", w.calls())
-		}
-		time.Sleep(10 * time.Millisecond)
+	if got := w.calls(t, 2); !slices.Equal(got, []bool{true, false}) {
+		t.Fatalf("turn calls %v, want start then end", got)
+	}
+}
+
+// A late end of one turn never lands after the next turn's start (PR #547 review O4: it cleared
+// appclick's window binding for that turn).
+func TestTurnEndIsHeardBeforeTheNextStart(t *testing.T) {
+	srv := newServer()
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Cfg.Debounce = 0 // the second wake comes at once
+	w := &turnWatch{Toolset: node.Multi{}, seen: make(chan bool, 8), hold: make(chan struct{})}
+	r.p.Tools = node.Multi{w}
+	stop := r.run(t)
+	r.turn(t)
+	mic.push(rep(noise, 30), rep(wake, 3), rep(speech, 12))
+	r.turn(t)
+	close(w.hold) // turn 1's end arrives only now, after turn 2 ran
+	_ = stop()
+	if got := w.calls(t, 4); !slices.Equal(got, []bool{true, false, true, false}) {
+		t.Fatalf("turn calls %v, want each start after the previous end", got)
 	}
 }

@@ -176,6 +176,9 @@ type Pipeline struct {
 
 	dropped atomic.Int64
 	ends    sync.WaitGroup // pending /conversation/end calls and background music steps
+	// turnEnded closes when the last turn's end has reached the toolsets; the next turn's start
+	// waits for it (turns run one at a time, so only the turn loop touches it).
+	turnEnded chan struct{}
 	bg      serial         // the music steps, in order (music.go)
 	tuned   int            // Live.tunes applied so far
 	gate    wakeGate       // the debounce and the not_for_me cool-down (wakegate.go)
@@ -521,16 +524,22 @@ func (p *Pipeline) turn(ctx context.Context, chunks <-chan []int16, w wakeFire) 
 		preWakeSpeech: preSecs, selfPlaying: w.selfPlaying, at: stageTimes{wake: start}}
 	p.cue(CueListening, 0)
 	// The toolsets hear the turn start and end (the browser's numbers), off the pipeline: the
-	// end waits for the start, so numbers drawn late are still taken down.
-	started := make(chan struct{})
+	// end waits for the start, so numbers drawn late are still taken down, and the start waits
+	// for the previous turn's end, so a late end never undoes this turn (review O4).
+	started, ended, prev := make(chan struct{}), make(chan struct{}), p.turnEnded
+	p.turnEnded = ended
 	go func() {
 		defer close(started)
+		if prev != nil {
+			<-prev
+		}
 		if w, ok := p.Tools.(node.TurnWatcher); ok {
 			w.TurnListening(ctx, true)
 		}
 	}()
 	defer func() {
 		go func() {
+			defer close(ended)
 			<-started
 			if w, ok := p.Tools.(node.TurnWatcher); ok {
 				w.TurnListening(context.WithoutCancel(ctx), false)
