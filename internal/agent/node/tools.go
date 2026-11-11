@@ -48,6 +48,14 @@ type Director interface {
 	Direct(ctx context.Context, said string) (out map[string]any, ok bool)
 }
 
+// SteeringDirector is a Director whose steering steps (scroll, switch to a tab or window: seen
+// at once, changing nothing) may run on a follow-up heard right after Jarvis spoke, before
+// command-center's gate has asked whether the speech was for it. Everything else said then
+// goes to command-center first (decision 2026-11-10-follow-up-shortcuts-pass-the-gate).
+type SteeringDirector interface {
+	DirectSteering(ctx context.Context, said string) (out map[string]any, ok bool)
+}
+
 type enabledKey struct{}
 
 // WithEnabled carries which commands are on (a settings gate's) to a Director, whose own calls
@@ -88,6 +96,18 @@ func (m Multi) TurnListening(ctx context.Context, on bool) {
 			w.TurnListening(ctx, on)
 		}
 	}
+}
+
+// DirectSteering asks each Toolset that can steer.
+func (m Multi) DirectSteering(ctx context.Context, said string) (map[string]any, bool) {
+	for _, t := range m {
+		if d, ok := t.(SteeringDirector); ok {
+			if out, ok := d.DirectSteering(ctx, said); ok {
+				return out, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // Direct asks each Toolset that can carry out a command itself.

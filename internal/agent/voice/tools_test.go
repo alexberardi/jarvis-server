@@ -576,14 +576,14 @@ func (d *volumeDirector) Direct(_ context.Context, said string) (map[string]any,
 
 // Right after the node said "Volume 70 percent.", the mic half-hearing it as "Volume 1." must
 // not run the shortcut (it set the volume to 10% on the lab Pi): it goes to command-center,
-// whose follow-up gate tells the node's voice from the user's. A follow-up sharing no word with
-// the reply still takes the shortcut.
+// whose follow-up gate tells the node's voice from the user's. Since 2026-11-10 a follow-up
+// sharing no word with the reply goes there too unless it steers (TestFollowUpAfterAReplySteers…).
 func TestShortcutsSkipFollowUpsLikeOurReply(t *testing.T) {
 	for _, c := range []struct {
 		followUp  string
 		shortcuts int
 		toCC      int
-	}{{"Volume 1.", 1, 1}, {"Mute.", 2, 0}} {
+	}{{"Volume 1.", 1, 1}, {"Mute.", 1, 1}} { // "Mute." right after a reply: the gate first (2026-11-10-follow-up-shortcuts-pass-the-gate)
 		srv := newServer()
 		srv.text, srv.speakPCM = "Volume up.", pcmOf(300)
 		srv.texts = []string{c.followUp}

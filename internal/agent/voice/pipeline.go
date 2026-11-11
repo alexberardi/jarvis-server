@@ -646,7 +646,7 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 		return "", true
 	}
 	activity := p.computerTurn(s, tr.Text, false) // a stop phrase stops it locally, at once; the server still hears it
-	if end, ok := p.direct(ctx, s, ex, tr.Text); ok {
+	if end, ok := p.direct(ctx, s, ex, tr.Text, false); ok {
 		return end, true
 	}
 
@@ -710,12 +710,17 @@ func (p *Pipeline) wakeExchange(ctx context.Context, s *session, ex *Exchange, s
 // like a silent desktop command: the island shows it, the next window waits for the next step,
 // a list on the island opens the choice window. A result that asks to be spoken (Signals.Speak)
 // is a spoken reply instead; end is then why the follow-up window stays shut ("" opens it).
-func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text string) (end FollowUpEnd, handled bool) {
-	d, ok := p.Tools.(node.Director)
-	if !ok {
-		return "", false
+// steering: only node.SteeringDirector steps (a follow-up right after a reply, which
+// command-center's gate hasn't judged yet).
+func (p *Pipeline) direct(ctx context.Context, s *session, ex *Exchange, text string, steering bool) (end FollowUpEnd, handled bool) {
+	ctx = node.WithSpeaker(ctx, s.userID)
+	var out map[string]any
+	var ok bool
+	if d, is := p.Tools.(node.SteeringDirector); steering && is {
+		out, ok = d.DirectSteering(ctx, text)
+	} else if d, is := p.Tools.(node.Director); !steering && is {
+		out, ok = d.Direct(ctx, text)
 	}
-	out, ok := d.Direct(node.WithSpeaker(ctx, s.userID), text)
 	if !ok {
 		return "", false
 	}
