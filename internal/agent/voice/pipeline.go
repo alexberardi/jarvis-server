@@ -179,9 +179,9 @@ type Pipeline struct {
 	// turnEnded closes when the last turn's end has reached the toolsets; the next turn's start
 	// waits for it (turns run one at a time, so only the turn loop touches it).
 	turnEnded chan struct{}
-	bg      serial         // the music steps, in order (music.go)
-	tuned   int            // Live.tunes applied so far
-	gate    wakeGate       // the debounce and the not_for_me cool-down (wakegate.go)
+	bg        serial   // the music steps, in order (music.go)
+	tuned     int      // Live.tunes applied so far
+	gate      wakeGate // the debounce and the not_for_me cool-down (wakegate.go)
 	// tentativeAt is the last tentative wake (tentative.go): its cool-down outlives a turn, so
 	// a lyric dip can't strobe the music across wakes either.
 	tentativeAt time.Time
