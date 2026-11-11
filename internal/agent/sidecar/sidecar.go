@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -229,9 +230,10 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		}
 	}
 	s.failed = desc.Failed
+	gen := sidecarGen.Add(1)
 	for _, a := range desc.Agents {
 		s.agents = append(s.agents, AgentDef{Name: a.Name, Package: a.Package,
-			Interval: time.Duration(a.Interval) * time.Second, RunOnStartup: a.RunOnStartup})
+			Interval: time.Duration(a.Interval) * time.Second, RunOnStartup: a.RunOnStartup, Sidecar: gen})
 	}
 	s.setDevices(desc.deviceComponents)
 	return s, nil
@@ -380,7 +382,12 @@ type AgentDef struct {
 	Name, Package string
 	Interval      time.Duration
 	RunOnStartup  bool
+	// Sidecar numbers the sidecar that loaded it: a reinstalled test agent comes from a new one.
+	Sidecar uint64
 }
+
+// sidecarGen numbers the sidecars started by this process (AgentDef.Sidecar).
+var sidecarGen atomic.Uint64
 
 // Agents are the packages' background agents, read once at start (a Pi's sidecar).
 func (s *Sidecar) Agents() []AgentDef { return s.agents }

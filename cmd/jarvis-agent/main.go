@@ -1291,6 +1291,9 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 			go agents.Run(ctx)
 			go boot()
 		} else {
+			// A desktop runs no package's agents, but a test install's do run, so the Forge
+			// can test one here (their runs are test events).
+			go (&pkgagents.Scheduler{Sidecar: live, Log: log, TestsOnly: true}).Run(ctx)
 			boot()
 		}
 	}

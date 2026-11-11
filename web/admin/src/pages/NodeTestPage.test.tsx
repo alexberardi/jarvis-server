@@ -207,6 +207,29 @@ describe('NodeTestPage', () => {
     expect(screen.getByText(/Once its devices are added, control them here/)).toBeInTheDocument()
   })
 
+  it("says a background agent loaded and shows its runs, a failure by its traceback's last line", async () => {
+    poll = {
+      ...completed,
+      package_name: 'zigbee-watch',
+      details: { commands: [], agents: ['zigbee_watch'] },
+      runs: [],
+      events: [
+        { kind: 'agent', agent: 'zigbee_watch', ok: true, ms: 42, alert_count: 2 },
+        {
+          kind: 'agent',
+          agent: 'zigbee_watch',
+          ms: 3,
+          error: 'Traceback (most recent call last):\n  File "agent.py", line 40, in run\nKeyError: \'state\'\n',
+        },
+      ],
+    }
+    renderPage('/admin/nodes/pc1/test?request=r1')
+    expect(await screen.findByText('zigbee_watch', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getByText(/Each ran once at the install/)).toBeInTheDocument()
+    expect(screen.getByText('Agent zigbee_watch: ran in 42 ms, 2 alerts')).toBeInTheDocument()
+    expect(screen.getByText("Agent zigbee_watch: KeyError: 'state'")).toBeInTheDocument()
+  })
+
   it('lists the runs and sends them to the Forge with the note', async () => {
     renderPage('/admin/nodes/pc1/test?request=r1')
     expect(await screen.findByText('KeyError: sides')).toBeInTheDocument()

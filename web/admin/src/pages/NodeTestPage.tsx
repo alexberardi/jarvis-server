@@ -216,6 +216,7 @@ function TestRunView({
 function InstallCard({ t, again }: { t: TestInstall; again: ReactNode }) {
   const commands = t.details?.commands ?? []
   const protocols = t.details?.protocols ?? []
+  const agents = t.details?.agents ?? []
   return (
     <Card>
       <CardHeader title={t.package_name} icon={<FlaskConical size={18} />} actions={<Badge tone="success">Installed</Badge>} className="mb-2" />
@@ -229,6 +230,12 @@ function InstallCard({ t, again }: { t: TestInstall; again: ReactNode }) {
           <>
             Device protocols: <span className="text-text">{protocols.join(', ')}</span>. Set its settings in the mobile
             app (the node&apos;s settings), then scan for devices there.{' '}
+          </>
+        ) : null}
+        {agents.length > 0 ? (
+          <>
+            Background agents: <span className="text-text">{agents.join(', ')}</span>. Each ran once at the install and
+            then runs on its schedule; its runs are in Node events.{' '}
           </>
         ) : null}
         The node keeps it for 20 minutes from the install. After a fix in the Forge, Reinstall gets the new version.
@@ -267,6 +274,15 @@ function eventLine(e: TestEvent): { text: string; bad: boolean } {
   if (e.kind === 'scan') {
     return e.error ? { text: `Scan (${e.protocol}): ${e.error}`, bad: true } : { text: `Scan (${e.protocol}): ${e.count ?? 0} found`, bad: false }
   }
+  if (e.kind === 'agent') {
+    if (e.ok) {
+      const alerts = e.alert_count ? `, ${e.alert_count} alert${e.alert_count === 1 ? '' : 's'}` : ''
+      return { text: `Agent ${e.agent}: ran in ${e.ms ?? 0} ms${alerts}`, bad: false }
+    }
+    // The error is a traceback: its last line says what went wrong (Send to Forge has it all).
+    const last = (e.error ?? '').trim().split('\n').pop() || 'failed'
+    return { text: `Agent ${e.agent}: ${last}`, bad: true }
+  }
   if (e.kind === 'control') {
     const ok = e.success === true
     return { text: `${e.action} ${e.entity_id}: ${ok ? 'done' : (e.error ?? 'failed')}`, bad: !ok }
@@ -280,7 +296,7 @@ function EventsCard({ events }: { events: TestEvent[] }) {
   const newest = events.slice(-30).reverse()
   return (
     <Card>
-      <CardHeader title="Node events" description="Its log lines, device scans and controls. Send to Forge includes them." className="mb-2" />
+      <CardHeader title="Node events" description="Its log lines, agent runs, device scans and controls. Send to Forge includes them." className="mb-2" />
       <ul className="max-h-72 divide-y divide-border overflow-y-auto" aria-label="Node events">
         {newest.map((e, i) => {
           const { text, bad } = eventLine(e)

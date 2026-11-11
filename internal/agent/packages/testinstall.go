@@ -36,6 +36,7 @@ type testPkg struct {
 	name, dir, rid     string
 	commands           []string
 	families, managers []string
+	agents             []string
 	expires            time.Time
 }
 
@@ -66,13 +67,14 @@ func (m *Manager) readTests() []testPkg {
 			Commands  []string  `json:"commands"`
 			Families  []string  `json:"families"`
 			Managers  []string  `json:"managers"`
+			Agents    []string  `json:"agents"`
 		}
 		b, err := os.ReadFile(filepath.Join(dir, testMeta))
 		if err != nil || json.Unmarshal(b, &meta) != nil {
 			continue // not finished writing, or not ours: removeTests sweeps it
 		}
 		out = append(out, testPkg{name: e.Name(), dir: dir, rid: meta.RequestID, commands: meta.Commands, families: meta.Families,
-			managers: meta.Managers, expires: meta.ExpiresAt})
+			managers: meta.Managers, agents: meta.Agents, expires: meta.ExpiresAt})
 	}
 	return out
 }
@@ -169,14 +171,14 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 		m.Log.Warn("packages: test install: pip failed", "package", name, "err", err)
 	}
 	commands := draftCommands(dir)
-	families, managers := draftDevices(dir)
-	if len(commands) == 0 && len(families) == 0 && len(managers) == 0 {
+	families, managers, agents := draftComponents(dir)
+	if len(commands) == 0 && len(families) == 0 && len(managers) == 0 && len(agents) == 0 {
 		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("%s has no commands or device protocols", name)
+		return nil, fmt.Errorf("%s has no commands, device protocols or agents", name)
 	}
 	meta, _ := json.Marshal(map[string]any{"package_name": name, "request_id": rid, "installed_at": m.clock().UTC(),
 		"expires_at": m.clock().Add(testTTL).UTC(), "commands": commands, "families": families,
-		"managers": managers, "pip_requirements": reqs})
+		"managers": managers, "agents": agents, "pip_requirements": reqs})
 	if err := os.WriteFile(filepath.Join(dir, testMeta), meta, 0o644); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
@@ -190,21 +192,22 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 	}
 	time.AfterFunc(testTTL+time.Second, func() { m.ExpireTests(context.Background()) })
 	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands,
-		"families", families, "managers", managers)
+		"families", families, "managers", managers, "agents", agents)
 	// commands: the tool names that loaded; jarvisd records their runs for Send to Forge.
 	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
 		"commands": m.served.PackageCommands(testPrefix + name), "protocols": componentNames(families),
-		"managers": componentNames(managers)}, nil
+		"managers": componentNames(managers), "agents": componentNames(agents)}, nil
 }
 
-// draftDevices are a draft's device protocols and managers: its manifest's, or by the Pi's
-// conventions (device_families/<name>/protocol.py, device_managers/<name>/manager.py).
-func draftDevices(dir string) (families, managers []string) {
+// draftComponents are a draft's device protocols, managers and background agents: its
+// manifest's, or by the Pi's conventions (device_families/<name>/protocol.py,
+// device_managers/<name>/manager.py, agents/<name>/agent.py).
+func draftComponents(dir string) (families, managers, agents []string) {
 	man, err := LoadManifest(dir)
 	if err != nil {
 		man = &Manifest{Components: inferComponents(dir, filepath.Base(dir))}
 	}
-	return man.Paths("device_protocol"), man.Paths("device_manager")
+	return man.Paths("device_protocol"), man.Paths("device_manager"), man.Paths(Agent)
 }
 
 // componentNames are the component directories' names (device_families/<name>/protocol.py).

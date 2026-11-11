@@ -250,7 +250,8 @@ func (m *Manager) writeList() (int, error) {
 	}
 	for _, tp := range m.tests() {
 		list = append(list, entry{Name: testPrefix + tp.name, Root: tp.dir, Commands: tp.commands,
-			Families: tp.families, Managers: tp.managers})
+			// A test's agents load on every node: pkgagents runs them for the test (TestAgentsOnly).
+			Families: tp.families, Managers: tp.managers, Agents: tp.agents})
 	}
 	doc := map[string]any{"packages": list}
 	if bi := m.Builtins; bi != nil {

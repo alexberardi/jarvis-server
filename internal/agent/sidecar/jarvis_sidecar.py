@@ -90,6 +90,7 @@ import pathlib
 import re
 import sys
 import threading
+import time
 import traceback
 
 PROTO = sys.stdout
@@ -624,6 +625,11 @@ def describe_agents() -> list:
     return out
 
 
+# A failed agent run's event keeps the end of its traceback (where the error is), under jarvisd's
+# 2 KB per event.
+_MAX_AGENT_ERROR = 1500
+
+
 def agent_run(params: dict) -> dict:
     """One run of an agent (N:services/agent_scheduler_service._run_agent_safe; the Go agent
     owns the schedule and the alert queue): await run(), then its alerts. A run that raises is
@@ -633,16 +639,27 @@ def agent_run(params: dict) -> dict:
     if agent is None:
         raise RuntimeError(f"no agent {name!r} in this sidecar")
     set_current_user_id(None)
+    package = AGENT_PACKAGE.get(name)
+    started = time.monotonic()
     try:
         _run(agent.run())
     except BaseException as exc:  # a SystemExit in run() must not end the sidecar
         print(f"sidecar: agent {name} failed:\n{traceback.format_exc()}", file=sys.stderr)
+        _test_event(package, "agent", agent=name, ms=int((time.monotonic() - started) * 1000),
+                    error=traceback.format_exc()[-_MAX_AGENT_ERROR:])
         return {"error": f"{type(exc).__name__}: {exc}"}
+    ms = int((time.monotonic() - started) * 1000)
     alerts = []
     try:
         alerts = [a.to_dict() for a in agent.get_alerts() or []]
     except Exception as exc:
         print(f"sidecar: agent {name}: alerts not read: {exc}", file=sys.stderr)
+        _test_event(package, "agent", agent=name, ms=ms, error=f"get_alerts: {type(exc).__name__}: {exc}")
+        return {"alerts": alerts}
+    # A summary: jarvisd keeps an event of up to 2 KB.
+    _test_event(package, "agent", agent=name, ms=ms, ok=True, alert_count=len(alerts),
+                alerts=[{"title": str(a.get("title", ""))[:100], "summary": str(a.get("summary", ""))[:200],
+                         "priority": a.get("priority")} for a in alerts[:3]])
     return {"alerts": alerts}
 
 
