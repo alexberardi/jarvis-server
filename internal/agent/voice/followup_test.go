@@ -622,3 +622,119 @@ func TestSilentStepsChainPastFiveIterations(t *testing.T) {
 		t.Fatalf("window %s after %d follow-ups, %d listens", tr.FollowUpEnd, len(tr.FollowUps), len(l.list()))
 	}
 }
+
+// listChooser is a toolset whose stage 1 puts a list on the island for every request and
+// takes any answer as a pick.
+type listChooser struct{ node.Toolset }
+
+func (listChooser) Direct(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, node.ChoiceKey: true, node.IslandOnlyKey: true}, true
+}
+
+func (listChooser) AnswerChoice(context.Context, string) (map[string]any, bool) {
+	return map[string]any{"success": true, node.ChoiceKey: true, node.IslandOnlyKey: true}, true
+}
+
+// "Show numbers… scroll down… show numbers… 7": "7" is four chunks long and, as the third
+// window of the turn, needed five loud chunks in a row; it was never heard (2026-10-27). Onset
+// is three chunks in every window.
+func TestShortAnswerHeardLateInAChain(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"show numbers", "scroll down", "show numbers", "seven"}
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Tools = listChooser{node.Multi{}}
+	short := rep(speech, 4)
+	l := answer(r, mic, short, short, short, short)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 4 {
+		t.Fatalf("%d follow-ups heard (%s), %d listens; want all four short words", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
+	}
+}
+
+// A Bluetooth headset's mic (HFP, mSBC) drops packets as silence mid-word: the log showed peaks
+// of 124–320 against a 60 threshold but never three loud chunks in a row (2026-10-27). A word
+// broken by dropouts is still heard.
+func TestAnswerBrokenByDropoutsIsHeard(t *testing.T) {
+	srv := newServer()
+	srv.texts = []string{"what time is it", "seven"}
+	srv.speakPCM = pcmOf(10)
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	var choppy [][]int16
+	for range 4 {
+		choppy = append(choppy, speech, speech, noise)
+	}
+	l := answer(r, mic, choppy)
+	stop := r.run(t)
+	tr := r.turn(t)
+	_ = stop()
+	if len(tr.FollowUps) != 1 {
+		t.Fatalf("%d follow-ups heard (%s), %d listens; want the choppy answer", len(tr.FollowUps), tr.FollowUpEnd, len(l.list()))
+	}
+}
+
+// turnWatch records what the voice loop tells a toolset about the turn.
+// turnWatch records TurnListening calls on seen, in the order they arrive; hold, when set,
+// keeps the first end call waiting until it is closed.
+type turnWatch struct {
+	node.Toolset
+	seen  chan bool
+	hold  chan struct{}
+	ended sync.Once
+}
+
+func (w *turnWatch) TurnListening(_ context.Context, on bool) {
+	if !on && w.hold != nil {
+		w.ended.Do(func() { <-w.hold })
+	}
+	w.seen <- on
+}
+
+// calls waits for the next n calls.
+func (w *turnWatch) calls(t *testing.T, n int) []bool {
+	t.Helper()
+	var got []bool
+	for range n {
+		got = append(got, <-w.seen)
+	}
+	return got
+}
+
+// The browser's numbers show while a turn listens: the toolset hears the turn start and end.
+func TestTurnStartAndEndReachTheTools(t *testing.T) {
+	srv := newServer()
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	w := &turnWatch{Toolset: node.Multi{}, seen: make(chan bool, 4)}
+	r.p.Tools = node.Multi{w}
+	stop := r.run(t)
+	r.turn(t)
+	_ = stop()
+	if got := w.calls(t, 2); !slices.Equal(got, []bool{true, false}) {
+		t.Fatalf("turn calls %v, want start then end", got)
+	}
+}
+
+// A late end of one turn never lands after the next turn's start (PR #547 review O4: it cleared
+// appclick's window binding for that turn).
+func TestTurnEndIsHeardBeforeTheNextStart(t *testing.T) {
+	srv := newServer()
+	mic := oneWake()
+	r := newRig(t, mic, srv)
+	r.p.Cfg.Debounce = 0 // the second wake comes at once
+	w := &turnWatch{Toolset: node.Multi{}, seen: make(chan bool, 8), hold: make(chan struct{})}
+	r.p.Tools = node.Multi{w}
+	stop := r.run(t)
+	r.turn(t)
+	mic.push(rep(noise, 30), rep(wake, 3), rep(speech, 12))
+	r.turn(t)
+	close(w.hold) // turn 1's end arrives only now, after turn 2 ran
+	_ = stop()
+	if got := w.calls(t, 4); !slices.Equal(got, []bool{true, false, true, false}) {
+		t.Fatalf("turn calls %v, want each start after the previous end", got)
+	}
+}

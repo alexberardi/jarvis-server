@@ -304,3 +304,24 @@ func TestFindAppNamesOnly(t *testing.T) {
 		t.Errorf("LaunchApp = %v, launched %v opened %v", err, b.launched, b.opened)
 	}
 }
+
+// With a browser connected, a link opens in a new tab of it, not the system's new window.
+func TestOpenLinkGoesToTheBrowser(t *testing.T) {
+	b := &fakeBackend{caps: all}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	var got []string
+	ts.OpenLink = func(_ context.Context, link string) (bool, error) { got = append(got, link); return true, nil }
+	for _, target := range []string{"https://www.google.com", "google.com"} {
+		if out := call(t, ts, ToolOpen, map[string]any{"target": target}); out["success"] != true || out["in"] != "a new browser tab" {
+			t.Fatalf("%s: %v", target, out)
+		}
+	}
+	if strings.Join(got, ";") != "https://www.google.com;https://google.com" || len(b.opened) != 0 {
+		t.Fatalf("browser %v, system %v", got, b.opened)
+	}
+	ts.OpenLink = func(context.Context, string) (bool, error) { return false, nil } // no browser connected
+	call(t, ts, ToolOpen, map[string]any{"target": "https://example.com"})
+	if strings.Join(b.opened, ";") != "https://example.com" {
+		t.Fatalf("system %v", b.opened)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/url"
 	"sort"
@@ -65,12 +66,21 @@ type Tools struct {
 	// Origins is this agent's server: fill and click refuse its tabs (the Jarvis page, where
 	// the user may be chatting; jarvispage.go). Nil or empty: no check.
 	Origins *jarvispage.Origins
-	tools   []tool
+	// CC, when it returns a client, lets the model pick the element a "click …" or "type … into
+	// …" meant when no name on the page matched (pick.go). Nil: no pick.
+	CC func() *node.CC
+	// Log, when set, records each model pick (what was said, the answer, its confidence).
+	Log   *slog.Logger
+	tools []tool
 
 	now  func() time.Time // nil: time.Now (tests inject a clock)
 	mu   sync.Mutex
 	task string    // the task tab ("KEY:T"): the one browser_open opened or a tool last named
 	used time.Time // when the task tab was last used
+
+	hints       *hintState // current visible page controls, nil when no voice snapshot is active
+	hintConfirm string     // the risky page action waiting for its yes
+	listening   bool       // a voice turn is listening (TurnListening)
 }
 
 // TaskTabIdle is how long the task tab stays the default target of a command without a tab_id
@@ -157,7 +167,7 @@ func NewTools(h *Hub) *Tools {
 			},
 			Keywords: []string{"browser", "scroll", "page", "down", "up"},
 			Examples: []node.Example{{VoiceCommand: "scroll down", Params: map[string]any{"direction": "down"}, Primary: true}}},
-			0, t.simple("scroll"), true},
+			0, t.scroll, true},
 		{node.Spec{Name: ToolFind, Description: "Find and highlight words on the browser's current page ('find X on this page').",
 			Params: []node.Param{
 				{Name: "text", Type: "string", Required: true, Description: ""},
@@ -168,7 +178,7 @@ func NewTools(h *Hub) *Tools {
 			0, t.find, true},
 		{node.Spec{Name: ToolFill, Description: "Type into a field on the browser's current page ('search for X on this page', 'fill in username X'). For a desktop app use desktop_type_text.",
 			Params: []node.Param{
-				{Name: "field", Type: "string", Description: "The field's label as the user said it, e.g. username, search"},
+				{Name: "field", Type: "string", Description: "The field as the user described it, using its label or nearby text"},
 				{Name: "text", Type: "string", Required: true, Description: "The text to put in the field"},
 				{Name: "submit", Type: "bool", Description: "Submit the form after"},
 				optionalTab("the current tab"),
@@ -178,10 +188,11 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "fill in username abcde on browser", Params: map[string]any{"field": "username", "text": "abcde"}, Primary: true},
 				{VoiceCommand: "put hello@example.com in the email field", Params: map[string]any{"field": "email", "text": "hello@example.com"}},
 				{VoiceCommand: "type pizza near me in the search box and search", Params: map[string]any{"field": "search", "text": "pizza near me", "submit": true}},
+				{VoiceCommand: "type cats into the reply box under Bob's comment", Params: map[string]any{"field": "reply box under Bob's comment", "text": "cats"}},
 			}, Risky: true}, 0, t.fill, true},
 		{node.Spec{Name: ToolClick, Description: "Click a button or link on the browser's current page by its label ('click OK on the browser'). Desktop dialogs and the browser's own pop-ups: use desktop_press_key.",
 			Params: []node.Param{
-				{Name: "text", Type: "string", Required: true, Description: "The label as shown, e.g. Sign in"},
+				{Name: "text", Type: "string", Description: "The control as the user described it, using its label or nearby text"},
 				optionalTab("the current tab"),
 			},
 			Keywords: []string{"browser", "click", "button", "ok", "cancel", "press", "accept", "submit", "link", "dialog"},
@@ -189,6 +200,7 @@ func NewTools(h *Hub) *Tools {
 				{VoiceCommand: "click OK on the browser", Params: map[string]any{"text": "OK"}, Primary: true},
 				{VoiceCommand: "hit cancel", Params: map[string]any{"text": "Cancel"}},
 				{VoiceCommand: "click sign in", Params: map[string]any{"text": "Sign in"}},
+				{VoiceCommand: "click Reply under Bob's comment", Params: map[string]any{"text": "Reply under Bob's comment"}},
 			}, Risky: true}, 0, t.click, true},
 	}
 	return t
@@ -397,6 +409,11 @@ func tabArg(args map[string]any) (browser string, tab any, err error) {
 	return "", nil, fmt.Errorf("%w: tab_id must be a tab_id from browser_list_tabs, e.g. \"firefox:42\"", errBadArgs)
 }
 
+func hasExplicitTab(args map[string]any) bool {
+	v, ok := args["tab_id"]
+	return ok && v != nil && v != ""
+}
+
 func validKey(k string) bool {
 	if k == "" || len(k) > 32 {
 		return false
@@ -488,6 +505,18 @@ func (t *Tools) simple(cmd string) func(context.Context, map[string]any) (map[st
 		}
 		return t.call(ctx, cmd, args, extra)
 	}
+}
+
+// scroll scrolls the page and reports whether it moved: at the end of the page it fails with
+// at_end, so neither the model nor the island says "scrolled" when nothing did (VOICE-FLOWS.md
+// Q32). An older extension that doesn't say keeps its plain success.
+func (t *Tools) scroll(ctx context.Context, args map[string]any) (map[string]any, error) {
+	out, err := t.simple("scroll")(ctx, args)
+	if err != nil || out["moved"] != false {
+		return out, err
+	}
+	where := map[string]string{"up": "the top", "top": "the top", "down": "the bottom", "bottom": "the bottom"}[str(out["direction"])]
+	return nil, &CommandError{Code: CodeAtEnd, Message: "the page didn't move: it's already at " + cmp.Or(where, "the end")}
 }
 
 // listTabs lists the tabs of every connected browser.
@@ -600,6 +629,12 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	if res := t.reuseTaskTab(ctx, u); res != nil {
 		return res, nil
 	}
+	return t.openURL(ctx, u)
+}
+
+// openURL opens u in a new tab of the user's browser window (behind the Jarvis page when that is
+// in front), never reusing one.
+func (t *Tools) openURL(ctx context.Context, u string) (map[string]any, error) {
 	extra := map[string]any{"url": u}
 	behind := false
 	if t.Origins.Known() {
@@ -622,6 +657,22 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		res["opened_behind_chat"] = true
 	}
 	return res, nil
+}
+
+// OpenLink opens an http(s) link in a new tab of the connected browser; ok false with none
+// connected. desktop_open sends links here: the system's handler opened a new window each time.
+func (t *Tools) OpenLink(ctx context.Context, link string) (bool, error) {
+	if len(t.Hub.Browsers()) == 0 {
+		return false, nil
+	}
+	u, err := webURL(link)
+	if err != nil {
+		return false, nil // mailto: and the like stay the system's
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+	_, err = t.openURL(ctx, u)
+	return err == nil, err
 }
 
 // reuseTaskTab answers an open of a site's home page (https://www.google.com) while the task tab
@@ -814,13 +865,18 @@ func (t *Tools) gate(ctx context.Context, g dictate.Gate, question string, act f
 
 func (t *Tools) fill(ctx context.Context, args map[string]any) (map[string]any, error) {
 	raw, _ := args["text"].(string)
+	field, _ := args["field"].(string)
 	text, err := dictate.Sanitize(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errDictate, err)
 	}
-	field, _ := args["field"].(string)
 	field = strings.TrimSpace(field)
 	submit := dictate.BoolArg(args, "submit")
+	if field != "" && !hasExplicitTab(args) {
+		if ref, h, handled := t.namedRef(field); handled {
+			return hintToolOut(t.fillHint(ctx, h, ref, text, submit))
+		}
+	}
 	if _, _, err := tabArg(args); err != nil {
 		return nil, err
 	}
@@ -874,6 +930,11 @@ func (t *Tools) click(ctx context.Context, args map[string]any) (map[string]any,
 	}
 	if len([]rune(label)) > 100 {
 		return nil, fmt.Errorf("%w: a button label is at most 100 characters", errBadArgs)
+	}
+	if !hasExplicitTab(args) {
+		if ref, h, handled := t.namedRef(label); handled {
+			return hintToolOut(t.clickHint(ctx, h, ref))
+		}
 	}
 	if _, _, err := tabArg(args); err != nil {
 		return nil, err

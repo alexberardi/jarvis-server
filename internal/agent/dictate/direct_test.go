@@ -24,7 +24,8 @@ func TestParseType(t *testing.T) {
 			t.Errorf("%q: %+v %v, want %+v", said, got, ok, want)
 		}
 	}
-	for _, said := range []string{"write my resume", "what should I type", "typewriter repair near me"} {
+	for _, said := range []string{"write my resume", "what should I type", "typewriter repair near me",
+		"type ABC into 29", "Type hello in number 4."} { // a number on the page: the browser's
 		if r, ok := parseType(said); ok {
 			t.Errorf("%q parsed as %+v", said, r)
 		}

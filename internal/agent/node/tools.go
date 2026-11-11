@@ -75,6 +75,21 @@ func Speaker(ctx context.Context) *int64 {
 	return u
 }
 
+// TurnWatcher is a Toolset told when a voice turn starts listening and when it ends: the
+// browser shows numbers on what can be clicked while Jarvis listens (VOICE-FLOWS.md Q32).
+type TurnWatcher interface {
+	TurnListening(ctx context.Context, on bool)
+}
+
+// TurnListening tells each Toolset that watches turns.
+func (m Multi) TurnListening(ctx context.Context, on bool) {
+	for _, t := range m {
+		if w, ok := t.(TurnWatcher); ok {
+			w.TurnListening(ctx, on)
+		}
+	}
+}
+
 // Direct asks each Toolset that can carry out a command itself.
 func (m Multi) Direct(ctx context.Context, said string) (map[string]any, bool) {
 	for _, t := range m {

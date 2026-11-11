@@ -947,6 +947,14 @@
         },
         "is_primary": false,
         "voice_command": "type pizza near me in the search box and search"
+      },
+      {
+        "expected_parameters": {
+          "field": "reply box under Bob's comment",
+          "text": "cats"
+        },
+        "is_primary": false,
+        "voice_command": "type cats into the reply box under Bob's comment"
       }
     ],
     "function": {
@@ -955,7 +963,7 @@
       "parameters": {
         "properties": {
           "field": {
-            "description": "The field's label as the user said it, e.g. username, search",
+            "description": "The field as the user described it, using its label or nearby text",
             "type": "string"
           },
           "submit": {
@@ -1015,6 +1023,13 @@
         },
         "is_primary": false,
         "voice_command": "click sign in"
+      },
+      {
+        "expected_parameters": {
+          "text": "Reply under Bob's comment"
+        },
+        "is_primary": false,
+        "voice_command": "click Reply under Bob's comment"
       }
     ],
     "function": {
@@ -1026,13 +1041,11 @@
             "type": "string"
           },
           "text": {
-            "description": "The label as shown, e.g. Sign in",
+            "description": "The control as the user described it, using its label or nearby text",
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": [],
         "type": "object"
       }
     },

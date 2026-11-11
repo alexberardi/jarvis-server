@@ -101,6 +101,9 @@ type Tools struct {
 	Host   *host.Host
 	Policy OpenPolicy
 	Apps   Lister // nil: no apps are launchable
+	// OpenLink, when set, opens an http(s) link in a new tab of the user's browser; ok false
+	// leaves it to the system's handler (which may open a new window).
+	OpenLink func(ctx context.Context, link string) (ok bool, err error)
 	// Launched records each app launch, so typing into it can wait for its window (nil: not
 	// recorded).
 	Launched *launches.Tracker
@@ -303,10 +306,7 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		return nil, err
 	}
 	if kind != targetApp {
-		if err := t.Host.Open(ctx, strings.TrimSpace(target)); err != nil {
-			return nil, err
-		}
-		return map[string]any{"opened": target, "note": "requested; launch is not confirmed"}, nil
+		return t.openLink(ctx, strings.TrimSpace(target))
 	}
 	list, err := t.catalogue()
 	if err != nil {
@@ -315,11 +315,7 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 	p, err := apps.Find(list, target)
 	if errors.Is(err, apps.ErrNotFound) && reDomain.MatchString(strings.TrimSpace(target)) {
 		// "open google.com": no app has that name, so it's the site.
-		link := "https://" + strings.TrimSpace(target)
-		if err := t.Host.Open(ctx, link); err != nil {
-			return nil, err
-		}
-		return map[string]any{"opened": link, "note": "requested; launch is not confirmed"}, nil
+		return t.openLink(ctx, "https://"+strings.TrimSpace(target))
 	}
 	if err != nil {
 		return nil, err
@@ -343,6 +339,22 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		out["fuzzy_match"], out["heard_as"] = true, p.HeardAs
 	}
 	return out, nil
+}
+
+// openLink opens a link: in a new tab of the connected browser when there is one (OpenLink), else
+// through the system's handler.
+func (t *Tools) openLink(ctx context.Context, link string) (map[string]any, error) {
+	if t.OpenLink != nil {
+		if ok, err := t.OpenLink(ctx, link); err != nil {
+			return nil, err
+		} else if ok {
+			return map[string]any{"opened": link, "in": "a new browser tab"}, nil
+		}
+	}
+	if err := t.Host.Open(ctx, link); err != nil {
+		return nil, err
+	}
+	return map[string]any{"opened": link, "note": "requested; launch is not confirmed"}, nil
 }
 
 // FindApp is the installed app a computer task names, near names included: only an app by

@@ -181,3 +181,24 @@ test("fill on a page that never shows the field fails with field_not_found", asy
   assert.equal(r.code, "field_not_found");
   assert.deepEqual(filled, []);
 });
+
+// Voice selection reads an invisible snapshot and acts by the refs it returns.
+test("snapshot lists visible controls without drawing an overlay", async () => {
+  const tab = { id: 4, url: "https://www.google.com/search?q=dogs", title: "dogs", active: true, windowId: 1 };
+  const b = load({ tabs: [tab] });
+  const calls = [];
+  b.api.tabs.get = async () => ({ ...tab, status: "complete" });
+  b.api.scripting.executeScript = async ({ func, args }) => {
+    calls.push([func.name, args]);
+    if (func.name === "snapCollect") {
+      return [{ frameId: 0, result: { token: "t", url: tab.url, title: tab.title, elements: [{ k: 1, role: "link", name: "Wikipedia" }, { k: 2, role: "button", name: "Search" }] } }];
+    }
+    return [{ frameId: 0, result: { ok: true, count: 2 } }];
+  };
+  const r = await b.call("snapshot", { viewport: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(Array.from(r.result.elements, (e) => e.ref), ["e1", "e2"]);
+  assert.equal(calls.find(([n]) => n === "snapCollect")[1][2], true, "only elements on screen");
+  assert.equal(calls.some(([n]) => n === "hintsDraw"), false, "snapshot stays invisible");
+  assert.ok(calls.some(([n]) => n === "snapCommit"), "snapshot refs are retained for act");
+});

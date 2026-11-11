@@ -17,6 +17,9 @@ const pageCheckTimeout = 3 * time.Second
 // CodeJarvisPage is the error code of a fill or click refused on the Jarvis page.
 const CodeJarvisPage = "jarvis_page"
 
+// CodeAtEnd: a scroll that found the page already at its top or bottom.
+const CodeAtEnd = "at_end"
+
 // tabURL is the address of the tab a command means (the given tab_id, else the current tab of
 // the browser it goes to), from list_tabs. ok false when it can't be told.
 func (t *Tools) tabURL(ctx context.Context, args map[string]any) (string, bool) {
