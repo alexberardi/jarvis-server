@@ -882,7 +882,7 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	var press func(*hat.LEDs) // the HAT button reads the Pi's alerts
 	var wakeReminders func()
-	if q := alertQueue(tf.host, tf.reminder); q != nil {
+	if q := tf.alerts; q != nil {
 		var alerts *sdkhost.Announcer
 		alerts, wakeReminders = startAlerts(ctx, q, mic, tf.reminder, log)
 		press = func(leds *hat.LEDs) { readAlerts(ctx, alerts, leds, log) }
@@ -936,6 +936,14 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, tf.live, log)
+	if tf.agents != nil {
+		// The Forge test page's "Run agents now" (jarvisd's run_test_agents).
+		addVerbs(r, map[string]func(context.Context, *node.CC, map[string]any){
+			"run_test_agents": func(ctx context.Context, _ *node.CC, _ map[string]any) {
+				log.Info("pkgagents: running the test agents now", "agents", tf.agents.RunTests(ctx))
+			},
+		})
+	}
 	// action, callback and toggle_command: the app's device control, a command's buttons and
 	// callbacks, run by the sidecar; a voice turn's action message is said between turns.
 	wireActions(r, sc, tools, st, sayNow(mic), log)
@@ -1157,6 +1165,8 @@ type toolFlags struct {
 	// the sidecar on them and leaves pkgs to answer the app's install requests.
 	pkgRoot string
 	pkgs    *packages.Manager
+	// agents runs the packages' background agents (a Pi's), or only test installs' (a computer).
+	agents *pkgagents.Scheduler
 	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools; its
 	// sidecar also loads the node's built-in commands, whose SDK backends host answers.
 	pi   bool
@@ -1171,6 +1181,8 @@ type toolFlags struct {
 	routine  *builtins.Routine
 	// reminder is the reminder built-in (with a store), whose due reminders a Pi's poller fires.
 	reminder *builtins.Reminder
+	// alerts is the node's alert queue (nodeAlerts), which build makes.
+	alerts *sdkhost.Alerts
 	// computer, when the caller sets it, is the computer-task executor's tools on the browser
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
@@ -1260,6 +1272,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 // addCommon adds what every profile has: the package sidecar's commands and the clock. On an
 // error it has already run closeAll.
 func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodesettings.Store, tools node.Multi, closeAll func()) (node.Multi, func(), error) {
+	f.alerts = nodeAlerts(f.host)
 	// The package sidecar: the installed Pantry packages, or the spike's directory of modules.
 	live := &sidecar.Live{}
 	f.live = live
@@ -1291,11 +1304,17 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 			f.pkgs.System = packages.NewSystem(log)
 			// The packages' background agents (comfyui_jobs) on their schedules, their alerts
 			// in the Pi's queue; one that keeps failing marks its package failed in the app.
-			agents := &pkgagents.Scheduler{Sidecar: live, Alerts: f.host.Alerts, Log: log}
+			agents := &pkgagents.Scheduler{Sidecar: live, Alerts: f.alerts, Log: log}
 			f.pkgs.AgentHealth = agents.Failing
+			f.agents = agents
 			go agents.Run(ctx)
 			go boot()
 		} else {
+			// A desktop runs no package's agents, but a test install's do run, so the Forge
+			// can test one here: its alerts are said and "what's up" reads them, as on a Pi, and
+			// its runs are test events.
+			f.agents = &pkgagents.Scheduler{Sidecar: live, Alerts: f.alerts, Log: log, TestsOnly: true}
+			go f.agents.Run(ctx)
 			boot()
 		}
 	}
@@ -1320,11 +1339,12 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		f.reminder = &builtins.Reminder{Store: st, CC: cc, Log: log}
 		tools = append(tools, f.reminder)
 	}
+	// "What's up": the node's alerts (reminders, the packages' agents), on a Pi and a computer.
+	tools = append(tools, &builtins.CheckAlerts{Alerts: f.alerts, CC: cc, Store: st})
 	if f.host != nil && f.host.Timers != nil {
-		// A Pi's timers, volume and alerts: the host's services, on its speaker.
+		// A Pi's timers and volume: the host's services, on its speaker.
 		tools = append(tools, &builtins.Timers{Service: f.host.Timers, Store: st},
-			&builtins.ControlNode{Audio: f.host.Audio, Store: st},
-			&builtins.CheckAlerts{Alerts: f.host.Alerts, CC: cc, Store: st})
+			&builtins.ControlNode{Audio: f.host.Audio, Store: st})
 	}
 	if f.pi {
 		// The Pi's model hand-offs, as the Python node had them; a computer's prompt doesn't.

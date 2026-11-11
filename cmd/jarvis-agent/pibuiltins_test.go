@@ -114,12 +114,9 @@ func TestDesktopRemindersFire(t *testing.T) {
 		node.Request{UserID: &user}); out["reminder_id"] == nil {
 		t.Fatalf("set: %v", out)
 	}
-	if alertQueue(nil, nil) != nil {
-		t.Error("no host and no reminders: a queue")
-	}
-	q := alertQueue(nil, rem)
+	q := nodeAlerts(nil)
 	if q == nil {
-		t.Fatal("the desktop's reminders have no queue")
+		t.Fatal("the desktop has no alert queue")
 	}
 
 	now = now.Add(2 * time.Minute)

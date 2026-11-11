@@ -1,6 +1,8 @@
 package packages
 
 import (
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+
 	"bufio"
 	"context"
 	"encoding/json"
@@ -36,6 +38,8 @@ type testPkg struct {
 	name, dir, rid     string
 	commands           []string
 	families, managers []string
+	agents             []string
+	secrets            []sidecar.SecretKey // what it declared once loaded: forgotten with it
 	expires            time.Time
 }
 
@@ -61,18 +65,20 @@ func (m *Manager) readTests() []testPkg {
 		}
 		dir := filepath.Join(m.testsDir(), e.Name())
 		var meta struct {
-			ExpiresAt time.Time `json:"expires_at"`
-			RequestID string    `json:"request_id"`
-			Commands  []string  `json:"commands"`
-			Families  []string  `json:"families"`
-			Managers  []string  `json:"managers"`
+			ExpiresAt time.Time           `json:"expires_at"`
+			RequestID string              `json:"request_id"`
+			Commands  []string            `json:"commands"`
+			Families  []string            `json:"families"`
+			Managers  []string            `json:"managers"`
+			Agents    []string            `json:"agents"`
+			Secrets   []sidecar.SecretKey `json:"secrets"`
 		}
 		b, err := os.ReadFile(filepath.Join(dir, testMeta))
 		if err != nil || json.Unmarshal(b, &meta) != nil {
 			continue // not finished writing, or not ours: removeTests sweeps it
 		}
 		out = append(out, testPkg{name: e.Name(), dir: dir, rid: meta.RequestID, commands: meta.Commands, families: meta.Families,
-			managers: meta.Managers, expires: meta.ExpiresAt})
+			managers: meta.Managers, agents: meta.Agents, secrets: meta.Secrets, expires: meta.ExpiresAt})
 	}
 	return out
 }
@@ -89,11 +95,11 @@ func (m *Manager) tests() []testPkg {
 }
 
 // removeTests deletes the expired test installs (all of them with all) and anything in tests/
-// that isn't one. It reports whether it removed a served one.
-func (m *Manager) removeTests(all bool) bool {
+// that isn't one. It returns the served ones it removed.
+func (m *Manager) removeTests(all bool) []testPkg {
 	entries, err := os.ReadDir(m.testsDir())
 	if err != nil {
-		return false
+		return nil
 	}
 	keep := map[string]bool{}
 	if !all {
@@ -101,17 +107,62 @@ func (m *Manager) removeTests(all bool) bool {
 			keep[tp.name] = true
 		}
 	}
-	served := false
+	served := map[string]testPkg{}
+	for _, tp := range m.readTests() {
+		served[tp.name] = tp
+	}
+	var removed []testPkg
 	for _, e := range entries {
 		if keep[e.Name()] {
 			continue
 		}
-		if e.IsDir() && exists(filepath.Join(m.testsDir(), e.Name(), testMeta)) {
-			served = true
+		if tp, ok := served[e.Name()]; ok {
+			removed = append(removed, tp)
 		}
 		_ = os.RemoveAll(filepath.Join(m.testsDir(), e.Name()))
 	}
-	return served
+	return removed
+}
+
+// forgetTestSecrets forgets the secrets the removed test installs declared, except a key a
+// package of the sidecar now in service declares too (two packages may share MQTT_HOST). Call it
+// after the new sidecar is in service. A reinstall of the same draft keeps its secrets: it
+// isn't removed, just replaced.
+func (m *Manager) forgetTestSecrets(removed []testPkg) {
+	if m.Secrets == nil || len(removed) == 0 {
+		return
+	}
+	declared := map[sidecar.SecretKey]bool{}
+	if m.served == nil && (len(m.List()) > 0 || m.Builtins != nil) {
+		// No sidecar to ask (it didn't start), yet packages may share these keys: keep them.
+		m.Log.Warn("packages: a removed test install's secrets are kept: no sidecar to check them against")
+		return
+	}
+	if m.served != nil {
+		now, err := m.served.SecretKeys()
+		if err != nil {
+			// Not knowing what is still used, keep them all rather than break a package.
+			m.Log.Warn("packages: a removed test install's secrets are kept", "err", err)
+			return
+		}
+		for _, keys := range now {
+			for _, k := range keys {
+				declared[k] = true
+			}
+		}
+	}
+	for _, tp := range removed {
+		for _, k := range tp.secrets {
+			if declared[k] {
+				continue
+			}
+			if err := m.Secrets.ForgetSecret(k.Key, k.Scope); err != nil {
+				m.Log.Warn("packages: a test install's secret wasn't forgotten", "package", tp.name, "key", k.Key, "err", err)
+				continue
+			}
+			m.Log.Info("packages: forgot a test install's secret", "package", tp.name, "key", k.Key)
+		}
+	}
 }
 
 // ExpireTests removes the test installs whose time is up and restarts the sidecar without
@@ -119,7 +170,8 @@ func (m *Manager) removeTests(all bool) bool {
 func (m *Manager) ExpireTests(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.removeTests(false) {
+	removed := m.removeTests(false)
+	if len(removed) == 0 {
 		return
 	}
 	m.Log.Info("packages: test install expired")
@@ -129,6 +181,7 @@ func (m *Manager) ExpireTests(ctx context.Context) {
 		return
 	}
 	m.commit(sc)
+	m.forgetTestSecrets(removed)
 }
 
 // A requirements.txt line uv may get: a requirement, never an option or a URL.
@@ -149,7 +202,7 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.removeTests(false)
+	removed := m.removeTests(false)
 	dir := filepath.Join(m.testsDir(), name)
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -169,15 +222,15 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 		m.Log.Warn("packages: test install: pip failed", "package", name, "err", err)
 	}
 	commands := draftCommands(dir)
-	families, managers := draftDevices(dir)
-	if len(commands) == 0 && len(families) == 0 && len(managers) == 0 {
+	families, managers, agents := draftComponents(dir)
+	if len(commands) == 0 && len(families) == 0 && len(managers) == 0 && len(agents) == 0 {
 		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("%s has no commands or device protocols", name)
+		return nil, fmt.Errorf("%s has no commands, device protocols or agents", name)
 	}
-	meta, _ := json.Marshal(map[string]any{"package_name": name, "request_id": rid, "installed_at": m.clock().UTC(),
+	meta := map[string]any{"package_name": name, "request_id": rid, "installed_at": m.clock().UTC(),
 		"expires_at": m.clock().Add(testTTL).UTC(), "commands": commands, "families": families,
-		"managers": managers, "pip_requirements": reqs})
-	if err := os.WriteFile(filepath.Join(dir, testMeta), meta, 0o644); err != nil {
+		"managers": managers, "agents": agents, "pip_requirements": reqs}
+	if err := writeMeta(dir, meta); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
@@ -188,23 +241,39 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 		}
 		return nil, err
 	}
+	m.forgetTestSecrets(removed)
+	// The secrets it declares, kept with it so they are forgotten when it goes (after a restart too).
+	if keys, err := m.served.SecretKeys(); err != nil {
+		m.Log.Warn("packages: a test install's secrets weren't read: they will stay after it", "package", name, "err", err)
+	} else if len(keys[testPrefix+name]) > 0 {
+		meta["secrets"] = keys[testPrefix+name]
+		if err := writeMeta(dir, meta); err != nil {
+			m.Log.Warn("packages: a test install's secrets weren't recorded", "package", name, "err", err)
+		}
+	}
 	time.AfterFunc(testTTL+time.Second, func() { m.ExpireTests(context.Background()) })
 	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands,
-		"families", families, "managers", managers)
+		"families", families, "managers", managers, "agents", agents)
 	// commands: the tool names that loaded; jarvisd records their runs for Send to Forge.
 	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
 		"commands": m.served.PackageCommands(testPrefix + name), "protocols": componentNames(families),
-		"managers": componentNames(managers)}, nil
+		"managers": componentNames(managers), "agents": componentNames(agents)}, nil
 }
 
-// draftDevices are a draft's device protocols and managers: its manifest's, or by the Pi's
-// conventions (device_families/<name>/protocol.py, device_managers/<name>/manager.py).
-func draftDevices(dir string) (families, managers []string) {
+// draftComponents are a draft's device protocols, managers and background agents: its
+// manifest's, or by the Pi's conventions (device_families/<name>/protocol.py,
+// device_managers/<name>/manager.py, agents/<name>/agent.py).
+func draftComponents(dir string) (families, managers, agents []string) {
 	man, err := LoadManifest(dir)
 	if err != nil {
 		man = &Manifest{Components: inferComponents(dir, filepath.Base(dir))}
 	}
-	return man.Paths("device_protocol"), man.Paths("device_manager")
+	return man.Paths("device_protocol"), man.Paths("device_manager"), man.Paths(Agent)
+}
+
+func writeMeta(dir string, meta map[string]any) error {
+	b, _ := json.Marshal(meta)
+	return os.WriteFile(filepath.Join(dir, testMeta), b, 0o644)
 }
 
 // componentNames are the component directories' names (device_families/<name>/protocol.py).

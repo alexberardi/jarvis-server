@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -93,6 +94,8 @@ type Sidecar struct {
 	music   []MusicCommand    // the IJarvisMusicCommand sources, in load order
 	failed  map[string]string // package -> why its commands didn't load
 	agents  []AgentDef
+	// agentComps are the agents as the settings snapshot lists them (Devices().Agents).
+	agentComps []nodesettings.DeviceComponent
 
 	devMu   sync.Mutex
 	devices nodesettings.Devices
@@ -197,10 +200,12 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		} `json:"tools"`
 		Failed map[string]string `json:"failed"`
 		Agents []struct {
-			Name         string `json:"name"`
-			Package      string `json:"package"`
-			Interval     int    `json:"interval_seconds"`
-			RunOnStartup bool   `json:"run_on_startup"`
+			Name         string                    `json:"name"`
+			Package      string                    `json:"package"`
+			Interval     int                       `json:"interval_seconds"`
+			RunOnStartup bool                      `json:"run_on_startup"`
+			Description  string                    `json:"description"`
+			Secrets      []nodesettings.SecretSpec `json:"secrets"`
 		} `json:"agents"`
 		deviceComponents
 	}
@@ -229,9 +234,15 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 		}
 	}
 	s.failed = desc.Failed
+	gen := sidecarGen.Add(1)
 	for _, a := range desc.Agents {
 		s.agents = append(s.agents, AgentDef{Name: a.Name, Package: a.Package,
-			Interval: time.Duration(a.Interval) * time.Second, RunOnStartup: a.RunOnStartup})
+			Interval: time.Duration(a.Interval) * time.Second, RunOnStartup: a.RunOnStartup, Sidecar: gen})
+		// The settings snapshot's agents (the app's Tasks tab), with their settings.
+		s.agentComps = append(s.agentComps, nodesettings.DeviceComponent{Secrets: a.Secrets, Entry: map[string]any{
+			"agent_name": a.Name, "description": a.Description, "enabled": true,
+			"schedule": map[string]any{"interval_seconds": a.Interval, "run_on_startup": a.RunOnStartup},
+		}})
 	}
 	s.setDevices(desc.deviceComponents)
 	return s, nil
@@ -285,6 +296,23 @@ func (s *Sidecar) UserSecrets(_ context.Context, uid int64) (map[string][]nodese
 		return nil, err
 	}
 	return res.Secrets, nil
+}
+
+// SecretKey is one secret a package declares (its key and scope).
+type SecretKey struct {
+	Key   string `json:"key"`
+	Scope string `json:"scope"`
+}
+
+// SecretKeys are the secrets each loaded package declares, by package.
+func (s *Sidecar) SecretKeys() (map[string][]SecretKey, error) {
+	var res struct {
+		Packages map[string][]SecretKey `json:"packages"`
+	}
+	if err := s.roundTrip("secret_keys", nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Packages, nil
 }
 
 // DataCommands are the commands' mobile data-browser settings, read once at start.
@@ -380,7 +408,12 @@ type AgentDef struct {
 	Name, Package string
 	Interval      time.Duration
 	RunOnStartup  bool
+	// Sidecar numbers the sidecar that loaded it: a reinstalled test agent comes from a new one.
+	Sidecar uint64
 }
+
+// sidecarGen numbers the sidecars started by this process (AgentDef.Sidecar).
+var sidecarGen atomic.Uint64
 
 // Agents are the packages' background agents, read once at start (a Pi's sidecar).
 func (s *Sidecar) Agents() []AgentDef { return s.agents }

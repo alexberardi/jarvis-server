@@ -104,6 +104,11 @@ func TestPiToolset(t *testing.T) {
 	if !slices.Contains(names, "get_current_time") {
 		t.Errorf("no clock: %v", names)
 	}
+	// The node's alerts (reminders, the packages' agents) and "what's up": addCommon, which a
+	// computer's toolset runs too, so a desktop has them (it had neither before 2026-11-10).
+	if !slices.Contains(names, "check_alerts") || tf.alerts == nil {
+		t.Errorf("no alert queue or check_alerts: %v", names)
+	}
 	if tf.origins == nil {
 		t.Error("origins not made (learnServer and listen fill them)")
 	}

@@ -24,7 +24,15 @@ type Sidecar interface {
 	Failed() map[string]string
 	// PackageCommands are the names of the commands that loaded from package pkg.
 	PackageCommands(pkg string) []string
+	// SecretKeys are the secrets each loaded package declares.
+	SecretKeys() (map[string][]sidecar.SecretKey, error)
 	Close() error
+}
+
+// SecretStore forgets a secret for every user (nodesettings.Store): a test install's settings
+// go with it.
+type SecretStore interface {
+	ForgetSecret(key, scope string) error
 }
 
 // Sidecars starts package sidecars and puts one in service.
@@ -82,6 +90,8 @@ type Manager struct {
 	// AgentHealth, when set (the Pi profile: pkgagents.Scheduler.Failing), are the packages
 	// whose agents keep failing, with why: Report marks them failed.
 	AgentHealth func() map[string]string
+	// Secrets, when set, is where a removed test install's secrets are forgotten.
+	Secrets SecretStore
 
 	mu     sync.Mutex
 	now    func() time.Time  // time.Now; tests move it
@@ -170,7 +180,9 @@ func (m *Manager) Boot(ctx context.Context) error {
 			return exists(filepath.Join(m.dir(name), ManifestFile)) || exists(filepath.Join(m.dir(name), CommandManifestFile))
 		})
 	}
-	m.removeTests(true)
+	removed := m.removeTests(true)
+	// A test left from before the restart: its secrets go once the sidecar shows what's still used.
+	defer func() { m.forgetTestSecrets(removed) }()
 	if m.Builtins != nil {
 		if err := m.installBuiltins(ctx); err != nil {
 			if !exists(m.builtinsStamp()) && len(m.List()) == 0 {
@@ -250,7 +262,8 @@ func (m *Manager) writeList() (int, error) {
 	}
 	for _, tp := range m.tests() {
 		list = append(list, entry{Name: testPrefix + tp.name, Root: tp.dir, Commands: tp.commands,
-			Families: tp.families, Managers: tp.managers})
+			// A test's agents load on every node: pkgagents runs them for the test (TestAgentsOnly).
+			Families: tp.families, Managers: tp.managers, Agents: tp.agents})
 	}
 	doc := map[string]any{"packages": list}
 	if bi := m.Builtins; bi != nil {

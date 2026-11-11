@@ -3,9 +3,12 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, FlaskConical, MessageCircle, RotateCw, SendHorizontal, ShieldAlert, Square } from 'lucide-react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import MessageBubble from '@/components/chat/MessageBubble'
+import DeviceDiscovery from '@/components/devices/DeviceDiscovery'
+import NodeSettings from '@/components/nodes/NodeSettings'
+import { getDeviceConfig, listDeviceRooms } from '@/api/devices'
 import { Badge, Banner, Button, Card, CardHeader, EmptyState, Input, PageHeader, buttonStyles } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
-import { normalizeShareCode, pollTestInstall, requestTestInstall, sendToForge } from '@/api/testInstall'
+import { normalizeShareCode, pollTestInstall, requestTestInstall, runTestAgents, sendToForge } from '@/api/testInstall'
 import type { TestEvent, TestInstall, TestRun } from '@/api/testInstall'
 import { useAuth } from '@/hooks/useAuth'
 import { useChat } from '@/hooks/useChat'
@@ -66,6 +69,15 @@ export default function NodeTestPage() {
           key={requestId}
           nodeId={id}
           householdId={node?.household_id ?? ''}
+          tools={
+            <NodeTools
+              nodeId={id}
+              householdId={node?.household_id ?? ''}
+              name={name}
+              online={node?.online === true}
+              desktop={node?.node_kind === 'desktop'}
+            />
+          }
           requestId={requestId}
           shareCode={shareCode}
           onReinstalled={(rid) => started(rid, shareCode)}
@@ -135,11 +147,14 @@ function TestRunView({
   shareCode,
   onReinstalled,
   onRestart,
+  tools,
 }: {
   nodeId: string
   householdId: string
   requestId: string
   shareCode: string
+  /** The node's settings and a device scan: shown for every draft, whatever it holds. */
+  tools: ReactNode
   onReinstalled: (requestId: string) => void
   onRestart: () => void
 }) {
@@ -204,7 +219,7 @@ function TestRunView({
         protocols={t.details?.protocols ?? []}
       />
       <div className="space-y-4">
-        <InstallCard t={t} again={again} />
+        <InstallCard t={t} again={again} tools={tools} nodeId={nodeId} requestId={requestId} />
         <RunsCard runs={t.runs ?? []} />
         {(t.events?.length ?? 0) > 0 && <EventsCard events={t.events ?? []} />}
         <SendCard nodeId={nodeId} requestId={requestId} />
@@ -213,9 +228,23 @@ function TestRunView({
   )
 }
 
-function InstallCard({ t, again }: { t: TestInstall; again: ReactNode }) {
+function InstallCard({
+  t,
+  again,
+  tools,
+  nodeId,
+  requestId,
+}: {
+  t: TestInstall
+  again: ReactNode
+  tools: ReactNode
+  nodeId: string
+  requestId: string
+}) {
+  const run = useMutation({ mutationFn: () => runTestAgents(nodeId, requestId) })
   const commands = t.details?.commands ?? []
   const protocols = t.details?.protocols ?? []
+  const agents = t.details?.agents ?? []
   return (
     <Card>
       <CardHeader title={t.package_name} icon={<FlaskConical size={18} />} actions={<Badge tone="success">Installed</Badge>} className="mb-2" />
@@ -227,14 +256,95 @@ function InstallCard({ t, again }: { t: TestInstall; again: ReactNode }) {
         ) : null}
         {protocols.length > 0 ? (
           <>
-            Device protocols: <span className="text-text">{protocols.join(', ')}</span>. Set its settings in the mobile
-            app (the node&apos;s settings), then scan for devices there.{' '}
+            Device protocols: <span className="text-text">{protocols.join(', ')}</span>.{' '}
+          </>
+        ) : null}
+        {agents.length > 0 ? (
+          <>
+            Background agents: <span className="text-text">{agents.join(', ')}</span>. Each ran once at the install and
+            then runs on its schedule; its runs are in Node events.{' '}
           </>
         ) : null}
         The node keeps it for 20 minutes from the install. After a fix in the Forge, Reinstall gets the new version.
       </p>
-      <div className="mt-3 flex flex-wrap gap-2">{again}</div>
+      <p className="mt-2 text-small text-text-muted">
+        Its settings are the node&apos;s: set them, then Reinstall to run it with them. Devices it finds go when the test
+        ends.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {agents.length > 0 && (
+          <Button size="sm" variant="primary" loading={run.isPending} onClick={() => run.mutate()}>
+            Run agents now
+          </Button>
+        )}
+        {tools}
+        {again}
+        {run.isSuccess && !run.isPending && (
+          <p role="status" className="basis-full text-small text-text-muted">
+            Sent. Its run shows in Node events in a few seconds.
+          </p>
+        )}
+        {run.isError && (
+          <p role="alert" className="basis-full text-small text-danger">
+            {errorMessage(run.error, "Couldn't run the agents")}
+          </p>
+        )}
+      </div>
     </Card>
+  )
+}
+
+/** NodeTools are the test node's settings and a device scan with it. */
+function NodeTools({
+  nodeId,
+  householdId,
+  name,
+  online,
+  desktop,
+}: {
+  nodeId: string
+  householdId: string
+  name: string
+  online: boolean
+  desktop: boolean
+}) {
+  const [scan, setScan] = useState(false)
+  const config = useQuery({
+    queryKey: ['devices', householdId, 'config'],
+    queryFn: ({ signal }) => getDeviceConfig(householdId, signal),
+    enabled: scan && !!householdId,
+    retry: false,
+  })
+  const rooms = useQuery({
+    queryKey: ['devices', householdId, 'rooms'],
+    queryFn: ({ signal }) => listDeviceRooms(householdId, signal),
+    enabled: scan && !!householdId,
+    retry: false,
+  })
+  return (
+    <>
+      <NodeSettings nodeId={nodeId} name={name} online={online} desktop={desktop} />
+      <Button size="sm" disabled={!online || !householdId} loading={scan && config.isPending} onClick={() => setScan(true)}>
+        Scan for devices
+      </Button>
+      {scan && config.isError && (
+        <p role="alert" className="basis-full text-small text-danger">
+          {errorMessage(config.error, "Couldn't start a device scan")}
+        </p>
+      )}
+      {scan && config.data && (
+        <DeviceDiscovery
+          household={householdId}
+          config={config.data}
+          rooms={rooms.data ?? []}
+          roomsError={rooms.isError}
+          nodeId={nodeId}
+          onClose={() => setScan(false)}
+          onChanged={() => {}}
+          onExisting={() => setScan(false)}
+        />
+      )}
+    </>
   )
 }
 
@@ -267,6 +377,15 @@ function eventLine(e: TestEvent): { text: string; bad: boolean } {
   if (e.kind === 'scan') {
     return e.error ? { text: `Scan (${e.protocol}): ${e.error}`, bad: true } : { text: `Scan (${e.protocol}): ${e.count ?? 0} found`, bad: false }
   }
+  if (e.kind === 'agent') {
+    if (e.ok) {
+      const alerts = e.alert_count ? `, ${e.alert_count} alert${e.alert_count === 1 ? '' : 's'}` : ''
+      return { text: `Agent ${e.agent}: ran in ${e.ms ?? 0} ms${alerts}`, bad: false }
+    }
+    // The error is a traceback: its last line says what went wrong (Send to Forge has it all).
+    const last = (e.error ?? '').trim().split('\n').pop() || 'failed'
+    return { text: `Agent ${e.agent}: ${last}`, bad: true }
+  }
   if (e.kind === 'control') {
     const ok = e.success === true
     return { text: `${e.action} ${e.entity_id}: ${ok ? 'done' : (e.error ?? 'failed')}`, bad: !ok }
@@ -280,7 +399,7 @@ function EventsCard({ events }: { events: TestEvent[] }) {
   const newest = events.slice(-30).reverse()
   return (
     <Card>
-      <CardHeader title="Node events" description="Its log lines, device scans and controls. Send to Forge includes them." className="mb-2" />
+      <CardHeader title="Node events" description="Its log lines, agent runs, device scans and controls. Send to Forge includes them." className="mb-2" />
       <ul className="max-h-72 divide-y divide-border overflow-y-auto" aria-label="Node events">
         {newest.map((e, i) => {
           const { text, bad } = eventLine(e)

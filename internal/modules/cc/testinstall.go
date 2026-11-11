@@ -64,6 +64,7 @@ func (m *Module) registerTestInstall(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/{request_id}", m.handlePollTestInstall)
 	mux.HandleFunc("POST "+base+"/{request_id}/feedback", m.handleTestInstallFeedback)
 	mux.HandleFunc("POST "+base+"/{request_id}/events", m.node(m.handleTestInstallEvents))
+	mux.HandleFunc("POST "+base+"/{request_id}/run-agents", m.handleRunTestAgents)
 }
 
 // --- store ---
@@ -364,5 +365,5 @@ func (m *Module) cleanupTestInstalls(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("test install request sweep: %w", err)
 	}
-	return nil
+	return m.sweepTestDevices(ctx, "")
 }

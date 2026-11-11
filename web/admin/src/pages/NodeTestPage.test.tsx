@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider } from '@/auth/AuthContext'
@@ -95,11 +95,15 @@ beforeEach(() => {
     if (url === '/api/admin/households') return { data: [{ id: 'hh1', name: 'Home' }] }
     if (url === '/api/admin/nodes') return { data: [{ node_id: 'pc1', name: 'Office-PC', household_id: 'hh1', is_active: true, services: [] }] }
     if (url === `${TI}/r1`) return { data: poll }
+    if (url.endsWith('/households/hh1/smart-home/config'))
+      return { data: { primary_node_id: 'pi1', use_external_devices: false, nodes: [{ node_id: 'pi1', name: 'Kitchen Pi', room: null, online: true }, { node_id: 'pc1', name: 'Office-PC', room: null, online: true, node_kind: 'desktop' }] } }
+    if (url.endsWith('/households/hh1/rooms')) return { data: [] }
     throw new Error(`unexpected GET ${url}`)
   })
   post.mockImplementation(async (url: string) => {
     if (url === TI) return { data: { id: 'r1', status: 'pending', package_name: 'coin_flip' } }
     if (url === `${TI}/r1/feedback`) return { data: { status: 'sent', runs: 1 } }
+    if (url === `${TI}/r1/run-agents`) return { data: { status: 'sent', agents: ['zigbee_watch'] } }
     throw new Error(`unexpected POST ${url}`)
   })
   api.listChatNodes.mockResolvedValue([live])
@@ -203,8 +207,45 @@ describe('NodeTestPage', () => {
     poll = { ...completed, package_name: 'zigbee2mqtt', details: { commands: [], protocols: ['zigbee2mqtt'] }, runs: [] }
     renderPage('/admin/nodes/pc1/test?request=r1')
     expect(await screen.findByText('zigbee2mqtt', { selector: 'span' })).toBeInTheDocument()
-    expect(screen.getByText(/Set its settings in the mobile app/)).toBeInTheDocument()
     expect(screen.getByText(/Once its devices are added, control them here/)).toBeInTheDocument()
+  })
+
+  it("says a background agent loaded and shows its runs, a failure by its traceback's last line", async () => {
+    poll = {
+      ...completed,
+      package_name: 'zigbee-watch',
+      details: { commands: [], agents: ['zigbee_watch'] },
+      runs: [],
+      events: [
+        { kind: 'agent', agent: 'zigbee_watch', ok: true, ms: 42, alert_count: 2 },
+        {
+          kind: 'agent',
+          agent: 'zigbee_watch',
+          ms: 3,
+          error: 'Traceback (most recent call last):\n  File "agent.py", line 40, in run\nKeyError: \'state\'\n',
+        },
+      ],
+    }
+    renderPage('/admin/nodes/pc1/test?request=r1')
+    expect(await screen.findByText('zigbee_watch', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getByText(/Each ran once at the install/)).toBeInTheDocument()
+    expect(screen.getByText('Agent zigbee_watch: ran in 42 ms, 2 alerts')).toBeInTheDocument()
+    expect(screen.getByText("Agent zigbee_watch: KeyError: 'state'")).toBeInTheDocument()
+
+    // Run agents now: the node runs them at once; their runs come back as events.
+    fireEvent.click(screen.getByRole('button', { name: 'Run agents now' }))
+    expect(await screen.findByText(/Its run shows in Node events/)).toBeInTheDocument()
+    expect(post).toHaveBeenCalledWith(`${TI}/r1/run-agents`)
+  })
+
+  it("offers the node's settings and a device scan on it for any draft, a command's too", async () => {
+    renderPage('/admin/nodes/pc1/test?request=r1')
+    expect(await screen.findByRole('button', { name: 'Settings' })).toBeEnabled()
+    expect(screen.getByText(/Devices it finds go when the test ends/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Scan for devices' }))
+    // The scan starts on the test node, not the household's primary one.
+    const dialog = await screen.findByRole('dialog', { name: 'Add devices' })
+    expect(within(dialog).getByRole('combobox')).toHaveValue('pc1')
   })
 
   it('lists the runs and sends them to the Forge with the note', async () => {

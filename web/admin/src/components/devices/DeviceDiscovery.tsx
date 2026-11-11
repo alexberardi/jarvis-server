@@ -13,10 +13,14 @@ interface Props {
   onClose: () => void
   onChanged: () => void
   onExisting: (id: string) => void
+  /** The node to scan with first (a Forge test's node), when it is one of config's. */
+  nodeId?: string
 }
 
-export default function DeviceDiscovery({ household, config, rooms, roomsError, onClose, onChanged, onExisting }: Props) {
-  const [nodeID, setNodeID] = useState(defaultDeviceNode(config)?.node_id ?? '')
+export default function DeviceDiscovery({ household, config, rooms, roomsError, onClose, onChanged, onExisting, nodeId }: Props) {
+  const [nodeID, setNodeID] = useState(
+    (nodeId && config.nodes.some((n) => n.node_id === nodeId) ? nodeId : defaultDeviceNode(config)?.node_id) ?? '',
+  )
   const [results, setResults] = useState<DiscoveredDevice[] | null>(null)
   const [chosen, setChosen] = useState<Record<string, { name: string; room: string }>>({})
   const [busy, setBusy] = useState<'scan' | 'import' | null>(null)

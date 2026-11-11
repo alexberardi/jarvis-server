@@ -1,6 +1,8 @@
 package packages
 
 import (
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+
 	"context"
 	"encoding/json"
 	"net/http"
@@ -60,7 +62,7 @@ func TestRequestsTestInstall(t *testing.T) {
 		q.Handle(ctx, api, TopicTestInstall, []byte(`{"request_id":"`+rid+`"}`))
 	}
 	want := map[string]map[string]any{
-		"t1": {"success": true, "details": map[string]any{"commands": []any{"hello_cmd"}, "files_installed": 3.0, "managers": []any{}, "package_name": "hello", "pip_packages_added": 1.0, "protocols": []any{}}},
+		"t1": {"success": true, "details": map[string]any{"agents": []any{}, "commands": []any{"hello_cmd"}, "files_installed": 3.0, "managers": []any{}, "package_name": "hello", "pip_packages_added": 1.0, "protocols": []any{}}},
 		"t2": {"success": false, "error": "No files in draft"},
 		"t3": {"success": false, "error": `test install: path "../../x.py" is not inside the package`},
 		"t4": {"success": false, "error": "Verification failed"},
@@ -122,8 +124,31 @@ func TestTestInstallDeviceProtocol(t *testing.T) {
 
 	// Nothing a node loads at all is still refused.
 	_, err = m.TestInstall(context.Background(), "notes", "r2", []DraftFile{{Filename: "README.md", Content: "hi"}})
-	if err == nil || err.Error() != "notes has no commands or device protocols" {
+	if err == nil || err.Error() != "notes has no commands, device protocols or agents" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A Forge draft that is a background agent has no commands either: it is listed for the sidecar
+// on any node (a desktop runs no installed package's agents), and the install reports it.
+func TestTestInstallAgent(t *testing.T) {
+	m, _, sc := newTestManager(t, newRepos(t))
+	agent := "from jarvis_command_sdk import IJarvisAgent\nclass Watch(IJarvisAgent): ...\n"
+	files := []DraftFile{{Filename: "agents/zigbee_watch/agent.py", Content: agent}}
+	details, err := m.TestInstall(context.Background(), "zigbee-watch", "r1", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := details["agents"]; !reflect.DeepEqual(got, []string{"zigbee_watch"}) {
+		t.Fatalf("agents = %v", got)
+	}
+	list, _ := readList(filepath.Join(m.Root, "commands.json"))
+	if len(list) != 1 || list[0].Name != "test:zigbee-watch" ||
+		!reflect.DeepEqual(list[0].Agents, []string{"agents/zigbee_watch/agent.py"}) {
+		t.Fatalf("commands.json = %+v", list)
+	}
+	if got := sc.livePackages(); !reflect.DeepEqual(got, []string{"test:zigbee-watch"}) {
+		t.Fatalf("in service %v", got)
 	}
 }
 
@@ -182,5 +207,59 @@ func TestShipTestEvents(t *testing.T) {
 	}
 	if !reflect.DeepEqual(posts, []string{"POST /api/v0/nodes/n1/test-install/rid-1/events", "POST /api/v0/nodes/n1/test-install/rid-1/events"}) {
 		t.Fatalf("posts = %v", posts)
+	}
+}
+
+// fakeSecrets records the secrets forgotten.
+type fakeSecrets struct{ forgot []string }
+
+func (f *fakeSecrets) ForgetSecret(key, scope string) error {
+	f.forgot = append(f.forgot, scope+"/"+key)
+	return nil
+}
+
+// A test install's settings go with it (user 2026-11-10): when it expires, the secrets it
+// declared are forgotten, except a key a package still loaded declares too. A reinstall of the
+// same draft keeps them, so a Forge fix doesn't ask for the MQTT broker again.
+func TestTestInstallSecretsGoWithIt(t *testing.T) {
+	m, _, sc := newTestManager(t, newRepos(t))
+	now := time.Date(2026, 11, 10, 21, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	fs := &fakeSecrets{}
+	m.Secrets = fs
+	host := sidecar.SecretKey{Key: "MQTT_HOST", Scope: "integration"}
+	sc.secrets = map[string][]sidecar.SecretKey{
+		"test:z2m": {host, {Key: "Z2M_BASE_TOPIC", Scope: "integration"}},
+		"test:hue": {host},
+	}
+	proto := func(name string) []DraftFile {
+		return []DraftFile{{Filename: "device_families/" + name + "/protocol.py",
+			Content: "from jarvis_command_sdk import IJarvisDeviceProtocol\nclass P(IJarvisDeviceProtocol): ...\n"}}
+	}
+	ctx := context.Background()
+	install := func(name string) {
+		t.Helper()
+		if _, err := m.TestInstall(ctx, name, "r-"+name, proto(name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install("z2m")
+	install("z2m") // Reinstall after a fix
+	now = now.Add(10 * time.Minute)
+	install("hue")
+	if len(fs.forgot) != 0 {
+		t.Fatalf("forgot %v before anything expired", fs.forgot)
+	}
+
+	now = now.Add(15 * time.Minute) // z2m's 20 minutes are up, hue's aren't
+	m.ExpireTests(ctx)
+	if want := []string{"integration/Z2M_BASE_TOPIC"}; !reflect.DeepEqual(fs.forgot, want) {
+		t.Fatalf("forgot %v, want %v (hue still declares MQTT_HOST)", fs.forgot, want)
+	}
+
+	now = now.Add(time.Hour)
+	m.ExpireTests(ctx)
+	if want := []string{"integration/Z2M_BASE_TOPIC", "integration/MQTT_HOST"}; !reflect.DeepEqual(fs.forgot, want) {
+		t.Fatalf("forgot %v, want %v", fs.forgot, want)
 	}
 }

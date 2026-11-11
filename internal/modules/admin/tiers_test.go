@@ -106,6 +106,7 @@ var wantTiers = map[string]tier{
 	"POST /api/cc/api/v0/nodes/{node_id}/test-install":                            tierSuperuser,
 	"GET /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}":                tierSuperuser,
 	"POST /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}/feedback":      tierSuperuser,
+	"POST /api/cc/api/v0/nodes/{node_id}/test-install/{request_id}/run-agents":    tierSuperuser,
 	// The desktop agent download (install plan 3.1): a public release asset, verified here.
 	"GET /api/addons/agent/{os}/{arch}": tierUser,
 

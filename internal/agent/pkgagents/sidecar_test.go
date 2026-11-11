@@ -104,3 +104,79 @@ func TestAPackageAgentPostsToTheInboxThroughTheSidecar(t *testing.T) {
 		t.Fatalf("failing = %v", f)
 	}
 }
+
+// A Forge test install's agents on a desktop (TestsOnly): they run at once, though crashy's
+// schedule says an hour and neither is an installed package's, and each run is a test event
+// for Send to Forge: ticker's with its alert, crashy's with the end of its traceback.
+func TestATestInstallsAgentsRunAtOnceAsTestEvents(t *testing.T) {
+	py := python(t)
+	dir, err := filepath.Abs(filepath.Join("..", "sidecar", "testdata", "packages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"packages": []any{
+		map[string]any{"name": "test:watcher", "root": filepath.Join(dir, "watcher"), "agents": []string{"agents/ticker/agent.py"}},
+		map[string]any{"name": "test:crashy", "root": filepath.Join(dir, "crashy"), "agents": []string{"agents/crashy/agent.py"}},
+	}})
+	listing := filepath.Join(t.TempDir(), "commands.json")
+	if err := os.WriteFile(listing, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// No command-center: ticker's inbox post fails inside its run, which still raises its alert.
+	sc, err := sidecar.StartWith(context.Background(), py, listing, log, sidecar.Options{Storage: st, Host: &sdkhost.Host{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := &sidecar.Live{}
+	live.Swap(sc)
+	defer live.Close()
+
+	(&Scheduler{Sidecar: live, Log: log, TestsOnly: true}).Tick(context.Background())
+
+	// The app's Tasks tab lists them, with their settings to fill in (the settings snapshot).
+	if err := st.SetSecret("CRASHY_URLS", "https://example.com", "integration", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	snap := st.Snapshot(nil, live.Devices(context.Background()), nil, false, nil)
+	agents, _ := json.Marshal(snap["agents"])
+	for _, want := range []string{`"agent_name":"crashy"`, `"description":"Fails every run."`, `"interval_seconds":3600`,
+		`"key":"CRASHY_URLS"`, `"value":"https://example.com"`, `"agent_name":"ticker"`} {
+		if !strings.Contains(string(agents), want) {
+			t.Fatalf("snapshot agents %s: no %s", agents, want)
+		}
+	}
+
+	events := func(pkg string) []map[string]any {
+		t.Helper()
+		out, err := live.DeviceCall("test_events", map[string]any{"package": pkg})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var evs []map[string]any
+		for _, e := range out["events"].([]any) {
+			if ev := e.(map[string]any); ev["kind"] == "agent" {
+				evs = append(evs, ev)
+			}
+		}
+		return evs
+	}
+	ok := events("test:watcher")
+	if len(ok) != 1 || ok[0]["agent"] != "ticker" || ok[0]["ok"] != true || ok[0]["alert_count"] != 1.0 {
+		t.Fatalf("ticker events = %v", ok)
+	}
+	if al := ok[0]["alerts"].([]any); len(al) != 1 || al[0].(map[string]any)["title"] != "run 1" {
+		t.Fatalf("ticker alerts = %v", al)
+	}
+	bad := events("test:crashy")
+	if len(bad) != 1 || bad[0]["agent"] != "crashy" || bad[0]["ok"] != nil {
+		t.Fatalf("crashy events = %v", bad)
+	}
+	if e, _ := bad[0]["error"].(string); !strings.Contains(e, "KeyError: 'state'") || !strings.Contains(e, "agent.py") || len(e) > 1500 {
+		t.Fatalf("crashy error = %q", e)
+	}
+}

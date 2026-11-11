@@ -90,6 +90,7 @@ import pathlib
 import re
 import sys
 import threading
+import time
 import traceback
 
 PROTO = sys.stdout
@@ -482,6 +483,30 @@ def _mask(value, secrets: list):
     return value
 
 
+def secret_keys(params: dict) -> dict:
+    """{"packages": {package: [{"key", "scope"}]}}: the secrets each loaded package declares (its
+    commands', families', managers' and agents' required_secrets). The node forgets a removed
+    test package's keys that no package still declares."""
+    owners = [(PACKAGE_OF.get(n), o) for n, o in COMMANDS.items()]
+    owners += [(FAMILY_PACKAGE.get(n), o) for n, o in FAMILIES.items()]
+    owners += [(MANAGER_PACKAGE.get(n), o) for n, o in MANAGERS.items()]
+    owners += [(AGENT_PACKAGE.get(n), o) for n, o in AGENTS.items()]
+    out: dict = {}
+    for package, owner in owners:
+        if not package:
+            continue  # the node's built-in commands
+        try:
+            declared = owner.required_secrets or []
+        except Exception:
+            continue
+        keys = out.setdefault(package, [])
+        for secret in declared:
+            key = {"key": secret.key, "scope": getattr(secret, "scope", "integration")}
+            if key not in keys:
+                keys.append(key)
+    return {"packages": out}
+
+
 def test_events(params: dict) -> dict:
     """{"events": [...], "last": seq, "head": seq}: a test package's events after params["after"],
     with its sensitive secrets masked (they leave the node with Send to Forge). head is the newest
@@ -616,12 +641,22 @@ def describe_agents() -> list:
     for name in sorted(AGENTS):
         try:
             sched = AGENTS[name].schedule
+            try:
+                description = str(AGENTS[name].description or "")
+            except Exception:
+                description = ""
             out.append({"name": name, "package": AGENT_PACKAGE[name], "interval_seconds": int(sched.interval_seconds),
-                        "run_on_startup": bool(sched.run_on_startup)})
+                        "run_on_startup": bool(sched.run_on_startup), "description": description,
+                        "secrets": _secrets_of(AGENTS[name], name)})
         except Exception as exc:
             print(f"sidecar: skipping agent {name}: {exc}", file=sys.stderr)
             FAILED[AGENT_PACKAGE[name]] = f"agent {name}: schedule: {type(exc).__name__}: {exc}"
     return out
+
+
+# A failed agent run's event keeps the end of its traceback (where the error is), under jarvisd's
+# 2 KB per event.
+_MAX_AGENT_ERROR = 1500
 
 
 def agent_run(params: dict) -> dict:
@@ -633,16 +668,27 @@ def agent_run(params: dict) -> dict:
     if agent is None:
         raise RuntimeError(f"no agent {name!r} in this sidecar")
     set_current_user_id(None)
+    package = AGENT_PACKAGE.get(name)
+    started = time.monotonic()
     try:
         _run(agent.run())
     except BaseException as exc:  # a SystemExit in run() must not end the sidecar
         print(f"sidecar: agent {name} failed:\n{traceback.format_exc()}", file=sys.stderr)
+        _test_event(package, "agent", agent=name, ms=int((time.monotonic() - started) * 1000),
+                    error=traceback.format_exc()[-_MAX_AGENT_ERROR:])
         return {"error": f"{type(exc).__name__}: {exc}"}
+    ms = int((time.monotonic() - started) * 1000)
     alerts = []
     try:
         alerts = [a.to_dict() for a in agent.get_alerts() or []]
     except Exception as exc:
         print(f"sidecar: agent {name}: alerts not read: {exc}", file=sys.stderr)
+        _test_event(package, "agent", agent=name, ms=ms, error=f"get_alerts: {type(exc).__name__}: {exc}")
+        return {"alerts": alerts}
+    # A summary: jarvisd keeps an event of up to 2 KB.
+    _test_event(package, "agent", agent=name, ms=ms, ok=True, alert_count=len(alerts),
+                alerts=[{"title": str(a.get("title", ""))[:100], "summary": str(a.get("summary", ""))[:200],
+                         "priority": a.get("priority")} for a in alerts[:3]])
     return {"alerts": alerts}
 
 
@@ -1633,7 +1679,7 @@ def callback(commands: dict, params: dict) -> dict:
 
 DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "device_state": device_state,
                   "device_removed": device_removed, "device_families": lambda params: device_families(),
-                  "test_events": test_events}
+                  "test_events": test_events, "secret_keys": secret_keys}
 
 
 def main() -> None:

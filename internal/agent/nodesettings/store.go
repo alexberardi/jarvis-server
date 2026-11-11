@@ -272,6 +272,23 @@ func (st *Store) DeleteSecret(key, scope string, uid *int64) error {
 	return st.SetSecret(key, "", scope, "", uid)
 }
 
+// ForgetSecret removes a key in a scope for every user (a removed Forge test install's settings).
+func (st *Store) ForgetSecret(key, scope string) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := st.s.Secrets[:0:0]
+	for _, s := range st.s.Secrets {
+		if s.Key != key || s.Scope != scope {
+			out = append(out, s)
+		}
+	}
+	if len(out) == len(st.s.Secrets) {
+		return nil
+	}
+	st.s.Secrets = out
+	return st.saveLocked()
+}
+
 // Enabled says whether a command is offered (the command_registry config push).
 func (st *Store) Enabled(command string) bool {
 	st.mu.Lock()

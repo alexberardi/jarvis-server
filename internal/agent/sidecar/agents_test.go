@@ -90,7 +90,13 @@ func TestSidecarRunsPackageAgents(t *testing.T) {
 		{Name: "flaky", Package: "watcher", Interval: 300 * time.Second},
 		{Name: "ticker", Package: "watcher", Interval: 20 * time.Second, RunOnStartup: true},
 	}
-	if got := sc.Agents(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+	got := sc.Agents()
+	if len(got) != 2 || got[0].Sidecar == 0 || got[1].Sidecar != got[0].Sidecar {
+		t.Fatalf("agents = %+v", got)
+	}
+	// Sidecar numbers this sidecar's start (a reinstall's agents come from a new one).
+	want[0].Sidecar, want[1].Sidecar = got[0].Sidecar, got[0].Sidecar
+	if got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("agents = %+v", got)
 	}
 	if f := sc.Failed(); len(f) != 1 || !strings.Contains(f["badagent"], "no IJarvisAgent") {

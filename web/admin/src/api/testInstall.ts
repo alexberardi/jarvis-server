@@ -20,8 +20,8 @@ export interface TestInstall {
   request_id: string
   package_name: string
   error_message: string | null
-  /** What loaded: the draft's commands (chat tools) and device protocols. */
-  details: { commands?: string[]; protocols?: string[] } | null
+  /** What loaded: the draft's commands (chat tools), device protocols and background agents. */
+  details: { commands?: string[]; protocols?: string[]; agents?: string[] } | null
   runs?: TestRun[]
   /** What the test install did on the node besides chat tool calls: log lines, scans, device controls. */
   events?: TestEvent[]
@@ -38,6 +38,11 @@ export interface TestEvent {
   entity_id?: string
   success?: boolean
   error?: string | null
+  /** An agent run: the agent, how long it took, whether it worked and how many alerts it raised. */
+  agent?: string
+  ms?: number
+  ok?: boolean
+  alert_count?: number
 }
 
 /** Share codes are six letters and digits; the Forge shows them in capitals. */
@@ -54,6 +59,11 @@ export async function pollTestInstall(nodeId: string, requestId: string): Promis
 }
 
 /** sendToForge has jarvisd send the install result, the runs and the note to the Forge draft. */
+/** runTestAgents asks the node to run the draft's background agents now; their runs arrive as events. */
+export async function runTestAgents(nodeId: string, requestId: string): Promise<void> {
+  await apiClient.post(`${base(nodeId)}/${encodeURIComponent(requestId)}/run-agents`)
+}
+
 export async function sendToForge(nodeId: string, requestId: string, note: string): Promise<void> {
   const n = note.trim()
   await apiClient.post(`${base(nodeId)}/${encodeURIComponent(requestId)}/feedback`, n ? { note: n } : {})

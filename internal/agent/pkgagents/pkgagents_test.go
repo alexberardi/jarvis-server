@@ -142,3 +142,58 @@ func TestSchedulerRunStopsWithItsContext(t *testing.T) {
 		t.Fatal("Run did not stop")
 	}
 }
+
+// A desktop runs only test installs' agents (TestsOnly). A test agent runs as soon as it loads,
+// whatever its schedule, then on its interval; a reinstall (a new sidecar) runs it at once again.
+func TestSchedulerRunsTestAgentsAtOnce(t *testing.T) {
+	now := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+	sc := &fakeSidecar{agents: []sidecar.AgentDef{
+		{Name: "comfyui_jobs", Package: "comfyui", Interval: 20 * time.Second, RunOnStartup: true, Sidecar: 1},
+		{Name: "zigbee_watch", Package: "test:zigbee", Interval: time.Hour, Sidecar: 1},
+	}}
+	s, _ := newScheduler(sc, &now)
+	s.TestsOnly = true
+	ctx := context.Background()
+	at := func(d time.Duration, want ...string) {
+		t.Helper()
+		now = now.Add(d)
+		sc.ran = nil
+		s.Tick(ctx)
+		if strings.Join(sc.ran, ",") != strings.Join(want, ",") {
+			t.Fatalf("+%v ran %v, want %v", d, sc.ran, want)
+		}
+	}
+	at(0, "zigbee_watch")
+	at(CheckEvery)
+	sc.agents[1].Sidecar = 2 // Reinstall
+	at(CheckEvery, "zigbee_watch")
+	at(CheckEvery)
+	at(time.Hour, "zigbee_watch")
+
+	// On a Pi (not TestsOnly) the installed package's agent runs too, the test agent at once.
+	s = &Scheduler{Sidecar: sc, Now: func() time.Time { return now }}
+	at(0, "comfyui_jobs", "zigbee_watch")
+}
+
+// "Run agents now" runs every test agent at once, due or not, and no installed package's; each
+// then waits a whole interval again.
+func TestRunTestsRunsTheTestAgentsNow(t *testing.T) {
+	now := time.Date(2026, 11, 10, 21, 30, 0, 0, time.UTC)
+	sc := &fakeSidecar{agents: []sidecar.AgentDef{
+		{Name: "comfyui_jobs", Package: "comfyui", Interval: time.Hour, Sidecar: 1},
+		{Name: "site_watch", Package: "test:site_watch", Interval: 5 * time.Minute, Sidecar: 1},
+	}}
+	s, _ := newScheduler(sc, &now)
+	s.Tick(context.Background()) // site_watch's run at load
+	sc.ran = nil
+	now = now.Add(time.Minute)
+	if got := s.RunTests(context.Background()); strings.Join(got, ",") != "site_watch" || strings.Join(sc.ran, ",") != "site_watch" {
+		t.Fatalf("RunTests = %v, ran %v", got, sc.ran)
+	}
+	sc.ran = nil
+	now = now.Add(4 * time.Minute) // five since load, four since the manual run
+	s.Tick(context.Background())
+	if len(sc.ran) != 0 {
+		t.Fatalf("ran %v before its interval after the manual run", sc.ran)
+	}
+}
