@@ -52,7 +52,12 @@ func nativeOffice(ctx context.Context, req map[string]any) (map[string]any, erro
 	cmd.Stdin = bytes.NewReader(in)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	if cmd.Process != nil {
+		// A leftover soffice.bin would hold office-profile and fail every later document op.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("LibreOffice took too long")
 		}

