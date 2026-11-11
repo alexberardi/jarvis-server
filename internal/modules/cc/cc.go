@@ -192,7 +192,8 @@ type Module struct {
 	vocab                 sttVocab // desktop nodes' app names for whisper (stt_vocabulary.go)
 	enroll                *enrollments
 	playback              *playbackStore
-	pairings              *pairingStore // device-code pairing (pairing.go)
+	pairings              *pairingStore    // device-code pairing (pairing.go)
+	deviceInputs          deviceInputStore // short-lived protocol pairing prompts
 	tools                 *servertools.Registry
 	dateKeys              []string      // DT_KEYS override (tests); nil = the shared vocabulary
 	lanAddr               func() string // this host's LAN address override (tests); nil = netaddr.LANAddr

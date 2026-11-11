@@ -160,6 +160,8 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		}
 	}
 
+	testDeviceMemberRoutes(t, base, h1, h2, root, users)
+
 	// G10: a member's own account.
 	if code, out := call(t, "GET", base+"/api/auth/me", nil, bearer(m1)...); code != 200 || obj(t, out)["email"] != "m1@example.com" {
 		t.Fatalf("member me: %d %v", code, out)

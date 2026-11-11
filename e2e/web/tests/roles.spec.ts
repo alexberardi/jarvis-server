@@ -8,8 +8,11 @@ import { expect, sidebar, test } from '../helpers/fixtures'
 
 const MEMBER_PAGES = [
   { label: 'Chat', path: '/chat' },
+  { label: 'Devices', path: '/devices' },
   { label: 'Add-ons', path: '/addons' },
   { label: 'Inbox', path: '/inbox' },
+  { label: 'Workflows', path: '/workflows' },
+  { label: 'Recordings', path: '/recordings' },
 ]
 
 // label in the sidebar, path, the page's heading, and an API call the page makes (when one
@@ -37,7 +40,8 @@ test.describe('superuser', () => {
   test('sees every page in the sidebar', async ({ page }) => {
     await page.goto('/chat')
     for (const p of [...MEMBER_PAGES, ...ADMIN_PAGES]) {
-      await expect(sidebar(page).getByRole('link', { name: p.label, exact: true }), p.label).toHaveAttribute('href', p.path)
+      const name = p.label === 'Inbox' ? /^Inbox(?: \d+ unread)?$/ : p.label
+      await expect(sidebar(page).getByRole('link', { name, exact: true }), p.label).toHaveAttribute('href', p.path)
     }
   })
 
@@ -77,7 +81,7 @@ for (const role of ['admin', 'power', 'member'] as Role[]) {
   test.describe(role, () => {
     test.use({ storageState: stateFile(role) })
 
-    test('sees only Chat, Add-ons and Inbox', async ({ page }) => {
+    test('sees all member pages and no admin pages', async ({ page }) => {
       await page.goto('/chat')
       const links = sidebar(page).getByRole('link')
       await expect(links).toHaveText(MEMBER_PAGES.map((p) => new RegExp(`^${p.label}`)))

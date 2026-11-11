@@ -97,11 +97,12 @@ type deviceRow struct {
 	roomID, deviceClass, manufacturer, model, source, haDeviceID    sql.NullString
 	protocol, localIP, mac, cloudID, createdAt, updatedAt, roomName sql.NullString
 	isControllable, isActive                                        sql.NullBool
+	nodeID                                                          sql.NullString
 }
 
 const deviceCols = `d.id, d.household_id, d.entity_id, d.name, d.domain, d.room_id, d.device_class, d.manufacturer,
 	d.model, d.source, d.ha_device_id, d.protocol, d.local_ip, d.mac_address, d.cloud_id, d.created_at, d.updated_at,
-	r.name, d.is_controllable, d.is_active`
+	r.name, d.is_controllable, d.is_active, d.node_id`
 
 func (m *Module) queryDevices(ctx context.Context, where string, args ...any) ([]*deviceRow, error) {
 	rows, err := m.deps.DB.Read.QueryContext(ctx, `SELECT `+deviceCols+` FROM cc_devices d
@@ -115,7 +116,7 @@ func (m *Module) queryDevices(ctx context.Context, where string, args ...any) ([
 		var d deviceRow
 		if err := rows.Scan(&d.id, &d.householdID, &d.entityID, &d.name, &d.domain, &d.roomID, &d.deviceClass,
 			&d.manufacturer, &d.model, &d.source, &d.haDeviceID, &d.protocol, &d.localIP, &d.mac, &d.cloudID,
-			&d.createdAt, &d.updatedAt, &d.roomName, &d.isControllable, &d.isActive); err != nil {
+			&d.createdAt, &d.updatedAt, &d.roomName, &d.isControllable, &d.isActive, &d.nodeID); err != nil {
 			return nil, err
 		}
 		out = append(out, &d)
@@ -155,6 +156,7 @@ func (d *deviceRow) response() map[string]any {
 		"is_controllable": d.controllable(), "is_active": d.active(), "room_name": nullable(d.roomName),
 		"created_at": naiveTS(d.createdAt.String), "updated_at": naiveTS(d.updatedAt.String),
 		"supported_actions": supportedActions(d.domain, d.protocol.String, d.controllable()),
+		"node_id":           nullable(d.nodeID),
 	}
 }
 
@@ -217,6 +219,7 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 	if !ok {
 		return
 	}
+	nodeID, _ := b.str("node_id", false)
 	var items []importItem
 	switch raw, present := b.m["devices"]; {
 	case !present:
@@ -262,6 +265,23 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 	if err := m.householdAccess(ctx, a, hh); err != nil {
 		m.writeErr(w, err)
 		return
+	}
+	if nodeID != "" {
+		n, err := m.nodeAccess(ctx, a, nodeID)
+		if err != nil {
+			m.writeErr(w, err)
+			return
+		}
+		if n.householdID.String != hh || !n.isActive {
+			detail(w, http.StatusBadRequest, "Node must be active in this household")
+			return
+		}
+		for _, it := range items {
+			if it.source != "direct" {
+				detail(w, http.StatusBadRequest, "Only direct devices can be bound to a node")
+				return
+			}
+		}
 	}
 	created, updated := 0, 0
 	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
@@ -315,7 +335,8 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 			controllable := importControllable(it.domain)
 			name := uniqueName(it.name)
 			var id string
-			err := tx.QueryRowContext(ctx, `SELECT id FROM cc_devices WHERE household_id = ? AND entity_id = ?`, hh, it.entityID).Scan(&id)
+			var bound sql.NullString
+			err := tx.QueryRowContext(ctx, `SELECT id, node_id FROM cc_devices WHERE household_id = ? AND entity_id = ?`, hh, it.entityID).Scan(&id, &bound)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				var room any
@@ -324,16 +345,34 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 				}
 				if _, err := tx.ExecContext(ctx, `INSERT INTO cc_devices (id, household_id, room_id, entity_id, name, domain,
 					device_class, manufacturer, model, source, protocol, local_ip, mac_address, cloud_id, ha_device_id,
-					is_controllable, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+					is_controllable, is_active, created_at, updated_at, node_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
 					uuid4(), hh, room, it.entityID, name, it.domain, nullStr(it.deviceClass), nullStr(it.manufacturer),
 					nullStr(it.model), it.source, nullStr(it.protocol), nullStr(it.localIP), nullStr(it.mac), nullStr(it.cloudID),
-					nullStr(it.haDeviceID), controllable, now, now); err != nil {
+					nullStr(it.haDeviceID), controllable, now, now, nullable(sql.NullString{String: nodeID, Valid: nodeID != ""})); err != nil {
 					return err
 				}
 				created++
 			case err != nil:
 				return err
 			default:
+				if bound.String != "" && nodeID != "" && bound.String != nodeID {
+					return fail(http.StatusConflict, "Device is already assigned to another node")
+				}
+				if bound.String != "" && nodeID == "" {
+					// Older clients may rename a bound device, but cannot replace its
+					// addressing with results from an unspecified network or manager.
+					var matches int
+					if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM cc_devices WHERE id = ?
+						AND domain = ? AND source IS ? AND protocol IS ? AND local_ip IS ?
+						AND mac_address IS ? AND cloud_id IS ? AND ha_device_id IS ? AND model IS ?`,
+						id, it.domain, it.source, nullStr(it.protocol), nullStr(it.localIP), nullStr(it.mac),
+						nullStr(it.cloudID), nullStr(it.haDeviceID), nullStr(it.model)).Scan(&matches); err != nil {
+						return err
+					}
+					if matches == 0 {
+						return fail(http.StatusConflict, "Rediscover this device using its assigned node to update its connection")
+					}
+				}
 				// Every identity field is overwritten; room only when one is supplied.
 				q := `UPDATE cc_devices SET name = ?, domain = ?, device_class = ?, manufacturer = ?, model = ?,
 					ha_device_id = ?, source = ?, protocol = ?, local_ip = ?, mac_address = ?, cloud_id = ?,
@@ -343,6 +382,9 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 					nullStr(it.cloudID), controllable, now}
 				if it.roomID != nil && *it.roomID != "" {
 					q, args = q+", room_id = ?", append(args, *it.roomID)
+				}
+				if nodeID != "" {
+					q, args = q+", node_id = ?", append(args, nodeID)
 				}
 				if _, err := tx.ExecContext(ctx, q+` WHERE id = ?`, append(args, id)...); err != nil {
 					return err
@@ -453,7 +495,7 @@ func (m *Module) handleDeleteDevice(w http.ResponseWriter, r *http.Request, a pr
 	}
 	// The owning node releases the device (e.g. HomeKit unpair) before the row goes.
 	if d.sourceOr() == "direct" && d.protocol.String != "" {
-		if n, err := m.pickNode(ctx, hh, d.protocol.String); err == nil {
+		if n, err := m.pickDeviceNode(ctx, hh, d); err == nil {
 			m.bus.Command(n.nodeID, "device_removed", map[string]any{
 				"entity_id": d.entityID, "protocol": d.protocol.String, "domain": d.domain, "cloud_id": nullable(d.cloudID),
 				"local_ip": nullable(d.localIP), "mac_address": nullable(d.mac), "name": d.name,

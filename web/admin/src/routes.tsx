@@ -8,6 +8,7 @@ import AccountPage from '@/pages/AccountPage'
 import AddonsPage from '@/pages/AddonsPage'
 import ChangePasswordPage from '@/pages/ChangePasswordPage'
 import ChatPage from '@/pages/ChatPage'
+import DevicesPage from '@/pages/DevicesPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
@@ -82,6 +83,7 @@ export function shellRoutes() {
     <>
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/chat" element={<ChatPage />} />
+      <Route path="/devices" element={<DevicesPage />} />
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
       <Route path="/inbox/:id" element={<InboxItemPage />} />
