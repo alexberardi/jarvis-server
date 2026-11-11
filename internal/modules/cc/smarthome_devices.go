@@ -173,6 +173,11 @@ func (m *Module) handleListDevices(w http.ResponseWriter, r *http.Request, a pro
 		m.writeErr(w, err)
 		return
 	}
+	// Here as well as hourly: a test's devices are gone from the list as soon as it ends.
+	if err := m.sweepTestDevices(ctx, hh); err != nil {
+		m.internalError(w, err)
+		return
+	}
 	q := r.URL.Query()
 	where, args := []string{"d.household_id = ?"}, []any{hh}
 	if room := q.Get("room_id"); room != "" {
@@ -323,7 +328,19 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 			return candidate
 		}
 		now := dbTime(m.now())
+		tests, err := m.testProtocols(ctx, tx, hh)
+		if err != nil {
+			return err
+		}
 		for _, it := range items {
+			// A device a running test's protocol provides goes when the test ends; any other
+			// import (a real protocol's, after the test) clears that.
+			var testNode, testPkg any
+			if it.protocol != nil {
+				if t, ok := tests[*it.protocol]; ok {
+					testNode, testPkg = t.nodeID, t.pkg
+				}
+			}
 			if it.roomID != nil && *it.roomID != "" {
 				if ok, err := m.roomInHousehold(ctx, tx, hh, *it.roomID); err != nil {
 					return err
@@ -345,10 +362,12 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 				}
 				if _, err := tx.ExecContext(ctx, `INSERT INTO cc_devices (id, household_id, room_id, entity_id, name, domain,
 					device_class, manufacturer, model, source, protocol, local_ip, mac_address, cloud_id, ha_device_id,
-					is_controllable, is_active, created_at, updated_at, node_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+					is_controllable, is_active, created_at, updated_at, node_id, test_node_id, test_package)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
 					uuid4(), hh, room, it.entityID, name, it.domain, nullStr(it.deviceClass), nullStr(it.manufacturer),
 					nullStr(it.model), it.source, nullStr(it.protocol), nullStr(it.localIP), nullStr(it.mac), nullStr(it.cloudID),
-					nullStr(it.haDeviceID), controllable, now, now, nullable(sql.NullString{String: nodeID, Valid: nodeID != ""})); err != nil {
+					nullStr(it.haDeviceID), controllable, now, now, nullable(sql.NullString{String: nodeID, Valid: nodeID != ""}),
+					testNode, testPkg); err != nil {
 					return err
 				}
 				created++
@@ -376,10 +395,10 @@ func (m *Module) handleImportDevices(w http.ResponseWriter, r *http.Request, a p
 				// Every identity field is overwritten; room only when one is supplied.
 				q := `UPDATE cc_devices SET name = ?, domain = ?, device_class = ?, manufacturer = ?, model = ?,
 					ha_device_id = ?, source = ?, protocol = ?, local_ip = ?, mac_address = ?, cloud_id = ?,
-					is_controllable = ?, is_active = 1, updated_at = ?`
+					is_controllable = ?, is_active = 1, updated_at = ?, test_node_id = ?, test_package = ?`
 				args := []any{name, it.domain, nullStr(it.deviceClass), nullStr(it.manufacturer), nullStr(it.model),
 					nullStr(it.haDeviceID), it.source, nullStr(it.protocol), nullStr(it.localIP), nullStr(it.mac),
-					nullStr(it.cloudID), controllable, now}
+					nullStr(it.cloudID), controllable, now, testNode, testPkg}
 				if it.roomID != nil && *it.roomID != "" {
 					q, args = q+", room_id = ?", append(args, *it.roomID)
 				}

@@ -364,5 +364,5 @@ func (m *Module) cleanupTestInstalls(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("test install request sweep: %w", err)
 	}
-	return nil
+	return m.sweepTestDevices(ctx, "")
 }

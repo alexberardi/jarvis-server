@@ -1,4 +1,4 @@
-# Forge test installs run background agents
+# Forge test installs: agents run, and what a test brings goes with it
 
 2026-11-10, user. A Forge draft's background agents (`agents/<name>/agent.py`, an `IJarvisAgent`)
 can be tested on a node like its commands and device protocols
@@ -17,3 +17,21 @@ can be tested on a node like its commands and device protocols
   (count and the first three, summarised) or the end of its traceback (1500 characters, under
   jarvisd's 2 KB per event). The web test page lists them in Node events (a failure by the
   traceback's last line); the mobile screen says the agent loaded; Send to Forge carries them all.
+
+## What a test brings goes with it
+
+2026-11-10, user. When a test install ends, nothing it brought may stay behind: a device or a
+setting without its protocol leaves the household in a state nothing can control.
+
+- **Secrets.** The node stores secrets by key, not by package. A test install records the keys
+  it declares (the sidecar's `secret_keys`) in its meta. When it is removed (expiry, a restart,
+  another install sweeping it), those keys are forgotten for every user, except a key a package
+  still loaded declares too (two packages may share `MQTT_HOST`). A Reinstall keeps them, so a
+  Forge fix doesn't ask for the broker again. With no sidecar to check against (it didn't start)
+  and packages installed, they are kept.
+- **Devices.** An import through a running test's protocol tags the device with the test's node
+  and package (cc migration 20261111013217); once that node runs no test of the package, the
+  device is deleted, on the devices list and hourly. A Reinstall is a newer request for the same
+  package, so its devices stay through a fix round. They do **not** survive into a real install
+  of the published package (user: "purely a dev testing scenario... safer that way"): re-add
+  them after it. Re-importing a device through a protocol no running test provides clears its tag.
