@@ -11,3 +11,6 @@ import (
 func nativeOffice(context.Context, map[string]any) (map[string]any, error) {
 	return nil, errors.New("documents aren't supported on this computer yet")
 }
+
+// OfficeStatus is `jarvis-agent status`'s line on documents.
+func OfficeStatus() string { return "not on this computer yet" }

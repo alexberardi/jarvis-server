@@ -1511,6 +1511,7 @@ func status(ctx context.Context, args []string) error {
 	fmt.Printf("menu icon:    %s\n", trayStatus())
 	fmt.Printf("dictation:    %s\n", dictationStatus(ctx, h))
 	fmt.Printf("browser:      %s\n", browserSummary())
+	fmt.Printf("documents:    %s\n", computer.OfficeStatus())
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
 	} else {
