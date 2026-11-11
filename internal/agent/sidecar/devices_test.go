@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -328,5 +329,19 @@ func TestSidecarRedescribesFamiliesAfterASecretIsSet(t *testing.T) {
 	var none Live
 	if err := none.RefreshDevices(); err != nil {
 		t.Fatalf("refresh without a sidecar = %v", err)
+	}
+}
+
+// SecretKeys are what each loaded package declares, for forgetting a removed test install's
+// settings: lights declares CLOUDY_TOKEN through its cloudy family.
+func TestSidecarListsEachPackagesSecretKeys(t *testing.T) {
+	sc, st := startLights(t)
+	_ = st.ForgetSecret("unused", "integration") // a key nothing stored: no error, no write
+	keys, err := sc.SecretKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keys["lights"]; !slices.Contains(got, SecretKey{Key: "CLOUDY_TOKEN", Scope: "integration"}) {
+		t.Fatalf("keys = %+v", keys)
 	}
 }

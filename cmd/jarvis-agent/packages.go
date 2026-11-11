@@ -25,6 +25,7 @@ func newPackages(root string, live *sidecar.Live, st sidecar.Storage, host *sdkh
 	if host != nil {
 		h = host
 	}
+	secrets, _ := st.(packages.SecretStore) // the node settings store; a test install's go with it
 	return &packages.Manager{
 		Root: root,
 		Python: &packages.Python{Root: root, UV: os.Getenv("JARVIS_AGENT_UV"), SDK: os.Getenv("JARVIS_AGENT_SDK"),
@@ -33,6 +34,7 @@ func newPackages(root string, live *sidecar.Live, st sidecar.Storage, host *sdkh
 		GOOS:     runtime.GOOS,
 		Sidecars: packages.LiveSidecars{Live: live, Log: log, Storage: st, Host: h},
 		Log:      log,
+		Secrets:  secrets,
 	}
 }
 

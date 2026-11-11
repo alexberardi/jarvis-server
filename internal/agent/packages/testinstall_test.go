@@ -1,6 +1,8 @@
 package packages
 
 import (
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+
 	"context"
 	"encoding/json"
 	"net/http"
@@ -205,5 +207,59 @@ func TestShipTestEvents(t *testing.T) {
 	}
 	if !reflect.DeepEqual(posts, []string{"POST /api/v0/nodes/n1/test-install/rid-1/events", "POST /api/v0/nodes/n1/test-install/rid-1/events"}) {
 		t.Fatalf("posts = %v", posts)
+	}
+}
+
+// fakeSecrets records the secrets forgotten.
+type fakeSecrets struct{ forgot []string }
+
+func (f *fakeSecrets) ForgetSecret(key, scope string) error {
+	f.forgot = append(f.forgot, scope+"/"+key)
+	return nil
+}
+
+// A test install's settings go with it (user 2026-11-10): when it expires, the secrets it
+// declared are forgotten, except a key a package still loaded declares too. A reinstall of the
+// same draft keeps them, so a Forge fix doesn't ask for the MQTT broker again.
+func TestTestInstallSecretsGoWithIt(t *testing.T) {
+	m, _, sc := newTestManager(t, newRepos(t))
+	now := time.Date(2026, 11, 10, 21, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	fs := &fakeSecrets{}
+	m.Secrets = fs
+	host := sidecar.SecretKey{Key: "MQTT_HOST", Scope: "integration"}
+	sc.secrets = map[string][]sidecar.SecretKey{
+		"test:z2m": {host, {Key: "Z2M_BASE_TOPIC", Scope: "integration"}},
+		"test:hue": {host},
+	}
+	proto := func(name string) []DraftFile {
+		return []DraftFile{{Filename: "device_families/" + name + "/protocol.py",
+			Content: "from jarvis_command_sdk import IJarvisDeviceProtocol\nclass P(IJarvisDeviceProtocol): ...\n"}}
+	}
+	ctx := context.Background()
+	install := func(name string) {
+		t.Helper()
+		if _, err := m.TestInstall(ctx, name, "r-"+name, proto(name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install("z2m")
+	install("z2m") // Reinstall after a fix
+	now = now.Add(10 * time.Minute)
+	install("hue")
+	if len(fs.forgot) != 0 {
+		t.Fatalf("forgot %v before anything expired", fs.forgot)
+	}
+
+	now = now.Add(15 * time.Minute) // z2m's 20 minutes are up, hue's aren't
+	m.ExpireTests(ctx)
+	if want := []string{"integration/Z2M_BASE_TOPIC"}; !reflect.DeepEqual(fs.forgot, want) {
+		t.Fatalf("forgot %v, want %v (hue still declares MQTT_HOST)", fs.forgot, want)
+	}
+
+	now = now.Add(time.Hour)
+	m.ExpireTests(ctx)
+	if want := []string{"integration/Z2M_BASE_TOPIC", "integration/MQTT_HOST"}; !reflect.DeepEqual(fs.forgot, want) {
+		t.Fatalf("forgot %v, want %v", fs.forgot, want)
 	}
 }

@@ -289,6 +289,23 @@ func (s *Sidecar) UserSecrets(_ context.Context, uid int64) (map[string][]nodese
 	return res.Secrets, nil
 }
 
+// SecretKey is one secret a package declares (its key and scope).
+type SecretKey struct {
+	Key   string `json:"key"`
+	Scope string `json:"scope"`
+}
+
+// SecretKeys are the secrets each loaded package declares, by package.
+func (s *Sidecar) SecretKeys() (map[string][]SecretKey, error) {
+	var res struct {
+		Packages map[string][]SecretKey `json:"packages"`
+	}
+	if err := s.roundTrip("secret_keys", nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Packages, nil
+}
+
 // DataCommands are the commands' mobile data-browser settings, read once at start.
 func (s *Sidecar) DataCommands() []nodesettings.DataCommand { return s.browser }
 

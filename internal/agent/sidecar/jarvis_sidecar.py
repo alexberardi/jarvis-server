@@ -483,6 +483,30 @@ def _mask(value, secrets: list):
     return value
 
 
+def secret_keys(params: dict) -> dict:
+    """{"packages": {package: [{"key", "scope"}]}}: the secrets each loaded package declares (its
+    commands', families', managers' and agents' required_secrets). The node forgets a removed
+    test package's keys that no package still declares."""
+    owners = [(PACKAGE_OF.get(n), o) for n, o in COMMANDS.items()]
+    owners += [(FAMILY_PACKAGE.get(n), o) for n, o in FAMILIES.items()]
+    owners += [(MANAGER_PACKAGE.get(n), o) for n, o in MANAGERS.items()]
+    owners += [(AGENT_PACKAGE.get(n), o) for n, o in AGENTS.items()]
+    out: dict = {}
+    for package, owner in owners:
+        if not package:
+            continue  # the node's built-in commands
+        try:
+            declared = owner.required_secrets or []
+        except Exception:
+            continue
+        keys = out.setdefault(package, [])
+        for secret in declared:
+            key = {"key": secret.key, "scope": getattr(secret, "scope", "integration")}
+            if key not in keys:
+                keys.append(key)
+    return {"packages": out}
+
+
 def test_events(params: dict) -> dict:
     """{"events": [...], "last": seq, "head": seq}: a test package's events after params["after"],
     with its sensitive secrets masked (they leave the node with Send to Forge). head is the newest
@@ -1650,7 +1674,7 @@ def callback(commands: dict, params: dict) -> dict:
 
 DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "device_state": device_state,
                   "device_removed": device_removed, "device_families": lambda params: device_families(),
-                  "test_events": test_events}
+                  "test_events": test_events, "secret_keys": secret_keys}
 
 
 def main() -> None:

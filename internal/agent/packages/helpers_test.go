@@ -1,6 +1,8 @@
 package packages
 
 import (
+	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
@@ -114,6 +116,18 @@ type fakeSidecar struct {
 	packages []string
 	failed   map[string]string
 	closed   bool
+	secrets  map[string][]sidecar.SecretKey // declared, by package (fakeSidecars.secrets)
+}
+
+// SecretKeys: what the loaded packages declare.
+func (s *fakeSidecar) SecretKeys() (map[string][]sidecar.SecretKey, error) {
+	out := map[string][]sidecar.SecretKey{}
+	for _, p := range s.packages {
+		if keys := s.secrets[p]; len(keys) > 0 && s.failed[p] == "" {
+			out[p] = keys
+		}
+	}
+	return out, nil
 }
 
 func (s *fakeSidecar) Failed() map[string]string { return s.failed }
@@ -131,6 +145,7 @@ func (s *fakeSidecar) Close() error { s.closed = true; return nil }
 // load.
 type fakeSidecars struct {
 	fail     map[string]string
+	secrets  map[string][]sidecar.SecretKey // what each package declares once loaded
 	startErr error
 	started  []*fakeSidecar
 	live     Sidecar
@@ -148,7 +163,7 @@ func (f *fakeSidecars) Start(_ context.Context, python, file string) (Sidecar, e
 	if err != nil {
 		return nil, err
 	}
-	sc := &fakeSidecar{failed: map[string]string{}}
+	sc := &fakeSidecar{failed: map[string]string{}, secrets: f.secrets}
 	for _, e := range list {
 		sc.packages = append(sc.packages, e.Name)
 		if why, ok := f.fail[e.Name]; ok {
