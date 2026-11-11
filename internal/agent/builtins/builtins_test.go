@@ -300,6 +300,8 @@ func TestMatchesTrigger(t *testing.T) {
 		"what's the weather":      false,
 		"good thanks":             false,
 		"is it time for the news": false,
+		"Good night everyone.":    false, // room talk: the model's (it can still run the routine)
+		"good morning sunshine":   false,
 	} {
 		if got := matchesTrigger(normalizeSaid(said), phrases); got != want {
 			t.Errorf("%q: %v, want %v", said, got, want)
