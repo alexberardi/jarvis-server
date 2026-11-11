@@ -44,11 +44,30 @@ def connect(req):
     while True:
         try:
             ctx = resolver.resolve("uno:pipe,name=%s;urp;StarOffice.ComponentContext" % req["pipe"])
-            return proc, ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
         except Exception:
             if proc.poll() is not None or time.time() > deadline:
+                proc.kill()  # nativeOffice kills the process group too: soffice.bin outlives this wrapper
                 raise RuntimeError("LibreOffice didn't start")
             time.sleep(0.25)
+            continue
+        never_update_links(ctx)
+        return proc, ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+
+
+# "Update links when opening" set to never, as each app numbers it: Calc's ScLkUpdMode
+# (always 0, never 1, on request 2), Writer's (always 0, on request 1, never 2).
+NEVER_UPDATE_LINKS = {"Calc": 1, "Writer": 2}
+
+
+def never_update_links(ctx):
+    """The private profile never updates a document's links to other files or the web, whatever
+    the file asks (PR #547 review C1)."""
+    provider = ctx.ServiceManager.createInstanceWithContext("com.sun.star.configuration.ConfigurationProvider", ctx)
+    for app, never in NEVER_UPDATE_LINKS.items():
+        access = provider.createInstanceWithArguments("com.sun.star.configuration.ConfigurationUpdateAccess",
+                                                      (prop("nodepath", "/org.openoffice.Office.%s/Content/Update" % app),))
+        access.setPropertyValue("Link", never)
+        access.commitChanges()
 
 
 def read_text(doc):
@@ -175,7 +194,8 @@ def main():
     doc = None
     try:
         # Files come from strangers (email attachments): never run their macros.
-        hidden = (prop("Hidden", True), prop("MacroExecutionMode", NEVER_EXECUTE))
+        # NO_UPDATE (0): nor are its links followed while it's open.
+        hidden = (prop("Hidden", True), prop("MacroExecutionMode", NEVER_EXECUTE), prop("UpdateDocMode", 0))
         if req["src"]:
             doc = desktop.loadComponentFromURL(uno.systemPathToFileUrl(req["src"]), "_blank", 0, hidden)
         else:

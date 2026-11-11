@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // Documents (computer_files doc_read and doc_edit, ELEMENT-LAYER-WORK.md C27): a text document or
@@ -166,6 +168,11 @@ func (t *Tools) docEdit(ctx context.Context, path string, create bool, from stri
 		}
 		src = fp
 	}
+	if f.kind == "sheet" {
+		if p := computeruse.EditsFormulaProblem(ops); p != "" {
+			return failCode("invalid_argument", "%s", p)
+		}
+	}
 	// shortcut: a file open in LibreOffice is refused, not merged; handle it when editing open documents is in scope.
 	if _, err := os.Lstat(filepath.Join(filepath.Dir(p), ".~lock."+filepath.Base(p)+"#")); err == nil {
 		return failCode("file_open", "%s is open in LibreOffice: close it first", filepath.Base(p))
@@ -250,17 +257,31 @@ func (t *Tools) backup(p string) (string, error) {
 }
 
 // replaceFile puts src at dst through a temporary file beside dst, so dst is never half-written.
+// The temporary file is created new (O_EXCL), so a symlink planted at its name can't redirect it.
 func replaceFile(src, dst string, mode os.FileMode) error {
-	tmp := filepath.Join(filepath.Dir(dst), ".jarvis-"+filepath.Base(dst)+".tmp")
-	if err := copyFile(src, tmp, mode); err != nil {
-		os.Remove(tmp)
+	in, err := os.Open(src)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".jarvis-*.tmp")
+	if err != nil {
 		return err
 	}
-	return nil
+	_, err = io.Copy(tmp, in)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), mode)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), dst)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
