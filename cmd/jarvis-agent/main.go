@@ -1255,6 +1255,7 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 	// Then the focused app window's controls ("click Bold" in LibreOffice), before tabs,
 	// windows and apps by name: what's on screen first (ELEMENT-LAYER-WORK.md slice 4b).
 	if f.computerOn != nil {
+		go enableAppElements(context.WithoutCancel(ctx), log)
 		if ac := newAppClick(f.computerOn, targets.Picker{CC: f.cc, Wrap: browser.Wrap, Log: log}, dt.Confirm); ac != nil {
 			tools = append(tools, ac)
 		}
@@ -1491,6 +1492,9 @@ func status(ctx context.Context, args []string) error {
 	fmt.Printf("menu icon:    %s\n", trayStatus())
 	fmt.Printf("dictation:    %s\n", dictationStatus(ctx, h))
 	fmt.Printf("browser:      %s\n", browserSummary())
+	if s := appElementsStatus(ctx); s != "" {
+		fmt.Printf("app elements: %s\n", s)
+	}
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
 	} else {
