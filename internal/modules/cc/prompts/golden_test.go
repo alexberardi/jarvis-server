@@ -229,7 +229,7 @@ func checkPromptFixture(t *testing.T, file string, toolSets *pyjson.Object) bool
 }
 
 func TestBuiltins(t *testing.T) {
-	want := []string{Cloud, Gemma4, Qwen3_14B, Qwen3_5_9B, Qwen3_8B}
+	want := []string{Cloud, Gemma4, Qwen3_14B, Qwen3_4B, Qwen3_5_9B, Qwen3_8B}
 	sort.Strings(want)
 	if got := BuiltinNames(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("BuiltinNames = %v, want %v", got, want)

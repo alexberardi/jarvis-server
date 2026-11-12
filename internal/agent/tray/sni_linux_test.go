@@ -143,10 +143,15 @@ func menuLabels(t *testing.T, menu dbus.BusObject) (labels []string, voiceState 
 			label = "(" + label + ")"
 		}
 		if n.ID == IDVoice {
-			if n.Props["toggle-type"].Value() != "checkmark" {
-				t.Fatalf("voice item isn't a checkmark: %v", n.Props)
+			// The tick lives in the label (checkGlyph): toggle-state is not published,
+			// because a host that draws it would show a second tick.
+			if _, ok := n.Props["toggle-state"]; ok {
+				t.Fatalf("toggle-state is published again; it would double the tick: %v", n.Props)
 			}
-			voiceState = n.Props["toggle-state"].Value().(int32)
+			voiceState = 0
+			if strings.HasPrefix(label, "✓") {
+				voiceState = 1
+			}
 		}
 		labels = append(labels, label)
 	}
@@ -212,7 +217,9 @@ func TestStatusNotifierItemOnAPrivateBus(t *testing.T) {
 		t.Fatalf("dbusmenu Version = %v (%v)", v, err)
 	}
 	labels, state := menuLabels(t, menu)
-	want := []string{"(Jarvis Automation Agent — Running)", "--", `Listen for "Hey Jarvis"`, "Open Jarvis Automation", "--", "Quit Jarvis Automation Agent"}
+	// The toggle spells its state into the label: the checkmark alone is not reliably drawn
+	// (stateLabel in sni_linux.go).
+	want := []string{"(Jarvis Automation Agent — Running)", "--", `     Listen for "Hey Jarvis"`, "Open Jarvis Automation", "--", "Quit Jarvis Automation Agent"}
 	if strings.Join(labels, "|") != strings.Join(want, "|") || state != 0 {
 		t.Fatalf("menu %q voice %d", labels, state)
 	}
@@ -233,8 +240,12 @@ func TestStatusNotifierItemOnAPrivateBus(t *testing.T) {
 	tr.Update(func(s *State) { s.Voice = true })
 	for s := within(t, sig, "LayoutUpdated"); s.Name != menuIface+".LayoutUpdated"; s = within(t, sig, "LayoutUpdated") {
 	}
-	if _, state := menuLabels(t, menu); state != 1 {
+	labelsOn, state := menuLabels(t, menu)
+	if state != 1 {
 		t.Fatalf("voice toggle-state %d after turning it on", state)
+	}
+	if !slices.Contains(labelsOn, `✓  Listen for "Hey Jarvis"`) {
+		t.Fatalf("the label carries no tick once it is on: %q", labelsOn)
 	}
 	if err := menu.Call(menuIface+".Event", 0, IDOpen, "clicked", dbus.MakeVariant(""), uint32(0)).Err; err != nil {
 		t.Fatal(err)
@@ -307,5 +318,76 @@ func TestProbeWithoutAHost(t *testing.T) {
 	startWatcher(t, c, false)
 	if got := probeOn(c); !strings.HasPrefix(got, "off: a StatusNotifierWatcher runs but no tray") {
 		t.Fatalf("watcher, no host: %q", got)
+	}
+}
+
+// A checkmark is a dbusmenu PROPERTY, so changing it must be signalled with
+// ItemsPropertiesUpdated. LayoutUpdated says the menu's structure changed, and toggling never
+// changes the structure -- a host that caches properties (libdbusmenu, which waybar uses) then
+// keeps drawing the old checkmark and the menu looks dead. The agent used to emit only
+// LayoutUpdated, which is why "Listen for Hey Jarvis" and "Computer control" could be turned
+// off from the menu but never visibly back on.
+func TestTogglingSignalsItemsPropertiesUpdated(t *testing.T) {
+	addr := privateBus(t)
+	agent, host := dial(t, addr), dial(t, addr)
+
+	tr, err := startOn(agent, Options{
+		State:   State{Status: "Running", VoiceAvailable: true},
+		Actions: Actions{SetVoice: func(bool) {}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	w := startWatcher(t, host, true)
+	within(t, w.got, "the item to register")
+
+	sig := make(chan *dbus.Signal, 8)
+	host.Signal(sig)
+	if err := host.AddMatchSignal(dbus.WithMatchObjectPath(menuPath), dbus.WithMatchInterface(menuIface),
+		dbus.WithMatchMember("ItemsPropertiesUpdated")); err != nil {
+		t.Fatal(err)
+	}
+
+	tr.Update(func(s *State) { s.Voice = true })
+
+	for {
+		s := within(t, sig, "ItemsPropertiesUpdated after the voice toggle")
+		if s.Name != menuIface+".ItemsPropertiesUpdated" {
+			continue
+		}
+		var updated []itemProps
+		if err := dbus.Store([]any{s.Body[0]}, &updated); err != nil {
+			t.Fatalf("decoding updatedProps: %v", err)
+		}
+		for _, u := range updated {
+			if u.ID != IDVoice {
+				continue
+			}
+			// The tick IS the label (checkGlyph), so the label is what must be signalled --
+			// otherwise a host redraws the old text and the state looks stuck.
+			lbl, ok := u.Props["label"]
+			if !ok {
+				t.Fatalf("toggle signalled without its label: %v", u.Props)
+			}
+			if got := lbl.Value().(string); got != `✓  Listen for "Hey Jarvis"` {
+				t.Fatalf("signalled label = %q", got)
+			}
+			return
+		}
+	}
+}
+
+// AboutToShow must not claim the menu is unchanged: voice, computer control, the activity
+// lines and the update line all change between openings, so a host that asks before opening
+// has to be told to re-read.
+func TestAboutToShowAsksForARefresh(t *testing.T) {
+	need, err := menuMethods{}.AboutToShow(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !need {
+		t.Fatal("AboutToShow said the menu needs no update; a host would draw its cached copy")
 	}
 }
