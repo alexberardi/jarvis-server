@@ -221,3 +221,77 @@ is theirs.
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.
 - `refine`: whether a learnt note needs the owner's approval before a run uses it.
+
+---
+
+## Plan: `capture` and `skill-doc` (awaiting the user's review)
+
+### Shape
+
+- **Storage:** one migration adds `skill TEXT NOT NULL DEFAULT '{}'` to `cc_taught_workflows`
+  (goal `{reason, end_state}`, `when_to_use`, `prerequisites[]`, `guardrails`, `notes[]`). A step's
+  `goal` and `expect` go in the existing `steps` JSON. An old row reads as an empty skill.
+- **A prerequisite is structured:** `{kind, text, app, site, file, url}` with kind `app_open`,
+  `file_open`, `page_open`, `signed_in` or `other`; `file`, `url` and `text` may hold `{param}`.
+  Only `other` needs the model to check.
+- **Trace:** two new event kinds, ignored by servers and agents that don't know them.
+  `start`: the windows (class, title, focused) or tabs (address, title) when recording began.
+  `result`, after an action has settled: the window title or page address and title, and the
+  elements (role, name) that **appeared and disappeared**, capped. A diff, not the whole tree: a
+  trace must stay under `MaxTraceBytes` (768 KiB).
+- **Signed in** is read from the recording itself: a site whose pages showed no password field
+  and took no masked input was signed in. A recording that signs in keeps that as steps.
+- **Learning:** the same call returns the new fields. If the local model's answer no longer fits
+  `learnMaxTokens`, the skill moves to a second call (ask first, per Boundaries).
+- **Inert until `verified-replay`:** this plan stores, learns and shows the skill. Runs don't read
+  it yet, so the Strict/Creative radio ships with `verified-replay`, not here.
+
+### Tasks (in order; each is one PR)
+
+- [ ] **S1 — skill in the data model.** `computer.Workflow`/`WorkflowStep` types, migration,
+  `Validate` (limits, kinds, `{param}` declared), API round trip.
+  - Acceptance: a workflow with a full skill saves and reloads; an old row loads empty and runs.
+  - Verify: `scripts/check`; store and validation tests; the teach cases.
+- [ ] **S2 — learn the skill (inference path).** Prompt and answer gain goal, when to use, step
+  goals, and step expectations inferred from the next step; invented references dropped.
+  - Acceptance: success criterion 1 on the `bank_download` trace, without captured results.
+  - Verify: prompt goldens (browser, desktop), build tests with a scripted model.
+- [ ] **S3 — the workflow page shows and edits the skill.** Goal, prerequisites, each step's goal
+  and expectation, notes.
+  - Acceptance: criteria 2 and 3.
+  - Verify: Vitest, `scripts/e2e web`, `scripts/screenshots --sandbox workflow-skills`.
+- [ ] **S4 — Relearn.** A route that returns a draft from the stored recording, and the button.
+  - Acceptance: criterion 1b.
+  - Verify: route tests (kept, expired, another household 404), Vitest.
+- [ ] **C1 — trace format.** `start` and `result` kinds, caps, tolerant parsing on the server.
+  - Acceptance: a trace with them learns as before; one without them still learns.
+  - Verify: parse tests both ways.
+- [ ] **C2 — desktop capture.** Starting windows and the result diff after each action settles,
+  Wayland/AT-SPI first (this box), then X11 and macOS. The settle wait uses the recorder's
+  injected clock.
+  - Acceptance: a recording on this box holds a `start` and a `result` per action, under the cap.
+  - Verify: `record_*_test.go` with a fake tree; one live recording here.
+- [ ] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
+  limited to what the steps touch, `{param}` where the recorded name is one.
+  - Acceptance: criteria 1 (captured path) and 1a.
+  - Verify: goldens; a recording made with a month-named file open, learnt in the sandbox.
+- [ ] **C3 — browser capture.** The same in the extension, a version bump, the re-signed `.xpi`.
+  - Acceptance: a browser recording holds `start` and `result` events; masked values still never
+    travel.
+  - Verify: `internal/agent/browser` tests and `jstest`; the `release_xpi` gate.
+  - **Held for the user:** signing and both store uploads.
+
+### Checkpoints
+
+1. After S3: a sandbox with the bank download learnt, and screenshots of its page, for you to read.
+2. After C4: a recording on this box with a file open, and the prerequisites it learnt.
+
+### Risks
+
+| Risk | Mitigation |
+|---|---|
+| The local model's answer grows past its budget or loses accuracy | Goldens on the real model before S2 merges; a second call if needed |
+| Result diffs blow the trace cap on busy pages | Cap per result and in total; drop oldest diffs, never events |
+| "Settled" is wrong (slow pages, animations) | The result is taken at quiet or just before the next action, whichever is first; the learner treats a result as evidence, and the owner can edit |
+| The extension waits on store review | C3 is last; browser recordings use inference until then |
+| Skill parts shown but not yet used by runs | Nothing here is released before `verified-replay` |
