@@ -108,6 +108,9 @@ func (r *Report) Markdown() string {
 			res = "skipped (" + c.SkipReason + ")"
 		} else {
 			runs, rounds, secs = fmt.Sprintf("%d/%d", c.Passed, c.Runs), fmt.Sprint(c.Rounds), fmt.Sprintf("%.1f s", c.Seconds)
+			if r.LLM == "cloud" {
+				rounds = "–" // model calls are counted at the tap, which a cloud run doesn't go through
+			}
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n", c.Name, c.Phase, c.CaseStatus, res, runs, rounds, secs)
 	}
