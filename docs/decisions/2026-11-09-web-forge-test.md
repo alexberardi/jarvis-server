@@ -14,9 +14,11 @@ test window ([Send to Forge](2026-11-09-send-to-forge.md)). The chat starts afte
 finishes, so its tool list includes the draft's commands. It is not saved, so it never replaces
 the Chat page's conversation. A reply shows only in the browser; the node just runs the command.
 
-The share code is pasted from the Forge page. A "Test on my Jarvis" link from the Forge page into
-the admin was left for later: it is separate work in pantry-web, and the link needs the admin's
-address.
+The share code is pasted from the Forge page, which has a copy button. A link from the Forge page
+straight into the admin is **not** planned (user, 2026-11-11): Pantry is the cloud store and
+cannot reach a self-hosted jarvisd, so the link would have to ask for the admin's address first,
+which is more setup than the copy it replaces. The line that recorded it as "left for later" was
+an agent's speculation, never a decision.
 
 The mobile app has the same flow: a **Test a Forge command** button on the node's detail screen
 (above Danger Zone) opens a screen with the share code, the install, then a chat pinned to the
