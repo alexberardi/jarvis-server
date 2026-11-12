@@ -47,7 +47,7 @@ each step is for and what should happen after it, and what to watch for.
 
 | Module id | Responsibility | Depends on |
 |---|---|---|
-| `skill-doc` | The learned knowledge: goal, when to use, prerequisites, per-step purpose and expected result, notes. Data model, learn prompt, editor. | — |
+| `skill-doc` | The learned knowledge: goal, when to use, prerequisites, per-step goal and expected result, notes. Data model, learn prompt, editor. | — |
 | `verified-replay` | The run under principles 2–4: model-led loop reading the skill, direct path by identity, prerequisites achieved before step 1, a check after every step. | `skill-doc` |
 | `narration` | What the user says while recording, aligned to the events, feeding the learner. | `skill-doc` |
 | `refine` | A workflow improves after teaching: a second recording, a spoken correction, answers given during runs kept as notes. | `skill-doc`, `verified-replay` |
@@ -66,6 +66,12 @@ Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
   (purpose, expectation) and notes are separate fields; the page and the model's prompt render
   them. No free-text skill file (user: "I don't want another readme based approach").
   [Decision](../decisions/2026-11-12-workflow-skill-is-structured.md).
+- **Q3 (2026-11-12): the recorder captures each step's result; the owner can also write a step's
+  goal.** After each action settles the recorder keeps what changed (window title, address, the
+  element list; a screenshot where there is no tree), and expectations are learnt from that.
+  Recordings without it fall back to inferring from the next step. Every step also has a **goal**
+  the owner can enter or correct on the workflow page.
+  [Decision](../decisions/2026-11-12-step-results-are-recorded.md).
 
 ---
 
@@ -85,8 +91,8 @@ What a skill holds, each a separate field (Q2):
 | Goal | What the task achieves, in a sentence or two | — |
 | When to use | What the user would be asking for, beyond the trigger phrases | `triggers` only |
 | Prerequisites | A list of what must be true before step 1 ("file abc is open", "signed in to the bank"), each one checkable. A run tries to achieve each unmet one before it starts (user, 2026-11-12) | — |
-| Step purpose | Why each step is there | `intent` (what, not why) |
-| Step expectation | What can be observed once the step worked | — |
+| Step goal | The point of each step. Learnt, and the owner can enter or correct it on the workflow page (Q3) | `intent` (what, not why) |
+| Step expectation | What can be observed once the step worked, learnt from the result the recorder captured (Q3); editable | — |
 | Notes | Things to watch for; empty when learnt, filled by `refine` | — |
 | Done | How to tell the whole task worked | `success` |
 
@@ -107,6 +113,8 @@ internal/modules/cc/computer/workflow.go      the Workflow type (the run reads i
 internal/modules/cc/workflows.go              storage, validation, routes
 internal/modules/cc/workflows_learn.go        the learn prompt and the draft
 internal/modules/cc/migrations/               one new migration
+internal/agent/computer/recorder.go           the result after each action (desktop)
+internal/agent/browser/                       the same in the extension (a store release)
 web/admin/src/pages/WorkflowEditPage.tsx      the editor
 docs/decisions/                               one file per answer
 ```
@@ -136,7 +144,7 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 
 - **Always:** existing workflows load and run as before; masked values never reach the skill text;
   skill text is length-capped for the local models.
-- **Ask first:** an agent or extension release (capturing more at recording time); a new model call
+- **Ask first:** a new model call
   per learn; changing the review card.
 - **Never:** store recorded coordinates as something a run acts on; weaken a risk a step already
   carries; put secrets or masked input in the skill.
@@ -153,12 +161,9 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 
 ### Open questions for `skill-doc` (asked one at a time, in this order)
 
-1. **Q3 — expectations:** a recording holds events, not what the screen showed after each. Are
-   step expectations inferred from the trace, or does the recorder capture the screen after each
-   step?
-2. **Q5 — prerequisites:** where they come from: inferred from how the recording begins, said by
+1. **Q5 — prerequisites:** where they come from: inferred from how the recording begins, said by
    the user, or both; and whether one can use a param ("file {name} is open").
-3. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
+2. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
    is still kept?
 
 ## Later modules' questions (not yet ordered)
