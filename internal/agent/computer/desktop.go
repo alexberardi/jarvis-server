@@ -186,7 +186,7 @@ func (t *Tools) attended(ctx context.Context, lockOnly bool) error {
 
 // begin starts (or resumes) run id on the desktop: refused while the user isn't there; then the
 // guard watches from now on and the island shows Jarvis in control.
-func (t *Tools) begin(ctx context.Context, id string, resume bool) (code string, err error) {
+func (t *Tools) begin(ctx context.Context, id string, resume bool, gen uint64) (code string, err error) {
 	run := t.runs().Get(id)
 	if run.attended && !resume {
 		// A run going on: the user may be watching it work, but not with the screen locked.
@@ -213,9 +213,7 @@ func (t *Tools) begin(ctx context.Context, id string, resume bool) (code string,
 		go g.Run(gctx)
 	}
 	t.desk.mu.Unlock()
-	if k, _ := t.Activity.Status(); k == Idle {
-		t.Activity.Set(Controlling, "Working on your computer")
-	}
+	t.Activity.SetSince(gen, Controlling, "Working on your computer", func(k Kind) bool { return k == Idle })
 	t.touchDesktop()
 	return "", nil
 }
@@ -418,6 +416,7 @@ func firstNonEmpty(ss ...string) string {
 }
 
 func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]any {
+	gen := t.Activity.Gen()
 	if t.Desktop == nil {
 		return failCode("unsupported", "desktop tasks aren't supported on this computer yet")
 	}
@@ -432,7 +431,7 @@ func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]an
 			return failCode(code, "%v", err)
 		}
 	}
-	if code, err := t.begin(ctx, a.RunID, false); err != nil {
+	if code, err := t.begin(ctx, a.RunID, false, gen); err != nil {
 		return failCode(code, "%v", err)
 	}
 	w, code, err := t.window(ctx, app)
@@ -516,7 +515,7 @@ func (t *Tools) actDesktop(ctx context.Context, a actArgs) map[string]any {
 	if t.runs().Get(a.RunID).Stopped {
 		return failCode("stopped", "the task was stopped")
 	}
-	if code, err := t.begin(ctx, a.RunID, a.Resume); err != nil {
+	if code, err := t.begin(ctx, a.RunID, a.Resume, a.gen); err != nil {
 		return failCode(code, "%v", err)
 	}
 	results := []map[string]any{}
@@ -694,7 +693,7 @@ func (t *Tools) desktopStep(ctx context.Context, a actArgs, i int, action comput
 			}
 		})
 	}
-	t.showing(action.Intent)
+	t.showing(a.gen, action.Intent)
 	text, code, err := t.doDesktop(ctx, action, run, pts)
 	if err != nil {
 		return Result{I: i, Code: code, Error: err.Error(), NewApp: newApp}

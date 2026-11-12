@@ -214,6 +214,8 @@ type actArgs struct {
 	// Resume continues a desktop task paused because the user used the computer (the
 	// server's Paused card's Continue).
 	Resume bool `json:"resume"`
+
+	gen uint64 // the activity's stops when the call began (act): a stop since ends what it shows
 }
 
 func decodeArgs(args map[string]any, v any) error {
@@ -416,6 +418,7 @@ func (r Result) out() map[string]any {
 }
 
 func (t *Tools) act(ctx context.Context, a actArgs) map[string]any {
+	a.gen = t.Activity.Gen()
 	switch {
 	case a.RunID == "":
 		return failCode("invalid_argument", "run_id is required")
@@ -493,7 +496,7 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 		return r
 	}
 
-	t.showing(action.Intent)
+	t.showing(a.gen, action.Intent)
 	if code, err := t.do(ctx, a, action, run); err != nil {
 		return fail(code, "%v", err)
 	}
@@ -546,14 +549,10 @@ func (t *Tools) verify(ctx context.Context, token, digest string) error {
 }
 
 // showing shows the action's intent on the island and the tray, unless they show something
-// else (a recording, a paused desktop task).
-func (t *Tools) showing(intent string) {
-	if t.Activity == nil {
-		return
-	}
-	if k, _ := t.Activity.Status(); k == Idle || k == Controlling {
-		t.Activity.Set(Controlling, intent)
-	}
+// else (a recording, a paused desktop task) or a stop came since the call began (gen): an action
+// that started as the user stopped the task never lights the indicator again.
+func (t *Tools) showing(gen uint64, intent string) {
+	t.Activity.SetSince(gen, Controlling, intent, func(k Kind) bool { return k == Idle || k == Controlling })
 }
 
 // browserKeys are the keypress names the extension's keys op sends.
