@@ -43,6 +43,7 @@ reported. Each run costs real money: screenshots go to the provider.
 | `blocked_site` | browser | a site the household blocked (`setup.block`) is refused | piece 14 |
 | `notes_wlroots` | desktop-wlroots | a note in the fixture notes app under headless sway (Xwayland) | piece 35 |
 | `notes_x11` | desktop-x11 | the same under Xvfb | piece 35 |
+| `notes_pointer_wlroots`, `notes_pointer_x11` | desktop-wlroots, desktop-x11 | a note from pixels alone: the notes app's pointer layout (click-only New and Save, no menu or shortcuts, no accessibility tree); pending | plan task 4 |
 | `notes_macos` | desktop-mac | a note in Apple's Notes.app on the Mac test host, attended; skipped elsewhere | piece 22 |
 | `replay_changed_param` | teach | the bank download, demonstrated for 2026-09 (`setup.demonstrate`), replayed for August | piece 32 |
 | `replay_moved_button` | teach | the same replayed after the site moved its buttons (every page the moved variant) | piece 32 |

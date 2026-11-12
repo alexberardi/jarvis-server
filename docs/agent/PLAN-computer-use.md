@@ -81,7 +81,11 @@ No failure traced to the model. Proposed loop fix (task 5): run the concrete che
 text, download, file) first and give their results to the screen question as facts, so a
 sentence about a download or a file is judged with what the checks found.
 
-**CHECKPOINT A:** the user sees the cloud numbers before prompt work starts.
+**CHECKPOINT A** (user, 2026-11-12): approved; the verify fix first, then tasks 3 and 4.
+
+Task 3 as built: the notes app's `--layout pointer` (click-only canvas New and Save, no menu or
+shortcuts, nothing focused; Tk has no accessibility tree), cases `notes_pointer_x11` and
+`notes_pointer_wlroots` (pending). Sonnet 5.5 with today's prompt: **3/3 each**, by clicks.
 
 ### 3. A canvas fixture app (no accessibility tree)
 

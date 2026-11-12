@@ -1,0 +1,30 @@
+{
+  "name": "notes_pointer_x11",
+  "about": "A desktop task from pixels alone, under Xvfb: the notes app's pointer layout draws New and Save as click-only canvases (no menu, no shortcuts, nothing focused) and Tk exposes no accessibility tree, so every control is found on the screenshot and clicked (docs/agent/PLAN-computer-use.md task 3). Flipped by plan task 4.",
+  "phase": "desktop-x11",
+  "status": "pending",
+  "say": "In the Jarvis Test Notes app, add a note titled Plumber that says Thursday at 10am, and save it.",
+  "target": "desktop",
+  "setup": {
+    "login": [],
+    "notes_layout": "pointer"
+  },
+  "answers": [
+    {
+      "when": "plan",
+      "tap": "approve"
+    },
+    {
+      "when": "confirm",
+      "tap": "approve"
+    }
+  ],
+  "checks": [
+    {
+      "kind": "note_exists",
+      "title": "Plumber",
+      "body": "Thursday"
+    }
+  ],
+  "max_minutes": 10
+}

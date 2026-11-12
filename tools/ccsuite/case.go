@@ -39,7 +39,7 @@ type Setup struct {
 	// browser profile, standing in for a saved login.
 	Login       []string `json:"login"`
 	Layout      string   `json:"layout,omitempty"`       // ccsites pages: default or moved
-	NotesLayout string   `json:"notes_layout,omitempty"` // the notes app: default or moved
+	NotesLayout string   `json:"notes_layout,omitempty"` // the notes app: default, moved or pointer (click-only New and Save)
 	// Block lists the sites (hosts, e.g. 127.0.0.1) the household blocks for computer tasks
 	// during the case: a household rule of cc's (policy.Rule, effect block) per site.
 	Block []string `json:"block,omitempty"`
@@ -124,8 +124,8 @@ func (c *Case) Validate() error {
 		return errors.New("no checks")
 	case !oneOf(c.Setup.Layout, "", "default", "moved"):
 		return fmt.Errorf("setup.layout %q: default or moved", c.Setup.Layout)
-	case !oneOf(c.Setup.NotesLayout, "", "default", "moved"):
-		return fmt.Errorf("setup.notes_layout %q: default or moved", c.Setup.NotesLayout)
+	case !oneOf(c.Setup.NotesLayout, "", "default", "moved", "pointer"):
+		return fmt.Errorf("setup.notes_layout %q: default, moved or pointer", c.Setup.NotesLayout)
 	}
 	if d := c.Setup.Demonstrate; d != "" {
 		if _, ok := demonstrations[d]; !ok {

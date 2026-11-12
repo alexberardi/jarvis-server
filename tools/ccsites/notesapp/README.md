@@ -12,6 +12,10 @@ what was saved from the state file (`NotesState` in `notesapp.go`, Go package `t
   the first save, so a missing file means nothing was saved.
 - `--layout moved`: the **New note** and **Save** buttons swap places (New note goes under the
   editor, Save above the list), for the replay cases that expect a moved button.
+- `--layout pointer`: **New** and **Save** are drawn on canvases that only a click works: no
+  menu, no Ctrl+N/Ctrl+S, no shortcut text, no keyboard focus, and nothing focused at start. Tk
+  exposes no accessibility tree either, so the `notes_pointer_*` cases are done from the
+  screenshot alone.
 
 Python 3 standard library only, but Tkinter needs the Tk libraries: `tk` on Arch,
 `python3-tk` on Debian/Ubuntu. Check with `python3 -c 'import tkinter'`.
