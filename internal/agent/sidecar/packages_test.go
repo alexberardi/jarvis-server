@@ -170,3 +170,40 @@ func TestLiveSwapsSidecars(t *testing.T) {
 		t.Fatal("Close left a sidecar in service")
 	}
 }
+
+// A test install's own Python packages (its .deps folder) are importable by its code.
+func TestSidecarImportsATestInstallsOwnPackages(t *testing.T) {
+	py := python(t)
+	root := filepath.Join(t.TempDir(), "alpha")
+	if err := os.CopyFS(root, os.DirFS(filepath.Join("testdata", "packages", "alpha"))); err != nil {
+		t.Fatal(err)
+	}
+	cmd := filepath.Join(root, "commands", "greet", "command.py")
+	src, err := os.ReadFile(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cmd, append([]byte("import only_in_deps  # noqa: F401\n"), src...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".deps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".deps", "only_in_deps.py"), []byte("X = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"packages": []map[string]any{
+		{"name": "test:alpha", "root": root, "commands": []string{"commands/greet/command.py"}}}})
+	listing := filepath.Join(t.TempDir(), "commands.json")
+	if err := os.WriteFile(listing, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sc, err := Start(context.Background(), py, listing, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	if f := sc.Failed(); len(f) != 0 {
+		t.Fatalf("failed = %v", f)
+	}
+}
