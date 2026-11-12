@@ -1,7 +1,7 @@
 # Spec: Feature models — a model slot per built-in feature
 
-Status: **approved 2026-11-11** (user, via interview; see
-[docs/intent/feature-models.md](../intent/feature-models.md)). Extends
+Status: **built 2026-11-11**, and this document matches what shipped. Approved by the user via
+interview; see [docs/intent/feature-models.md](../intent/feature-models.md). Extends
 [2026-10-22-cloud-model-slot.md](../decisions/2026-10-22-cloud-model-slot.md), which built the
 pattern and applied it to one feature.
 
@@ -109,21 +109,22 @@ overriding a deliberate choice.
 
 | Feature (card label) | Setting key | `auto` today | Call sites |
 |---|---|---|---|
+| Call planning and follow-ups | `phone_calls.planning_model` | background | `phone/plan.go`, `phone/followups.go`, `phone/turn.go`, `phone/inbound.go` |
 | Computer control | `computer.model` | largest local vision model | *(already shipped)* |
-| Conversation | `cc.chat.model` | live | `engine.go`, `voice_routes.go`, `warmup.go`, `refine.go`, `continue.go`, `nodeplugin.go`, `compaction.go` |
-| Phone calls | `cc.phone.model` | live | `phone/turn.go`, `phone/inbound_agent.go` |
-| Call planning and follow-ups | `cc.phone.planning_model` | background | `phone/plan.go`, `phone/followups.go`, `phone/turn.go:969`, `phone/inbound.go` |
-| Memory | `cc.memory.model` | background | `memory_jobs.go` |
-| Routines and reactions | `cc.signals.model` | background | `signals_reactions.go` |
-| Web watches | `cc.watches.model` | background | `watches_web.go` |
-| Errands | `cc.errands.model` | background | `errands/planner.go`, `errands/runner.go` |
-| Deep research | `cc.research.model` | background | `servertools/deepresearch.go` |
-| Learned workflows | `cc.workflows.model` | background | `workflows_learn.go` |
+| Conversation | `conversation.model` | live | `engine.go`, `voice_routes.go`, `warmup.go`, `refine.go`, `continue.go`, `compaction.go` |
+| Deep research | `research.model` | background | `servertools/deepresearch.go` |
 | Documents and images | `ocr.model` | background | `ocr/engines.go` |
-| Recipe import | `recipes.import.model` | live | `recipes/ingest.go` |
+| Errands | `errands.model` | background | `errands/planner.go`, `errands/runner.go` |
 | Grocery matching | `recipes.grocery.model` | background | `recipes/grocery_match.go` |
+| Learned workflows | `workflows.model` | background | `workflows_learn.go` |
+| Memory | `memory.model` | background | `memory_jobs.go` |
+| Phone calls | `phone_calls.model` | live | `phone/turn.go`, `phone/inbound_agent.go` |
+| Recipe import | `recipes.import.model` | live | `recipes/ingest.go`, `recipes/mealplan.go`, `recipes/photo_import.go` |
+| Routines and reactions | `signals.model` | background | `signals_reactions.go` |
+| Web watches | `watches.model` | background | `watches_web.go` |
 
-Thirteen rows. None of the twelve new keys collides with an existing registered definition
+Keys follow each feature's existing prefix, as `computer.model` does, rather than a `cc.` prefix:
+the module that owns the feature owns the key. Thirteen rows. None of the twelve new keys collides with an existing registered definition
 (verified 2026-11-11).
 
 ### The legacy recipes keys
@@ -146,15 +147,17 @@ wire change. `docs/schema/recipes.md` is updated in the same PR.
 
 ### Deliberately out of scope
 
-`llm/jobs.go` forcing `background` on queued jobs (that is the public async-job API, not a built-in
-feature), `warm_flight.go` and the `slotVision` probes (they follow whatever slot Conversation
+`llm/jobs.go` and `llm/validate.go` pinning queued jobs to `background` (the public async-job API,
+not a built-in feature), the node's `/node/llm/chat` `model` argument in `nodeplugin.go` (an API
+path deliberately kept off the cloud slot), compaction's own background-then-live summarizer
+fallback, `warm_flight.go` and the `slotVision` probes (they follow whatever slot Conversation
 resolved to), and the `embeddings` label.
 
 ### The one non-mechanical piece
 
 `compaction.go` reads the **live** endpoint's context window to decide when to compact a
 conversation. If Conversation runs on another slot, compaction must read *that* slot's window, or
-it compacts at the wrong threshold. Compaction resolves `cc.chat.model` with the conversation, not
+it compacts at the wrong threshold. Compaction resolves `conversation.model` with the conversation, not
 separately.
 
 ## The UI
@@ -163,8 +166,10 @@ The card component stays; its contents change in three ways.
 
 1. **Copy.** The option reads `Auto — background`, not `Auto (background)`, with `live`,
    `background` and `cloud` alongside it as today.
-2. **Grouping.** Thirteen bare `<select>`s is a wall. Rows group under headings, and the group
-   shape is settled in the design pass, not here.
+2. **Order.** One alphabetical list. Grouping was tried and reverted: the obvious groupings
+   ("someone is waiting", "runs in the background") name what a feature *defaults* to, which is
+   the thing this card edits, so moving Conversation to background left it under the wrong
+   heading with nothing re-sorting. Sorting by title is stable under every change.
 3. **Vision.** `Documents and images` and `Computer control` need a projector. A slot whose model
    has none is **disabled with the reason shown**, the same shape as the existing
    `Cloud (not set up)` option, rather than letting the feature fail at runtime. The data is
@@ -215,8 +220,9 @@ assert `req.Label` at exactly these call sites (`recipes/grocery_test.go:236`,
 
 ## Success Criteria
 
-1. A superuser sees 13 grouped feature rows on the Models page, each with `Auto — {label}` plus the
-   three slots, the cloud notice, and no-vision slots disabled with a reason.
+1. A superuser sees 13 feature rows on the Models page in alphabetical order, each with
+   `Auto — {label}` plus the three slots, the cloud notice, and no-vision slots disabled with a
+   reason.
 2. With all settings unset, every feature's chat request carries the label it carries on `main`,
    proven by test, on a fresh install and on an upgrade.
 3. Setting a feature to `live`, `background` or `cloud` moves that feature's requests and no
@@ -238,7 +244,7 @@ A stack of four PRs, each green on its own:
 | 1 | `llm.FeatureSlot` + resolver tests + the Go↔UI drift guard + the `req.Label` assertions missing at today's call sites (no behavior change) |
 | 2 | The cc features: settings registered, call sites read them, compaction follows Conversation |
 | 3 | `ocr.model`; the recipes renames, the fold, the migration and `docs/schema/recipes.md` |
-| 4 | The card: 13 rows, grouping, `Auto — {label}`, no-vision disable, cloud notices, screenshots and the design audit |
+| 4 | The card: 13 rows alphabetically, `Auto — {label}`, no-vision disable, cloud notices, screenshots and the design audit |
 
 ## Open Questions
 
