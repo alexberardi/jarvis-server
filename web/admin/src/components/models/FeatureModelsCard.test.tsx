@@ -185,7 +185,7 @@ describe('cloudProvider', () => {
 })
 
 describe('the feature table', () => {
-  it('lists every feature under a group, with auto naming the slot it resolves to', async () => {
+  it('lists every feature alphabetically, with auto naming the slot it resolves to', async () => {
     api.getLabels.mockResolvedValue(labels('https://api.anthropic.com'))
     stored = 'auto'
     renderCard()
@@ -194,9 +194,9 @@ describe('the feature table', () => {
     for (const f of FEATURES) {
       expect(screen.getByLabelText(f.title)).toBeInTheDocument()
     }
-    for (const title of ['Someone is waiting', 'Runs in the background', 'Needs to see images']) {
-      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
-    }
+    // Alphabetical, so a row keeps its place when its slot changes.
+    const titles = screen.getAllByText(/./, { selector: 'label[for^="feature-"]' }).map((l) => l.textContent ?? '')
+    expect(titles).toEqual([...titles].sort((a, b) => a.localeCompare(b)))
     // Auto says which slot it means, so a row reads as a value rather than as a word.
     expect(screen.getAllByRole('option', { name: 'Auto — live' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('option', { name: 'Auto — background' }).length).toBeGreaterThan(0)

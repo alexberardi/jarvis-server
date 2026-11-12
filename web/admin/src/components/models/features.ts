@@ -27,132 +27,108 @@ export interface Feature {
   notice: (provider: string) => string
 }
 
-/** A run of features that share why you would move them, shown under one heading. */
-export interface FeatureGroup {
-  id: string
-  title: string
-  blurb: string
-  features: Feature[]
-}
-
-export const FEATURE_GROUPS: FeatureGroup[] = [
+/**
+ * Every feature. FEATURES sorts these by title: a feature's slot is the thing being edited on
+ * this card, so grouping or ordering by it would strand a row under the wrong heading the moment
+ * someone changed it.
+ */
+const UNSORTED: Feature[] = [
   {
-    id: 'waiting',
-    title: 'Someone is waiting',
-    blurb: 'A person is listening while these run, so a slow or distant slot is felt as a pause.',
-    features: [
-      {
-        key: 'conversation.model',
-        service: 'cc',
-        title: 'Conversation',
-        auto: 'live',
-        notice: (p) => `What you say and the context of the turn are sent to ${p}.`,
-      },
-      {
-        key: 'phone_calls.model',
-        service: 'cc',
-        title: 'Phone calls',
-        auto: 'live',
-        notice: (p) => `What is said on the call is sent to ${p}, as the call happens.`,
-      },
-      {
-        key: 'recipes.import.model',
-        service: 'recipes',
-        title: 'Recipe import',
-        auto: 'live',
-        notice: (p) => `The text of the page or photo you are importing is sent to ${p}.`,
-      },
-    ],
+    key: 'conversation.model',
+    service: 'cc',
+    title: 'Conversation',
+    auto: 'live',
+    notice: (p) => `What you say and the context of the turn are sent to ${p}.`,
   },
   {
-    id: 'background',
-    title: 'Runs in the background',
-    blurb: 'Nobody waits on these, so a larger, slower slot costs you nothing but electricity.',
-    features: [
-      {
-        key: 'memory.model',
-        service: 'cc',
-        title: 'Memory',
-        auto: 'background',
-        notice: (p) => `A finished conversation is sent to ${p} to pull memories out of it.`,
-      },
-      {
-        key: 'phone_calls.planning_model',
-        service: 'cc',
-        title: 'Call planning and follow-ups',
-        auto: 'background',
-        notice: (p) => `A call's goal, and its transcript afterwards, are sent to ${p}.`,
-      },
-      {
-        key: 'errands.model',
-        service: 'cc',
-        title: 'Errands',
-        auto: 'background',
-        notice: (p) => `An errand's goal, and what it reads along the way, are sent to ${p}.`,
-      },
-      {
-        key: 'signals.model',
-        service: 'cc',
-        title: 'Routines and reactions',
-        auto: 'background',
-        notice: (p) => `What set the routine off, and your household's context, are sent to ${p}.`,
-      },
-      {
-        key: 'watches.model',
-        service: 'cc',
-        title: 'Web watches',
-        auto: 'background',
-        notice: (p) => `The contents of every page you watch are sent to ${p} on each check.`,
-      },
-      {
-        key: 'research.model',
-        service: 'cc',
-        title: 'Deep research',
-        auto: 'background',
-        notice: (p) => `Your query and the pages it found are sent to ${p} to be written up.`,
-      },
-      {
-        key: 'workflows.model',
-        service: 'cc',
-        title: 'Learned workflows',
-        auto: 'background',
-        notice: (p) => `The steps you took, and what they touched, are sent to ${p}.`,
-      },
-      {
-        key: 'recipes.grocery.model',
-        service: 'recipes',
-        title: 'Grocery matching',
-        auto: 'background',
-        notice: (p) => `Your ingredients and the store's listing are sent to ${p}.`,
-      },
-    ],
+    key: 'phone_calls.model',
+    service: 'cc',
+    title: 'Phone calls',
+    auto: 'live',
+    notice: (p) => `What is said on the call is sent to ${p}, as the call happens.`,
   },
   {
-    id: 'vision',
-    title: 'Needs to see images',
-    blurb: 'These send pictures, so they can only run on a slot whose model has vision.',
-    features: [
-      {
-        key: 'computer.model',
-        service: 'cc',
-        title: 'Computer control',
-        auto: 'background',
-        vision: true,
-        notice: (p) => `Page contents and screenshots of your browser are sent to ${p} while a task runs.`,
-      },
-      {
-        key: 'ocr.model',
-        service: 'ocr',
-        title: 'Documents and images',
-        auto: 'background',
-        vision: true,
-        notice: (p) => `The document or photo itself is sent to ${p} to be read.`,
-      },
-    ],
+    key: 'recipes.import.model',
+    service: 'recipes',
+    title: 'Recipe import',
+    auto: 'live',
+    notice: (p) => `The text of the page or photo you are importing is sent to ${p}.`,
+  },
+  {
+    key: 'memory.model',
+    service: 'cc',
+    title: 'Memory',
+    auto: 'background',
+    notice: (p) => `A finished conversation is sent to ${p} to pull memories out of it.`,
+  },
+  {
+    key: 'phone_calls.planning_model',
+    service: 'cc',
+    title: 'Call planning and follow-ups',
+    auto: 'background',
+    notice: (p) => `A call's goal, and its transcript afterwards, are sent to ${p}.`,
+  },
+  {
+    key: 'errands.model',
+    service: 'cc',
+    title: 'Errands',
+    auto: 'background',
+    notice: (p) => `An errand's goal, and what it reads along the way, are sent to ${p}.`,
+  },
+  {
+    key: 'signals.model',
+    service: 'cc',
+    title: 'Routines and reactions',
+    auto: 'background',
+    notice: (p) => `What set the routine off, and your household's context, are sent to ${p}.`,
+  },
+  {
+    key: 'watches.model',
+    service: 'cc',
+    title: 'Web watches',
+    auto: 'background',
+    notice: (p) => `The contents of every page you watch are sent to ${p} on each check.`,
+  },
+  {
+    key: 'research.model',
+    service: 'cc',
+    title: 'Deep research',
+    auto: 'background',
+    notice: (p) => `Your query and the pages it found are sent to ${p} to be written up.`,
+  },
+  {
+    key: 'workflows.model',
+    service: 'cc',
+    title: 'Learned workflows',
+    auto: 'background',
+    notice: (p) => `The steps you took, and what they touched, are sent to ${p}.`,
+  },
+  {
+    key: 'recipes.grocery.model',
+    service: 'recipes',
+    title: 'Grocery matching',
+    auto: 'background',
+    notice: (p) => `Your ingredients and the store's listing are sent to ${p}.`,
+  },
+  {
+    key: 'computer.model',
+    service: 'cc',
+    title: 'Computer control',
+    auto: 'background',
+    vision: true,
+    notice: (p) => `Page contents and screenshots of your browser are sent to ${p} while a task runs.`,
+  },
+  {
+    key: 'ocr.model',
+    service: 'ocr',
+    title: 'Documents and images',
+    auto: 'background',
+    vision: true,
+    notice: (p) => `The document or photo itself is sent to ${p} to be read.`,
   },
 ]
 
-export const FEATURES: Feature[] = FEATURE_GROUPS.flatMap((g) => g.features)
+export const FEATURES: Feature[] = [...UNSORTED].sort((a, b) => a.title.localeCompare(b.title))
 
 const PROVIDERS: Record<string, string> = {
   'api.anthropic.com': 'Anthropic',

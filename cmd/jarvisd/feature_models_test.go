@@ -15,8 +15,9 @@ import (
 )
 
 // featureKeyRE pulls the keys out of the SPA's feature table (web/admin/.../features.ts), where
-// every entry reads `key: 'some.setting.model',`.
-var featureKeyRE = regexp.MustCompile(`(?m)^\s*key:\s*'([^']+)',`)
+// every entry reads `key: 'some.setting.model',`. Either quote style matches, so reformatting the
+// file cannot fail this test for a reason that has nothing to do with drift.
+var featureKeyRE = regexp.MustCompile(`(?m)^\s*key:\s*['"]([^'"]+)['"],`)
 
 // TestFeatureModelsMatchTheSPA keeps the Feature models card and the server's slot settings from
 // drifting apart: a row whose key is not a registered slot setting silently does nothing, and a

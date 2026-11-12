@@ -9,7 +9,7 @@ import { fieldControl } from '@/components/ui/fieldStyles'
 import { cn } from '@/lib/utils'
 import type { AggregatedSettingsResponse } from '@/types/settings'
 import {
-  FEATURE_GROUPS,
+  FEATURES,
   SLOT_TITLE,
   cloudProvider,
   slotSeesImages,
@@ -153,19 +153,9 @@ export default function FeatureModelsCard() {
       icon={Route}
       description="Which model each feature runs on. Auto stays on this machine; only a feature you set to cloud uses the cloud slot."
     >
-      <div className="space-y-6">
-        {FEATURE_GROUPS.map((group) => (
-          <section key={group.id} aria-labelledby={`feature-group-${group.id}`}>
-            <h3 id={`feature-group-${group.id}`} className="text-small font-semibold text-text">
-              {group.title}
-            </h3>
-            <p className="mt-1 text-caption text-text-muted">{group.blurb}</p>
-            <div className="mt-3 divide-y divide-border border-t border-border">
-              {group.features.map((f) => (
-                <FeatureRow key={f.key} feature={f} provider={provider} slots={slotStates(f)} />
-              ))}
-            </div>
-          </section>
+      <div className="divide-y divide-border">
+        {FEATURES.map((f) => (
+          <FeatureRow key={f.key} feature={f} provider={provider} slots={slotStates(f)} />
         ))}
       </div>
     </ModelCard>
