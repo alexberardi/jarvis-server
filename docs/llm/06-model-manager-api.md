@@ -141,11 +141,15 @@ Models page ("Runs: Remote endpoint", "API") or `PUT /v1/models/labels`:
   `tool_result` blocks, and consecutive same-role messages merge (parallel tool results share one
   user message); empty messages and a leading assistant turn are dropped; a `tool` message
   without `tool_call_id` is a 400. Tools map to `{name, description, input_schema}`;
-  `tool_choice` auto/none as is, required → any, a named function → `{type: tool}`.
+  `tool_choice` auto/none as is, required → any, a named function → `{type: tool}`; for
+  `sonnet-5-5`, `opus-5-5`, `fable-5-1`/`5-2` and `mythos-5-1`/`5-2`, which reject a forced
+  choice with a 400, a forced one goes as `auto`.
   `max_tokens` is the request's, else 4096 (the module has no default setting). Temperature,
   top_p, seed and the llama.cpp thinking fields are not sent; `thinking: {"type":"disabled"}`
   is, except for models whose name contains `fable` or `mythos` (always thinking, where
-  `disabled` is a 400). Data-URL images (with `remote_vision` on) become base64 `image` blocks.
+  `disabled` is a 400: no `thinking` key) and `sonnet-5-5` (`disabled` is a 400; it gets
+  `{"type":"between_tools"}`). Claude Opus 5.5 can't turn thinking off at all and is not
+  supported yet (the same thinking-block replay limit as Fable/Mythos). Data-URL images (with `remote_vision` on) become base64 `image` blocks.
 - Response: text blocks concatenate, `tool_use` blocks become tool calls; `stop_reason`
   tool_use → `tool_calls`, max_tokens / model_context_window_exceeded → `length`, refusal →
   `content_filter`, else `stop` (refusal and pause_turn are logged). Prompt tokens include the
@@ -187,9 +191,10 @@ with the model from `JARVIS_TEST_<NAME>_MODEL` or the default (`internal/modules
 | OpenAI | `OPENAI_API_KEY` → `JARVIS_TEST_OPENAI_KEY` | `gpt-5-nano` |
 | Gemini | `GEMINI_API_KEY` → `JARVIS_TEST_GEMINI_KEY` | `gemini-3.1-flash-lite` |
 
-- `TestRemoteLive` (llm): chat, thinking off, a tool round trip, a tool call in the history from
-  another model, streamed text and a streamed tool call; tool calls must come back with an id,
-  the right name and JSON-object arguments.
+- `TestRemoteLive` (llm): chat, thinking off, a forced tool choice (`required`), a tool round
+  trip, a tool call in the history from another model, streamed text and a streamed tool call;
+  tool calls must come back with an id, the right name and JSON-object arguments. With the
+  Anthropic key it also runs every check on `claude-sonnet-5-5`.
 - `TestCloudLive` (cc): voice turns through the `Cloud` prompt with the dev node's whole tool set
   (`fixtures/golden/prompts/_inputs.json`) plus the server tools: a `todo_list` round trip on
   the blocking routes, then a tool round trip (any tool) on the streaming routes with the first in

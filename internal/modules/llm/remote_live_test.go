@@ -22,8 +22,17 @@ func TestRemoteLive(t *testing.T) {
 		t.Run(p.Name, func(t *testing.T) {
 			remoteLiveChecks(t, &livetest.Busy{}, Endpoint{BaseURL: p.BaseURL, APIKey: p.Key, Model: p.Model, Remote: true, API: p.API})
 		})
+		// Claude Sonnet 5.5 too, whatever the provider's model: it refuses thinking "disabled" and
+		// a forced tool_choice, which the Anthropic translation must avoid (anthropic.go).
+		if p.Name == "anthropic" && p.Model != sonnet55 {
+			t.Run(p.Name+"/"+sonnet55, func(t *testing.T) {
+				remoteLiveChecks(t, &livetest.Busy{}, Endpoint{BaseURL: p.BaseURL, APIKey: p.Key, Model: sonnet55, Remote: true, API: p.API})
+			})
+		}
 	}
 }
+
+const sonnet55 = "claude-sonnet-5-5"
 
 func remoteLiveChecks(t *testing.T, busy *livetest.Busy, ep Endpoint) {
 	s := NewService(ServiceConfig{Resolver: &fakeResolver{eps: map[string]Endpoint{LabelLive: ep}, err: map[string]error{}},
@@ -70,6 +79,16 @@ func remoteLiveChecks(t *testing.T, busy *livetest.Busy, ep Endpoint) {
 		if r.Content == "" {
 			busy.Fatalf(t, "empty answer: %+v", r)
 		}
+	})
+
+	// cc's call-now nag sends tool_choice "required": every provider must take it (a model that
+	// refuses a forced choice gets auto) and still call the tool.
+	t.Run("forced tool choice", func(t *testing.T) {
+		r, err := s.Chat(ctx, ChatRequest{Messages: weatherQ, Tools: tools, ToolChoice: json.RawMessage(`"required"`), MaxTokens: ptr(256)})
+		if err != nil {
+			busy.Fatalf(t, "%v", err)
+		}
+		wantToolCall(t, r.ToolCalls)
 	})
 
 	t.Run("tool round trip", func(t *testing.T) {

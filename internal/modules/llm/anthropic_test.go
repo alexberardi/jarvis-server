@@ -523,3 +523,73 @@ func TestOpenAIPathUnchanged(t *testing.T) {
 		t.Fatalf("headers %v", h)
 	}
 }
+
+// How thinking is turned off per model: Sonnet 5.5 rejects {"type":"disabled"} with a 400 and
+// takes {"type":"between_tools"} instead; always-thinking models get no key; the rest disabled.
+func TestAnthropicThinkingOffPerModel(t *testing.T) {
+	for model, want := range map[string]string{
+		"claude-sonnet-test": "disabled",
+		"claude-haiku-5-5":   "disabled",
+		"claude-sonnet-5":    "disabled",
+		"claude-sonnet-5-5":  "between_tools",
+		"Claude-Sonnet-5-5":  "between_tools",
+		"claude-fable-5-2":   "",
+		"claude-mythos-5-2":  "",
+	} {
+		rec := newRecorder(t, canned{body: messageOK})
+		s := anthropicService(rec, "", model)
+		if _, err := s.Chat(context.Background(), ChatRequest{Messages: []Message{msg("user", "hi")}}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, raw := rec.last()
+		var b struct {
+			Thinking *struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+		}
+		if err := json.Unmarshal([]byte(raw), &b); err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if b.Thinking != nil {
+			got = b.Thinking.Type
+		}
+		if got != want {
+			t.Errorf("%s: thinking %q, want %q (%s)", model, got, want, raw)
+		}
+	}
+}
+
+// Sonnet 5.5, Opus 5.5 and Fable/Mythos 5.1+ reject a forced tool_choice (any, or a named tool)
+// with a 400: a forced choice goes to them as auto, and stays forced for every other model.
+func TestAnthropicForcedToolChoicePerModel(t *testing.T) {
+	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "now"}}}
+	for _, tc := range []struct{ model, choice, want string }{
+		{"claude-sonnet-test", `"required"`, `{"type":"any"}`},
+		{"claude-haiku-5-5", `"required"`, `{"type":"any"}`},
+		{"claude-sonnet-5-5", `"required"`, `{"type":"auto"}`},
+		{"claude-sonnet-5-5", `{"type":"function","function":{"name":"now"}}`, `{"type":"auto"}`},
+		{"claude-sonnet-5-5", `"none"`, `{"type":"none"}`},
+		{"claude-opus-5-5", `"required"`, `{"type":"auto"}`},
+		{"claude-fable-5-2", `"required"`, `{"type":"auto"}`},
+		{"claude-mythos-5-1", `"required"`, `{"type":"auto"}`},
+		{"claude-fable-5", `"required"`, `{"type":"any"}`},
+	} {
+		rec := newRecorder(t, canned{body: messageOK})
+		s := anthropicService(rec, "", tc.model)
+		if _, err := s.Chat(context.Background(), ChatRequest{Messages: []Message{msg("user", "hi")},
+			Tools: tools, ToolChoice: json.RawMessage(tc.choice)}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, raw := rec.last()
+		var b struct {
+			ToolChoice json.RawMessage `json:"tool_choice"`
+		}
+		if err := json.Unmarshal([]byte(raw), &b); err != nil {
+			t.Fatal(err)
+		}
+		if string(b.ToolChoice) != tc.want {
+			t.Errorf("%s %s: tool_choice %s, want %s", tc.model, tc.choice, b.ToolChoice, tc.want)
+		}
+	}
+}
