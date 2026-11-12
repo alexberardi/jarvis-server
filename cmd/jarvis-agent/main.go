@@ -61,6 +61,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"github.com/alexberardi/jarvis-server/internal/agent/targets"
 	"github.com/alexberardi/jarvis-server/internal/agent/views"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
 	"github.com/alexberardi/jarvis-server/internal/buildinfo"
@@ -784,6 +785,7 @@ func runAgent(ctx context.Context, args []string) error {
 	if p.desktop {
 		// Computer tasks in the browser and on the desktop (plan P3 pieces 8 and 22): build
 		// adds the executor's tools after the browser's.
+		tf.computerOn = computerSw.On
 		tf.computer = func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset {
 			var b computer.Browser
 			if bt != nil {
@@ -1187,6 +1189,9 @@ type toolFlags struct {
 	// extension's (nil with --no-browser) and the desktop, whose apps launch opens through
 	// desktop_open's catalogue and whose windows h focuses: build adds them after the browser tools.
 	computer func(bt *browser.Tools, apps computer.Apps, h *host.Host) node.Toolset
+	// computerOn, when the caller sets it, is the computer-control switch: voice clicks in
+	// desktop apps (appclick) need it on.
+	computerOn func() bool
 }
 
 func addToolFlags(fs *flag.FlagSet) *toolFlags {
@@ -1258,6 +1263,13 @@ func (f *toolFlags) build(ctx context.Context, log *slog.Logger, promptAX bool, 
 		guard.Tab = hub.FocusedTab
 		tools = append(tools, bt)
 		closeAll = stopBrowser
+	}
+	// Then the focused app window's controls ("click Bold" in LibreOffice), before tabs,
+	// windows and apps by name: what's on screen first (ELEMENT-LAYER-WORK.md slice 4b).
+	if f.computerOn != nil {
+		if ac := newAppClick(f.computerOn, targets.Picker{CC: f.cc, Wrap: browser.Wrap, Log: log}, dt.Confirm); ac != nil {
+			tools = append(tools, ac)
+		}
 	}
 	tools = append(tools, opener, &screen.Tools{C: screen.Native(), Log: log}, dt)
 	if f.computer != nil {
@@ -1499,6 +1511,7 @@ func status(ctx context.Context, args []string) error {
 	fmt.Printf("menu icon:    %s\n", trayStatus())
 	fmt.Printf("dictation:    %s\n", dictationStatus(ctx, h))
 	fmt.Printf("browser:      %s\n", browserSummary())
+	fmt.Printf("documents:    %s\n", computer.OfficeStatus())
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
 	} else {

@@ -67,7 +67,14 @@ func expectedReject(cat string) bool {
 func realEngine(t *testing.T, base string) func(body map[string]any) (engineReply, bool) {
 	return func(body map[string]any) (engineReply, bool) {
 		raw, _ := json.Marshal(body)
-		resp, err := http.Post(strings.TrimRight(base, "/")+"/v1/chat/completions", "application/json", bytes.NewReader(raw))
+		req, _ := http.NewRequest("POST", strings.TrimRight(base, "/")+"/v1/chat/completions", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		// An installed jarvisd's LLM API takes an app client (~/.config/jarvis-harness/installed.env).
+		if id := os.Getenv("INSTALLED_APP_ID"); id != "" {
+			req.Header.Set("X-Jarvis-App-Id", id)
+			req.Header.Set("X-Jarvis-App-Key", os.Getenv("INSTALLED_APP_KEY"))
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Errorf("engine: %v", err)
 			return engineReply{status: 502, content: err.Error()}, true
