@@ -163,7 +163,7 @@ func TestStoreCheckout(t *testing.T) {
 		t.Fatal("cart has no checkout button")
 	}
 	code, _, body = get(t, c, hs.URL+"/store/checkout")
-	for _, want := range []string{"•••• 4242", "Place order", `value="Avery Quinn"`} {
+	for _, want := range []string{"•••• 4242", "Place order", `value="Jordan Quinn"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("checkout (%d) lacks %q", code, want)
 		}
@@ -171,7 +171,7 @@ func TestStoreCheckout(t *testing.T) {
 	if n := len(state(t, hs.URL).Orders); n != 0 {
 		t.Fatalf("%d orders before Place order", n)
 	}
-	form := url.Values{"name": {"Avery Quinn"}, "street": {"12 Orchard Lane"}, "city": {"Springfield"}, "zip": {"62704"}, "card": {"4242"}}
+	form := url.Values{"name": {"Jordan Quinn"}, "street": {"12 Orchard Lane"}, "city": {"Springfield"}, "zip": {"62704"}, "card": {"4242"}}
 	code, h, _ := post(t, c, hs.URL+"/store/checkout", form)
 	if code != http.StatusSeeOther {
 		t.Fatalf("place order: %d", code)
@@ -183,7 +183,7 @@ func TestStoreCheckout(t *testing.T) {
 		t.Fatalf("orders: %+v", st.Orders)
 	}
 	o := st.Orders[0]
-	if len(o.Items) != 1 || o.Items[0].ID != BestUnder300 || o.Card != "•••• 4242" || o.ShipTo.Name != "Avery Quinn" {
+	if len(o.Items) != 1 || o.Items[0].ID != BestUnder300 || o.Card != "•••• 4242" || o.ShipTo.Name != "Jordan Quinn" {
 		t.Errorf("order: %+v", o)
 	}
 	if !strings.Contains(body, o.Number) {

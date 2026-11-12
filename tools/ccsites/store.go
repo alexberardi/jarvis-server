@@ -65,8 +65,9 @@ func productByID(id string) (Product, bool) {
 	return Product{}, false
 }
 
-// shipTo is the pre-filled shipping address at checkout.
-var shipTo = Address{Name: "Avery Quinn", Street: "12 Orchard Lane", City: "Springfield, IL", Zip: "62704"}
+// shipTo is the pre-filled shipping address at checkout: the user's own, named as the sandbox's
+// seeded user (scripts/seed-dev.py: Jordan), so "my saved address" is plainly this one.
+var shipTo = Address{Name: "Jordan Quinn", Street: "12 Orchard Lane", City: "Springfield, IL", Zip: "62704"}
 
 const savedCard = "•••• 4242"
 
