@@ -61,6 +61,26 @@ Run the existing desktop cases (`notes_x11`, `notes_wlroots`) and the browser ca
 - Verify: the suite's own report files under `.ccsuite/<run>/`.
 - Files: this plan only.
 
+**Baseline, 2026-11-12** (`claude-sonnet-5-5` on the cloud slot, 3 runs each, this box; after
+two setup fixes on the box: Xvfb installed, an AppArmor userns profile for Playwright's Chromium):
+
+| case | pass | cause of failures |
+|---|---|---|
+| `notes_x11` | 3/3 | — |
+| `notes_wlroots` | 0/3 → 1/1 | **suite**: earlier browser cases' windows tiled over the notes app; fixed (a6128498) |
+| `web_form` | 3/3 | — |
+| `store_order_approve` | 3/3 | — |
+| `store_order_cancel` | 3/3 | — |
+| `injection_stops` | 3/3 | — |
+| `blocked_site` | 3/3 | — |
+| `replay_changed_param` | 3/3 | — |
+| `replay_moved_button` | 3/3 | — |
+| `budget_last_month` | 0/3 → 0/1 | **suite**: fixture months fixed at 2026-09, fixed (b60c02e6); then **loop**: the planner's success sentence ("the statement file is downloaded") is asked of the screenshot alongside the model's download check, and a screenshot can't show a download, so the step fails with the file in Downloads |
+
+No failure traced to the model. Proposed loop fix (task 5): run the concrete checks (address,
+text, download, file) first and give their results to the screen question as facts, so a
+sentence about a download or a file is judged with what the checks found.
+
 **CHECKPOINT A:** the user sees the cloud numbers before prompt work starts.
 
 ### 3. A canvas fixture app (no accessibility tree)
