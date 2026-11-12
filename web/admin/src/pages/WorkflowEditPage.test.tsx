@@ -95,7 +95,7 @@ describe('WorkflowEditPage', () => {
     renderPage()
     await screen.findAllByTestId('step')
     const body = await save()
-    expect(Object.keys(body).sort()).toEqual(['name', 'params', 'shared', 'steps', 'success', 'triggers'])
+    expect(Object.keys(body).sort()).toEqual(['name', 'params', 'shared', 'skill', 'steps', 'success', 'triggers'])
     const wf = bank()
     expect(body).toEqual({
       name: wf.name,
@@ -104,6 +104,7 @@ describe('WorkflowEditPage', () => {
       steps: wf.steps,
       success: wf.success,
       shared: false,
+      skill: {},
     })
   })
 
@@ -224,5 +225,78 @@ describe('WorkflowEditPage', () => {
     expect(screen.queryByLabelText('Step 1 intent')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toBeDisabled()
     expect(screen.getByRole('switch', { name: 'Share with the household' })).toBeDisabled()
+  })
+
+  // The workflow's skill (docs/agent/WORKFLOW-SKILLS.md): learnt, shown as separate parts, edited here.
+  const skilled = () =>
+    bank({
+      skill: {
+        goal: { reason: 'Keep the records', end_state: 'The {month} statement is in Downloads' },
+        when_to_use: 'You ask for a bank statement',
+        prerequisites: [{ kind: 'signed_in', site: 'bank.example.com', text: 'Signed in to the bank' }],
+        guardrails: 'creative',
+        notes: [{ text: 'The site signs out after five minutes', app: 'Brave' }],
+      },
+      steps: bank().steps.map((s, i) =>
+        i === 1 ? { ...s, goal: 'Get to the list', expect: { url_contains: 'bank.example.com/statements' } } : i === 2 ? { ...s, expect: { screen: 'The month shows' } } : s,
+      ),
+    })
+
+  it('shows the skill and saves it unchanged, with what the page does not edit', async () => {
+    api.getWorkflow.mockResolvedValue(skilled())
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.getByLabelText('Why you do this')).toHaveValue('Keep the records')
+    expect(screen.getByLabelText("It's done when")).toHaveValue('The {month} statement is in Downloads')
+    expect(screen.getByLabelText('Signed in to (prerequisite 1)')).toHaveValue('bank.example.com')
+    expect(screen.getByLabelText(/step 2 goal/)).toHaveValue('Get to the list')
+    // An expectation the recording proved is read out, not typed over.
+    expect(steps()[1]).toHaveTextContent('Then the address contains bank.example.com/statements.')
+    expect(screen.getByLabelText(/what you see after step 3/)).toHaveValue('The month shows')
+    const body = await save()
+    expect(body.skill).toEqual(skilled().skill)
+    expect(body.steps[1].expect).toEqual({ url_contains: 'bank.example.com/statements' })
+    expect(body.steps[2].expect).toEqual({ screen: 'The month shows' })
+  })
+
+  it('edits the goal, prerequisites, notes and a step\'s goal and expectation', async () => {
+    api.getWorkflow.mockResolvedValue(skilled())
+    renderPage()
+    await screen.findAllByTestId('step')
+    fireEvent.change(screen.getByLabelText("It's done when"), { target: { value: ' The statement is saved ' } })
+    // A prerequisite's value moves with its kind; an empty one and a blank note are not saved.
+    fireEvent.change(screen.getByLabelText('Prerequisite 1'), { target: { value: 'page_open' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add a prerequisite' }))
+    fireEvent.change(screen.getByLabelText('Prerequisite 2'), { target: { value: 'file_open' } })
+    fireEvent.change(screen.getByLabelText('A file is open (prerequisite 2)'), { target: { value: 'budget-{month}.xlsx' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add a prerequisite' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
+    fireEvent.change(screen.getByLabelText(/step 1 goal/), { target: { value: 'Start at the bank' } })
+    fireEvent.change(screen.getByLabelText(/what you see after step 1/), { target: { value: 'The sign-in page' } })
+    fireEvent.change(screen.getByLabelText(/what you see after step 3/), { target: { value: '' } })
+    const body = await save()
+    expect(body.skill?.goal).toEqual({ reason: 'Keep the records', end_state: 'The statement is saved' })
+    expect(body.skill?.prerequisites).toEqual([
+      { kind: 'page_open', url: 'bank.example.com' },
+      { kind: 'file_open', file: 'budget-{month}.xlsx' },
+    ])
+    expect(body.skill?.notes).toEqual([{ text: 'The site signs out after five minutes', app: 'Brave' }])
+    expect(body.steps[0].goal).toBe('Start at the bank')
+    expect(body.steps[0].expect).toEqual({ screen: 'The sign-in page' })
+    expect(body.steps[2].expect).toBeUndefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove prerequisite 1' }))
+    expect(screen.getAllByTestId('prerequisite')).toHaveLength(2)
+  })
+
+  it('reads the skill out to a member who may not change it', async () => {
+    api.getWorkflow.mockResolvedValue({ ...skilled(), editable: false, owner_id: 9, shared: true })
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.getByText('The {month} statement is in Downloads')).toBeInTheDocument()
+    expect(screen.getByText('Signed in to bank.example.com')).toBeInTheDocument()
+    expect(screen.getByText('The site signs out after five minutes')).toBeInTheDocument()
+    expect(steps()[1]).toHaveTextContent('Get to the list Then the address contains bank.example.com/statements.')
+    expect(screen.queryByLabelText('Why you do this')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add a prerequisite' })).not.toBeInTheDocument()
   })
 })

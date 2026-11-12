@@ -47,6 +47,13 @@ test('edits a workflow and the server keeps the edit', async ({ page }) => {
     await page.getByRole('button', { name: 'Move step 5 up' }).click()
     await page.getByRole('switch', { name: 'Ask me first before step 1' }).check()
     await page.getByRole('switch', { name: 'Share with the household' }).check()
+    // The workflow's skill (docs/agent/WORKFLOW-SKILLS.md): its goal, a prerequisite, a step's goal.
+    await expect(page.getByLabel("It's done when")).toHaveValue('The statement for {month} is in Downloads as a CSV file.')
+    await page.getByLabel('Why you do this').fill('For the tax return')
+    await page.getByRole('button', { name: 'Add a prerequisite' }).click()
+    await page.getByLabel('Prerequisite 2', { exact: true }).selectOption('file_open')
+    await page.getByLabel('A file is open (prerequisite 2)').fill('budget-{month}.xlsx')
+    await page.getByLabel(/step 1 goal/).fill('Start at the bank')
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page.getByText('Saved')).toBeVisible()
 
@@ -62,14 +69,21 @@ test('edits a workflow and the server keeps the edit', async ({ page }) => {
     ])
     expect(after.steps[4].action.text).toBe('{account}')
     expect(after.steps[0].risk).toBe('submit_third_party')
+    expect(after.steps[0].goal).toBe('Start at the bank')
+    expect(after.skill.goal.reason).toBe('For the tax return')
+    expect(after.skill.prerequisites).toEqual([
+      { kind: 'signed_in', site: 'bank.example.com' },
+      { kind: 'file_open', file: 'budget-{month}.xlsx' },
+    ])
 
     // What the page shows after a reload came from the server.
     await page.reload()
     await expect(page.getByTestId('step').nth(4)).toContainText('Choose {account}')
     await expect(page.getByTestId('step').nth(0)).toContainText('Asks first')
+    await expect(page.getByLabel('A file is open (prerequisite 2)')).toHaveValue('budget-{month}.xlsx')
   } finally {
-    const { name, triggers, params, steps, success, shared } = before
-    await must('PUT', cc(`/workflows/${BANK}`), { token, body: { name, triggers, params, steps, success, shared } })
+    const { name, triggers, params, steps, success, shared, skill } = before
+    await must('PUT', cc(`/workflows/${BANK}`), { token, body: { name, triggers, params, steps, success, shared, skill } })
   }
 })
 
