@@ -343,3 +343,36 @@ func TestDoneNamesDownloads(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 }
+
+// A screen question about something a screenshot can't show (a finished download, a saved file)
+// is asked after the concrete checks, with what they found: the planner's "the statement file is
+// downloaded" failed beside a download check that had found the file (budget_last_month on
+// Sonnet 5.5, 2026-11-12). A failing concrete check fails first, without the vision call.
+func TestVerifyScreenAfterConcreteChecks(t *testing.T) {
+	e := newEnv(t, thanksPage())
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{
+		{Name: "statement-2026-10.csv", Bytes: 3 << 10},
+	}}}
+	check := &SuccessCheck{Screen: "The October 2026 statement file is downloaded to the computer",
+		Download: &DownloadCheck{NameLike: "2026-10"}}
+	e.script("Yes. Jarvis found the statement in Downloads.")
+	v := e.verify(check)
+	if !v.OK || v.Checked != "statement-2026-10.csv is in Downloads (3 KB); The October 2026 statement file is downloaded to the computer: yes" {
+		t.Fatalf("verify %+v", v)
+	}
+	if len(e.llm.reqs) != 1 {
+		t.Fatalf("screen calls %d", len(e.llm.reqs))
+	}
+	txt := e.llm.reqs[0].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(txt, "Jarvis already checked: statement-2026-10.csv is in Downloads (3 KB)") {
+		t.Fatalf("screen question without the checks' findings:\n%s", txt)
+	}
+
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {}}
+	if v := e.verify(check); v.OK || v.Why != `there's no file like "2026-10" in Downloads` {
+		t.Fatalf("verify %+v", v)
+	}
+	if len(e.llm.reqs) != 1 {
+		t.Fatalf("a failed download still asked the screen: %d calls", len(e.llm.reqs))
+	}
+}
