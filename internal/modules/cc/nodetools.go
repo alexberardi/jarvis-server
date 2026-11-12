@@ -57,7 +57,58 @@ func (m *Module) handleNodeTools(w http.ResponseWriter, r *http.Request, u authn
 			out[k] = v
 		}
 	}
+	if err := m.annotatePackageStores(ctx, nodeID, n.householdID.String, out["installed_packages"]); err != nil {
+		m.internalError(w, err)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// annotatePackageStores adds, to each installed package whose store is recorded (decision 5),
+// pantry_store_id and the store's pantry_store_name, or pantry_store_removed when the store is
+// no longer in the household's list: the package runs, but has no updates. Additive keys; a
+// package installed before stores were recorded is left as the node reported it.
+func (m *Module) annotatePackageStores(ctx context.Context, nodeID, householdID string, pkgs any) error {
+	list, _ := pkgs.([]any)
+	if len(list) == 0 {
+		return nil
+	}
+	rows, err := m.deps.DB.Read.QueryContext(ctx,
+		`SELECT command_name, pantry_store_id FROM cc_node_package_stores WHERE node_id = ?`, nodeID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	recorded := map[string]string{}
+	for rows.Next() {
+		var name, id string
+		if err := rows.Scan(&name, &id); err != nil {
+			return err
+		}
+		recorded[name] = id
+	}
+	if err := rows.Err(); err != nil || len(recorded) == 0 {
+		return err
+	}
+	names := map[string]string{}
+	for _, s := range m.PantryStores(ctx, householdID) {
+		names[s.ID] = s.Name
+	}
+	for _, e := range list {
+		p, _ := e.(map[string]any)
+		name, _ := p["name"].(string)
+		id, ok := recorded[name]
+		if !ok {
+			continue
+		}
+		p["pantry_store_id"] = id
+		if n, listed := names[id]; listed {
+			p["pantry_store_name"] = n
+		} else {
+			p["pantry_store_removed"] = true
+		}
+	}
+	return nil
 }
 
 func (m *Module) requestNodeTools(ctx context.Context, nodeID string) (map[string]any, bool) {

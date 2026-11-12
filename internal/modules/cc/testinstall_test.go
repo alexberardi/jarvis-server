@@ -322,19 +322,19 @@ func TestTestInstallPantryErrors(t *testing.T) {
 		return n
 	}
 
-	post("ZZZ999").detail(404, "Share code not found or expired")
+	post("ZZZ999").detail(404, "Share code not found or expired in the Pantry store Test Pantry")
 
 	pantry.set(func() { pantry.drafts["NONAME"] = `{"files":[]}` })
 	if cr := post("noname").want(201).json(); cr["package_name"] != "unknown" {
 		t.Fatal(cr)
 	}
 	pantry.set(func() { pantry.drafts["BADJSN"] = `<html>` })
-	post("BADJSN").detail(502, "Pantry returned an error")
+	post("BADJSN").detail(502, "The Pantry store Test Pantry returned an error")
 
 	pantry.set(func() { pantry.status = http.StatusInternalServerError })
-	post("ABC123").detail(502, "Pantry returned an error")
+	post("ABC123").detail(502, "The Pantry store Test Pantry returned an error")
 	pantry.set(func() { pantry.status = http.StatusUnauthorized })
-	post("ABC123").detail(502, "Pantry returned an error")
+	post("ABC123").detail(502, "The Pantry store Test Pantry returned an error")
 
 	// Unreachable: nothing listens on the port any more.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -344,7 +344,7 @@ func TestTestInstallPantryErrors(t *testing.T) {
 	dead := "http://" + l.Addr().String()
 	l.Close()
 	setPantry(t, e, "hh1", dead)
-	post("ABC123").detail(502, "Could not reach Pantry service")
+	post("ABC123").detail(502, "Could not reach the Pantry store Test Pantry")
 	// A malformed URL can't be stored any more: pantry.stores validates it (TestPantryStores).
 
 	if got := count(); got != 1 {
@@ -367,7 +367,7 @@ func TestTestInstallPantryTimeout(t *testing.T) {
 	member := e.auth.addUser(1, "hh1", authn.RoleMember)
 	e.createNode("n1", "hh1")
 	e.do("POST", "/api/v0/nodes/n1/test-install", map[string]any{"share_code": "ABC123"}, bearer(member)).
-		detail(502, "Could not reach Pantry service")
+		detail(502, "Could not reach the Pantry store Test Pantry")
 	if pantryDraftTimeout != 10*time.Second {
 		t.Fatal("legacy's Pantry timeout is 10 s")
 	}

@@ -23,28 +23,35 @@ func (m *Module) registerPantryStore(mux *http.ServeMux) {
 // pantryStoreQuery is what the browse passes on to Pantry's GET /v1/commands.
 var pantryStoreQuery = []string{"q", "category", "sort", "page", "per_page"}
 
-// pantryStoreGate checks the caller is a member and the household has the Pantry on.
-func (m *Module) pantryStoreGate(w http.ResponseWriter, r *http.Request, u authn.User) (string, bool) {
+// pantryStoreGate checks the caller is a member and the household has the Pantry on, and
+// resolves the store to browse: ?pantry_store_id= when the client picked one (only a store in
+// the household's list, decision 14), else the default.
+func (m *Module) pantryStoreGate(w http.ResponseWriter, r *http.Request, u authn.User) (PantryStore, bool) {
 	hh := r.PathValue("household_id")
 	if err := m.requireRole(r.Context(), u.ID, hh, authn.RoleMember); err != nil {
 		m.writeErr(w, err)
-		return "", false
+		return PantryStore{}, false
 	}
-	return hh, m.requirePantry(w, r, hh)
+	if !m.requirePantry(w, r, hh) {
+		return PantryStore{}, false
+	}
+	store, err := m.pantryStore(r.Context(), hh, r.URL.Query().Get("pantry_store_id"))
+	if err != nil {
+		m.writeErr(w, err)
+		return PantryStore{}, false
+	}
+	return store, true
 }
 
-func (m *Module) pantryStoreUnavailable(w http.ResponseWriter, err error) {
-	if noPantryStore(w, err) {
-		return
-	}
-	m.deps.Log.Warn("cc: Pantry store read failed", "err", err)
-	detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached right now. Try again later.",
+func (m *Module) pantryStoreUnavailable(w http.ResponseWriter, store PantryStore, err error) {
+	m.deps.Log.Warn("cc: Pantry store read failed", "store", store.ID, "err", err)
+	detailCode(w, http.StatusServiceUnavailable, "The Pantry store "+store.Name+" can't be reached right now. Try again later.",
 		pantryUnavailableCode)
 }
 
 // handlePantryBrowse is Pantry's package list, as Pantry returns it.
 func (m *Module) handlePantryBrowse(w http.ResponseWriter, r *http.Request, u authn.User) {
-	hh, ok := m.pantryStoreGate(w, r, u)
+	store, ok := m.pantryStoreGate(w, r, u)
 	if !ok {
 		return
 	}
@@ -59,8 +66,8 @@ func (m *Module) handlePantryBrowse(w http.ResponseWriter, r *http.Request, u au
 		path += "?" + q.Encode()
 	}
 	var out map[string]any
-	if err := m.pantryGet(r.Context(), hh, path, &out); err != nil {
-		m.pantryStoreUnavailable(w, err)
+	if err := m.pantryGet(r.Context(), store.base(), path, &out); err != nil {
+		m.pantryStoreUnavailable(w, store, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
@@ -72,18 +79,18 @@ func (m *Module) handlePantryBrowse(w http.ResponseWriter, r *http.Request, u au
 // in /versions need not exist in the repository. /download counts an install, so only the
 // install dialog asks for it, not a look at the package.
 func (m *Module) handlePantryCommand(w http.ResponseWriter, r *http.Request, u authn.User) {
-	hh, ok := m.pantryStoreGate(w, r, u)
+	store, ok := m.pantryStoreGate(w, r, u)
 	if !ok {
 		return
 	}
 	ctx, name := r.Context(), url.PathEscape(r.PathValue("command_name"))
 	var d map[string]any
-	switch err := m.pantryGet(ctx, hh, "/v1/commands/"+name, &d); {
+	switch err := m.pantryGet(ctx, store.base(), "/v1/commands/"+name, &d); {
 	case errors.Is(err, errPantryNoPackage):
-		detailCode(w, http.StatusNotFound, "The Pantry has no package "+r.PathValue("command_name"), packageNotFoundCode)
+		detailCode(w, http.StatusNotFound, "The Pantry store "+store.Name+" has no package "+r.PathValue("command_name"), packageNotFoundCode)
 		return
 	case err != nil:
-		m.pantryStoreUnavailable(w, err)
+		m.pantryStoreUnavailable(w, store, err)
 		return
 	}
 	if r.URL.Query().Get("install") != "1" {
@@ -93,8 +100,8 @@ func (m *Module) handlePantryCommand(w http.ResponseWriter, r *http.Request, u a
 	var dl struct {
 		Commit string `json:"git_commit_sha"`
 	}
-	if err := m.pantryGet(ctx, hh, "/v1/commands/"+name+"/download", &dl); err != nil && !errors.Is(err, errPantryNoPackage) {
-		m.pantryStoreUnavailable(w, err)
+	if err := m.pantryGet(ctx, store.base(), "/v1/commands/"+name+"/download", &dl); err != nil && !errors.Is(err, errPantryNoPackage) {
+		m.pantryStoreUnavailable(w, store, err)
 		return
 	}
 	d["git_tag"] = nil
