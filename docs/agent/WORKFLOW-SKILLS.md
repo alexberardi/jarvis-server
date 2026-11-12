@@ -62,6 +62,10 @@ Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
 - **Q1 (2026-11-12): the model-led loop is the base; the recording acts directly only on a unique
   identity match; every step is verified.**
   [Decision](../decisions/2026-11-12-workflow-runs-are-model-led.md).
+- **Q2 (2026-11-12): the skill is structured parts, not a document.** Goal, prerequisites, steps
+  (purpose, expectation) and notes are separate fields; the page and the model's prompt render
+  them. No free-text skill file (user: "I don't want another readme based approach").
+  [Decision](../decisions/2026-11-12-workflow-skill-is-structured.md).
 
 ---
 
@@ -74,7 +78,7 @@ the task from it alone. The owner can read and correct it on the workflow's page
 stores and learns the skill and shows it; it does not change how a run behaves
 (`verified-replay` does).
 
-What a skill holds (shape pending Q2):
+What a skill holds, each a separate field (Q2):
 
 | Part | Says | Today |
 |---|---|---|
@@ -149,14 +153,12 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 
 ### Open questions for `skill-doc` (asked one at a time, in this order)
 
-1. **Q2 — shape:** is the skill structured fields shown as one page, or a free-text document the
-   owner edits?
-2. **Q3 — expectations:** a recording holds events, not what the screen showed after each. Are
+1. **Q3 — expectations:** a recording holds events, not what the screen showed after each. Are
    step expectations inferred from the trace, or does the recorder capture the screen after each
    step?
-3. **Q5 — prerequisites:** where they come from: inferred from how the recording begins, said by
+2. **Q5 — prerequisites:** where they come from: inferred from how the recording begins, said by
    the user, or both; and whether one can use a param ("file {name} is open").
-4. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
+3. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
    is still kept?
 
 ## Later modules' questions (not yet ordered)
