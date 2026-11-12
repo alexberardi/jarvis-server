@@ -14,6 +14,20 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 - [x] Pilot on a Surface Pro 6: reboot, automatic kiosk login, Jabra voice, finger touch, full-screen speech waveform and PIN exit confirmed. Other screen-equipped devices are untested.
 - [ ] Real external Chromecast routing, phone sender applications and subscription website compatibility sign-off. See [touch display operation](agent/touch-display.md).
 
+### Workflow skills (2026-11-12)
+
+A taught workflow learns a structured skill (goal, prerequisites, step goals and expectations)
+and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-SKILLS.md](agent/WORKFLOW-SKILLS.md).
+
+- [x] S1 the skill in the data model and API; S2 learning the goal, step goals and expectations
+  (inference path). Runs don't read the skill yet.
+- [ ] S3 the workflow page, S4 Relearn; `capture` C1–C4 (the recorder keeps the starting state and
+  each action's result; C3 needs an extension release).
+- [ ] `verified-replay`, then `narration`, `refine`.
+- [ ] **The teach cases fail on the dev box, on main too** (2026-11-12): its `background` and
+  `live` labels serve `qwen3-4b`, whose errand planner picks `computer_task` over `run_workflow`,
+  so no replay starts. The suite's table is for `qwen3.5-9b`.
+
 ### Before the official release (user 2026-10-12): next step
 
 **Installer plan:** [install/01-no-cli-plan.md](install/01-no-cli-plan.md) ties the three "without a terminal" items below into one build order (artifacts per OS, CI jobs, sign-off matrix, open questions Q1–Q8).

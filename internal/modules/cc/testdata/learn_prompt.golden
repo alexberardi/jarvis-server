@@ -20,11 +20,13 @@ Values that may change from one run to the next (the only parameter candidates):
 - event 8: month "2026-09" (url)
 
 Answer with this JSON:
-{"name": "...", "triggers": ["..."], "steps": [{"intent": "...", "event_seqs": [1], "target": "..."}], "params": [{"name": "...", "kind": "...", "example": "...", "from_seqs": [1]}], "success": {...}}
+{"name": "...", "goal": {"reason": "...", "end_state": "..."}, "when_to_use": "...", "triggers": ["..."], "steps": [{"intent": "...", "goal": "...", "expect": "...", "event_seqs": [1], "target": "..."}], "params": [{"name": "...", "kind": "...", "example": "...", "from_seqs": [1]}], "success": {...}}
 
 - name: a short title for the task, like "Download bank statement".
+- goal: reason is why the user does this task, in one sentence; end_state is what is true once it worked, as someone could see it on the screen or in their files, like "The statement for {month} is in Downloads". Write a param as {name}.
+- when_to_use: one sentence saying what the user would be asking for when they want this done.
 - triggers: one to three things the user could say to run it, like "download my bank statement".
-- steps: the events grouped into steps, in order. intent is one short line saying what the step does; event_seqs are the numbers of its events; target is what it acts on, in a few words. Leave out events that do nothing for the task.
+- steps: the events grouped into steps, in order. intent is one short line saying what the step does; goal is the point of the step (why it is there, not what is clicked); expect is what the screen shows once the step worked, in one short sentence, like "The Statements page lists the months" (what is visible, not what the user did); event_seqs are the numbers of its events; target is what it acts on, in a few words. Leave out events that do nothing for the task.
 - params: the candidate values that change each time the task is done (another month, another file). name is lower_snake_case, like "month"; kind is one of date, month, text, number, file; example is the candidate's value; from_seqs are the numbers of the events it comes from. Only use the candidates listed above, and leave out the ones that stay the same. Write a param as {name} in the intents that use it.
 - success: how to tell the task worked: {"download": {"name_like": "statement_*.csv"}} for a download, {"url_contains": "..."} or {"text_present": ["..."]} for a page that shows it.
 - ••• is a value that was hidden on purpose: never guess it.

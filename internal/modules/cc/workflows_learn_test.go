@@ -72,14 +72,17 @@ func replaceMasked(t *testing.T, with string) json.RawMessage {
 // bankModel is what a model answers for the bank trace (its navigations after Sign in and
 // Statements folded into those clicks): an invented event (42) and an invented param, and a
 // param of an unknown kind on a real candidate (event 6), which the job drops.
-const bankModel = `{"name": "Download bank statement", "triggers": ["download my bank statement", " "],
+const bankModel = `{"name": "Download bank statement",
+ "goal": {"reason": "Keep a copy of each month's statement.", "end_state": "The statement for {month} is in Downloads as a CSV file."},
+ "when_to_use": "The user asks for a bank statement.",
+ "triggers": ["download my bank statement", " "],
  "steps": [
   {"intent": "Open the bank's sign-in page", "event_seqs": [1], "target": "the sign-in page"},
   {"intent": "Enter the username", "event_seqs": [2], "target": "Username"},
   {"intent": "Enter the password", "event_seqs": [3], "target": "Password"},
-  {"intent": "Sign in", "event_seqs": [4], "target": "Sign in"},
+  {"intent": "Sign in", "goal": "Get into the account", "expect": "The accounts page shows", "event_seqs": [4], "target": "Sign in"},
   {"intent": "Open the statements", "event_seqs": [5], "target": "Statements"},
-  {"intent": "Enter the month {month}", "event_seqs": [6], "target": "Statement month"},
+  {"intent": "Enter the month {month}", "goal": "Pick which statement", "expect": "The month field shows {month}", "event_seqs": [6], "target": "Statement month"},
   {"intent": "Download the CSV", "event_seqs": [7, 8], "target": "Download CSV"},
   {"intent": "Log out", "event_seqs": [42], "target": "Log out"}
  ],
@@ -189,6 +192,24 @@ func TestLearnFromBankTrace(t *testing.T) {
 	}
 	if e := w.Steps[6].Element; e.Role != "button" || e.Name != "Download CSV" {
 		t.Fatalf("element %+v", e)
+	}
+	// The skill: the model's goal; a step's expectation is the page it opened when the recording
+	// shows one (never the query, which changes), else the model's sentence, else nothing.
+	if g := w.Skill.Goal; g.Reason != "Keep a copy of each month's statement." || g.EndState != "The statement for {month} is in Downloads as a CSV file." ||
+		w.Skill.WhenToUse != "The user asks for a bank statement." {
+		t.Fatalf("skill %+v", w.Skill)
+	}
+	if s := w.Steps[3]; s.Goal != "Get into the account" || s.Expect == nil || s.Expect.URLContains != "bank.example.com/accounts" || s.Expect.Screen != "" {
+		t.Fatalf("step 4's skill: %q %+v", s.Goal, s.Expect)
+	}
+	if s := w.Steps[4]; s.Expect == nil || s.Expect.URLContains != "bank.example.com/statements" {
+		t.Fatalf("step 5's expectation: %+v", s.Expect)
+	}
+	if s := w.Steps[5]; s.Goal != "Pick which statement" || s.Expect == nil || s.Expect.Screen != "The month field shows {month}" {
+		t.Fatalf("step 6's skill: %q %+v", s.Goal, s.Expect)
+	}
+	if s := w.Steps[1]; s.Goal != "" || s.Expect != nil {
+		t.Fatalf("step 2 has a skill the model didn't give: %q %+v", s.Goal, s.Expect)
 	}
 	if len(w.Params) != 1 || w.Params[0] != (Param{Name: "month", Kind: "month", Example: "2026-09"}) {
 		t.Fatalf("params %+v", w.Params)
@@ -640,3 +661,28 @@ const docsNavTrace = `[
 ]`
 
 const docsNavModel = `{"name":"Open the install guide","triggers":["open the install guide"],"steps":[{"intent":"Open the guide","event_seqs":[1],"target":"guide"},{"intent":"Open Install","event_seqs":[2,3],"target":"Install"}],"params":[],"success":{"url_contains":"/guide/install"}}`
+
+// A model groups several of the user's actions into one step ("sign in" = the username, the
+// password and the button; qwen on the dev box does, 2026-11-12). Every action is kept, as on
+// the desktop (#581): keeping only the last one pressed Sign in on an empty form.
+func TestLearnKeepsEveryActionOfAStep(t *testing.T) {
+	le := newLearnEnv(t, `{"name": "Download bank statement", "steps": [
+	  {"intent": "Sign in", "goal": "Get into the account", "expect": "The accounts page shows", "event_seqs": [1, 2, 3, 4]},
+	  {"intent": "Download the CSV", "event_seqs": [7, 8]}]}`)
+	w := le.store("rec_bank1", bankTraceWithSecret(t), "")
+	var got []string
+	for _, s := range w.Steps {
+		got = append(got, s.Action.Kind+" "+s.Action.Text+s.Action.URL+s.Action.Ref)
+		if len(got) >= 2 && len(got) <= 4 && (s.Intent != "Sign in" || s.Goal != "Get into the account") {
+			t.Fatalf("step %d: %+v", len(got), s)
+		}
+	}
+	want := []string{"navigate https://bank.example.com/login", "type alex", "type " + maskedValue, "press " + recordedRef, "press " + recordedRef}
+	if !slices.Equal(got, want) {
+		t.Fatalf("steps\n got %q\nwant %q", got, want)
+	}
+	// What the step causes shows after its last action: the page Sign in opened.
+	if w.Steps[1].Expect != nil || w.Steps[2].Expect != nil || w.Steps[3].Expect == nil || w.Steps[3].Expect.URLContains != "bank.example.com/accounts" {
+		t.Fatalf("expectations: %+v %+v %+v", w.Steps[1].Expect, w.Steps[2].Expect, w.Steps[3].Expect)
+	}
+}

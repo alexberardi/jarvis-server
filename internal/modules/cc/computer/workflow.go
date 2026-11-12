@@ -36,6 +36,7 @@ type Workflow struct {
 	Params   []WorkflowParam
 	Steps    []WorkflowStep
 	Success  SuccessCheck
+	Skill    Skill
 	Version  int
 }
 
@@ -58,6 +59,10 @@ type WorkflowStep struct {
 	Action  computeruse.Action `json:"action"`
 	Element *RecordedElement   `json:"element,omitempty"`
 	Risk    string             `json:"risk,omitempty"` // a computeruse risk category; "" is none
+	// Goal is the point of the step, and Expect what can be observed once it worked (the
+	// workflow's skill, skill.go).
+	Goal   string        `json:"goal,omitempty"`
+	Expect *SuccessCheck `json:"expect,omitempty"`
 }
 
 // StepWindow is the window a desktop step was recorded in: its class (the app id on Wayland)
