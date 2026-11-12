@@ -50,7 +50,7 @@ func TestCloudConfigSources(t *testing.T) {
 	}
 }
 
-// The labels body points live and cloud at the provider with vision on; its String never
+// The labels body points live, background (errands plan on it by default) and cloud at the provider with vision on; its String never
 // shows the key.
 func TestCloudLabelsBody(t *testing.T) {
 	c := cloud{Key: "sk-secret", Model: "claude-sonnet-5-5", URL: "https://api.anthropic.com"}
@@ -59,7 +59,7 @@ func TestCloudLabelsBody(t *testing.T) {
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range []string{"live", "cloud"} {
+	for _, l := range []string{"live", "background", "cloud"} {
 		v := got[l]
 		if v["engine"] != "remote" || v["remote_url"] != c.URL || v["remote_model"] != c.Model ||
 			v["remote_api_key"] != c.Key || v["remote_vision"] != true || v["remote_api"] != "auto" {

@@ -24,7 +24,7 @@ required case passed, 1 when one failed, 2 when the run could not bring its worl
 
 **`--llm cloud`** runs computer tasks on the optional cloud slot, as a household that picked it
 would ([plan](../agent/PLAN-computer-use.md) task 1): the sandbox comes up without a model, then
-its `live` and `cloud` labels point at Anthropic with vision on and `computer.model` is `cloud`.
+its `live`, `background` (the errand planner's default) and `cloud` labels point at Anthropic with vision on and `computer.model` is `cloud`.
 The key is `JARVIS_TEST_ANTHROPIC_KEY` (the live tests' name), from the environment or from
 `~/.config/jarvis-harness/cloud.env` (`JARVIS_CLOUD_ENV` names another file); the model is
 `JARVIS_TEST_ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and the URL

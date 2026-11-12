@@ -10,8 +10,8 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 )
 
-// --llm cloud: the suite's sandbox comes up without a model, then its live and cloud labels
-// point at Anthropic with vision on, and computer.model is cloud, so computer tasks run on the
+// --llm cloud: the suite's sandbox comes up without a model, then its live, background and cloud
+// labels point at Anthropic with vision on, and computer.model is cloud, so computer tasks run on the
 // optional cloud slot as a household that picked it would (docs/agent/PLAN-computer-use.md
 // task 1). The key never reaches a log, a report or an error.
 type cloud struct {
@@ -60,14 +60,15 @@ func cloudConfig() (cloud, error) {
 	return c, nil
 }
 
-// labels is the PUT /v1/models/labels body: live (the conversation and the planner) and cloud
-// (computer tasks) on the provider, with vision on.
+// labels is the PUT /v1/models/labels body: live (the conversation), background (the errand
+// planner's default slot, and the other background features') and cloud (computer tasks) on
+// the provider, with vision on. The sandbox has no local model to fall back on.
 func (c cloud) labels() map[string]map[string]any {
 	l := func() map[string]any {
 		return map[string]any{"engine": "remote", "remote_url": c.URL, "remote_model": c.Model,
 			"remote_api_key": c.Key, "remote_api": "auto", "remote_vision": true}
 	}
-	return map[string]map[string]any{"live": l(), "cloud": l()}
+	return map[string]map[string]any{"live": l(), "background": l(), "cloud": l()}
 }
 
 // String is the config without its key, for logs.
