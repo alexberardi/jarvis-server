@@ -48,8 +48,12 @@ export interface TestEvent {
 /** Share codes are six letters and digits; the Forge shows them in capitals. */
 export const normalizeShareCode = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
 
-export async function requestTestInstall(nodeId: string, shareCode: string): Promise<string> {
-  const { data } = await apiClient.post<{ id: string }>(base(nodeId), { share_code: shareCode })
+/** storeId is the store the code is looked up in (only that one); cc's default without it. */
+export async function requestTestInstall(nodeId: string, shareCode: string, storeId?: string): Promise<string> {
+  const { data } = await apiClient.post<{ id: string }>(base(nodeId), {
+    share_code: shareCode,
+    ...(storeId ? { pantry_store_id: storeId } : {}),
+  })
   return data.id
 }
 

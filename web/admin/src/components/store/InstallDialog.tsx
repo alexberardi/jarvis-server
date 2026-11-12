@@ -3,7 +3,7 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Info } from 'lucide-react'
 import type { NodeLiveness } from '@/api/nodes'
 import { getStorePackage, pollInstall, requestInstall } from '@/api/store'
-import type { StoreDetail } from '@/api/store'
+import type { PantryStore, StoreDetail } from '@/api/store'
 import { Badge, Banner, Button, Dialog, Skeleton } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useNodeLiveness } from '@/hooks/useNodes'
@@ -18,6 +18,8 @@ interface InstallDialogProps {
   label: string
   /** The household whose Pantry the details come from. */
   householdId: string
+  /** The store picked when the household has several; the install names it. Unset: the default. */
+  store?: PantryStore
   onClose: () => void
 }
 
@@ -36,7 +38,7 @@ type Step = 'households' | 'nodes' | 'progress'
  * only one), then their nodes, then each node's progress. Each install is the ordinary per-node
  * request, so cc applies its household, role and Pantry checks to every one.
  */
-export default function InstallDialog({ names, label, householdId, onClose }: InstallDialogProps) {
+export default function InstallDialog({ names, label, householdId, store, onClose }: InstallDialogProps) {
   const { households } = useAuth()
   const [step, setStep] = useState<Step>(households.length > 1 ? 'households' : 'nodes')
   const [chosenHH, setChosenHH] = useState<Set<string>>(() => new Set([householdId]))
@@ -45,7 +47,10 @@ export default function InstallDialog({ names, label, householdId, onClose }: In
   const [starting, setStarting] = useState(false)
 
   const details = useQueries({
-    queries: names.map((n) => ({ queryKey: ['store-install', householdId, n], queryFn: () => getStorePackage(householdId, n, true) })),
+    queries: names.map((n) => ({
+      queryKey: ['store-install', householdId, store?.id, n],
+      queryFn: () => getStorePackage(householdId, n, true, store?.id),
+    })),
   })
   const pkgs = details.flatMap((d) => (d.data ? [d.data] : []))
   const detailsError = details.find((d) => d.isError)?.error
@@ -63,7 +68,7 @@ export default function InstallDialog({ names, label, householdId, onClose }: In
     const started = await Promise.all(
       planned.map(async (j): Promise<Job> => {
         try {
-          return { ...j, requestId: await requestInstall(j.node.node_id, j.pkg) }
+          return { ...j, requestId: await requestInstall(j.node.node_id, j.pkg, store?.id) }
         } catch (err) {
           return { ...j, error: errorMessage(err, 'Could not start the install') }
         }
@@ -154,7 +159,7 @@ export default function InstallDialog({ names, label, householdId, onClose }: In
       open
       onClose={onClose}
       title={title}
-      description="Choose the nodes to install on."
+      description={store ? `From ${store.name}. Choose the nodes to install on.` : 'Choose the nodes to install on.'}
       footer={
         <>
           <Button variant="ghost" onClick={households.length > 1 ? () => setStep('households') : onClose}>

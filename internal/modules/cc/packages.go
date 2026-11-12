@@ -75,9 +75,14 @@ const pantryDisabledDetail = "The Pantry package store is turned off for this ho
 func packageDefinitions() []settings.Definition {
 	return []settings.Definition{
 		{Key: settingPantryStores, Category: "pantry", Type: settings.JSON,
-			Default:  []any{map[string]any{"id": defaultPantryStoreID, "url": defaultPantryBaseURL, "name": defaultPantryStoreName}},
-			Validate: validatePantryStores,
-			Description: "The Pantry package stores, in preference order: a list of {id, url, name}. The first is " +
+			Default:   []any{map[string]any{"id": defaultPantryStoreID, "url": defaultPantryBaseURL, "name": defaultPantryStoreName}},
+			Normalize: newPantryStoreIDs,
+			Validate:  validatePantryStores,
+			// The superuser Settings page edits each household's list; household admins can't
+			// (several pantries, slice 3: the household settings route serves it read-only).
+			Household: true,
+			Description: "The Pantry package stores, in preference order: a list of {id, url, name}; leave id out " +
+				"of a new store and jarvisd makes one, which installs then keep across URL or name edits. The first is " +
 				"the default for anything that doesn't pick one. Every node must be able to reach every URL, " +
 				"because nodes download from the store directly. Pantry on with an empty list is a config error."},
 		{Key: settingPantryEnabled, Category: "pantry", Type: settings.Bool, Default: false,
@@ -148,9 +153,32 @@ var errNoPantryStore = &pantryErr{http.StatusServiceUnavailable, noPantryStoreDe
 var errPantryStoreUnknown = &pantryErr{http.StatusUnprocessableEntity,
 	"That Pantry store isn't in this household's list", pantryStoreUnknownCode}
 
-const noPantryStoreDetail = "No Pantry store is configured. A household admin can add one in the Pantry settings."
+const noPantryStoreDetail = "No Pantry store is configured. An admin can add one in Settings, under pantry.stores."
 
 var pantryStoreID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// newPantryStoreIDs gives each entry with no id a fresh one: the server makes a store's id
+// (decision 1), so a client adding a store leaves it out. Anything else is left to validation.
+func newPantryStoreIDs(v any) any {
+	list, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make([]any, len(list))
+	for i, e := range list {
+		m, ok := e.(map[string]any)
+		if id, has := m["id"]; ok && (!has || id == nil || id == "") {
+			c := make(map[string]any, len(m)+1)
+			for k, x := range m {
+				c[k] = x
+			}
+			c["id"] = uuid4()
+			e = c
+		}
+		out[i] = e
+	}
+	return out
+}
 
 // parsePantryStores decodes a pantry.stores value (as settings coerces JSON).
 func parsePantryStores(v any) ([]PantryStore, error) {

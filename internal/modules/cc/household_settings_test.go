@@ -13,9 +13,11 @@ import (
 )
 
 func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
-	// Inbound setup is editable by superusers in the admin, but remains outside
-	// the mobile household-admin API. No other definition may opt into this scope.
+	// Inbound setup and the Pantry stores (several pantries, slice 3) are editable by superusers
+	// in the admin, but remain outside the mobile household-admin API. No other definition may
+	// opt into this scope.
 	adminOnly := map[string]bool{
+		settingPantryStores:               true,
 		phone.SettingInboundEnabled:       true,
 		phone.SettingInboundAnswerDelay:   true,
 		phone.SettingInboundMaxSeconds:    true,

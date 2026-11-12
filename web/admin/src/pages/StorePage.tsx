@@ -6,9 +6,11 @@ import { Link } from 'react-router-dom'
 import { browseStore } from '@/api/store'
 import type { StorePackage } from '@/api/store'
 import InstallDialog from '@/components/store/InstallDialog'
+import StorePicker from '@/components/store/StorePicker'
 import { Badge, Banner, Button, Card, CardHeader, EmptyState, ErrorState, Input, List, PageHeader, SkeletonList, Switch } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useBundle } from '@/hooks/useBundle'
+import { usePantryStore } from '@/hooks/usePantryStore'
 import { errorMessage } from '@/lib/errors'
 
 /** pantryOff: cc's 403 for a household with the Pantry switched off. */
@@ -33,7 +35,12 @@ export default function StorePage() {
   const [installing, setInstalling] = useState<{ names: string[]; label: string } | null>(null)
   const household = households.find((h) => h.id === hh)
 
-  const list = useQuery({ queryKey: ['store', hh, term], queryFn: () => browseStore(hh, term), enabled: !!hh })
+  const pantry = usePantryStore()
+  const list = useQuery({
+    queryKey: ['store', hh, pantry.storeId, term],
+    queryFn: () => browseStore(hh, term, pantry.storeId),
+    enabled: !!hh && pantry.ready,
+  })
   const { bundle, canEdit, toggle } = useBundle()
   const items = list.data ?? []
   const nameOf = (n: string) => items.find((p) => p.command_name === n)?.display_name || n
@@ -99,13 +106,17 @@ export default function StorePage() {
             )}
           </Card>
 
-          <Input
-            type="search"
-            aria-label="Search packages"
-            placeholder="Search packages"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+          {/* The store scopes the search, so it comes first. */}
+          <div className={pantry.stores.length > 1 ? 'grid gap-3 sm:grid-cols-[16rem_minmax(0,1fr)]' : undefined}>
+            <StorePicker {...pantry} />
+            <Input
+              type="search"
+              aria-label="Search packages"
+              placeholder="Search packages"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
 
           <Card flush className="overflow-hidden">
             {list.isError ? (
@@ -114,10 +125,13 @@ export default function StorePage() {
                 message={errorMessage(list.error, 'Check your connection and try again.')}
                 onRetry={() => list.refetch()}
               />
-            ) : list.isLoading ? (
+            ) : list.isPending ? (
               <SkeletonList rows={4} label="Loading packages" />
             ) : items.length === 0 ? (
-              <EmptyState icon={<Search size={20} />} title={term ? 'No packages match' : 'The Pantry has no packages'} />
+              <EmptyState
+                icon={<Search size={20} />}
+                title={term ? 'No packages match' : `${pantry.storeId ? pantry.store?.name : 'The Pantry'} has no packages`}
+              />
             ) : (
               <List label="Packages">
                 {items.map((p) => (
@@ -137,7 +151,13 @@ export default function StorePage() {
       )}
 
       {installing && (
-        <InstallDialog names={installing.names} label={installing.label} householdId={hh} onClose={() => setInstalling(null)} />
+        <InstallDialog
+          names={installing.names}
+          label={installing.label}
+          householdId={hh}
+          store={pantry.storeId ? pantry.store : undefined}
+          onClose={() => setInstalling(null)}
+        />
       )}
     </div>
   )

@@ -57,6 +57,9 @@ type Definition struct {
 	// Validate, when set, checks a value before Set stores it. nil (which clears the scope's
 	// value) is never validated. The error's text is shown to whoever wrote the value.
 	Validate func(v any) error
+	// Normalize, when set, rewrites a non-nil value before Validate checks it and Set stores it
+	// (cc: pantry.stores gives a new entry its server-made id).
+	Normalize func(v any) any
 	// Household allows the superuser settings UI to manage household overrides of the system
 	// value. It does not grant household users write access; the owning module's household
 	// routes enforce their own allowlist (cc: the mobile household settings allowlist).
@@ -589,6 +592,9 @@ func (s *Service) Set(ctx context.Context, key string, value any, sc Scope) erro
 	def, ok := s.defs[key]
 	if !ok {
 		return ErrUnknownKey
+	}
+	if def.Normalize != nil && value != nil {
+		value = def.Normalize(value)
 	}
 	if err := s.Validate(key, value); err != nil {
 		return err

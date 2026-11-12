@@ -5,6 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import MessageBubble from '@/components/chat/MessageBubble'
 import DeviceDiscovery from '@/components/devices/DeviceDiscovery'
 import NodeSettings from '@/components/nodes/NodeSettings'
+import StorePicker from '@/components/store/StorePicker'
 import { getDeviceConfig, listDeviceRooms } from '@/api/devices'
 import { Badge, Banner, Button, Card, CardHeader, EmptyState, Input, PageHeader, buttonStyles } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
@@ -13,6 +14,7 @@ import type { TestEvent, TestInstall, TestRun } from '@/api/testInstall'
 import { useAuth } from '@/hooks/useAuth'
 import { useChat } from '@/hooks/useChat'
 import { useNodeLiveness, useNodesView } from '@/hooks/useNodes'
+import { usePantryStore } from '@/hooks/usePantryStore'
 import { nodeLabel } from '@/lib/chatNode'
 import { errorMessage } from '@/lib/errors'
 import { nameOf } from '@/lib/session'
@@ -47,7 +49,9 @@ export default function NodeTestPage() {
   const requestId = params.get('request') ?? ''
   // The code is kept with the test: the Forge's Fix saves to the same draft, so Reinstall reuses it.
   const shareCode = params.get('code') ?? ''
-  const started = (rid: string, code: string) => setParams({ request: rid, code })
+  // So is the store it came from (several pantries, decision 4): Reinstall goes back to it.
+  const storeId = params.get('store') ?? undefined
+  const started = (rid: string, code: string, store?: string) => setParams({ request: rid, code, ...(store ? { store } : {}) })
   const liveness = useNodeLiveness()
   const node = liveness.data?.find((n) => n.node_id === id)
   // The registered name, as the node's card on the Nodes page shows it.
@@ -80,12 +84,14 @@ export default function NodeTestPage() {
           }
           requestId={requestId}
           shareCode={shareCode}
-          onReinstalled={(rid) => started(rid, shareCode)}
+          storeId={storeId}
+          onReinstalled={(rid) => started(rid, shareCode, storeId)}
           onRestart={() => setParams({}, { replace: true })}
         />
       ) : (
         <ShareCodeForm
           nodeId={id}
+          householdId={node?.household_id ?? undefined}
           name={name}
           offline={node !== undefined && !node.online}
           onStarted={started}
@@ -97,17 +103,24 @@ export default function NodeTestPage() {
 
 function ShareCodeForm({
   nodeId,
+  householdId,
   name,
   offline,
   onStarted,
 }: {
   nodeId: string
+  /** The node's household, whose stores the code can come from. */
+  householdId: string | undefined
   name: string
   offline: boolean
-  onStarted: (requestId: string, code: string) => void
+  onStarted: (requestId: string, code: string, storeId?: string) => void
 }) {
   const [code, setCode] = useState('')
-  const start = useMutation({ mutationFn: () => requestTestInstall(nodeId, code), onSuccess: (rid) => onStarted(rid, code) })
+  const pantry = usePantryStore(householdId)
+  const start = useMutation({
+    mutationFn: () => requestTestInstall(nodeId, code, pantry.storeId),
+    onSuccess: (rid) => onStarted(rid, code, pantry.storeId),
+  })
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (code.length === 6 && !offline) start.mutate()
@@ -115,6 +128,7 @@ function ShareCodeForm({
   return (
     <Card className="max-w-xl">
       <form onSubmit={submit} className="space-y-4">
+        <StorePicker {...pantry} label="Pantry store" hint="The code is looked up in this store only." />
         <Input
           label="Share code"
           hint="The 6-character code on the Forge page."
@@ -145,6 +159,7 @@ function TestRunView({
   householdId,
   requestId,
   shareCode,
+  storeId,
   onReinstalled,
   onRestart,
   tools,
@@ -153,6 +168,8 @@ function TestRunView({
   householdId: string
   requestId: string
   shareCode: string
+  /** The store the code was looked up in, when the household has several. */
+  storeId?: string
   /** The node's settings and a device scan: shown for every draft, whatever it holds. */
   tools: ReactNode
   onReinstalled: (requestId: string) => void
@@ -165,7 +182,7 @@ function TestRunView({
     refetchInterval: (q) => (q.state.data?.status === 'completed' ? 5000 : q.state.data && !LIVE.has(q.state.data.status) ? false : 2000),
   })
   const t = poll.data
-  const reinstall = useMutation({ mutationFn: () => requestTestInstall(nodeId, shareCode), onSuccess: onReinstalled })
+  const reinstall = useMutation({ mutationFn: () => requestTestInstall(nodeId, shareCode, storeId), onSuccess: onReinstalled })
   const again = (
     <>
       {shareCode && (
