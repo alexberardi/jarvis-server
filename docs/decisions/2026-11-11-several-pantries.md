@@ -64,9 +64,12 @@ All ten answered by the user, 2026-11-11, before anything was built; 11–14 set
    same-named packages cannot both be live on a node whatever we chose. Changing a package's
    store is a deliberate uninstall, then install.
 9. **`/services` keeps reporting one URL** for `jarvis-pantry`, the default store, so every
-   client that reads it today keeps working. An empty list publishes no entry at all. The
-   caller decides which list: an authenticated caller gets its household's list, an anonymous
-   one the system list (today `main.go` always passes `householdID ""`).
+   client that reads it today keeps working. An empty list publishes no entry at all.
+   `/services` stays the **system** list: it is unauthenticated and a user can belong to several
+   households, so it cannot tell whose list to return. A household's own list reaches the app
+   through the household settings (`GET /api/v0/mobile/household/{id}/settings`), which already
+   carry `pantry.enabled` and check membership: they gain a read-only `pantry.stores` (user,
+   2026-11-11, settled while building 1b).
 10. **Clients sniff for the list; its absence is today's behaviour.** The `/services` response
     is an envelope (`{"services": [...]}`), so it gains a sibling `pantries` array of
     `{id, url, name}` beside the unchanged `services` array. A client that finds it shows a picker; a
@@ -131,8 +134,10 @@ are additive on top of it and can land separately.
      `PantryStores` plus the default's URL; an enabled, empty list answers **503
      `pantry_no_store`** on every Pantry route. `/services` reports the first store's URL, or
      no entry. No wire shape changes.
-   - **1b, discovery.** `/services` gains the sibling `pantries` array. Wire change: follow the
-     wire-change skill, add contract cases.
+   - **1b, discovery.** `/services` gains the sibling `pantries` array (the system list, read
+     per request), and its `jarvis-pantry` row is removed at start when the list is empty. The
+     household settings gain a read-only `pantry.stores`; the household PUT still refuses it.
+     Contract: `pantries` is `Optional` in `contract/config_test.go`.
 2. **Provenance** (`internal/modules/cc/packages.go`, the server's install record). An install
    records its store id; a test install too; updates and revert use it; a package whose store is gone keeps running
    with updates unavailable; a name already installed is refused, naming its store.
@@ -140,7 +145,8 @@ are additive on top of it and can land separately.
    and on `/admin/nodes/:id/test`, each shown only when more than one store is configured, and
    the store's name on the install confirmation. Follows the UI guide: design skills, then the
    Impeccable audit with `scripts/screenshots` before the PR.
-4. **Mobile** (`jarvis-node-mobile`). Sniff `pantries` from `/services`; picker when it is
+4. **Mobile** (`jarvis-node-mobile`). Read `pantry.stores` from the household settings, falling
+   back to `pantries` from `/services`, then to today's single URL; picker when it is
    present and has more than one entry; selection per device; a store that cannot be reached
    fails on its own rather than failing the screen (a LAN store is unreachable off the home
    network, and the app talks to stores directly).

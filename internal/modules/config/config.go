@@ -136,6 +136,10 @@ type Module struct {
 	// through /services, by name → base URL (e.g. jarvis-pantry from cc's pantry.stores,
 	// D48). Synced at startup.
 	External func(ctx context.Context) map[string]string
+	// Pantries is the system's Pantry stores in preference order, each {id, url, name}, listed
+	// beside the services in GET /services (decision 2026-11-11-several-pantries, 10). Read per
+	// request; nil leaves the key out.
+	Pantries func(ctx context.Context) []map[string]string
 
 	settings *settings.Service
 
@@ -242,10 +246,22 @@ func (m *Module) syncSelf(ctx context.Context) error {
 		return err
 	}
 	if m.External != nil {
-		for name, raw := range m.External(ctx) {
+		ext := m.External(ctx)
+		for name, raw := range ext {
 			if err := m.syncExternal(ctx, name, raw); err != nil {
 				return err
 			}
+		}
+		// A setting that no longer publishes its row (an empty pantry.stores) takes it away.
+		q, args := `DELETE FROM config_services WHERE description = 'external (jarvisd setting)'`, []any{}
+		for name := range ext {
+			args = append(args, name)
+		}
+		if len(args) > 0 {
+			q += ` AND name NOT IN (?` + strings.Repeat(`, ?`, len(args)-1) + `)`
+		}
+		if _, err := m.deps.DB.Write.ExecContext(ctx, q, args...); err != nil {
+			return fmt.Errorf("config: drop unlisted external rows: %w", err)
 		}
 	}
 	if m.MQTTPort > 0 {
@@ -508,7 +524,15 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	for _, s := range svcs {
 		out = append(out, s.response(st))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"services": out})
+	body := map[string]any{"services": out}
+	if m.Pantries != nil {
+		p := m.Pantries(r.Context())
+		if p == nil {
+			p = []map[string]string{}
+		}
+		body["pantries"] = p
+	}
+	httpx.WriteJSON(w, http.StatusOK, body)
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {

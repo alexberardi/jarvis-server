@@ -146,3 +146,24 @@ func TestPantryNoStoreRefuses(t *testing.T) {
 		t.Fatal(rows, "requests written")
 	}
 }
+
+// Any member reads the household's pantry.stores from the household settings (the app's store
+// picker, decision 2026-11-11-several-pantries 1b); nobody writes it through that route.
+func TestHouseholdSettingsListPantryStores(t *testing.T) {
+	e := newEnv(t)
+	admin := e.auth.addUser(5, "hh1", authn.RoleAdmin)
+	member := e.auth.addUser(6, "hh1", authn.RoleMember)
+	const get = "/api/v0/mobile/household/hh1/settings"
+	s := e.do("GET", get, nil, bearer(member)).want(200).json()["settings"].(map[string]any)
+	got, _ := s[settingPantryStores].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["id"] != defaultPantryStoreID || got[0].(map[string]any)["url"] != defaultPantryBaseURL {
+		t.Fatal(s[settingPantryStores])
+	}
+	setPantry(t, e, "hh1", "http://10.0.0.5:7721")
+	s = e.do("GET", get, nil, bearer(member)).want(200).json()["settings"].(map[string]any)
+	if got := s[settingPantryStores].([]any); len(got) != 1 || got[0].(map[string]any)["url"] != "http://10.0.0.5:7721" {
+		t.Fatal(got)
+	}
+	e.do("PUT", get+"/"+settingPantryStores, map[string]any{"value": []any{}}, bearer(admin)).
+		detail(404, "Setting is not household-controllable: "+settingPantryStores)
+}
