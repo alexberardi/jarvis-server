@@ -65,7 +65,7 @@ type Check struct {
 	// at most MaxTotal when set.
 	Product  string  `json:"product,omitempty"`
 	MaxTotal float64 `json:"max_total,omitempty"`
-	// download: a statement downloaded from Site (bank, card) for Month (YYYY-MM, optional).
+	// download: a statement downloaded from Site (bank, card) for Month (YYYY-MM, or "last" for the clock's last month; optional).
 	Site  string `json:"site,omitempty"`
 	Month string `json:"month,omitempty"`
 	// spreadsheet_has: a file in the agent's ~/Documents/Jarvis matching File (a glob, default
@@ -189,8 +189,8 @@ func (ch Check) Validate() error {
 	if ch.Site != "" && !oneOf(ch.Site, "bank", "card") {
 		return fmt.Errorf("site %q: bank or card", ch.Site)
 	}
-	if ch.Month != "" && !monthRE.MatchString(ch.Month) {
-		return fmt.Errorf("month %q: YYYY-MM", ch.Month)
+	if ch.Month != "" && ch.Month != "last" && !monthRE.MatchString(ch.Month) {
+		return fmt.Errorf("month %q: YYYY-MM or last", ch.Month)
 	}
 	if ch.File != "" {
 		if _, err := filepath.Match(ch.File, ""); err != nil {

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newSites(t *testing.T, dir string) (*Server, *httptest.Server) {
@@ -472,5 +473,26 @@ func TestControlLayout(t *testing.T) {
 	login(t, c, hs.URL, "bank")
 	if after := ids(); !slices.Equal(after, before) {
 		t.Fatalf("buttons %q after a reset, want %q", after, before)
+	}
+}
+
+// Statements run from 2026-04 to the clock's last month, newest first: "last month" always has
+// one, and the months the replay cases name (2026-09, 2026-08) stay.
+func TestStatementMonths(t *testing.T) {
+	for _, tc := range []struct {
+		now   time.Time
+		first string
+		n     int
+	}{
+		{time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), "2026-09", 6},
+		{time.Date(2026, 11, 12, 4, 0, 0, 0, time.UTC), "2026-10", 7},
+		{time.Date(2026, 12, 31, 23, 0, 0, 0, time.UTC), "2026-11", 8},
+		{time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC), "2027-02", 11},
+	} {
+		got := statementMonths(tc.now)
+		if len(got) != tc.n || got[0] != tc.first || got[len(got)-1] != "2026-04" ||
+			!slices.Contains(got, "2026-09") || !slices.Contains(got, "2026-08") {
+			t.Errorf("%s: %v", tc.now.Format("2006-01-02"), got)
+		}
 	}
 }

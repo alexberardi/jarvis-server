@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/tools/ccsites/notesapp"
 )
@@ -109,16 +110,20 @@ func (ch Check) Eval(st *State) string {
 		}
 		return "an order was placed: " + orders(st)
 	case "download":
+		want := ch.Month
+		if want == "last" {
+			want = lastMonth(time.Now())
+		}
 		var got []string
 		for _, d := range st.Sites.Downloads {
-			if d.Site == ch.Site && (ch.Month == "" || d.Month == ch.Month) {
+			if d.Site == ch.Site && (want == "" || d.Month == want) {
 				return ""
 			}
 			got = append(got, d.Site+" "+d.Month)
 		}
 		month := ""
-		if ch.Month != "" {
-			month = " for " + ch.Month
+		if want != "" {
+			month = " for " + want
 		}
 		return fmt.Sprintf("no %s statement%s downloaded (downloads: %s)", ch.Site, month, list(got))
 	case "spreadsheet_has":
@@ -321,4 +326,10 @@ func xlsxText(path string) (string, error) {
 		rc.Close()
 	}
 	return strings.Join(parts, " "), nil
+}
+
+// lastMonth is the month before now's, as YYYY-MM: a download check's month "last" (the fixture
+// bank's statements run up to it, tools/ccsites/bank.go).
+func lastMonth(now time.Time) string {
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0).Format("2006-01")
 }

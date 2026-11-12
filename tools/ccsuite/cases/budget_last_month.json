@@ -1,6 +1,6 @@
 {
   "name": "budget_last_month",
-  "about": "Download last month's bank and card statements and build the budget spreadsheet in ~/Documents/Jarvis; the fixtures' last month is 2026-09 and Dining is the one category over budget. Flipped by piece 14 (spreadsheets: piece 13).",
+  "about": "Download last month's bank and card statements and build the budget spreadsheet in ~/Documents/Jarvis; the fixture bank's statements run up to the clock's last month (the checks use month last) and Dining is the one category over budget. Flipped by piece 14 (spreadsheets: piece 13).",
   "phase": "browser",
   "status": "required",
   "say": "Do my budget for last month: download the statements from my bank ({{sites}}/bank/) and my card ({{sites}}/card/) and put a spreadsheet of spending by category in my Jarvis documents.",
@@ -8,8 +8,8 @@
   "setup": {"login": ["bank", "card"]},
   "answers": [],
   "checks": [
-    {"kind": "download", "site": "bank", "month": "2026-09"},
-    {"kind": "download", "site": "card", "month": "2026-09"},
+    {"kind": "download", "site": "bank", "month": "last"},
+    {"kind": "download", "site": "card", "month": "last"},
     {"kind": "spreadsheet_has", "contains": ["Dining", "Groceries", "Travel"]},
     {"kind": "reply_matches", "pattern": "(?i)dining"}
   ],

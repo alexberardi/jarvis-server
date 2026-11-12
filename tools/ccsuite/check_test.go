@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/tools/ccsites/notesapp"
 )
@@ -186,6 +187,33 @@ func TestAnswers(t *testing.T) {
 	for tap, want := range map[string]string{"approve": "approve_errand_plan", "cancel": "discard_errand_plan"} {
 		if el, ok := it.button(tap); !ok || el.Callback != want {
 			t.Errorf("button(%s) = %v, %v; want %s", tap, el.Callback, ok, want)
+		}
+	}
+}
+
+// A download check's month "last" is the month before the clock's.
+func TestDownloadLastMonth(t *testing.T) {
+	last := lastMonth(time.Now())
+	st := &State{}
+	st.Sites.Downloads = append(st.Sites.Downloads, struct {
+		Site     string `json:"site"`
+		Month    string `json:"month"`
+		Filename string `json:"filename"`
+		Rows     int    `json:"rows"`
+	}{Site: "bank", Month: last})
+	if got := (Check{Kind: "download", Site: "bank", Month: "last"}).Eval(st); got != "" {
+		t.Errorf("last month's download not found: %s", got)
+	}
+	if got := (Check{Kind: "download", Site: "bank", Month: "2026-04"}).Eval(st); got == "" {
+		t.Error("a fixed month matched last month's download")
+	}
+	for now, want := range map[time.Time]string{
+		time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC): "2026-10",
+		time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC):  "2026-02",
+		time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC):   "2026-12",
+	} {
+		if got := lastMonth(now); got != want {
+			t.Errorf("lastMonth(%s) = %s, want %s", now.Format("2006-01-02"), got, want)
 		}
 	}
 }
