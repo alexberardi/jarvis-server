@@ -1,5 +1,15 @@
 import { parseServerTime } from '@/lib/time'
-import type { ParamKind, SuccessCheck, TaughtWorkflow, TraceEvent, WStep, WorkflowPut } from '@/api/workflows'
+import type {
+  ParamKind,
+  Prerequisite,
+  PrerequisiteKind,
+  Skill,
+  SuccessCheck,
+  TaughtWorkflow,
+  TraceEvent,
+  WStep,
+  WorkflowPut,
+} from '@/api/workflows'
 
 /** A piece of a sentence; bold is what the step acts on ("Click **Download CSV**"). */
 export interface Part {
@@ -267,6 +277,48 @@ export function cleanSuccess(c: SuccessCheck): SuccessCheck {
   return out
 }
 
+/** The kinds of prerequisite, as the page offers them, and the field each one is about. */
+export const PREREQS: { value: PrerequisiteKind; label: string; field: 'app' | 'file' | 'url' | 'site' | 'text'; placeholder: string }[] = [
+  { value: 'app_open', label: 'An app is open', field: 'app', placeholder: 'LibreOffice Calc' },
+  { value: 'file_open', label: 'A file is open', field: 'file', placeholder: 'budget-{month}.xlsx' },
+  { value: 'page_open', label: 'A page is open', field: 'url', placeholder: 'https://bank.example.com/statements' },
+  { value: 'signed_in', label: 'Signed in to', field: 'site', placeholder: 'bank.example.com' },
+  { value: 'other', label: 'Something else', field: 'text', placeholder: 'The printer is on' },
+]
+
+/** prereqField is the field a prerequisite's kind is about. */
+export function prereqField(kind: PrerequisiteKind) {
+  return (PREREQS.find((p) => p.value === kind) ?? PREREQS[4]).field
+}
+
+/** prereqSentence is a prerequisite as the page reads it out: "A file is open: budget.xlsx". */
+export function prereqSentence(p: Prerequisite): string {
+  const kind = PREREQS.find((k) => k.value === p.kind)
+  if (!kind || kind.field === 'text') return p.text ?? ''
+  return `${kind.label}${kind.value === 'signed_in' ? ' ' : ': '}${p[kind.field] ?? ''}`
+}
+
+/**
+ * cleanSkill trims the skill and drops what was left empty (a prerequisite with nothing it is
+ * about, a blank note), so cc's validation sees only what the owner wrote. Fields the page
+ * doesn't edit (guardrails, a note's app) are kept.
+ */
+export function cleanSkill(s: Skill): Skill {
+  const out: Skill = {}
+  const reason = s.goal?.reason?.trim()
+  const end = s.goal?.end_state?.trim()
+  if (reason || end) out.goal = { ...(reason ? { reason } : {}), ...(end ? { end_state: end } : {}) }
+  if (s.when_to_use?.trim()) out.when_to_use = s.when_to_use.trim()
+  const pre = (s.prerequisites ?? [])
+    .map((p) => ({ ...p, [prereqField(p.kind)]: (p[prereqField(p.kind)] ?? '').trim() }) as Prerequisite)
+    .filter((p) => p[prereqField(p.kind)])
+  if (pre.length) out.prerequisites = pre
+  if (s.guardrails) out.guardrails = s.guardrails
+  const notes = (s.notes ?? []).map((n) => ({ ...n, text: n.text.trim() })).filter((n) => n.text)
+  if (notes.length) out.notes = notes
+  return out
+}
+
 /** toPut is the save payload: exactly the fields PUT takes. */
 export function toPut(d: {
   name: string
@@ -275,6 +327,7 @@ export function toPut(d: {
   cands: Candidate[]
   success: SuccessCheck
   shared: boolean
+  skill?: Skill
 }): WorkflowPut {
   const live = d.cands.filter((c) => !('step' in c.from) || d.steps.some((s) => s.uid === (c.from as { step: string }).step))
   return {
@@ -289,11 +342,18 @@ export function toPut(d: {
         ...(c.description ? { description: c.description } : {}),
       })),
     steps: applyParams(d.steps, live).map(({ step }) => {
-      const { risk, ...rest } = step
-      return risk ? { ...rest, risk } : rest
+      const { risk, goal, expect, ...rest } = step
+      const check = expect && cleanSuccess(expect)
+      return {
+        ...rest,
+        ...(risk ? { risk } : {}),
+        ...(goal?.trim() ? { goal: goal.trim() } : {}),
+        ...(check && Object.keys(check).length ? { expect: check } : {}),
+      }
     }),
     success: cleanSuccess(d.success),
     shared: d.shared,
+    ...(d.skill ? { skill: cleanSkill(d.skill) } : {}),
   }
 }
 

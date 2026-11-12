@@ -766,20 +766,33 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
          "action": {"kind": "press", "intent": "Pay the balance", "ref": "e4"},
          "element": {"role": "button", "name": "Pay now"}, "risk": "pay"},
     ]
+    # The bank workflow has a skill (docs/agent/WORKFLOW-SKILLS.md); the water bill is one taught
+    # before skills.
+    bank_skill = {
+        "goal": {"reason": "Keep a copy of each month's statement for the household records.",
+                 "end_state": "The statement for {month} is in Downloads as a CSV file."},
+        "when_to_use": "You ask for a bank statement.",
+        "prerequisites": [{"kind": "signed_in", "site": "bank.example.com"}],
+        "notes": [{"text": "The bank signs you out after five minutes without a click."}],
+    }
+    bank_steps[1].update(goal="Get to the list of statements",
+                         expect={"url_contains": "bank.example.com/statements"})
+    bank_steps[2].update(goal="Pick which statement to download",
+                         expect={"screen": "The month field shows {month}"})
     workflows = [
         ("tw_5eed000000000001", primary, "Download bank statement", ["download my bank statement"],
          [{"name": "month", "kind": "month", "example": "2026-09", "description": "the statement month"}],
-         bank_steps, {"download": {"name_like": "statement*.csv"}}, 0, "rec_5eed000000000001"),
+         bank_steps, {"download": {"name_like": "statement*.csv"}}, bank_skill, 0, "rec_5eed000000000001"),
         ("tw_5eed000000000002", partner, "Pay the water bill", ["pay the water bill"], [],
-         water_steps, {"text_present": ["Payment received"]}, 1, None),
+         water_steps, {"text_present": ["Payment received"]}, {}, 1, None),
     ]
     n = 0
-    for wid, owner, name, triggers, params, steps, success, shared, rec in workflows:
+    for wid, owner, name, triggers, params, steps, success, skill, shared, rec in workflows:
         n += cx.execute("""INSERT INTO cc_taught_workflows (id, household_id, owner_id, name, slug,
-            trigger_phrases, params, steps, success, shared, recording_id, version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT DO NOTHING""",
+            trigger_phrases, params, steps, success, skill, shared, recording_id, version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT DO NOTHING""",
                         (wid, household_id, owner, name, slugify(name), json.dumps(triggers), json.dumps(params),
-                         json.dumps(steps), json.dumps(success), shared, rec, stamp, stamp)).rowcount
+                         json.dumps(steps), json.dumps(success), json.dumps(skill), shared, rec, stamp, stamp)).rowcount
     counts["taught_workflows"] = n
     bank_trace = [
         {"seq": 1, "kind": "navigate", "url": "https://bank.example.com/login"},

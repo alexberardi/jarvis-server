@@ -52,6 +52,9 @@ export interface WStep {
   element?: RecordedElement
   /** A computeruse risk category: the step asks first. "" or absent is none. */
   risk?: string
+  /** The point of the step, and what can be observed once it worked (the workflow's skill). */
+  goal?: string
+  expect?: SuccessCheck
 }
 
 /** computer.SuccessCheck: how a run is checked afterwards. */
@@ -61,6 +64,31 @@ export interface SuccessCheck {
   download?: { name_like: string; min_bytes?: number }
   file?: { path: string; contains?: string[] }
   screen?: string
+}
+
+export type PrerequisiteKind = 'app_open' | 'file_open' | 'page_open' | 'signed_in' | 'other'
+
+/** Something that must be true before step 1; a run tries to achieve an unmet one. */
+export interface Prerequisite {
+  kind: PrerequisiteKind
+  text?: string
+  app?: string
+  site?: string
+  file?: string
+  url?: string
+}
+
+/**
+ * computer.Skill: what a workflow knows about its task beyond its steps
+ * (docs/agent/WORKFLOW-SKILLS.md). Separate fields, never a document.
+ */
+export interface Skill {
+  goal?: { reason?: string; end_state?: string }
+  when_to_use?: string
+  prerequisites?: Prerequisite[]
+  /** strict | creative: set with the run that reads it; the page only keeps it. */
+  guardrails?: string
+  notes?: { text: string; app?: string }[]
 }
 
 export interface TaughtWorkflow {
@@ -73,6 +101,7 @@ export interface TaughtWorkflow {
   params: Param[] | null
   steps: WStep[]
   success: SuccessCheck
+  skill?: Skill
   shared: boolean
   recording_id?: string
   version: number
@@ -90,6 +119,8 @@ export interface WorkflowPut {
   steps: WStep[]
   success: SuccessCheck
   shared: boolean
+  /** Left out, cc keeps the stored skill. */
+  skill?: Skill
 }
 
 export async function listWorkflows(householdId: string): Promise<TaughtWorkflow[]> {
