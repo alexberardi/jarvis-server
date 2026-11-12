@@ -47,14 +47,16 @@ each step is for and what should happen after it, and what to watch for.
 
 | Module id | Responsibility | Depends on |
 |---|---|---|
-| `skill-doc` | The learned knowledge: goal, when to use, prerequisites, per-step goal and expected result, notes. Data model, learn prompt, editor. | — |
+| `capture` | The recorder keeps the starting state and the result of each action (Q3, Q5): desktop agent and browser extension. | — |
+| `skill-doc` | The learned knowledge: goal, when to use, prerequisites, per-step goal and expected result, notes. Data model, learn prompt, editor, Relearn. | `capture` (falls back without it) |
 | `verified-replay` | The run under principles 2–4: model-led loop reading the skill, direct path by identity, prerequisites achieved before step 1, a check after every step. | `skill-doc` |
 | `narration` | What the user says while recording, aligned to the events, feeding the learner. | `skill-doc` |
 | `refine` | A workflow improves after teaching: a second recording, a spoken correction, answers given during runs kept as notes. | `skill-doc`, `verified-replay` |
 | `control-flow` | Conditions and repetition, learned from narration or a second demonstration. | `verified-replay`, `narration` |
 | `compose` | Workflows return values and call each other. | `skill-doc` |
 
-Build order: `skill-doc` → `verified-replay` → `narration` → `refine` → `control-flow` → `compose`.
+Build order: `capture` and `skill-doc` together (the learner falls back to inference until a
+recording has results, so neither blocks the other) → `verified-replay` → `narration` → `refine` → `control-flow` → `compose`.
 Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
 
 ## Decided
@@ -82,6 +84,10 @@ Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
   they're not useful"). The learner proposes a value where the recorded name is, or looks like, a
   param; the owner can make it fixed again.
   [Decision](../decisions/2026-11-12-prerequisites-from-the-starting-state.md).
+- **Q4 (2026-11-12): existing workflows stay as they are, with a Relearn button.** Relearn rebuilds
+  the skill from the stored recording as a draft to review; when the recording is past retention
+  the page says to record the task again. Nothing is relearnt on upgrade.
+  [Decision](../decisions/2026-11-12-existing-workflows-relearn.md).
 
 ---
 
@@ -123,8 +129,8 @@ internal/modules/cc/computer/workflow.go      the Workflow type (the run reads i
 internal/modules/cc/workflows.go              storage, validation, routes
 internal/modules/cc/workflows_learn.go        the learn prompt and the draft
 internal/modules/cc/migrations/               one new migration
-internal/agent/computer/recorder.go           the result after each action (desktop)
-internal/agent/browser/                       the same in the extension (a store release)
+internal/agent/computer/recorder.go           `capture`: starting state and each action's result (desktop)
+internal/agent/browser/                       `capture`: the same in the extension (a store release)
 web/admin/src/pages/WorkflowEditPage.tsx      the editor
 docs/decisions/                               one file per answer
 ```
@@ -162,17 +168,24 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 ### Success criteria
 
 1. Learning the suite's `bank_download` recording gives a workflow with a goal, its prerequisites,
-   and a purpose and expectation on every step, none naming something absent from the trace.
+   and a goal and expectation on every step, none naming something absent from the recording.
+   With captured results the expectations come from them; without, from the next step.
+1a. A recording begun with a file open whose name holds the month param learns the prerequisite
+   "file {…} is open" with the param, not the recorded name; one begun with an unrelated window
+   open does not list it.
+1b. Relearn on a workflow whose recording is kept gives a draft to review and leaves the workflow
+   unchanged until it is saved; with the recording gone it says so.
 2. A person reading only the workflow page can say what the task does and what each step should
    cause.
 3. The owner edits any part of the skill and the edit survives a reload; the version goes up.
 4. A workflow stored before this change opens, edits and runs with no migration step by the user.
 5. `scripts/check --all`, `scripts/e2e web` and the teach cases pass.
 
-### Open questions for `skill-doc` (asked one at a time, in this order)
+### Open questions for `skill-doc`
 
-1. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
-   is still kept?
+None: Q2–Q6 are decided. `capture`'s own questions (how long to wait for an action to settle, size
+limits, what "signed in" is read from) are settled in its plan, with the user asked where a choice
+is theirs.
 
 ## Later modules' questions (not yet ordered)
 
