@@ -26,6 +26,18 @@ func SlotSetting(key, category, description string) settings.Definition {
 		Description: description, Options: opts, Validate: validSlot}
 }
 
+// Slot resolves a feature's slot setting to the label its chat requests go to: live, background
+// or cloud when the setting names one, else fallback — the feature's own default, which is what
+// auto means and never picks cloud. An unrecognised stored value takes fallback too; the
+// setting's own validator (SlotSetting) rejects one at write time.
+func Slot(value, fallback string) string {
+	switch value {
+	case LabelLive, LabelBackground, LabelCloud:
+		return value
+	}
+	return fallback
+}
+
 func validSlot(v any) error {
 	if s, ok := v.(string); ok && slices.Contains(SlotChoices, s) {
 		return nil

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -52,25 +53,34 @@ type HouseholdLister interface {
 	UserHouseholds(ctx context.Context, userID int64) ([]string, error)
 }
 
-// Setting keys (§7.5). The llm.* values are jarvisd LLM labels (live/background).
+// Legacy setting keys, renamed 2026-11-11 (docs/llm/SPEC-feature-models.md). They are no longer
+// definitions; Start carries their stored values to the keys below. legacyLightweightModel has no
+// successor: its cheap OCR-text structuring pass runs on SettingImportModel with the rest of an
+// import.
 const (
-	SettingFullModel        = "llm.full_model_name"
-	SettingLightweightModel = "llm.lightweight_model_name"
-	SettingBackgroundModel  = "llm.background_model_name"
-	SettingMaxRetries       = "queue.max_retries"
-	SettingAbandonMinutes   = "parse_job.abandon_minutes"
-	SettingImageMaxBytes    = "image.max_bytes"
-	SettingUserAgent        = "scraper.user_agent"
+	legacyFullModel        = "llm.full_model_name"
+	legacyLightweightModel = "llm.lightweight_model_name"
+	legacyBackgroundModel  = "llm.background_model_name"
+)
+
+// Setting keys (§7.5). The model keys are feature slot settings (llm.SlotSetting).
+const (
+	SettingImportModel    = "recipes.import.model"
+	SettingGroceryModel   = "recipes.grocery.model"
+	SettingMaxRetries     = "queue.max_retries"
+	SettingAbandonMinutes = "parse_job.abandon_minutes"
+	SettingImageMaxBytes  = "image.max_bytes"
+	SettingUserAgent      = "scraper.user_agent"
 )
 
 // Definitions are the module's settings (legacy settings_service.py; env fallbacks are cut, §7.5).
 var Definitions = []settings.Definition{
-	{Key: SettingFullModel, Category: "llm", Type: settings.String, Default: "live",
-		Description: "Model name used for full recipe extraction and meal planning"},
-	{Key: SettingLightweightModel, Category: "llm", Type: settings.String, Default: "live",
-		Description: "Model name used for cheap OCR-text structuring passes"},
-	{Key: SettingBackgroundModel, Category: "llm", Type: settings.String, Default: "background",
-		Description: "Model name used for slow background passes (grocery SKU matching)"},
+	llm.SlotSetting(SettingImportModel, "recipes",
+		"Which model reads a recipe into fields, and plans meals: auto (live), live, background or cloud "+
+			"(the optional cloud slot: the page or photo text goes to its provider)."),
+	llm.SlotSetting(SettingGroceryModel, "recipes",
+		"Which model matches ingredients to store items, a slow background pass: auto (background), live, "+
+			"background or cloud (the optional cloud slot: your ingredients and the store listing go to its provider)."),
 	{Key: SettingMaxRetries, Category: "queue", Type: settings.Int, Default: int64(3),
 		Description: "Maximum retries for a failed recipe parse job"},
 	{Key: SettingAbandonMinutes, Category: "parse_job", Type: settings.Int, Default: int64(4320),
@@ -218,16 +228,41 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	}
 }
 
-// Start migrates the settings table, upserts the embedded stock reference data and schedules
-// the hourly cleanup.
+// Start migrates the settings table, carries the renamed model settings over, upserts the
+// embedded stock reference data and schedules the hourly cleanup.
 func (m *Module) Start(ctx context.Context) error {
 	if err := m.settings.Migrate(ctx); err != nil {
+		return err
+	}
+	if err := m.renameModelSettings(ctx); err != nil {
 		return err
 	}
 	if err := m.seedStock(ctx); err != nil {
 		return err
 	}
 	return m.startCleanup(ctx)
+}
+
+// renameModelSettings carries the pre-2026-11-11 model settings to their current keys. The
+// lightweight pass has no successor key: it runs on SettingImportModel now, so an install that
+// deliberately pointed it at a different slot than the full pass is told its value is dropped
+// rather than having the move happen silently.
+func (m *Module) renameModelSettings(ctx context.Context) error {
+	if err := m.settings.Rename(ctx, legacyFullModel, SettingImportModel); err != nil {
+		return err
+	}
+	if err := m.settings.Rename(ctx, legacyBackgroundModel, SettingGroceryModel); err != nil {
+		return err
+	}
+	light, had, err := m.settings.Forget(ctx, legacyLightweightModel)
+	if err != nil {
+		return err
+	}
+	if had && light != "" && light != m.settings.String(ctx, SettingImportModel, settings.Scope{}) {
+		m.deps.Log.Warn("recipes: the OCR-text structuring pass now runs on the recipe import model; "+
+			"its own setting is dropped", "was", light, "now_follows", SettingImportModel)
+	}
+	return nil
 }
 
 // --- timestamps ---

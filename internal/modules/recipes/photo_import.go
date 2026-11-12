@@ -352,10 +352,7 @@ func (m *Module) photoJob(ctx context.Context, j parseJob) error {
 		return nil
 	}
 
-	label := m.label(ctx, SettingLightweightModel)
-	if m.settings.String(ctx, SettingLightweightModel, settings.Scope{}) == "" {
-		label = m.label(ctx, SettingFullModel) // P2 with no model name used the full model
-	}
+	label := m.importSlot(ctx) // P2 followed its own setting, which folded into the import slot
 	draft, err := m.structure(ctx, label, texts)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -432,7 +429,7 @@ func (m *Module) structure(ctx context.Context, label string, texts []ocrq.Text)
 			return d, nil
 		}
 	}
-	fixed, ferr := m.chatJSON(ctx, m.label(ctx, SettingFullModel), 0, p1MaxToken, p2Timeout, extract.P1rSystem,
+	fixed, ferr := m.chatJSON(ctx, m.importSlot(ctx), 0, p1MaxToken, p2Timeout, extract.P1rSystem,
 		extract.P1rUser(ocrq.DraftSchemaHint, reply))
 	if ferr == nil {
 		if good, ok := extract.RepairReply(fixed); ok {

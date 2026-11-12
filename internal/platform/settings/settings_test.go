@@ -308,3 +308,81 @@ func TestRouterErrors(t *testing.T) {
 		t.Fatalf("invalidate: %v", m)
 	}
 }
+
+// Rename carries a renamed setting's stored value to its current key and drops the old rows, so
+// cleaning up a legacy key does not reset what the user chose.
+func TestRename(t *testing.T) {
+	ctx := context.Background()
+	const old, current = "llm.old_model_name", "model.temperature"
+	raw := func(s *Service, key string) (string, bool) {
+		t.Helper()
+		var v string
+		err := s.db.Read.QueryRow("SELECT value FROM "+s.table+" WHERE key = ?", key).Scan(&v)
+		return v, err == nil
+	}
+
+	t.Run("carries the value over", func(t *testing.T) {
+		s := newService(t, nil)
+		if _, err := s.db.Write.Exec("INSERT INTO "+s.table+" (key, value, value_type, category) VALUES (?, ?, 'float', 'llm')",
+			old, "0.2"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Rename(ctx, old, current); err != nil {
+			t.Fatal(err)
+		}
+		v, err := s.Get(ctx, current, Scope{})
+		if err != nil || v.Value != 0.2 || !v.FromDB {
+			t.Fatalf("got %v (db=%v) err %v, want 0.2 from db", v.Value, v.FromDB, err)
+		}
+		if _, ok := raw(s, old); ok {
+			t.Error("old key still stored")
+		}
+		// Idempotent: a second pass is a no-op, not a reset.
+		if err := s.Rename(ctx, old, current); err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := s.Get(ctx, current, Scope{}); v.Value != 0.2 {
+			t.Errorf("after second pass: %v", v.Value)
+		}
+	})
+
+	t.Run("a value already set under the current key wins", func(t *testing.T) {
+		s := newService(t, nil)
+		if err := s.Set(ctx, current, 0.9, Scope{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Write.Exec("INSERT INTO "+s.table+" (key, value, value_type, category) VALUES (?, ?, 'float', 'llm')",
+			old, "0.2"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Rename(ctx, old, current); err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := s.Get(ctx, current, Scope{}); v.Value != 0.9 {
+			t.Errorf("got %v, want the value already set (0.9)", v.Value)
+		}
+		if _, ok := raw(s, old); ok {
+			t.Error("old key still stored")
+		}
+	})
+
+	t.Run("nothing stored is a no-op", func(t *testing.T) {
+		s := newService(t, nil)
+		if err := s.Rename(ctx, old, current); err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := s.Get(ctx, current, Scope{}); v.FromDB {
+			t.Error("rename invented a row")
+		}
+	})
+
+	t.Run("refuses a live or unknown key", func(t *testing.T) {
+		s := newService(t, nil)
+		if err := s.Rename(ctx, "memory.enabled", current); err == nil {
+			t.Error("renamed away a current definition")
+		}
+		if err := s.Rename(ctx, old, "no.such.key"); err == nil {
+			t.Error("renamed onto an unknown key")
+		}
+	})
+}
