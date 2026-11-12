@@ -66,3 +66,18 @@ func TestDirectScrollAtTheEnd(t *testing.T) {
 		t.Fatalf("model's call: %v", out)
 	}
 }
+
+// Only scrolling steers: a follow-up right after a reply never clicks on the node.
+func TestDirectSteeringOnlyScrolls(t *testing.T) {
+	h, path := startHub(t)
+	ts := NewTools(h)
+	f := connectExt(t, h, path, "Firefox", true, func(Message) Message { return ok(map[string]any{}) })
+	if out, ok := ts.DirectSteering(context.Background(), "Scroll down."); !ok || out["success"] != true || lastArgs(t, f, "scroll")["direction"] != "down" {
+		t.Fatalf("scroll: %v %v", out, ok)
+	}
+	for _, said := range []string{"click 7", "click Images", "search for octopus facts", "pause the video"} {
+		if out, ok := ts.DirectSteering(context.Background(), said); ok {
+			t.Errorf("%q steered: %v", said, out)
+		}
+	}
+}

@@ -74,3 +74,12 @@ func TestDirectSwitches(t *testing.T) {
 		t.Fatal("an unknown name handled locally")
 	}
 }
+
+// Switching is steering: DirectSteering does what Direct does.
+func TestDirectSteeringSwitches(t *testing.T) {
+	b := &fakeBackend{caps: hypr, windows: []host.Window{{ID: "0x7", Title: "~/jarvis", App: "foot"}, {ID: "0xf", Title: "YouTube", App: "firefox", Focused: true}}}
+	ts := New(host.New(b), OpenPolicy{}, catalogue)
+	if out, ok := ts.DirectSteering(context.Background(), "switch to the terminal"); !ok || out["success"] != true || !slices.Contains(b.actions, "focus 0x7") {
+		t.Fatalf("%v %v %v", out, ok, b.actions)
+	}
+}

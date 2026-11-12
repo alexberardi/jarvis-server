@@ -121,13 +121,22 @@ func ControlNodeMatch(said string) (Match, bool) {
 }
 
 var (
-	volumeUpRe   = regexp.MustCompile(`(?i)\b(?:turn\s+(?:the\s+)?)?volume\s+up\b|\b(?:turn\s+it\s+up|louder|crank\s+it\s+up)\b`)
-	volumeDownRe = regexp.MustCompile(`(?i)\b(?:turn\s+(?:the\s+)?)?volume\s+down\b|\b(?:turn\s+it\s+down|quieter|softer)\b`)
+	// Up and down are the whole request, as mute is: inside a longer sentence ("speak louder,
+	// grandma can't hear you", "turn it down a notch, you're yelling") they're room talk.
+	volumeUpRe   = volumeStep(`(?:turn\s+(?:the\s+)?)?volume\s+up|turn\s+it\s+up|(?:make\s+it\s+)?louder|crank\s+it\s+up`)
+	volumeDownRe = volumeStep(`(?:turn\s+(?:the\s+)?)?volume\s+down|turn\s+it\s+down|(?:make\s+it\s+)?(?:quieter|softer)`)
 	volumeSetRe  = regexp.MustCompile(`(?i)\b(?:set|change|make|put)\s+(?:the\s+)?volume\s+(?:to\s+|at\s+)?(\d+)\s*(%)?`)
 	volumeBareRe = regexp.MustCompile(`(?i)\bvolume\s+(\d+)\s*(%)?\b`)
 	muteRe       = regexp.MustCompile(`(?i)^\s*(?:please\s+)?mute(?:\s+(?:the\s+)?(?:volume|sound|audio|speaker))?\s*\.?$`)
 	unmuteRe     = regexp.MustCompile(`(?i)^\s*(?:please\s+)?unmute(?:\s+(?:the\s+)?(?:volume|sound|audio|speaker))?\s*\.?$`)
 )
+
+// volumeStep is a volume up/down request said on its own: an optional "hey jarvis", "okay" or
+// "please" before it and "a bit", "a little", "a notch", "more" or "please" after.
+func volumeStep(verbs string) *regexp.Regexp {
+	return regexp.MustCompile(`(?i)^\s*(?:(?:hey\s+)?jarvis[,\s]+)?(?:(?:okay|ok)[,\s]+)?(?:please\s+)?(?:` + verbs +
+		`)(?:\s+(?:a\s+(?:little\s+)?bit|a\s+little|a\s+notch|a\s+touch|some|more))?(?:[,\s]+please)?\s*[.!]?\s*$`)
+}
 
 // volumeTarget is _interpret_target: "50%" is 50; a bare 1-10 is the 0-10 scale (5 is 50).
 func volumeTarget(m []string) (map[string]any, bool) {

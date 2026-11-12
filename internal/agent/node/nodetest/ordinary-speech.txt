@@ -1,0 +1,103 @@
+# Ordinary speech that funnel stage 1 (every node.Director) must never carry out: room talk a
+# follow-up window hears without the wake word, and sentences that only share a command's words.
+# One per line; "#" lines are comments. Tests run a Director over it with nodetest.NeverDirect.
+# Idea from omarchy-utter's never-match corpus (2026-11-10). A line that is also a real command
+# ("type two diabetes runs in our family") doesn't belong here: right after a reply such a
+# follow-up passes command-center's gate first (voice.TestFollowUpAfterAReplySteersOnlyOnTheNode).
+
+I can't switch to the new phone plan until next month.
+We should switch to oat milk, it's cheaper.
+She finally switched to the night shift.
+Did you switch the laundry over?
+I'll switch it up and make tacos tonight.
+Can you believe he went to Discord for that?
+We went to the top of the tower last summer.
+Go to bed, it's late.
+Go to your room and finish your homework.
+I want to go to the beach this weekend.
+Let's go to the bottom of this, what actually happened?
+He scrolled through his phone the whole dinner.
+I scroll down my feed way too much.
+Stop scrolling and eat your food.
+I can type really fast now.
+What type of dog is that?
+She's not really my type.
+I typed up the notes yesterday.
+Click your seatbelt in.
+The pen keeps clicking, it drives me crazy.
+It finally clicked for me in class today.
+Open the window, it's hot in here.
+The store opens at nine.
+Keep an open mind about it.
+Close the door behind you.
+We're so close to finishing the puzzle.
+That was a close game last night.
+Show me what you drew at school.
+The show starts at eight.
+Did you see that show about the octopus?
+I set a timer on the oven already.
+Remind me what your teacher's name is?
+That reminds me, we need to call grandma.
+Add some salt to the pasta water.
+That doesn't add up.
+Can you add me to the group chat?
+Number seven bus is always late.
+I got number four on the test wrong.
+Click number two on the remote, no, the other one.
+Seven, eight, nine, ten, ready or not.
+Press the button on the microwave.
+Hit enter on the dishwasher, it's the start button.
+Next week is going to be busy.
+Go back to what you were saying.
+Go back to sleep, it's early.
+Scroll back up, I missed it. No, on your phone.
+Search me, I have no idea.
+I searched everywhere for my keys.
+Find your shoes, we're leaving.
+Find out if the pool is open.
+Play nice with your brother.
+They played really well tonight.
+Pause, let me think about that.
+Stop it, both of you.
+Turn the corner and it's on the left.
+Turn it down a notch, you're yelling.
+Copy that, I'll be there in ten.
+Paste the wallpaper on that wall first.
+Undo the knot, it's too tight.
+Save some cake for your dad.
+Print that out for me later.
+Zoom in on her face, she looks so happy. Not now, on the photo.
+Mute yourself on the call, there's background noise.
+Select the ripest avocados, okay?
+Select one card from the deck.
+Delete that guy's number.
+Send him a text that we're running late.
+Write your name at the top of the page.
+Read the next chapter before bed.
+Look at the top of the page, there's a typo.
+Tab over there and grab me a napkin.
+I need a new tab for my bar tab.
+Window seat or aisle?
+Clean the windows this weekend.
+The terminal at the airport was packed.
+My cloud storage is full again.
+Open up about how you feel.
+What time is it in Tokyo right now, you think?
+Good night everyone.
+Good morning sunshine.
+Thank you so much for dinner.
+Okay, sounds good.
+Yeah, no, totally.
+Hmm, I don't know.
+Wait, what did you say?
+Never mind.
+Can you pass the salt?
+How was your day?
+Did you take the trash out?
+The kids are watching YouTube upstairs.
+Firefox the animal is a red panda, did you know that?
+Jarvis is the butler in the Iron Man movies.
+Speak louder, grandma can't hear you.
+Can you be quieter, the baby's asleep?
+Good night everyone, see you tomorrow.
+Is it time for the news yet?
