@@ -18,13 +18,14 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// Server serves the four fixture sites and the control API. Its state (orders, downloads, forms,
+// Server serves the five fixture sites and the control API. Its state (orders, downloads, forms,
 // sessions and carts) lives in memory and, with a state dir, in DIR/state.json after every change.
 //
 //	/store/   Test Store: search, product, compare, cart, checkout, order confirmation (store.go)
 //	/bank/    Test Bank: monthly statements with a CSV download (bank.go)
 //	/card/    Test Card Services: the card's statements, same pages (bank.go)
 //	/form/    a 10-field application form with validation (form.go)
+//	/wiki/    encyclopedia articles about made-up places, to summarize (wiki.go)
 //	/control/ state, reset and login for the suite (control.go)
 //
 // store, bank and card answer 401 with a sign-in page without their session cookie.
@@ -206,6 +207,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "form":
 			s.form(w, r)
 		}
+	case "wiki":
+		s.wiki(w, r)
 	case "":
 		s.render(w, r, http.StatusOK, "index", "Fixture sites", nil)
 	default:

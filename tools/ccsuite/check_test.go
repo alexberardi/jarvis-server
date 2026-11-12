@@ -27,16 +27,21 @@ const sitesJSON = `{
 // xlsx writes a minimal spreadsheet: shared strings and one sheet with an inline string and a
 // number.
 func xlsx(t *testing.T, path string) {
+	zipFile(t, path, map[string]string{
+		"xl/sharedStrings.xml":     `<sst><si><t>Category</t></si><si><t>Dining</t></si><si><r><t>Groc</t></r><r><t>eries</t></r></si></sst>`,
+		"xl/worksheets/sheet1.xml": `<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="inlineStr"><is><t>Travel</t></is></c><c><v>312.5</v></c></row></sheetData></worksheet>`,
+		"xl/workbook.xml":          `<workbook><sheets><sheet name="Budget"/></sheets></workbook>`,
+	})
+}
+
+// zipFile writes a zip at path with these members, as an office file is one.
+func zipFile(t *testing.T, path string, members map[string]string) {
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	zw := zip.NewWriter(f)
-	for name, body := range map[string]string{
-		"xl/sharedStrings.xml":     `<sst><si><t>Category</t></si><si><t>Dining</t></si><si><r><t>Groc</t></r><r><t>eries</t></r></si></sst>`,
-		"xl/worksheets/sheet1.xml": `<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="inlineStr"><is><t>Travel</t></is></c><c><v>312.5</v></c></row></sheetData></worksheet>`,
-		"xl/workbook.xml":          `<workbook><sheets><sheet name="Budget"/></sheets></workbook>`,
-	} {
+	for name, body := range members {
 		w, _ := zw.Create(name)
 		w.Write([]byte(body))
 	}
@@ -56,6 +61,16 @@ func fixtureState(t *testing.T) State {
 	xlsx(t, filepath.Join(docs, "budget", "budget-2026-09.xlsx"))
 	var err error
 	if st.Docs, err = readDocs(docs); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir() // ~/Documents: a summary in Writer's format, one in Word's, in a folder
+	zipFile(t, filepath.Join(home, "Velmora.odt"), map[string]string{"content.xml": `<office:document-content xmlns:office="o" xmlns:text="t">` +
+		`<office:body><office:text><text:h>Velmora</text:h><text:p>A lake town on Lake <text:span>Orrin</text:span>, founded in 1287.</text:p>` +
+		`<text:p>Known for the Brassfeather Festival.</text:p></office:text></office:body></office:document-content>`})
+	os.MkdirAll(filepath.Join(home, "Notes"), 0o755)
+	zipFile(t, filepath.Join(home, "Notes", "Rome.docx"), map[string]string{"word/document.xml": `<w:document xmlns:w="w"><w:body>` +
+		`<w:p><w:r><w:t>Rome</w:t></w:r></w:p><w:p><w:r><w:t>Capital of </w:t></w:r><w:r><w:t>Italy.</w:t></w:r></w:p></w:body></w:document>`})
+	if st.Documents, err = readDocs(home); err != nil {
 		t.Fatal(err)
 	}
 	notes := filepath.Join(t.TempDir(), "notes.json")
@@ -93,6 +108,11 @@ func TestChecks(t *testing.T) {
 		{"download", Check{Kind: "download", Site: "bank", Month: "2026-09"}, &st, ""},
 		{"download any month", Check{Kind: "download", Site: "card"}, &st, ""},
 		{"download wrong month", Check{Kind: "download", Site: "card", Month: "2026-09"}, &st, "no card statement for 2026-09 downloaded (downloads: bank 2026-09, card 2026-08)"},
+		{"document_has odt", Check{Kind: "document_has", File: "Velmora.*", Contains: []string{"velmora", "Lake Orrin", "1287", "Brassfeather"}, MaxWords: 20}, &st, ""},
+		{"document_has docx in a folder", Check{Kind: "document_has", File: "*.docx", Contains: []string{"Capital of Italy"}}, &st, ""},
+		{"document_has missing term", Check{Kind: "document_has", File: "Velmora.odt", Contains: []string{"Tessaly"}}, &st, `Velmora.odt has not all of ["Tessaly"]`},
+		{"document_has too long", Check{Kind: "document_has", File: "Velmora.odt", MaxWords: 10}, &st, "has 15 words, more than 10: not a summary"},
+		{"document_has no file", Check{Kind: "document_has", File: "Atlantis.odt"}, &st, "no file in ~/Documents matching Atlantis.odt"},
 		{"spreadsheet_has xlsx", Check{Kind: "spreadsheet_has", Contains: []string{"dining", "Groceries", "Travel", "312.5"}}, &st, ""},
 		{"spreadsheet_has csv by glob", Check{Kind: "spreadsheet_has", File: "*.csv", Contains: []string{"Utilities"}}, &st, ""},
 		{"spreadsheet_has glob excludes", Check{Kind: "spreadsheet_has", File: "*.csv", Contains: []string{"Dining"}}, &st, "(files: spending-2026-09.csv)"},

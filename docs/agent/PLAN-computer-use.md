@@ -1,7 +1,7 @@
 # Plan: Computer use, vision-first
 
 Spec: [SPEC-computer-use.md](SPEC-computer-use.md) (approved by the user 2026-11-11). Branch:
-`feat/computer-use`, worktree `.claude/worktrees/computer-use`. Status: **draft, awaiting review.**
+`feat/computer-use`, worktree `.claude/worktrees/computer-use`. Status: **approved 2026-11-11; in progress.**
 
 ## What the code already does (read 2026-11-11, `cc/computer/loop.go`, `prompt.go`)
 
@@ -86,6 +86,20 @@ sentence about a download or a file is judged with what the checks found.
 Task 3 as built: the notes app's `--layout pointer` (click-only canvas New and Save, no menu or
 shortcuts, nothing focused; Tk has no accessibility tree), cases `notes_pointer_x11` and
 `notes_pointer_wlroots` (pending). Sonnet 5.5 with today's prompt: **3/3 each**, by clicks.
+
+**Reordered** (user, 2026-11-12): Sonnet already passes the pixel-only cases with today's prompt,
+so task 4 can't show a gain on cloud. Next are 6 → 7 → checkpoint B → 8 (checkpoint C); task 4
+moves to task 9, measured on the local models where it can matter.
+
+Task 6 as built: `t1_writer_summary` (required), **3/3 on Sonnet 5.5** after two product fixes
+the case found. (1) "This page" meant nothing to the errand: the planner passed the page's name
+as search words, web search was off, and the step failed without reading it. `write_document`
+now reads the page open in the browser through the agent (`browser_read_page`) when its source,
+the request or its instructions mean the open page, which also covers pages behind a login or on
+the home network that the server's fetch can't reach (and refuses: private hosts). (2) The
+"summary" was the page rewritten, 523 words of 560: the writer's prompt now says what a summary
+is, and a summary over half its material's length is sent back once with the counts. The case
+reads the saved `.odt`: key facts of a made-up town (so not from memory), at most 350 words.
 
 ### 3. A canvas fixture app (no accessibility tree)
 

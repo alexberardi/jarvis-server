@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -20,11 +21,14 @@ import (
 // app's state file, the fake relay's pushes, the cards Jarvis posted and what it said. It is
 // gathered by run.go; the checks are pure functions of it.
 type State struct {
-	Sites  SitesState      `json:"sites"`
-	Docs   []Doc           `json:"docs"`
-	Notes  []notesapp.Note `json:"notes"`
-	Pushes []Push          `json:"pushes"`
-	Cards  []Card          `json:"cards"`
+	Sites SitesState `json:"sites"`
+	Docs  []Doc      `json:"docs"`
+	// Documents is every file in the agent's ~/Documents, folders included (Docs is its
+	// Jarvis folder), as Docs reads them: a document's text.
+	Documents []Doc           `json:"documents"`
+	Notes     []notesapp.Note `json:"notes"`
+	Pushes    []Push          `json:"pushes"`
+	Cards     []Card          `json:"cards"`
 	// Replies is what Jarvis said: the chat's answers and the cards' bodies, in order.
 	Replies []string `json:"replies"`
 }
@@ -140,6 +144,23 @@ func (ch Check) Eval(st *State) string {
 			}
 		}
 		return fmt.Sprintf("no file in ~/Documents/Jarvis%s has all of %q (files: %s)", inGlob(ch.File), ch.Contains, list(names))
+	case "document_has":
+		var names []string
+		for _, d := range st.Documents {
+			if ok, _ := filepath.Match(ch.File, path.Base(d.Path)); !ok {
+				continue
+			}
+			names = append(names, d.Path)
+			words := len(strings.Fields(d.Text))
+			switch {
+			case !containsAll(d.Text, ch.Contains):
+				return fmt.Sprintf("~/Documents/%s has not all of %q", d.Path, ch.Contains)
+			case ch.MaxWords > 0 && words > ch.MaxWords:
+				return fmt.Sprintf("~/Documents/%s has %d words, more than %d: not a summary", d.Path, words, ch.MaxWords)
+			}
+			return ""
+		}
+		return fmt.Sprintf("no file in ~/Documents matching %s (files: %s)", ch.File, list(names))
 	case "form_submitted":
 		for _, f := range st.Sites.Forms {
 			if fieldsMatch(f.Fields, ch.Fields) {
@@ -246,8 +267,9 @@ func anyMatch(re *regexp.Regexp, texts []string) bool {
 	return false
 }
 
-// readDocs reads every file under dir (the agent's ~/Documents/Jarvis) as text: .xlsx by its
-// cells, anything else as it is (CSV, TSV, Markdown); a missing dir is no files.
+// readDocs reads every file under dir (the agent's ~/Documents/Jarvis, or ~/Documents) as text:
+// .xlsx by its cells, .odt and .docx by their paragraphs, anything else as it is (CSV, TSV,
+// Markdown); a missing dir is no files.
 func readDocs(dir string) ([]Doc, error) {
 	var docs []Doc
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -262,9 +284,14 @@ func readDocs(dir string) ([]Doc, error) {
 		}
 		rel, _ := filepath.Rel(dir, p)
 		var text string
-		if strings.EqualFold(filepath.Ext(p), ".xlsx") {
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".xlsx":
 			text, err = xlsxText(p)
-		} else {
+		case ".odt":
+			text, err = paragraphs(p, "content.xml", "p", "h")
+		case ".docx":
+			text, err = paragraphs(p, "word/document.xml", "p")
+		default:
 			var b []byte
 			b, err = os.ReadFile(p)
 			text = string(b)
@@ -326,6 +353,50 @@ func xlsxText(path string) (string, error) {
 		rc.Close()
 	}
 	return strings.Join(parts, " "), nil
+}
+
+// paragraphs is the text of member in the zip at path (a .odt's content.xml, a .docx's
+// word/document.xml), one paragraph per element named one of para, space-separated: what a
+// document says, not how it looks.
+func paragraphs(path, member string, para ...string) (string, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return "", err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if f.Name != member {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		defer rc.Close()
+		var parts []string
+		var cur strings.Builder
+		dec := xml.NewDecoder(rc)
+		for {
+			tok, err := dec.Token()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", fmt.Errorf("%s: %w", member, err)
+			}
+			switch t := tok.(type) {
+			case xml.EndElement:
+				if oneOf(t.Name.Local, para...) && strings.TrimSpace(cur.String()) != "" {
+					parts = append(parts, strings.TrimSpace(cur.String()))
+					cur.Reset()
+				}
+			case xml.CharData:
+				cur.Write(t)
+			}
+		}
+		return strings.Join(parts, " "), nil
+	}
+	return "", fmt.Errorf("%s: no %s", path, member)
 }
 
 // lastMonth is the month before now's, as YYYY-MM: a download check's month "last" (the fixture

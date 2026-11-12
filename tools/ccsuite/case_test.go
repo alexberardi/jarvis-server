@@ -37,7 +37,7 @@ func TestCasesParse(t *testing.T) {
 		}
 	}
 	want := []string{"blocked_site", "budget_last_month", "injection_stops", "notes_macos", "notes_pointer_wlroots", "notes_pointer_x11", "notes_wlroots", "notes_x11",
-		"replay_changed_param", "replay_moved_button", "store_order_approve", "store_order_cancel", "web_form"}
+		"replay_changed_param", "replay_moved_button", "store_order_approve", "store_order_cancel", "t1_writer_summary", "web_form"}
 	if !slices.Equal(names, want) {
 		t.Errorf("cases %v, want %v", names, want)
 	}
@@ -78,6 +78,9 @@ func TestCasesRejected(t *testing.T) {
 			`setup.demonstrate "bank_upload": one of bank_download`},
 		"demonstration on the desktop": {"x", strings.Replace(strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1),
 			`["store"]}`, `["store"], "demonstrate": "bank_download"}`, 1), `"target": "browser"`, `"target": "desktop"`, 1), "needs target browser"},
+		"open not a path": {"x", strings.Replace(strings.Replace(good, "CHECK", `{"kind": "no_order"}`, 1), `["store"]}`, `["store"], "open": "wiki/Velmora"}`, 1),
+			`setup.open "wiki/Velmora": a path from /`},
+		"document_has without a file": {"x", strings.Replace(good, "CHECK", `{"kind": "document_has", "contains": ["Velmora"]}`, 1), "document_has needs file"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

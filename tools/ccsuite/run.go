@@ -270,6 +270,13 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 			}
 		}
 	}
+	if c.Setup.Open != "" {
+		closeTab, err := e.OpenTab(cctx, c.Setup.Open)
+		if err != nil {
+			return fail("open: " + err.Error())
+		}
+		defer closeTab(context.WithoutCancel(ctx))
+	}
 	if strings.HasPrefix(c.Phase, "desktop-") {
 		if err := e.StartNotes(cctx, c); err != nil {
 			return fail("notes app: " + err.Error())
@@ -498,7 +505,8 @@ func answerFor(answers []Answer, c Card) (Answer, bool) {
 }
 
 // reset puts the fixtures back: the sites' state (orders, downloads, forms, sessions), the
-// fake relay's pushes, the agent's ~/Documents/Jarvis and what its browser downloaded.
+// fake relay's pushes, the agent's ~/Documents (its Jarvis folder left empty) and what its
+// browser downloaded.
 func (e *Env) reset(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, "POST", e.Sites+"/control/reset", nil)
 	if err := doJSON(req, nil); err != nil {
@@ -511,7 +519,7 @@ func (e *Env) reset(ctx context.Context) error {
 		}
 	}
 	docs := e.path("agent-home", "Documents", "Jarvis")
-	if err := os.RemoveAll(docs); err != nil {
+	if err := os.RemoveAll(filepath.Dir(docs)); err != nil {
 		return err
 	}
 	// The files only: the browser may hold the directory.
@@ -549,6 +557,9 @@ func (e *Env) gather(ctx context.Context, cards []Card) (State, error) {
 		return st, fmt.Errorf("sites: %w", err)
 	}
 	if st.Docs, err = readDocs(e.path("agent-home", "Documents", "Jarvis")); err != nil {
+		return st, err
+	}
+	if st.Documents, err = readDocs(e.path("agent-home", "Documents")); err != nil {
 		return st, err
 	}
 	switch d := e.desk; {

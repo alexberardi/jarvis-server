@@ -43,6 +43,9 @@ type Setup struct {
 	// Block lists the sites (hosts, e.g. 127.0.0.1) the household blocks for computer tasks
 	// during the case: a household rule of cc's (policy.Rule, effect block) per site.
 	Block []string `json:"block,omitempty"`
+	// Open is a fixture sites path (e.g. /wiki/Velmora) the suite opens in a browser tab in front
+	// before Say: the page the user means by "this page", whose address Say doesn't give.
+	Open string `json:"open,omitempty"`
 	// Demonstrate names a scripted demonstration (teach.go demonstrations, e.g. bank_download)
 	// the suite plays in the browser while the agent records it, before Say: jarvisd learns a
 	// workflow from it, which the suite saves as-is. The fixtures are reset afterwards, and a
@@ -70,8 +73,12 @@ type Check struct {
 	Month string `json:"month,omitempty"`
 	// spreadsheet_has: a file in the agent's ~/Documents/Jarvis matching File (a glob, default
 	// every file) whose text contains each of Contains (case-insensitive).
+	// document_has: a file anywhere in the agent's ~/Documents whose name matches File (a glob,
+	// required), whose text contains each of Contains and runs to at most MaxWords words (when
+	// set: a summary, not the page pasted whole).
 	File     string   `json:"file,omitempty"`
 	Contains []string `json:"contains,omitempty"`
+	MaxWords int      `json:"max_words,omitempty"`
 	// form_submitted: a submission with these fields (case-insensitive, trimmed).
 	Fields map[string]string `json:"fields,omitempty"`
 	// note_exists: a saved note titled Title whose body contains Body.
@@ -86,7 +93,7 @@ var (
 	phases = []string{"tests", "browser", "desktop-mac", "desktop-wlroots", "desktop-x11", "teach"}
 	// checkKinds lists every check kind with the field it needs ("" for none).
 	checkKinds = map[string]string{
-		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains",
+		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains", "document_has": "file",
 		"form_submitted": "fields", "note_exists": "title", "reply_matches": "pattern", "asked": "", "refused": "",
 	}
 	loginSites = []string{"store", "bank", "card"}
@@ -126,6 +133,9 @@ func (c *Case) Validate() error {
 		return fmt.Errorf("setup.layout %q: default or moved", c.Setup.Layout)
 	case !oneOf(c.Setup.NotesLayout, "", "default", "moved", "pointer"):
 		return fmt.Errorf("setup.notes_layout %q: default, moved or pointer", c.Setup.NotesLayout)
+	}
+	if o := c.Setup.Open; o != "" && (!strings.HasPrefix(o, "/") || c.Target != "browser") {
+		return fmt.Errorf("setup.open %q: a path from /, with target browser", o)
 	}
 	if d := c.Setup.Demonstrate; d != "" {
 		if _, ok := demonstrations[d]; !ok {
@@ -176,6 +186,8 @@ func (ch Check) Validate() error {
 		missing = ch.Site == ""
 	case "contains":
 		missing = len(ch.Contains) == 0
+	case "file":
+		missing = ch.File == ""
 	case "fields":
 		missing = len(ch.Fields) == 0
 	case "title":

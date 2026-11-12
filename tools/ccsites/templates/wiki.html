@@ -1,0 +1,7 @@
+{{define "content"}}<article>
+<h1>{{.D.Title}}</h1>
+<p><em>From Test Wiki, the free encyclopedia</em></p>
+<p>{{.D.Lead}}</p>
+{{range .D.Sections}}<h2>{{.Heading}}</h2>
+{{range .Paras}}<p>{{.}}</p>
+{{end}}{{end}}</article>{{end}}

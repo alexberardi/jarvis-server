@@ -496,3 +496,23 @@ func TestStatementMonths(t *testing.T) {
 		}
 	}
 }
+
+// The wiki's article is in <main>, which is what write_document reads from a page; an unknown
+// article is a 404.
+func TestWikiArticle(t *testing.T) {
+	_, hs := newSites(t, "")
+	c := browser(t)
+	code, _, body := get(t, c, hs.URL+"/wiki/Velmora")
+	if code != 200 {
+		t.Fatalf("article: %d", code)
+	}
+	main := body[strings.Index(body, "<main"):strings.Index(body, "</main>")]
+	for _, want := range []string{"<h1>Velmora</h1>", "Lake Orrin", "Brassfeather Festival", "1287", "Tessaly Bridge"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("article's main has no %q", want)
+		}
+	}
+	if code, _, _ := get(t, c, hs.URL+"/wiki/Atlantis"); code != http.StatusNotFound {
+		t.Errorf("unknown article: %d", code)
+	}
+}
