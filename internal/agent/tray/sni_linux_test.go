@@ -309,3 +309,76 @@ func TestProbeWithoutAHost(t *testing.T) {
 		t.Fatalf("watcher, no host: %q", got)
 	}
 }
+
+// A checkmark is a dbusmenu PROPERTY, so changing it must be signalled with
+// ItemsPropertiesUpdated. LayoutUpdated says the menu's structure changed, and toggling never
+// changes the structure -- a host that caches properties (libdbusmenu, which waybar uses) then
+// keeps drawing the old checkmark and the menu looks dead. The agent used to emit only
+// LayoutUpdated, which is why "Listen for Hey Jarvis" and "Computer control" could be turned
+// off from the menu but never visibly back on.
+func TestTogglingSignalsItemsPropertiesUpdated(t *testing.T) {
+	addr := privateBus(t)
+	agent, host := dial(t, addr), dial(t, addr)
+
+	tr, err := startOn(agent, Options{
+		State:   State{Status: "Running", VoiceAvailable: true},
+		Actions: Actions{SetVoice: func(bool) {}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+
+	w := startWatcher(t, host, true)
+	within(t, w.got, "the item to register")
+
+	sig := make(chan *dbus.Signal, 8)
+	host.Signal(sig)
+	if err := host.AddMatchSignal(dbus.WithMatchObjectPath(menuPath), dbus.WithMatchInterface(menuIface),
+		dbus.WithMatchMember("ItemsPropertiesUpdated")); err != nil {
+		t.Fatal(err)
+	}
+
+	tr.Update(func(s *State) { s.Voice = true })
+
+	for {
+		s := within(t, sig, "ItemsPropertiesUpdated after the voice toggle")
+		if s.Name != menuIface+".ItemsPropertiesUpdated" {
+			continue
+		}
+		var updated []itemProps
+		if err := dbus.Store([]any{s.Body[0]}, &updated); err != nil {
+			t.Fatalf("decoding updatedProps: %v", err)
+		}
+		for _, u := range updated {
+			if u.ID != IDVoice {
+				continue
+			}
+			v, ok := u.Props["toggle-state"]
+			if !ok {
+				t.Fatalf("voice item signalled without toggle-state: %v", u.Props)
+			}
+			if v.Value() != int32(1) {
+				t.Fatalf("toggle-state = %v, want 1", v.Value())
+			}
+			// Only what changed is sent: the label did not.
+			if _, sentLabel := u.Props["label"]; sentLabel {
+				t.Errorf("unchanged label was signalled too: %v", u.Props)
+			}
+			return
+		}
+	}
+}
+
+// AboutToShow must not claim the menu is unchanged: voice, computer control, the activity
+// lines and the update line all change between openings, so a host that asks before opening
+// has to be told to re-read.
+func TestAboutToShowAsksForARefresh(t *testing.T) {
+	need, err := menuMethods{}.AboutToShow(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !need {
+		t.Fatal("AboutToShow said the menu needs no update; a host would draw its cached copy")
+	}
+}

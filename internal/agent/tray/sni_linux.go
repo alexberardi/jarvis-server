@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"sync"
 
@@ -246,9 +247,11 @@ func (s *sni) update(items []Item, tooltip string) error {
 		s.mu.Unlock()
 		return nil
 	}
+	old := s.items
 	s.items, s.tooltip = slices.Clone(items), tooltip
 	s.rev++
 	rev := s.rev
+	changed := changedProps(old, s.items)
 	active := Active(items)
 	newIcon := active != s.active
 	s.active = active
@@ -262,6 +265,15 @@ func (s *sni) update(items []Item, tooltip string) error {
 	errs := []error{
 		s.conn.Emit(menuPath, menuIface+".LayoutUpdated", rev, int32(0)),
 		s.conn.Emit(itemPath, itemIface+".NewToolTip"),
+	}
+	// A checkmark is a PROPERTY (toggle-state), not structure. LayoutUpdated alone says the
+	// menu's shape changed, and toggling never changes the shape -- so a host that caches
+	// properties (libdbusmenu, which is what waybar uses) keeps showing the old checkmark and
+	// the menu looks dead. The spec's signal for this is ItemsPropertiesUpdated; it was
+	// declared in the interface XML but never emitted.
+	if len(changed) > 0 {
+		errs = append(errs, s.conn.Emit(menuPath, menuIface+".ItemsPropertiesUpdated",
+			changed, []removedProps{}))
 	}
 	if newIcon {
 		errs = append(errs, s.conn.Emit(itemPath, itemIface+".NewIcon"))
@@ -285,6 +297,49 @@ func (s *sni) close() {
 }
 
 // node is item it as a dbusmenu node.
+// propsOf is an item's dbusmenu properties, as node() publishes them.
+func propsOf(it Item) map[string]dbus.Variant { return node(it).Props }
+
+// itemProps is one entry of ItemsPropertiesUpdated's first argument.
+type itemProps struct {
+	ID    int32
+	Props map[string]dbus.Variant
+}
+
+// removedProps is its second argument (nothing is ever removed here).
+type removedProps struct {
+	ID    int32
+	Names []string
+}
+
+// changedProps is the items whose published properties differ from the previous menu, so only
+// what actually changed is signalled. An item that is new, or whose id moved, is covered by
+// LayoutUpdated instead.
+func changedProps(old, now []Item) []itemProps {
+	prev := make(map[int32]map[string]dbus.Variant, len(old))
+	for _, it := range old {
+		prev[it.ID] = propsOf(it)
+	}
+	var out []itemProps
+	for _, it := range now {
+		was, ok := prev[it.ID]
+		if !ok {
+			continue
+		}
+		cur := propsOf(it)
+		diff := map[string]dbus.Variant{}
+		for k, v := range cur {
+			if w, ok := was[k]; !ok || !reflect.DeepEqual(w.Value(), v.Value()) {
+				diff[k] = v
+			}
+		}
+		if len(diff) > 0 {
+			out = append(out, itemProps{ID: it.ID, Props: diff})
+		}
+	}
+	return out
+}
+
 func node(it Item) layout {
 	p := map[string]dbus.Variant{}
 	if it.Separator {
@@ -398,7 +453,11 @@ func (m menuMethods) EventGroup(events []menuEvent) ([]int32, *dbus.Error) {
 	return bad, nil
 }
 
-func (menuMethods) AboutToShow(id int32) (bool, *dbus.Error) { return false, nil }
+// AboutToShow reports true so a host that asks before opening the menu re-reads it rather
+// than drawing its cached copy. Returning false asserted "nothing has changed since you last
+// looked", which is not something this menu can promise: voice, computer control, the activity
+// lines and the update line all change between openings.
+func (menuMethods) AboutToShow(id int32) (bool, *dbus.Error) { return true, nil }
 
 func (menuMethods) AboutToShowGroup(ids []int32) ([]int32, []int32, *dbus.Error) {
 	return []int32{}, []int32{}, nil
