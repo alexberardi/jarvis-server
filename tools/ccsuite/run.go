@@ -32,7 +32,7 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 	casesDir := fs.String("cases", "tools/ccsuite/cases", "the case files' directory (relative to --root)")
 	filter := fs.String("filter", "", "only cases whose name matches this regexp")
 	repeat := fs.Int("repeat", 1, "runs of each case")
-	llm := fs.String("llm", "shared", "the sandbox's model: shared (the installed jarvisd's, through the tap) or scripted")
+	llm := fs.String("llm", "shared", "the sandbox's model: shared (the installed jarvisd's, through the tap), scripted, or cloud (Anthropic from JARVIS_TEST_ANTHROPIC_KEY or ~/.config/jarvis-harness/cloud.env)")
 	label := fs.String("label", "", "shared: the installed jarvisd's label to use, live or background (default: as the harness env file says)")
 	includePending := fs.Bool("include-pending", false, "run pending cases too (they never fail the run)")
 	out := fs.String("out", "", "the run's directory (default .ccsuite/<run>)")
@@ -47,8 +47,8 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 	switch {
-	case *llm != "shared" && *llm != "scripted":
-		return errors.New("--llm: shared or scripted")
+	case *llm != "shared" && *llm != "scripted" && *llm != "cloud":
+		return errors.New("--llm: shared, scripted or cloud")
 	case *label != "" && *label != "live" && *label != "background":
 		return errors.New("--label: live or background")
 	case *label != "" && *llm != "shared":
@@ -75,6 +75,15 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var cl *cloud
+	if *llm == "cloud" {
+		c, err := cloudConfig()
+		if err != nil {
+			return err
+		}
+		cl = &c
+	}
+
 	run := runID()
 	dir := *out
 	if dir == "" {
@@ -90,7 +99,7 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	env := &Env{Root: rootAbs, Dir: dir, Name: "ccsuite-" + run, LLM: *llm, Label: *label, Chromium: *chromium, Keep: *keep, Settle: *settle, Log: stdout}
+	env := &Env{Root: rootAbs, Dir: dir, Name: "ccsuite-" + run, LLM: *llm, Label: *label, Cloud: cl, Chromium: *chromium, Keep: *keep, Settle: *settle, Log: stdout}
 	fmt.Fprintf(stdout, "ccsuite: run %s in %s\n", run, dir)
 	start := time.Now()
 	rep := &Report{Run: run, LLM: *llm}

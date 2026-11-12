@@ -35,7 +35,8 @@ type Env struct {
 	Root     string        // the jarvis-server checkout
 	Dir      string        // the run dir (absolute): bin/, logs/, agent-home/, browser/, ...
 	Name     string        // the sandbox: ccsuite-<run>
-	LLM      string        // shared or scripted
+	LLM      string        // shared, scripted or cloud
+	Cloud    *cloud        // cloud: the provider (cloud.go)
 	Label    string        // shared: the installed jarvisd's label (live, background); "" = as configured
 	Chromium string        // the browser binary; "" = Playwright's newest Chromium
 	Keep     bool          // leave it all running at the end (kept.json; ccsuite down --run DIR)
@@ -167,7 +168,11 @@ var tapLine = regexp.MustCompile(`llm: tap .*\((live|background) = ([^)]*)\)`)
 
 func (e *Env) sandbox(ctx context.Context) error {
 	e.logf("sandbox %s up (--llm %s; logs/sandbox.log)", e.Name, e.LLM)
-	cmd := exec.CommandContext(ctx, filepath.Join(e.Root, "scripts", "sandbox"), "up", "--name", e.Name, "--llm", e.LLM)
+	sbxLLM := e.LLM
+	if e.LLM == "cloud" {
+		sbxLLM = "none" // the labels are pointed at the provider once it is up (useCloud)
+	}
+	cmd := exec.CommandContext(ctx, filepath.Join(e.Root, "scripts", "sandbox"), "up", "--name", e.Name, "--llm", sbxLLM)
 	cmd.Dir, cmd.Env = e.Root, os.Environ()
 	if e.LLM == "shared" && e.Label != "" {
 		// The label is read from the harness env file: a file of ours that sources it and
@@ -213,6 +218,14 @@ func (e *Env) sandbox(ctx context.Context) error {
 		}
 	}
 	e.Model, e.Label = "scripted", "scripted"
+	if e.LLM == "cloud" {
+		if e.Cloud == nil {
+			return errors.New("--llm cloud without a provider")
+		}
+		if err := e.useCloud(ctx, *e.Cloud); err != nil {
+			return err
+		}
+	}
 	if e.LLM == "shared" {
 		e.Model, e.Label = "unknown", firstNonEmpty(e.Label, "live")
 		if b, err := os.ReadFile(e.path("logs", "sandbox.log")); err == nil {

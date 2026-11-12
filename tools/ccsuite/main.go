@@ -5,7 +5,7 @@
 // answers the phone's cards as the case says, and scores the case from the fixtures' own state
 // (orders placed, files downloaded, spreadsheets, notes), never from the model's words alone.
 //
-//	ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted] [--label live|background]
+//	ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted|cloud] [--label live|background]
 //	            [--include-pending] [--out DIR] [--keep] [--settle 1m] [--chromium PATH]
 //	ccsuite down --run DIR
 //
@@ -51,7 +51,7 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer) error {
 	case len(args) > 0 && args[0] == userInputCmd:
 		return userInput(ctx)
 	}
-	return errors.New("usage: ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted] [--label live|background] [--include-pending] [--out DIR] [--keep]\n       ccsuite down --run DIR")
+	return errors.New("usage: ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted|cloud] [--label live|background] [--include-pending] [--out DIR] [--keep]\n       ccsuite down --run DIR")
 }
 
 // errFailed is a run whose required cases failed (exit 1, already reported).

@@ -11,15 +11,25 @@ flips it to `required`.
 go run ./tools/ccsuite run --llm scripted                       # the plumbing: bring-up, tear-down; the scripted model does no computer task, so every case is skipped
 go run ./tools/ccsuite run --llm shared --label background      # the required cases against the installed background model
 go run ./tools/ccsuite run --include-pending --filter 'store_' --repeat 3
+go run ./tools/ccsuite run --llm cloud --filter 'notes_'               # on the optional cloud slot (below)
 go run ./tools/ccsuite run --filter none --keep                 # bring-up only, all of it left running (below)
 go run ./tools/ccsuite down --run .ccsuite/<run>               # and taken down again
 scripts/e2e computer --llm shared --label background --repeat 3 # the same from the E2E runner (overnight; docs/dev/e2e.md)
 ```
 
-Flags: `--filter RE` (case names), `--repeat N` (runs per case, default 1), `--llm shared|scripted`,
+Flags: `--filter RE` (case names), `--repeat N` (runs per case, default 1), `--llm shared|scripted|cloud`,
 `--label live|background`, `--include-pending`, `--out DIR` (default `.ccsuite/<run>/`, ignored by
 git), `--keep` (leave it all running: below), `--settle 1m` (below), `--chromium PATH`. Exit 0 when every
 required case passed, 1 when one failed, 2 when the run could not bring its world up.
+
+**`--llm cloud`** runs computer tasks on the optional cloud slot, as a household that picked it
+would ([plan](../agent/PLAN-computer-use.md) task 1): the sandbox comes up without a model, then
+its `live` and `cloud` labels point at Anthropic with vision on and `computer.model` is `cloud`.
+The key is `JARVIS_TEST_ANTHROPIC_KEY` (the live tests' name), from the environment or from
+`~/.config/jarvis-harness/cloud.env` (`JARVIS_CLOUD_ENV` names another file); the model is
+`JARVIS_TEST_ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and the URL
+`JARVIS_TEST_ANTHROPIC_URL` (default `https://api.anthropic.com`). The key is never logged or
+reported. Each run costs real money: screenshots go to the provider.
 
 ## The cases
 
@@ -103,7 +113,7 @@ rewrites it).
 ## What a run does
 
 1. **Bring-up**, in the run dir and never the user's session: `go build` of `jarvis-agent` and
-   `ccsites`; `scripts/sandbox up --name ccsuite-<run> --llm shared|scripted`; `ccsites --listen
+   `ccsites`; `scripts/sandbox up --name ccsuite-<run> --llm shared|scripted` (`none` for `--llm cloud`); `ccsites --listen
    127.0.0.1:0`. Only when a case needs them (so a run of pending cases needs neither sway nor
    Xvfb): a desktop session, headless sway (`WLR_BACKENDS=headless`, Xwayland on) or `Xvfb :N`,
    each under its own `dbus-run-session` with its own `XDG_RUNTIME_DIR` and HOME and nothing of the
