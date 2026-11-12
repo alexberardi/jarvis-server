@@ -185,6 +185,11 @@ are additive on top of it and can land separately.
    present and has more than one entry; selection per device; a store that cannot be reached
    fails on its own rather than failing the screen (a LAN store is unreachable off the home
    network, and the app talks to stores directly).
+   Built in [jarvis-node-mobile#157](https://github.com/alexberardi/jarvis-node-mobile/pull/157):
+   the pick is kept per household in AsyncStorage (`@jarvis/pantry_store/{hh}`) and
+   `pantry_store_id` is sent only when there are several stores; the node picker locks a node
+   whose copy came from another or a removed store and says why; a Forge test's Reinstall goes
+   back to its store; an empty household list shows "no store configured" without contacting one.
 
 The seam is small because `PantryBaseURL(ctx, householdID)` is the single accessor, with seven
 real call sites: the catalogue and download helper, the two `pantry_url` payloads to nodes, the
