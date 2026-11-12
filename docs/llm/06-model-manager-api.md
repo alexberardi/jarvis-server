@@ -191,9 +191,10 @@ with the model from `JARVIS_TEST_<NAME>_MODEL` or the default (`internal/modules
 | OpenAI | `OPENAI_API_KEY` → `JARVIS_TEST_OPENAI_KEY` | `gpt-5-nano` |
 | Gemini | `GEMINI_API_KEY` → `JARVIS_TEST_GEMINI_KEY` | `gemini-3.1-flash-lite` |
 
-- `TestRemoteLive` (llm): chat, thinking off, a tool round trip, a tool call in the history from
-  another model, streamed text and a streamed tool call; tool calls must come back with an id,
-  the right name and JSON-object arguments.
+- `TestRemoteLive` (llm): chat, thinking off, a forced tool choice (`required`), a tool round
+  trip, a tool call in the history from another model, streamed text and a streamed tool call;
+  tool calls must come back with an id, the right name and JSON-object arguments. With the
+  Anthropic key it also runs every check on `claude-sonnet-5-5`.
 - `TestCloudLive` (cc): voice turns through the `Cloud` prompt with the dev node's whole tool set
   (`fixtures/golden/prompts/_inputs.json`) plus the server tools: a `todo_list` round trip on
   the blocking routes, then a tool round trip (any tool) on the streaming routes with the first in
