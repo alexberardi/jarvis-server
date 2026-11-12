@@ -29,10 +29,12 @@ type Sidecar interface {
 	Close() error
 }
 
-// SecretStore forgets a secret for every user (nodesettings.Store): a test install's settings
-// go with it.
+// SecretStore is what a removed test install leaves behind in the node settings store
+// (nodesettings.Store): its secrets, forgotten for every user, and the data its commands and
+// agents saved. A test install's settings go with it.
 type SecretStore interface {
 	ForgetSecret(key, scope string) error
+	DeleteAllData(command string) (int, error)
 }
 
 // Sidecars starts package sidecars and puts one in service.

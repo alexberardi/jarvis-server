@@ -35,6 +35,13 @@ setting without its protocol leaves the household in a state nothing can control
   package, so its devices stay through a fix round. They do **not** survive into a real install
   of the published package (user: "purely a dev testing scenario... safer that way"): re-add
   them after it. Re-importing a device through a protocol no running test provides clears its tag.
+- **Saved data.** 2026-11-11: an agent or command that ran in a test saves state through
+  `JarvisStorage`, named after its owner. The install records the names its loaded commands and
+  its agents own (`.test_meta.json` `data_names`); when it is removed those records are cleared,
+  so a Forge fix starts from an empty store rather than the last round's state. A name an
+  installed package's agent owns is left alone (two packages may each have an `agents/news`);
+  commands can't clash, because the sidecar refuses a draft command another package or the node
+  already provides. A Reinstall keeps the data, as it keeps the secrets.
 
 ## A desktop has the node's alerts
 

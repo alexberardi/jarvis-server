@@ -40,6 +40,7 @@ type testPkg struct {
 	families, managers []string
 	agents             []string
 	secrets            []sidecar.SecretKey // what it declared once loaded: forgotten with it
+	data               []string            // what it saves data under: cleared with it
 	expires            time.Time
 }
 
@@ -72,13 +73,15 @@ func (m *Manager) readTests() []testPkg {
 			Managers  []string            `json:"managers"`
 			Agents    []string            `json:"agents"`
 			Secrets   []sidecar.SecretKey `json:"secrets"`
+			Data      []string            `json:"data_names"`
 		}
 		b, err := os.ReadFile(filepath.Join(dir, testMeta))
 		if err != nil || json.Unmarshal(b, &meta) != nil {
 			continue // not finished writing, or not ours: removeTests sweeps it
 		}
 		out = append(out, testPkg{name: e.Name(), dir: dir, rid: meta.RequestID, commands: meta.Commands, families: meta.Families,
-			managers: meta.Managers, agents: meta.Agents, secrets: meta.Secrets, expires: meta.ExpiresAt})
+			managers: meta.Managers, agents: meta.Agents, secrets: meta.Secrets, data: meta.Data,
+			expires: meta.ExpiresAt})
 	}
 	return out
 }
@@ -165,6 +168,39 @@ func (m *Manager) forgetTestSecrets(removed []testPkg) {
 	}
 }
 
+// forgetTestData clears the data the removed test installs saved (JarvisStorage records, under
+// the names their commands and agents own: meta data_names). A name an installed package's
+// agent owns keeps its data: two packages may each have an agents/news. Their commands can't
+// clash — the sidecar refuses a draft command another package or the node already provides, so
+// it never loads and never reaches data_names. Call it with forgetTestSecrets; a reinstall of
+// the same draft keeps its data: it isn't removed, just replaced.
+func (m *Manager) forgetTestData(removed []testPkg) {
+	if m.Secrets == nil || len(removed) == 0 {
+		return
+	}
+	installed := map[string]bool{}
+	for _, in := range m.List() {
+		for _, a := range componentNames(in.Manifest.Paths(Agent)) {
+			installed[a] = true
+		}
+	}
+	for _, tp := range removed {
+		for _, name := range tp.data {
+			if installed[name] {
+				continue
+			}
+			n, err := m.Secrets.DeleteAllData(name)
+			if err != nil {
+				m.Log.Warn("packages: a test install's saved data wasn't cleared", "package", tp.name, "data", name, "err", err)
+				continue
+			}
+			if n > 0 {
+				m.Log.Info("packages: cleared a test install's saved data", "package", tp.name, "data", name, "records", n)
+			}
+		}
+	}
+}
+
 // ExpireTests removes the test installs whose time is up and restarts the sidecar without
 // them.
 func (m *Manager) ExpireTests(ctx context.Context) {
@@ -182,6 +218,7 @@ func (m *Manager) ExpireTests(ctx context.Context) {
 	}
 	m.commit(sc)
 	m.forgetTestSecrets(removed)
+	m.forgetTestData(removed)
 }
 
 // A requirements.txt line uv may get: a requirement, never an option or a URL.
@@ -242,21 +279,26 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 		return nil, err
 	}
 	m.forgetTestSecrets(removed)
-	// The secrets it declares, kept with it so they are forgotten when it goes (after a restart too).
+	m.forgetTestData(removed)
+	// What it owns in the node settings store, kept with it so both go when it does (after a
+	// restart too): the secrets it declares, and the names its commands and agents save data
+	// under (JarvisStorage is named after its owner).
+	loaded := m.served.PackageCommands(testPrefix + name)
+	meta["data_names"] = append(componentNames(agents), loaded...)
 	if keys, err := m.served.SecretKeys(); err != nil {
 		m.Log.Warn("packages: a test install's secrets weren't read: they will stay after it", "package", name, "err", err)
 	} else if len(keys[testPrefix+name]) > 0 {
 		meta["secrets"] = keys[testPrefix+name]
-		if err := writeMeta(dir, meta); err != nil {
-			m.Log.Warn("packages: a test install's secrets weren't recorded", "package", name, "err", err)
-		}
+	}
+	if err := writeMeta(dir, meta); err != nil {
+		m.Log.Warn("packages: a test install's secrets and data names weren't recorded", "package", name, "err", err)
 	}
 	time.AfterFunc(testTTL+time.Second, func() { m.ExpireTests(context.Background()) })
 	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands,
 		"families", families, "managers", managers, "agents", agents)
 	// commands: the tool names that loaded; jarvisd records their runs for Send to Forge.
 	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
-		"commands": m.served.PackageCommands(testPrefix + name), "protocols": componentNames(families),
+		"commands": loaded, "protocols": componentNames(families),
 		"managers": componentNames(managers), "agents": componentNames(agents)}, nil
 }
 
