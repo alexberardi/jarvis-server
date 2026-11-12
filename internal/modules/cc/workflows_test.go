@@ -203,3 +203,57 @@ func TestWorkflowsPurgedWithTheirOwner(t *testing.T) {
 		t.Errorf("%d workflows outlive their owner", n)
 	}
 }
+
+// A workflow's skill (docs/agent/WORKFLOW-SKILLS.md) is stored and edited with it, and a
+// workflow from before skills reads as an empty one.
+func TestWorkflowSkillRoundTrip(t *testing.T) {
+	e := newWFEnv(t)
+	w := e.seedWorkflow("Bank statement", false)
+
+	// Seeded without a skill, like a row from before the column: an empty skill, no step goal.
+	got := e.do("GET", wfBase+"/"+w.ID, nil, e.owner).want(200).json()
+	if sk := got["skill"].(map[string]any); len(sk) != 0 {
+		t.Fatalf("a workflow without a skill: %v", sk)
+	}
+
+	edit := w
+	edit.Steps = []WStep{wfStep()}
+	edit.Steps[0].Goal = "get to the list of statements"
+	edit.Steps[0].Expect = &computer.SuccessCheck{URLContains: "/statements"}
+	body := wfPutBody(edit)
+	body["skill"] = computer.Skill{
+		Goal:          computer.Goal{Reason: "keep the records", EndState: "the {month} statement is in Downloads"},
+		Prerequisites: []computer.Prerequisite{{Kind: computer.PrereqSignedIn, Site: "bank.example"}},
+		Guardrails:    computer.GuardCreative,
+		Notes:         []computer.Note{{Text: "the site signs out after five minutes"}},
+	}
+	e.do("PUT", wfBase+"/"+w.ID, body, e.owner).want(200)
+	got = e.do("GET", wfBase+"/"+w.ID, nil, e.owner).want(200).json()
+	sk := got["skill"].(map[string]any)
+	step := got["steps"].([]any)[0].(map[string]any)
+	if sk["goal"].(map[string]any)["end_state"] != "the {month} statement is in Downloads" || sk["guardrails"] != "creative" ||
+		sk["prerequisites"].([]any)[0].(map[string]any)["site"] != "bank.example" ||
+		step["goal"] != "get to the list of statements" || step["expect"].(map[string]any)["url_contains"] != "/statements" ||
+		got["version"] != float64(2) {
+		t.Fatalf("skill after PUT: %v", got)
+	}
+
+	// A PUT without a skill (a client from before it) keeps the stored one.
+	e.do("PUT", wfBase+"/"+w.ID, wfPutBody(edit), e.owner).want(200)
+	got = e.do("GET", wfBase+"/"+w.ID, nil, e.owner).want(200).json()
+	if got["skill"].(map[string]any)["guardrails"] != "creative" {
+		t.Fatalf("a PUT without a skill dropped it: %v", got["skill"])
+	}
+
+	// An invalid skill is refused and nothing is stored.
+	body["skill"] = computer.Skill{Prerequisites: []computer.Prerequisite{{Kind: computer.PrereqFileOpen, File: "{nope}"}}}
+	e.do("PUT", wfBase+"/"+w.ID, body, e.owner).detail(400, "skill.prerequisites[0]: {nope} isn't one of the workflow's params")
+	if got := e.do("GET", wfBase+"/"+w.ID, nil, e.owner).want(200).json(); got["version"] != float64(3) {
+		t.Fatalf("a refused PUT changed it: %v", got)
+	}
+	// The replay gets the skill with the workflow.
+	stored, err := e.m.getWorkflow(context.Background(), w.ID)
+	if err != nil || stored.replay().Skill.Guardrails != computer.GuardCreative {
+		t.Fatalf("replay(): %v %+v", err, stored)
+	}
+}

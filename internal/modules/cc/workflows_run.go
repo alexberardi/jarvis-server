@@ -88,7 +88,7 @@ func (t taughtWorkflows) Heal(ctx context.Context, id string, version int, heals
 // replay is the workflow as the replay runs it.
 func (w TaughtWorkflow) replay() computer.Workflow {
 	return computer.Workflow{ID: w.ID, Name: w.Name, Slug: w.Slug, Triggers: w.Triggers, Params: w.Params,
-		Steps: w.Steps, Success: w.Success, Version: w.Version}
+		Steps: w.Steps, Success: w.Success, Skill: w.Skill, Version: w.Version}
 }
 
 // replayRefusal is why a replay can't start: a message for the user, and the HTTP status the

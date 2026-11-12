@@ -54,6 +54,7 @@ type TaughtWorkflow struct {
 	Params      []Param               `json:"params"`
 	Steps       []WStep               `json:"steps"`
 	Success     computer.SuccessCheck `json:"success"`
+	Skill       computer.Skill        `json:"skill"`
 	Shared      bool                  `json:"shared"`
 	RecordingID string                `json:"recording_id,omitempty"`
 	Version     int                   `json:"version"`
@@ -118,29 +119,32 @@ func (w *TaughtWorkflow) Validate() error {
 		if err := s.Action.Validate(); err != nil {
 			return fmt.Errorf("steps[%d]: %w", i, err)
 		}
+		if err := w.Steps[i].ValidateSkill(); err != nil {
+			return fmt.Errorf("steps[%d]: %w", i, err)
+		}
 	}
-	return nil
+	return w.Skill.Validate(w.Params)
 }
 
 // --- store ---
 
-const workflowColumns = `id, household_id, owner_id, name, slug, trigger_phrases, params, steps, success,
+const workflowColumns = `id, household_id, owner_id, name, slug, trigger_phrases, params, steps, success, skill,
 	shared, recording_id, version, created_at, updated_at`
 
 func scanWorkflow(sc interface{ Scan(...any) error }) (TaughtWorkflow, error) {
 	var (
-		w                                 TaughtWorkflow
-		trig, params, steps, succ, ca, ua string
-		rec                               sql.NullString
+		w                                        TaughtWorkflow
+		trig, params, steps, succ, skill, ca, ua string
+		rec                                      sql.NullString
 	)
-	if err := sc.Scan(&w.ID, &w.HouseholdID, &w.OwnerID, &w.Name, &w.Slug, &trig, &params, &steps, &succ,
+	if err := sc.Scan(&w.ID, &w.HouseholdID, &w.OwnerID, &w.Name, &w.Slug, &trig, &params, &steps, &succ, &skill,
 		&w.Shared, &rec, &w.Version, &ca, &ua); err != nil {
 		return TaughtWorkflow{}, err
 	}
 	for _, f := range []struct {
 		raw string
 		v   any
-	}{{trig, &w.Triggers}, {params, &w.Params}, {steps, &w.Steps}, {succ, &w.Success}} {
+	}{{trig, &w.Triggers}, {params, &w.Params}, {steps, &w.Steps}, {succ, &w.Success}, {skill, &w.Skill}} {
 		if err := json.Unmarshal([]byte(f.raw), f.v); err != nil {
 			return TaughtWorkflow{}, fmt.Errorf("workflow %s: %w", w.ID, err)
 		}
@@ -151,7 +155,7 @@ func scanWorkflow(sc interface{ Scan(...any) error }) (TaughtWorkflow, error) {
 }
 
 // workflowJSON is the JSON columns of w, in column order.
-func workflowJSON(w TaughtWorkflow) (trig, params, steps, succ string, err error) {
+func workflowJSON(w TaughtWorkflow) (trig, params, steps, succ, skill string, err error) {
 	enc := func(v any, empty string) string {
 		if err != nil {
 			return ""
@@ -163,7 +167,7 @@ func workflowJSON(w TaughtWorkflow) (trig, params, steps, succ string, err error
 		}
 		return string(b)
 	}
-	return enc(w.Triggers, "[]"), enc(w.Params, "[]"), enc(w.Steps, "[]"), enc(w.Success, "{}"), err
+	return enc(w.Triggers, "[]"), enc(w.Params, "[]"), enc(w.Steps, "[]"), enc(w.Success, "{}"), enc(w.Skill, "{}"), err
 }
 
 // uniqueWorkflowSlug is the name's slug (as slugify, fallback "workflow"), with _2, _3... when
@@ -199,15 +203,15 @@ func (m *Module) createWorkflow(ctx context.Context, w TaughtWorkflow) (TaughtWo
 	if err != nil {
 		return TaughtWorkflow{}, err
 	}
-	trig, params, steps, succ, err := workflowJSON(w)
+	trig, params, steps, succ, skill, err := workflowJSON(w)
 	if err != nil {
 		return TaughtWorkflow{}, err
 	}
 	now := m.now().UTC().Truncate(time.Millisecond)
 	w.ID, w.Slug, w.Version, w.CreatedAt, w.UpdatedAt = "tw_"+randHex(8), slug, 1, now, now
 	_, err = m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_taught_workflows (`+workflowColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.HouseholdID, w.OwnerID, w.Name, w.Slug, trig, params, steps, succ, w.Shared,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.HouseholdID, w.OwnerID, w.Name, w.Slug, trig, params, steps, succ, skill, w.Shared,
 		sql.NullString{String: w.RecordingID, Valid: w.RecordingID != ""}, w.Version, dbTime(now), dbTime(now))
 	return w, err
 }
@@ -244,7 +248,7 @@ func (m *Module) listWorkflows(ctx context.Context, hh string, viewer int64) ([]
 }
 
 // updateWorkflow validates and stores w's editable fields (name, triggers, params, steps,
-// success, shared), re-slugs it on a rename and bumps its version. It returns the stored row.
+// success, skill, shared), re-slugs it on a rename and bumps its version. It returns the stored row.
 func (m *Module) updateWorkflow(ctx context.Context, w TaughtWorkflow) (TaughtWorkflow, error) {
 	if err := w.Validate(); err != nil {
 		return TaughtWorkflow{}, err
@@ -253,14 +257,14 @@ func (m *Module) updateWorkflow(ctx context.Context, w TaughtWorkflow) (TaughtWo
 	if err != nil {
 		return TaughtWorkflow{}, err
 	}
-	trig, params, steps, succ, err := workflowJSON(w)
+	trig, params, steps, succ, skill, err := workflowJSON(w)
 	if err != nil {
 		return TaughtWorkflow{}, err
 	}
 	now := m.now().UTC().Truncate(time.Millisecond)
 	if _, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_taught_workflows SET name = ?, slug = ?,
-		trigger_phrases = ?, params = ?, steps = ?, success = ?, shared = ?, version = version + 1, updated_at = ?
-		WHERE id = ?`, w.Name, slug, trig, params, steps, succ, w.Shared, dbTime(now), w.ID); err != nil {
+		trigger_phrases = ?, params = ?, steps = ?, success = ?, skill = ?, shared = ?, version = version + 1, updated_at = ?
+		WHERE id = ?`, w.Name, slug, trig, params, steps, succ, skill, w.Shared, dbTime(now), w.ID); err != nil {
 		return TaughtWorkflow{}, err
 	}
 	got, err := m.getWorkflow(ctx, w.ID)
@@ -374,6 +378,8 @@ type workflowPut struct {
 	Steps    []WStep               `json:"steps"`
 	Success  computer.SuccessCheck `json:"success"`
 	Shared   bool                  `json:"shared"`
+	// Skill replaces the skill; left out, the stored one is kept (a client from before it).
+	Skill *computer.Skill `json:"skill"`
 }
 
 func (m *Module) handlePutWorkflow(w http.ResponseWriter, r *http.Request, u authn.User) {
@@ -390,6 +396,9 @@ func (m *Module) handlePutWorkflow(w http.ResponseWriter, r *http.Request, u aut
 		return
 	}
 	wf.Name, wf.Triggers, wf.Params, wf.Steps, wf.Success, wf.Shared = in.Name, in.Triggers, in.Params, in.Steps, in.Success, in.Shared
+	if in.Skill != nil {
+		wf.Skill = *in.Skill
+	}
 	if err := wf.Validate(); err != nil {
 		detail(w, http.StatusBadRequest, err.Error())
 		return
