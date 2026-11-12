@@ -16,6 +16,7 @@ const (
 	Qwen3_14B   = "Qwen3_14B_Compressed"  // prod (serves the 27B)
 	Qwen3_8B    = "Qwen3_8B_Compressed"   // dev
 	Qwen3_5_9B  = "Qwen3_5_9B_Compressed" // native tools
+	Qwen3_4B    = "Qwen3_4B"              // small local models: its own name, so it can be tuned alone
 	Cloud       = "Cloud"                 // remote models (any vendor), native tools
 	Gemma4      = "Gemma4"                // Gemma 4: native tools, never the Qwen suffix (BuiltinPrefs)
 	thinkOpen   = "<think>"
