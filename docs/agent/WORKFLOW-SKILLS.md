@@ -37,15 +37,18 @@ each step is for and what should happen after it, and what to watch for.
    app. So the skill must be complete enough for the model to finish the task with no recording.
 4. **Every step is look, act, verify**, judged by observed state, never the model's claim. A step
    that can't be verified stops and asks.
-5. **Rules unchanged:** risk and confirmations, masked values, ownership and sharing, per-computer
+5. **Prerequisites first** (user, 2026-11-12). A workflow lists what must be true before it starts
+   ("file abc is open"). A run checks each one and tries to achieve the unmet ones itself, under the
+   same rules as any step; one it can't achieve stops the run before step 1 and asks.
+6. **Rules unchanged:** risk and confirmations, masked values, ownership and sharing, per-computer
    opt-in (C2, C11) apply as today.
 
 ## Capability map
 
 | Module id | Responsibility | Depends on |
 |---|---|---|
-| `skill-doc` | The learned knowledge: goal, when to use, starting state, per-step purpose and expected result, notes. Data model, learn prompt, editor. | — |
-| `verified-replay` | The run under principles 2–4: model-led loop reading the skill, direct path by identity, a check after every step. | `skill-doc` |
+| `skill-doc` | The learned knowledge: goal, when to use, prerequisites, per-step purpose and expected result, notes. Data model, learn prompt, editor. | — |
+| `verified-replay` | The run under principles 2–4: model-led loop reading the skill, direct path by identity, prerequisites achieved before step 1, a check after every step. | `skill-doc` |
 | `narration` | What the user says while recording, aligned to the events, feeding the learner. | `skill-doc` |
 | `refine` | A workflow improves after teaching: a second recording, a spoken correction, answers given during runs kept as notes. | `skill-doc`, `verified-replay` |
 | `control-flow` | Conditions and repetition, learned from narration or a second demonstration. | `verified-replay`, `narration` |
@@ -77,7 +80,7 @@ What a skill holds (shape pending Q2):
 |---|---|---|
 | Goal | What the task achieves, in a sentence or two | — |
 | When to use | What the user would be asking for, beyond the trigger phrases | `triggers` only |
-| Starting state | What must be true first: the app or site, signed in, the file that must exist | — |
+| Prerequisites | A list of what must be true before step 1 ("file abc is open", "signed in to the bank"), each one checkable. A run tries to achieve each unmet one before it starts (user, 2026-11-12) | — |
 | Step purpose | Why each step is there | `intent` (what, not why) |
 | Step expectation | What can be observed once the step worked | — |
 | Notes | Things to watch for; empty when learnt, filled by `refine` | — |
@@ -136,7 +139,7 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 
 ### Success criteria
 
-1. Learning the suite's `bank_download` recording gives a workflow with a goal, a starting state,
+1. Learning the suite's `bank_download` recording gives a workflow with a goal, its prerequisites,
    and a purpose and expectation on every step, none naming something absent from the trace.
 2. A person reading only the workflow page can say what the task does and what each step should
    cause.
@@ -151,12 +154,15 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 2. **Q3 — expectations:** a recording holds events, not what the screen showed after each. Are
    step expectations inferred from the trace, or does the recorder capture the screen after each
    step?
-3. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
+3. **Q5 — prerequisites:** where they come from: inferred from how the recording begins, said by
+   the user, or both; and whether one can use a param ("file {name} is open").
+4. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
    is still kept?
 
 ## Later modules' questions (not yet ordered)
 
-- `verified-replay`: what a failed expectation does (retry, model continues, ask); whether a new
+- `verified-replay`: how far a run may go to achieve a prerequisite (open a file, yes; sign in, ask);
+  what a failed expectation does (retry, model continues, ask); whether a new
   workflow's first run is a supervised "watch me do it back".
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.

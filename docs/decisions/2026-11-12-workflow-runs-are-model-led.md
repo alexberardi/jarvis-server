@@ -7,7 +7,7 @@ know if we want a fast path necessarily. First and foremost we want a correct an
 path"). The screen at run time will rarely look like the recording: other windows are open, pages
 are scrolled, windows have moved.
 
-- The base is a model loop guided by the workflow's skill (its goal, starting state, step purposes
+- The base is a model loop guided by the workflow's skill (its goal, prerequisites, step purposes
   and expectations). The skill must be enough to do the task without the recording.
 - A step skips the model only when its recorded element is found uniquely, by identity, in the
   right app. Recorded coordinates never drive an action.
