@@ -422,10 +422,17 @@ func TestCCMQTTRows(t *testing.T) {
 		// auth, rid bound to the node.
 		tg.Post(t, CommandCenter, "/api/v0/mobile/node-tool-reports/"+d["reply_request_id"].(string), report, resultSinkH(n)).
 			Expect(http.StatusOK, Obj{"status": Eq("ok")})
+		installed := Eq(report["installed_packages"])
+		if Jarvisd() {
+			// Additive (several pantries, decision 5): package_install above completed
+			// contract_pkg, so jarvisd names the Pantry store it came from (absent when run alone).
+			installed = NonEmptyArrayOf(Obj{"name": Eq("contract_pkg"), "version": Eq("0.0.1"),
+				"pantry_store_id": Optional(UUID), "pantry_store_name": Optional(NonEmptyString)})
+		}
 		awaitHTTP(t, pending).Expect(http.StatusOK, Obj{
 			"client_tools":       Eq(report["client_tools"]),
 			"available_commands": Eq(report["available_commands"]),
-			"installed_packages": Eq(report["installed_packages"]),
+			"installed_packages": installed,
 		})
 		tg.Get(t, CommandCenter, "/api/v0/mobile/nodes/contract-nosuch-"+randHex(3)+"/tools", u.H()).ExpectError(http.StatusNotFound, "Node not found")
 		tg.Get(t, CommandCenter, "/api/v0/mobile/nodes/"+nid+"/tools", stranger.H()).ExpectError(http.StatusForbidden, rowsNotMember)

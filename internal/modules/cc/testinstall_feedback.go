@@ -257,13 +257,13 @@ func (m *Module) handleTestInstallFeedback(w http.ResponseWriter, r *http.Reques
 		report["note"] = *note
 	}
 	raw, _ := json.Marshal(report)
-	pantry, err := m.pantryURL(ctx, t.householdID)
+	store, err := m.pantryStore(ctx, t.householdID, t.storeID.String) // the store the test came from (decision 4)
 	if err != nil {
-		noPantryStore(w, err)
+		m.writeErr(w, err)
 		return
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		pantryDraftURL(pantry, t.shareCode)+"/feedback", bytes.NewReader(raw))
+		pantryDraftURL(store.base(), t.shareCode)+"/feedback", bytes.NewReader(raw))
 	if err != nil {
 		detail(w, http.StatusBadGateway, "Could not reach Pantry service")
 		return

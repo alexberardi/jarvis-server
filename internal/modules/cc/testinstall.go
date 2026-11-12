@@ -38,18 +38,18 @@ var opTestInstall = pkgOp{"test-install", "Test install"}
 // lifecycle fields (id, node, household, status, results, deadlines); its command/repo/tag
 // fields are unused here.
 type tiRequest struct {
-	pkgRequest
+	pkgRequest             // its storeID: the store the share code was resolved against (decision 4)
 	shareCode, packageName string
 }
 
 const tiCols = `id, node_id, household_id, share_code, package_name, status, results_json, error_message,
-	created_at, verified_at, expires_at, completed_at`
+	created_at, verified_at, expires_at, completed_at, pantry_store_id`
 
 func scanTI(s scanner) (*tiRequest, error) {
 	var t tiRequest
 	var created, expires string
 	if err := s.Scan(&t.id, &t.nodeID, &t.householdID, &t.shareCode, &t.packageName, &t.status, &t.resultsJSON,
-		&t.errorMessage, &created, &t.verifiedAt, &expires, &t.completedAt); err != nil {
+		&t.errorMessage, &created, &t.verifiedAt, &expires, &t.completedAt, &t.storeID); err != nil {
 		return nil, err
 	}
 	t.createdAt, t.expiresAt = parseTS(created), parseTS(expires)
@@ -103,31 +103,34 @@ func pantryDraftURL(base, code string) string {
 }
 
 // fetchDraftPackage is legacy's one CC→Pantry call: GET the draft (unauthenticated, the share
-// code is the secret) and take its package_name. Errors are the HTTP answers mobile shows.
-func (m *Module) fetchDraftPackage(ctx context.Context, draftURL string) (string, error) {
+// code is the secret) and take its package_name. Errors are the HTTP answers mobile shows; they
+// name the store (decision 4), the only one asked.
+func (m *Module) fetchDraftPackage(ctx context.Context, store PantryStore, draftURL string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, pantryDraftTimeout)
 	defer cancel()
+	unreachable := fail(http.StatusBadGateway, "Could not reach the Pantry store "+store.Name)
+	refused := fail(http.StatusBadGateway, "The Pantry store "+store.Name+" returned an error")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, draftURL, nil)
 	if err != nil {
-		return "", fail(http.StatusBadGateway, "Could not reach Pantry service")
+		return "", unreachable
 	}
 	resp, err := m.pantryHTTP.Do(req)
 	if err != nil {
-		m.deps.Log.Warn("cc: Pantry unreachable for test install", "url", draftURL, "err", err)
-		return "", fail(http.StatusBadGateway, "Could not reach Pantry service")
+		m.deps.Log.Warn("cc: Pantry unreachable for test install", "store", store.ID, "err", err)
+		return "", unreachable
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return "", fail(http.StatusNotFound, "Share code not found or expired")
+		return "", fail(http.StatusNotFound, "Share code not found or expired in the Pantry store "+store.Name)
 	case resp.StatusCode != http.StatusOK:
-		m.deps.Log.Warn("cc: Pantry refused a test install draft", "url", draftURL, "status", resp.StatusCode)
-		return "", fail(http.StatusBadGateway, "Pantry returned an error")
+		m.deps.Log.Warn("cc: Pantry refused a test install draft", "store", store.ID, "status", resp.StatusCode)
+		return "", refused
 	}
 	var draft map[string]any
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&draft); err != nil {
-		m.deps.Log.Warn("cc: Pantry draft is not a JSON object", "url", draftURL, "err", err)
-		return "", fail(http.StatusBadGateway, "Pantry returned an error")
+		m.deps.Log.Warn("cc: Pantry draft is not a JSON object", "store", store.ID, "err", err)
+		return "", refused
 	}
 	if name, ok := draft["package_name"].(string); ok {
 		return name, nil
@@ -147,6 +150,7 @@ func (m *Module) handleRequestTestInstall(w http.ResponseWriter, r *http.Request
 		return
 	}
 	raw, _ := b.str("share_code", true)
+	picked, _ := b.str("pantry_store_id", false) // jarvisd-only: the store picked; else the default
 	if !b.done(w) {
 		return
 	}
@@ -181,12 +185,13 @@ func (m *Module) handleRequestTestInstall(w http.ResponseWriter, r *http.Request
 		detail(w, http.StatusBadRequest, "Invalid share code")
 		return
 	}
-	pantry, err := m.pantryURL(ctx, hh)
+	// Only the picked store sees the code (decision 4): it is the only secret on an unpublished draft.
+	store, err := m.pantryStore(ctx, hh, picked)
 	if err != nil {
-		noPantryStore(w, err)
+		m.writeErr(w, err)
 		return
 	}
-	pkgName, err := m.fetchDraftPackage(ctx, pantryDraftURL(pantry, code))
+	pkgName, err := m.fetchDraftPackage(ctx, store, pantryDraftURL(store.base(), code))
 	if err != nil {
 		m.writeErr(w, err)
 		return
@@ -196,9 +201,10 @@ func (m *Module) handleRequestTestInstall(w http.ResponseWriter, r *http.Request
 	t := &tiRequest{shareCode: code, packageName: pkgName}
 	t.id, t.nodeID, t.householdID, t.status = uuid4(), nodeID, hh, pkgPending
 	t.createdAt, t.expiresAt = now, now.Add(pkgPickupTTL)
+	t.storeID = sql.NullString{String: store.ID, Valid: true}
 	if _, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_test_install_requests (id, node_id, household_id,
-		share_code, package_name, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.id, t.nodeID, t.householdID, t.shareCode, t.packageName, t.status, dbTime(now), dbTime(t.expiresAt)); err != nil {
+		share_code, package_name, status, created_at, expires_at, pantry_store_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.id, t.nodeID, t.householdID, t.shareCode, t.packageName, t.status, dbTime(now), dbTime(t.expiresAt), t.storeID); err != nil {
 		m.internalError(w, err)
 		return
 	}
@@ -243,7 +249,7 @@ func (m *Module) handleVerifyTestInstall(w http.ResponseWriter, r *http.Request,
 		detail(w, out.status, out.detail)
 		return
 	}
-	pantry, err := m.pantryURL(r.Context(), t.householdID)
+	store, err := m.pantryStore(r.Context(), t.householdID, t.storeID.String)
 	if err != nil {
 		m.writeErr(w, err)
 		return
@@ -251,7 +257,7 @@ func (m *Module) handleVerifyTestInstall(w http.ResponseWriter, r *http.Request,
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"confirmed":           true,
 		"package_name":        t.packageName,
-		"pantry_download_url": pantryDraftURL(pantry, t.shareCode),
+		"pantry_download_url": pantryDraftURL(store.base(), t.shareCode),
 	})
 }
 

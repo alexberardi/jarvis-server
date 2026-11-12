@@ -140,7 +140,27 @@ are additive on top of it and can land separately.
      Contract: `pantries` is `Optional` in `contract/config_test.go`.
 2. **Provenance** (`internal/modules/cc/packages.go`, the server's install record). An install
    records its store id; a test install too; updates and revert use it; a package whose store is gone keeps running
-   with updates unavailable; a name already installed is refused, naming its store.
+   with updates unavailable; a name already installed is refused, naming its store. As built:
+   - Install (`POST …/package-install`), Forge test install (`POST …/test-install`) and the Store
+     browse (`?pantry_store_id=`) take an optional, jarvisd-only `pantry_store_id`. Without it,
+     the default (first) store. An id not in the household's list is **422
+     `pantry_store_unknown`** (14).
+   - The request rows record the store id (`pantry_store_id`, a nullable column on both request
+     tables). Verify hands the node that store's current URL, looked up by id, so an edited URL
+     reaches pending requests (11). Send to Forge posts to the test install's store.
+   - Request rows are swept after 30 days, so what a node has installed from where lives in
+     `cc_node_package_stores` (node, package → store id): written when an install completes,
+     deleted when an uninstall completes. A test install records nothing there.
+   - An install of a package recorded on the node goes to its store whatever the client sends
+     (an update). A pick of another store is **409 `pantry_store_conflict`**, naming the store
+     it came from (8). When that store is no longer listed, **409 `pantry_store_removed`**:
+     no updates until it is uninstalled (5, 11). A package with no record (installed before
+     this) is treated as from the default store.
+   - Revert needs nothing: the node keeps the previous version itself and downloads nothing.
+   - `GET /api/v0/mobile/nodes/{id}/tools` adds, to each recorded `installed_packages` entry,
+     `pantry_store_id` and `pantry_store_name`, or `pantry_store_removed: true` (additive; the
+     contract's report_tools case allows them under jarvisd).
+   - Pantry errors name the store: the share-code check, the Store browse and the desktop pin.
 3. **The admin** (`web/admin/`). The settings editor for the list, a picker on the Store page
    and on `/admin/nodes/:id/test`, each shown only when more than one store is configured, and
    the store's name on the install confirmation. Follows the UI guide: design skills, then the

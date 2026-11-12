@@ -257,6 +257,9 @@ func (m *Module) requireNodeAccess(ctx context.Context, u authn.User, nodeID str
 
 // writeErr writes a statusErr, or a 500.
 func (m *Module) writeErr(w http.ResponseWriter, err error) {
+	if pantryRefused(w, err) {
+		return
+	}
 	var se *statusErr
 	if errors.As(err, &se) {
 		detail(w, se.status, se.detail)

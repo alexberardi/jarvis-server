@@ -120,12 +120,33 @@ type PantryStore struct {
 	Name string `json:"name"`
 }
 
-// noPantryStoreCode marks a household with the Pantry on and no store configured.
-const noPantryStoreCode = "pantry_no_store"
+// Codes for the Pantry store refusals a client tells apart.
+const (
+	// noPantryStoreCode marks a household with the Pantry on and no store configured.
+	noPantryStoreCode = "pantry_no_store"
+	// pantryStoreUnknownCode: a picked store id that isn't in the household's list (decision 14).
+	pantryStoreUnknownCode = "pantry_store_unknown"
+	// pantryStoreConflictCode: the package is already installed from another store (decision 8).
+	pantryStoreConflictCode = "pantry_store_conflict"
+	// pantryStoreRemovedCode: the package's store was removed from the list, so it has no
+	// updates (decisions 5, 11).
+	pantryStoreRemovedCode = "pantry_store_removed"
+)
+
+// pantryErr is a Pantry store refusal: writeErr answers it with its code.
+type pantryErr struct {
+	status       int
+	detail, code string
+}
+
+func (e *pantryErr) Error() string { return e.detail }
 
 // errNoPantryStore: the Pantry is on but pantry.stores is empty, an invalid config that every
 // Pantry action reports rather than falling back to the public Pantry.
-var errNoPantryStore = fail(http.StatusServiceUnavailable, noPantryStoreDetail)
+var errNoPantryStore = &pantryErr{http.StatusServiceUnavailable, noPantryStoreDetail, noPantryStoreCode}
+
+var errPantryStoreUnknown = &pantryErr{http.StatusUnprocessableEntity,
+	"That Pantry store isn't in this household's list", pantryStoreUnknownCode}
 
 const noPantryStoreDetail = "No Pantry store is configured. A household admin can add one in the Pantry settings."
 
@@ -187,23 +208,96 @@ func (m *Module) PantryStores(ctx context.Context, householdID string) []PantryS
 	return stores
 }
 
-// noPantryStore writes errNoPantryStore's 503 with its code and reports whether err was it.
-func noPantryStore(w http.ResponseWriter, err error) bool {
-	if !errors.Is(err, errNoPantryStore) {
+// pantryRefused writes a *pantryErr with its code and reports whether err was one.
+func pantryRefused(w http.ResponseWriter, err error) bool {
+	var pe *pantryErr
+	if !errors.As(err, &pe) {
 		return false
 	}
-	detailCode(w, http.StatusServiceUnavailable, noPantryStoreDetail, noPantryStoreCode)
+	detailCode(w, pe.status, pe.detail, pe.code)
 	return true
 }
 
-// pantryURL is the household's default store's base URL (D39, D48: what nodes are handed), or
-// errNoPantryStore.
-func (m *Module) pantryURL(ctx context.Context, householdID string) (string, error) {
+// base is the store's URL without a trailing slash, for appending paths.
+func (s PantryStore) base() string { return strings.TrimRight(s.URL, "/") }
+
+// pantryStore is the household's store with this id, or its default, the first, when id is ""
+// (decision 2). The server only ever talks to a store in the household's list (decision 14):
+// another id is errPantryStoreUnknown, and an empty list errNoPantryStore.
+func (m *Module) pantryStore(ctx context.Context, householdID, id string) (PantryStore, error) {
 	stores := m.PantryStores(ctx, householdID)
 	if len(stores) == 0 {
-		return "", errNoPantryStore
+		return PantryStore{}, errNoPantryStore
 	}
-	return strings.TrimRight(stores[0].URL, "/"), nil
+	if id == "" {
+		return stores[0], nil
+	}
+	for _, s := range stores {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return PantryStore{}, errPantryStoreUnknown
+}
+
+// pantryURL is the household's default store's base URL (D39, D48), or errNoPantryStore.
+func (m *Module) pantryURL(ctx context.Context, householdID string) (string, error) {
+	s, err := m.pantryStore(ctx, householdID, "")
+	return s.base(), err
+}
+
+// installStore is the store an install of name on the node comes from (decisions 5, 8, 11): the
+// one it is installed from, so an update goes back there; else the picked one; else the default.
+// A pick that differs from where it is installed is refused naming that store, and a package
+// whose store was removed has no updates until it is uninstalled.
+func (m *Module) installStore(ctx context.Context, householdID, nodeID, name, picked string) (PantryStore, error) {
+	if picked != "" {
+		if _, err := m.pantryStore(ctx, householdID, picked); err != nil {
+			return PantryStore{}, err
+		}
+	}
+	var recorded string
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT pantry_store_id FROM cc_node_package_stores
+		WHERE node_id = ? AND command_name = ?`, nodeID, name).Scan(&recorded)
+	switch {
+	case errors.Is(err, sql.ErrNoRows): // not installed, or installed before stores were recorded
+		return m.pantryStore(ctx, householdID, picked)
+	case err != nil:
+		return PantryStore{}, err
+	}
+	from, err := m.pantryStore(ctx, householdID, recorded)
+	switch {
+	case errors.Is(err, errPantryStoreUnknown):
+		return PantryStore{}, &pantryErr{http.StatusConflict, name + " came from a Pantry store that is no longer in " +
+			"this household's list, so it has no updates. Uninstall it, then install it from another store.", pantryStoreRemovedCode}
+	case err != nil:
+		return PantryStore{}, err
+	case picked != "" && picked != recorded:
+		return PantryStore{}, &pantryErr{http.StatusConflict, name + " is already installed from " + from.Name +
+			". Uninstall it first to install it from another store.", pantryStoreConflictCode}
+	}
+	return from, nil
+}
+
+// recordPackageStore keeps where a node's package came from when its install or uninstall
+// completes, in the transaction that completes it.
+func recordPackageStore(ctx context.Context, tx *sql.Tx, op pkgOp, p *pkgRequest) error {
+	if p.status != pkgCompleted {
+		return nil
+	}
+	switch {
+	case op == opInstall && p.storeID.Valid:
+		_, err := tx.ExecContext(ctx, `INSERT INTO cc_node_package_stores (node_id, command_name, pantry_store_id,
+			installed_at) VALUES (?, ?, ?, ?) ON CONFLICT (node_id, command_name) DO UPDATE SET
+			pantry_store_id = excluded.pantry_store_id, installed_at = excluded.installed_at`,
+			p.nodeID, p.commandName, p.storeID.String, p.completedAt.String)
+		return err
+	case op == opUninstall:
+		_, err := tx.ExecContext(ctx, `DELETE FROM cc_node_package_stores WHERE node_id = ? AND command_name = ?`,
+			p.nodeID, p.commandName)
+		return err
+	}
+	return nil
 }
 
 // convertPantryBaseURL moves the retired pantry.base_url, at every scope, to a one-entry
@@ -255,15 +349,11 @@ type pantryCommand struct {
 	AptPackages   []any    `json:"apt_packages"`
 }
 
-// pantryGet decodes the household's Pantry at path into v: errPantryNoPackage on a 404, any
-// other failure (unreachable, another status, not JSON) as an error.
-func (m *Module) pantryGet(ctx context.Context, householdID, path string, v any) error {
+// pantryGet decodes the store at base (PantryStore.base) at path into v: errPantryNoPackage on a
+// 404, any other failure (unreachable, another status, not JSON) as an error.
+func (m *Module) pantryGet(ctx context.Context, base, path string, v any) error {
 	ctx, cancel := context.WithTimeout(ctx, pantryDraftTimeout)
 	defer cancel()
-	base, err := m.pantryURL(ctx, householdID)
-	if err != nil {
-		return err
-	}
 	u := base + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -334,22 +424,19 @@ func isCommitSHA(s string) bool {
 // version is a git_tag Pantry lists for the package, a full commit id (what the app sends,
 // from Pantry's /download), or else Pantry's newest. It writes the refusal and returns false
 // when the install can't go ahead.
-func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, hh, name, repo string, tag *string) (string, *string, bool) {
+func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, store PantryStore, name, repo string, tag *string) (string, *string, bool) {
 	unavailable := func(err error) (string, *string, bool) {
-		if noPantryStore(w, err) {
-			return "", nil, false
-		}
-		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "err", err)
-		detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached to check "+name+
+		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "store", store.ID, "err", err)
+		detailCode(w, http.StatusServiceUnavailable, "The Pantry store "+store.Name+" can't be reached to check "+name+
 			", so it can't be installed on a computer right now. Try again later.", pantryUnavailableCode)
 		return "", nil, false
 	}
 	notFound := func() (string, *string, bool) {
-		detailCode(w, http.StatusUnprocessableEntity, "The Pantry has no package "+name+" to install on a computer", packageNotFoundCode)
+		detailCode(w, http.StatusUnprocessableEntity, "The Pantry store "+store.Name+" has no package "+name+" to install on a computer", packageNotFoundCode)
 		return "", nil, false
 	}
 	var d pantryCommand
-	switch err := m.pantryGet(ctx, hh, "/v1/commands/"+url.PathEscape(name), &d); {
+	switch err := m.pantryGet(ctx, store.base(), "/v1/commands/"+url.PathEscape(name), &d); {
 	case errors.Is(err, errPantryNoPackage):
 		return notFound()
 	case err != nil:
@@ -379,7 +466,7 @@ func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, h
 			GitTag *string `json:"git_tag"`
 		} `json:"versions"`
 	}
-	switch err := m.pantryGet(ctx, hh, "/v1/commands/"+url.PathEscape(name)+"/versions", &vs); {
+	switch err := m.pantryGet(ctx, store.base(), "/v1/commands/"+url.PathEscape(name)+"/versions", &vs); {
 	case errors.Is(err, errPantryNoPackage):
 		return notFound()
 	case err != nil:
@@ -455,19 +542,20 @@ const (
 type pkgRequest struct {
 	id, nodeID, householdID, commandName, repoURL string
 	gitTag, resultsJSON, errorMessage             sql.NullString
+	storeID                                       sql.NullString // pantry.stores id; installs only
 	status                                        string
 	createdAt, expiresAt                          time.Time
 	verifiedAt, completedAt                       sql.NullString
 }
 
 const pkgCols = `id, node_id, household_id, command_name, github_repo_url, git_tag, status, results_json,
-	error_message, created_at, verified_at, expires_at, completed_at`
+	error_message, created_at, verified_at, expires_at, completed_at, pantry_store_id`
 
 func scanPkg(s scanner) (*pkgRequest, error) {
 	var p pkgRequest
 	var created, expires string
 	if err := s.Scan(&p.id, &p.nodeID, &p.householdID, &p.commandName, &p.repoURL, &p.gitTag, &p.status, &p.resultsJSON,
-		&p.errorMessage, &created, &p.verifiedAt, &expires, &p.completedAt); err != nil {
+		&p.errorMessage, &created, &p.verifiedAt, &expires, &p.completedAt, &p.storeID); err != nil {
 		return nil, err
 	}
 	p.createdAt, p.expiresAt = parseTS(created), parseTS(expires)
@@ -590,8 +678,10 @@ func savePkg(ctx context.Context, tx *sql.Tx, p *pkgRequest) error {
 }
 
 // transitionPkg loads a row and applies fn in one write transaction, so concurrent poll,
-// verify and results calls can't each commit a different status (§8 lazy-expiry race).
-func (m *Module) transitionPkg(ctx context.Context, rid, nodeID string, fn func(*pkgRequest) bool) (*pkgRequest, error) {
+// verify and results calls can't each commit a different status (§8 lazy-expiry race). then,
+// if set, runs in the same transaction after a change is saved.
+func (m *Module) transitionPkg(ctx context.Context, rid, nodeID string, fn func(*pkgRequest) bool,
+	then func(*sql.Tx, *pkgRequest) error) (*pkgRequest, error) {
 	var out *pkgRequest
 	err := m.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
 		p, err := m.loadPkg(ctx, tx, rid, nodeID)
@@ -599,10 +689,13 @@ func (m *Module) transitionPkg(ctx context.Context, rid, nodeID string, fn func(
 			return err
 		}
 		out = p
-		if fn(p) {
-			return savePkg(ctx, tx, p)
+		if !fn(p) {
+			return nil
 		}
-		return nil
+		if err := savePkg(ctx, tx, p); err != nil || then == nil {
+			return err
+		}
+		return then(tx, p)
 	})
 	return out, err
 }
@@ -668,23 +761,19 @@ func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
 	name, _ := b.str("command_name", true)
 	repo, _ := b.str("github_repo_url", true)
 	tag, _ := b.optStrPtr("git_tag")
+	picked, _ := b.str("pantry_store_id", false) // jarvisd-only: the store picked; else the default
 	if !b.done(w) {
 		return
 	}
-	p, ok := m.createPkg(w, r, auth, name, repo, tag, true)
+	p, store, ok := m.createPkg(w, r, auth, name, repo, tag, true, picked)
 	if !ok {
-		return
-	}
-	pantry, err := m.pantryURL(r.Context(), p.householdID) // createPkg checked there is one
-	if err != nil {
-		m.writeErr(w, err)
 		return
 	}
 	// The node ignores the repo info here and installs only what verify returns; it is kept
 	// for wire parity (D40 12.Q12). On a computer both are Pantry's (pinDesktopInstall).
 	m.publishPkg(p.nodeID, opInstall, map[string]any{
 		"request_id": p.id, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
-		"pantry_url": pantry,
+		"pantry_url": store.base(),
 	})
 	writeCreated(w, p)
 }
@@ -703,7 +792,7 @@ func (m *Module) handleRequestUninstall(w http.ResponseWriter, r *http.Request) 
 	if !b.done(w) {
 		return
 	}
-	p, ok := m.createPkg(w, r, auth, name, "", nil, false)
+	p, _, ok := m.createPkg(w, r, auth, name, "", nil, false, "")
 	if !ok {
 		return
 	}
@@ -739,7 +828,7 @@ func (m *Module) handleRequestRevert(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusUnprocessableEntity, "command_name or package_name is required")
 		return
 	}
-	p, ok := m.createPkg(w, r, auth, name, "", nil, false)
+	p, _, ok := m.createPkg(w, r, auth, name, "", nil, false, "")
 	if !ok {
 		return
 	}
@@ -749,19 +838,21 @@ func (m *Module) handleRequestRevert(w http.ResponseWriter, r *http.Request) {
 
 // createPkg checks the node and household (from the node row, never the caller), the owner or
 // an admin on a computer, and for an install (needsPantry) that the household has the Pantry
-// on and, on a computer, Pantry's repository and version (pinDesktopInstall), then inserts a pending row with
-// the 5-minute pickup deadline.
-func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth, name, repo string, tag *string, needsPantry bool) (p *pkgRequest, ok bool) {
+// on, the store it comes from (installStore, from the picked id) and, on a computer, that
+// store's repository and version (pinDesktopInstall), then inserts a pending row with the
+// 5-minute pickup deadline.
+func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth, name, repo string, tag *string,
+	needsPantry bool, picked string) (p *pkgRequest, store PantryStore, ok bool) {
 	ctx := r.Context()
 	nodeID := r.PathValue("node_id")
 	node, err := m.nodeByID(ctx, nodeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		detail(w, http.StatusNotFound, "Node not found")
-		return nil, false
+		return nil, PantryStore{}, false
 	}
 	if err != nil {
 		m.internalError(w, err)
-		return nil, false
+		return nil, PantryStore{}, false
 	}
 	hh := ""
 	if node.householdID.Valid {
@@ -769,21 +860,24 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	}
 	if err := m.requirePkgHousehold(ctx, auth, hh); err != nil {
 		m.writeErr(w, err)
-		return nil, false
+		return nil, PantryStore{}, false
 	}
 	if err := m.requireDesktopPkgRole(ctx, auth, node, hh); err != nil {
 		m.writeErr(w, err)
-		return nil, false
+		return nil, PantryStore{}, false
 	}
 	if needsPantry && !m.requirePantry(w, r, hh) {
-		return nil, false
+		return nil, PantryStore{}, false
 	}
-	if _, err := m.pantryURL(ctx, hh); needsPantry && noPantryStore(w, err) {
-		return nil, false
+	if needsPantry {
+		if store, err = m.installStore(ctx, hh, nodeID, name, picked); err != nil {
+			m.writeErr(w, err)
+			return nil, PantryStore{}, false
+		}
 	}
 	if needsPantry && node.desktop() {
-		if repo, tag, ok = m.pinDesktopInstall(ctx, w, hh, name, repo, tag); !ok {
-			return nil, false
+		if repo, tag, ok = m.pinDesktopInstall(ctx, w, store, name, repo, tag); !ok {
+			return nil, PantryStore{}, false
 		}
 	}
 	now := m.now()
@@ -792,14 +886,17 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	if tag != nil {
 		p.gitTag = sql.NullString{String: *tag, Valid: true}
 	}
-	if _, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_package_install_requests (id, node_id, household_id,
-		command_name, github_repo_url, git_tag, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.id, p.nodeID, p.householdID, p.commandName, p.repoURL, p.gitTag, p.status, dbTime(now), dbTime(p.expiresAt)); err != nil {
-		m.internalError(w, err)
-		return nil, false
+	if needsPantry {
+		p.storeID = sql.NullString{String: store.ID, Valid: true}
 	}
-	m.deps.Log.Info("cc: package request created", "op", "package", "node", nodeID, "command", name, "request_id", p.id)
-	return p, true
+	if _, err := m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_package_install_requests (id, node_id, household_id,
+		command_name, github_repo_url, git_tag, status, created_at, expires_at, pantry_store_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.id, p.nodeID, p.householdID, p.commandName, p.repoURL, p.gitTag, p.status, dbTime(now), dbTime(p.expiresAt), p.storeID); err != nil {
+		m.internalError(w, err)
+		return nil, PantryStore{}, false
+	}
+	m.deps.Log.Info("cc: package request created", "op", "package", "node", nodeID, "command", name, "store", p.storeID.String, "request_id", p.id)
+	return p, store, true
 }
 
 // publishPkg nudges the node on jarvis/nodes/{id}/package-{op}. Like legacy, a missing broker
@@ -828,7 +925,7 @@ func (m *Module) handleVerifyPackage(w http.ResponseWriter, r *http.Request, n *
 	p, err := m.transitionPkg(r.Context(), r.PathValue("request_id"), nodeID, func(p *pkgRequest) bool {
 		out = verifyTransition(p, m.now())
 		return out.changed
-	})
+	}, nil)
 	if errors.Is(err, sql.ErrNoRows) {
 		detail(w, http.StatusNotFound, "Package install request not found")
 		return
@@ -841,14 +938,16 @@ func (m *Module) handleVerifyPackage(w http.ResponseWriter, r *http.Request, n *
 		detail(w, out.status, out.detail)
 		return
 	}
-	pantry, err := m.pantryURL(r.Context(), p.householdID)
+	// The request's store, by id, so an edited URL reaches it (decision 11); the default for an
+	// uninstall, a revert, or a row from before stores were recorded.
+	store, err := m.pantryStore(r.Context(), p.householdID, p.storeID.String)
 	if err != nil {
 		m.writeErr(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"confirmed": true, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
-		"pantry_url": pantry, // additive (D48): the household's default Pantry store
+		"pantry_url": store.base(), // additive (D48): the Pantry store it installs from
 	})
 }
 
@@ -881,7 +980,7 @@ func (m *Module) handlePackageResults(op pkgOp) nodeHandler {
 		p, err := m.transitionPkg(r.Context(), r.PathValue("request_id"), nodeID, func(p *pkgRequest) bool {
 			out = resultTransition(p, res, op, m.now())
 			return out.changed
-		})
+		}, func(tx *sql.Tx, p *pkgRequest) error { return recordPackageStore(r.Context(), tx, op, p) })
 		if errors.Is(err, sql.ErrNoRows) {
 			detail(w, http.StatusNotFound, op.label+" request not found")
 			return
@@ -931,7 +1030,7 @@ func (m *Module) handlePollPackage(op pkgOp) http.HandlerFunc {
 		if p.live() && p.pastExpiry(m.now()) {
 			// The poll persists the flip, as legacy did; re-read under the write lock so a
 			// result that landed meanwhile wins.
-			p, err = m.transitionPkg(ctx, rid, nodeID, func(p *pkgRequest) bool { return pollTransition(p, m.now()) })
+			p, err = m.transitionPkg(ctx, rid, nodeID, func(p *pkgRequest) bool { return pollTransition(p, m.now()) }, nil)
 			if err != nil {
 				m.internalError(w, err)
 				return
