@@ -448,7 +448,7 @@ func TestRenameModelSettings(t *testing.T) {
 	if got := e.m.importSlot(e.ctx); got != llm.LabelBackground {
 		t.Errorf("import slot = %s, want the renamed value background", got)
 	}
-	if got := e.m.featureSlot(e.ctx, SettingGroceryModel, llm.LabelBackground); got != llm.LabelLive {
+	if got := llm.SlotFor(e.ctx, e.m.settings, SettingGroceryModel, llm.LabelBackground); got != llm.LabelLive {
 		t.Errorf("grocery slot = %s, want the renamed value live", got)
 	}
 	for _, old := range []string{legacyFullModel, legacyBackgroundModel, legacyLightweightModel} {

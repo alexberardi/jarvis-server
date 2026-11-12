@@ -576,7 +576,12 @@ func (s *Service) value(ctx context.Context, key string, sc Scope) any {
 	return v.Value
 }
 
+// String is nil-receiver safe: a module with no settings service yet has nothing stored, so it
+// answers "". Callers that need the definition's default must hold a service.
 func (s *Service) String(ctx context.Context, key string, sc Scope) string {
+	if s == nil {
+		return ""
+	}
 	switch v := s.value(ctx, key, sc).(type) {
 	case string:
 		return v

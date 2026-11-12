@@ -80,7 +80,7 @@ func (m *Module) formatTextMode(ctx context.Context, conv *conversation, msgs []
 
 	maxTok := 256
 	temp := 0.7
-	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(append(cloneMsgs(msgs), failedNote(results)...)),
+	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{Label: m.conversationSlot(ctx), Messages: toLLM(append(cloneMsgs(msgs), failedNote(results)...)),
 		MaxTokens: &maxTok, Temperature: &temp, ReasoningBudget: m.thinkingBudget(ctx, conv.householdID)})
 	raw := ""
 	if err != nil {

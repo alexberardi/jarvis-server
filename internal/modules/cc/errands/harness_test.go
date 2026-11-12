@@ -232,6 +232,22 @@ type fakeSettings map[string]bool
 
 func (f fakeSettings) Int(context.Context, string, settings.Scope) int64 { return 0 }
 
+// String: no slot setting stored, i.e. auto, so every feature keeps its own default label.
+func (f fakeSettings) String(context.Context, string, settings.Scope) string { return "" }
+
+// withSlot answers one slot setting, for the per-feature model choice.
+type withSlot struct {
+	fakeSettings
+	key, slot string
+}
+
+func (s withSlot) String(_ context.Context, key string, _ settings.Scope) string {
+	if key == s.key {
+		return s.slot
+	}
+	return ""
+}
+
 func (f fakeSettings) Bool(_ context.Context, key string, _ settings.Scope) bool {
 	if v, ok := f[key]; ok {
 		return v

@@ -538,7 +538,7 @@ func (s *Service) summarizeInbound(ctx context.Context, a *inboundAgent) string 
 	msgs := append(a.transcript(), chatMsg{"user", live.InboundSummaryInstruction})
 	actx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: a.rt.wire(msgs)})
+	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: s.planningSlot(ctx), Messages: a.rt.wire(msgs)})
 	if err != nil || resp == nil {
 		s.log().Error("phone: inbound summary failed", "err", err)
 		return fallback()

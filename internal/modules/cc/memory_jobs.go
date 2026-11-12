@@ -266,7 +266,7 @@ func (m *Module) runExtraction(ctx context.Context, job queue.Job) ([]byte, erro
 	}
 	temp, think := 0.0, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
-		Label:           llm.LabelBackground,
+		Label:           m.featureSlot(ctx, SettingMemoryModel, llm.LabelBackground),
 		Temperature:     &temp,  // greedy: structured, factual, stable run to run
 		ReasoningBudget: &think, // thinking off: it only burns the shared GPU here
 		Messages: []llm.Message{

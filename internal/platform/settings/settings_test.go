@@ -386,3 +386,12 @@ func TestRename(t *testing.T) {
 		}
 	})
 }
+
+// A nil service reads as "nothing stored" rather than panicking: it reaches llm.SlotFor through
+// a module's settings field, which is unset until the module is wired.
+func TestNilServiceString(t *testing.T) {
+	var s *Service
+	if got := s.String(context.Background(), "memory.enabled", Scope{}); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -36,6 +37,21 @@ func Slot(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// SlotReader reads a feature's slot setting. *settings.Service satisfies it, as does a module's
+// own narrower settings interface.
+type SlotReader interface {
+	String(ctx context.Context, key string, sc settings.Scope) string
+}
+
+// SlotFor reads a feature's slot setting and resolves it (Slot): the label the feature's chat
+// requests go to. A module without a settings service yet takes fallback, as auto does.
+func SlotFor(ctx context.Context, s SlotReader, key, fallback string) string {
+	if s == nil {
+		return fallback
+	}
+	return Slot(s.String(ctx, key, settings.Scope{}), fallback)
 }
 
 func validSlot(v any) error {

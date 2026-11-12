@@ -766,7 +766,7 @@ func (s *Service) composeErrandMessage(ctx context.Context, goal string, results
 	}
 	temp, maxTok, off := 0.3, 800, 0
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
-		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &off,
+		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &off,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(ComposePrompt(goal, results))}},
 	})
 	if err != nil {

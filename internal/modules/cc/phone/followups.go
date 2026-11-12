@@ -88,7 +88,7 @@ func (s *Service) followUps(ctx context.Context, p *turnPipeline, sess *Session,
 	msgs := append(p.transcript(), chatMsg{"user", followUpInstruction(cands, summary, now)})
 	actx, cancel := context.WithTimeout(ctx, followUpPickTimeout)
 	defer cancel()
-	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: p.rt.wire(msgs)})
+	resp, err := s.LLM.Chat(actx, llm.ChatRequest{Label: s.planningSlot(ctx), Messages: p.rt.wire(msgs)})
 	if err != nil || resp == nil {
 		s.log().Warn("phone: follow-up pick failed", "session", sess.ID, "err", err)
 		return nil

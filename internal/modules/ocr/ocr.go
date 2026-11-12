@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	pconfig "github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
@@ -67,6 +68,10 @@ const ServiceName = "jarvis-ocr-service"
 // ocr.enable_apple_vision defaults on where Vision is built in (macOS, ID13);
 // ocr.llm_vision_timeout_seconds is new (A10e M4: the legacy 60 s was too short).
 var Definitions = []settings.Definition{
+	llm.SlotSetting(SettingModel, "ocr.processing",
+		"Which model transcribes a document or photo in LLM vision mode: auto (background), live, background "+
+			"or cloud (the optional cloud slot: the image itself goes to its provider). The slot's model needs "+
+			"vision."),
 	{Key: "ocr.enable_apple_vision", Category: "ocr.providers", Type: settings.Bool, Default: defaultAppleVision,
 		Description: "Enable Apple Vision OCR (built in on macOS; elsewhere through a jarvis-osx-api helper on a Mac)"},
 	{Key: "ocr.enable_llm_proxy_vision", Category: "ocr.providers", Type: settings.Bool, Default: false,
@@ -164,7 +169,7 @@ func (m *Module) buildEngines() []Engine {
 		out = append(out, av)
 	}
 	if m.LLM != nil {
-		out = append(out, &LLMVision{LLM: m.LLM, TimeoutFn: m.llmVisionTimeout})
+		out = append(out, &LLMVision{LLM: m.LLM, TimeoutFn: m.llmVisionTimeout, SlotFn: m.visionSlot})
 	}
 	return out
 }
@@ -602,4 +607,13 @@ func readPart(fh *multipart.FileHeader) (Image, error) {
 		ct = strings.TrimSpace(ct[:i])
 	}
 	return Image{Data: data, ContentType: ct}, nil
+}
+
+// SettingModel is which slot LLM vision OCR transcribes on (llm.SlotSetting).
+const SettingModel = "ocr.model"
+
+// visionSlot is the label LLM vision OCR runs on: the documents-and-images feature's slot,
+// background by default.
+func (m *Module) visionSlot(ctx context.Context) string {
+	return llm.SlotFor(ctx, m.settings, SettingModel, llm.LabelBackground)
 }

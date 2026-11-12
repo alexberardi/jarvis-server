@@ -176,7 +176,7 @@ func (p *turnPipeline) generateReply(ctx context.Context, heard, schedulingNote 
 	defer cancel()
 	maxTok := 400
 	t0 := time.Now()
-	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: "live", Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
+	ch, err := s.LLM.Stream(tctx, llm.ChatRequest{Label: s.modelSlot(ctx), Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
 	if err != nil {
 		return nil, "", nil, nil, nil, err
 	}
@@ -359,7 +359,7 @@ func (p *turnPipeline) askedKeys(ctx context.Context, heard string) map[string]b
 		msgs = append(msgs, chatMsg{m[0], m[1]})
 	}
 	maxTok := live.ClassifyMaxTokens
-	resp, err := p.s.LLM.Chat(cctx, llm.ChatRequest{Label: "live", Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
+	resp, err := p.s.LLM.Chat(cctx, llm.ChatRequest{Label: p.s.modelSlot(ctx), Messages: p.rt.wire(msgs), MaxTokens: &maxTok})
 	if err != nil || resp == nil {
 		p.s.log().Warn("phone: ask-classifier unavailable, suppressing", "err", err)
 		return out
@@ -966,7 +966,7 @@ func (s *Service) assess(ctx context.Context, p *turnPipeline, goal string) (str
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
 		actx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		resp, err = s.LLM.Chat(actx, llm.ChatRequest{Label: "background", Messages: p.rt.wire(msgs)})
+		resp, err = s.LLM.Chat(actx, llm.ChatRequest{Label: s.planningSlot(ctx), Messages: p.rt.wire(msgs)})
 		cancel()
 		if err == nil && resp != nil {
 			break

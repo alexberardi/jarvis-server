@@ -151,7 +151,18 @@ type ResearchRunner struct {
 	LLM    LLM
 	Notify Notifier
 	Log    *slog.Logger
-	now    func() time.Time
+	// Slot is the label the synthesis call goes to (cc's research feature slot). nil is
+	// background, which is what this ran on before the setting existed.
+	Slot func(ctx context.Context) string
+	now  func() time.Time
+}
+
+// slot is Slot, or background when the owner set no hook.
+func (r *ResearchRunner) slot(ctx context.Context) string {
+	if r.Slot == nil {
+		return llm.LabelBackground
+	}
+	return r.Slot(ctx)
 }
 
 // NewResearchRunner builds the job runner. fetch may be nil (the default guarded fetcher).
@@ -260,7 +271,7 @@ func (r *ResearchRunner) research(ctx context.Context, req researchRequest, star
 		fmt.Sprintf("Please synthesize these %d sources into a comprehensive research summary.", len(ok))
 	temp := 0.3
 	resp, err := r.LLM.Chat(ctx, llm.ChatRequest{
-		Label:       llm.LabelBackground,
+		Label:       r.slot(ctx),
 		Temperature: &temp,
 		Messages: []llm.Message{
 			{Role: "system", Content: llm.TextContent(summarizeSystemPrompt)},

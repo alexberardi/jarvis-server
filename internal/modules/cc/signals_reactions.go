@@ -884,7 +884,7 @@ func (m *Module) pickAction(ctx context.Context, hh, label, instruction string, 
 		"Call the single tool that carries out the instruction, or none if nothing fits."
 	temp, maxTok, budget := 0.0, automationMaxTok, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
-		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
+		Label: m.featureSlot(ctx, SettingSignalsModel, llm.LabelBackground), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
 		// The engine copy drops the date-time marker, as on the voice path (A10b R6/R9).
 		Tools: llmTools(tools), ToolChoice: json.RawMessage(`"auto"`),
 		Messages: []llm.Message{{Role: "system", Content: llm.TextContent(automationSystem)},

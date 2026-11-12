@@ -168,7 +168,7 @@ func (m *Module) extractWatchValue(ctx context.Context, w watches.Watch, text st
 	}
 	temp, maxTokens, budget := 0.0, 200, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
-		Label: "background", Temperature: &temp, MaxTokens: &maxTokens, ReasoningBudget: &budget,
+		Label: m.featureSlot(ctx, SettingWatchesModel, llm.LabelBackground), Temperature: &temp, MaxTokens: &maxTokens, ReasoningBudget: &budget,
 		ResponseFormat: &llm.ResponseFormat{Type: "json_object", JSONSchema: watchValueSchema},
 		Messages: []llm.Message{
 			{Role: "system", Content: llm.TextContent("You read one value from a web page for a household's watch. Answer only JSON.")},

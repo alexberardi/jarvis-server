@@ -324,12 +324,6 @@ func (m *Module) handleParsePayloadAsync(w http.ResponseWriter, r *http.Request,
 
 // --- the recipes.ingest handler ---
 
-// featureSlot is the label a feature's chat requests go to: its slot setting, or fallback when
-// that is auto (llm.Slot). The setting's validator rejects anything else at write time.
-func (m *Module) featureSlot(ctx context.Context, key, fallback string) string {
-	return llm.Slot(m.settings.String(ctx, key, settings.Scope{}), fallback)
-}
-
 // chatJSON runs one JSON-mode chat on label and returns the reply content.
 func (m *Module) chatJSON(ctx context.Context, label string, temp float64, maxTokens int, timeout time.Duration,
 	system, user string) (string, error) {
@@ -484,5 +478,5 @@ func (m *Module) fetchHTML(ctx context.Context, url string) (string, *extract.Re
 // by default. Recipe extraction, the P1r repair, the OCR-text structuring pass and meal planning
 // all run on it.
 func (m *Module) importSlot(ctx context.Context) string {
-	return m.featureSlot(ctx, SettingImportModel, llm.LabelLive)
+	return llm.SlotFor(ctx, m.settings, SettingImportModel, llm.LabelLive)
 }

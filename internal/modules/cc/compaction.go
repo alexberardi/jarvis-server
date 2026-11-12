@@ -83,9 +83,11 @@ func (m *Module) compactThresholds(ctx context.Context) (float64, float64) {
 	return t, max(t, h)
 }
 
-// liveContext is the live slot's per-request context, 0 when unknown.
+// liveContext is the per-request context of the slot a conversation turn runs on, 0 when
+// unknown. It follows conversation.model: measuring the live slot's window while the turn runs
+// on another slot compacts at the wrong threshold.
 func (m *Module) liveContext(ctx context.Context) int {
-	ep, ok := m.endpoint(ctx, llm.LabelLive)
+	ep, ok := m.endpoint(ctx, m.conversationSlot(ctx))
 	if !ok {
 		return 0
 	}

@@ -194,7 +194,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 		maxTok := nextMax
 		nextMax = iterMaxTokens
 		temp := loopTemperature
-		req := llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(msgs), MaxTokens: &maxTok, Temperature: &temp,
+		req := llm.ChatRequest{Label: m.conversationSlot(ctx), Messages: toLLM(msgs), MaxTokens: &maxTok, Temperature: &temp,
 			ReasoningBudget: budget}
 		if doubleChecked && maxTok == doubleCheckMaxTokens {
 			b := doubleCheckThinkBudget // the double-check pass ends in /think: let it reason, briefly

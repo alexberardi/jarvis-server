@@ -78,7 +78,7 @@ func buildMatchPrompt(candidates []skuMapping, unmatched []string) []llm.Message
 // matchRequest is the chat request for the pass: temperature 0, JSON mode, 1500 tokens, on the
 // label the setting names.
 func (m *Module) matchRequest(ctx context.Context, msgs []llm.Message) llm.ChatRequest {
-	label := m.featureSlot(ctx, SettingGroceryModel, llm.LabelBackground)
+	label := llm.SlotFor(ctx, m.settings, SettingGroceryModel, llm.LabelBackground)
 	temp, maxTok := 0.0, matchMaxTokens
 	return llm.ChatRequest{
 		Label: label, Messages: msgs, Temperature: &temp, MaxTokens: &maxTok,
