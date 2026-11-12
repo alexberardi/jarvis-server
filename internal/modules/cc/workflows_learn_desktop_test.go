@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 )
 
 func desktopTrace(t *testing.T, name string) json.RawMessage {
@@ -300,7 +301,7 @@ func TestDesktopStepKeepsEveryEvent(t *testing.T) {
 		{Kind: "input", App: "omawrite", Value: "test test test"},
 		{Kind: "key", App: "omawrite", Key: "Enter"},
 	}
-	out, err := parseLearnOutput(`{"name": "test omacalc", "steps": [{"intent": "type test message", "event_seqs": [1, 2]}]}`)
+	out, err := parseLearnOutput(`{"name": "test omacalc", "steps": [{"intent": "type test message", "goal": "send the message", "expect": "the message is in the chat", "event_seqs": [1, 2]}]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,10 +309,12 @@ func TestDesktopStepKeepsEveryEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every event has the step's goal; what the step causes shows only after its last event.
 	want := []WStep{
-		{Intent: "type test message", Target: "desktop", App: "omawrite",
+		{Intent: "type test message", Target: "desktop", App: "omawrite", Goal: "send the message",
 			Action: computeruse.Action{Kind: "type", Intent: "type test message", Text: "test test test"}},
-		{Intent: "type test message", Target: "desktop", App: "omawrite",
+		{Intent: "type test message", Target: "desktop", App: "omawrite", Goal: "send the message",
+			Expect: &computer.SuccessCheck{Screen: "the message is in the chat"},
 			Action: computeruse.Action{Kind: "keypress", Intent: "type test message", Keys: []string{"enter"}}},
 	}
 	if g, w := mustJSON(t, w.Steps), mustJSON(t, want); g != w {

@@ -30,10 +30,10 @@ var prereqKinds = []string{PrereqAppOpen, PrereqFileOpen, PrereqPageOpen, Prereq
 
 // Limits on a skill: it is rendered into a local model's prompt.
 const (
-	maxSkillText     = 500
+	MaxSkillText     = 500
 	maxPrerequisites = 20
 	maxNotes         = 50
-	maxStepGoal      = 300
+	MaxStepGoal      = 300
 )
 
 // Skill is the workflow-level part; each step's goal and expectation are on the step.
@@ -73,8 +73,8 @@ type Note struct {
 // the field ("skill.prerequisites[1]: ...").
 func (s *Skill) Validate(params []WorkflowParam) error {
 	trim := func(field string, p *string) error {
-		if *p = strings.TrimSpace(*p); utf8.RuneCountInString(*p) > maxSkillText {
-			return fmt.Errorf("skill.%s is longer than %d characters", field, maxSkillText)
+		if *p = strings.TrimSpace(*p); utf8.RuneCountInString(*p) > MaxSkillText {
+			return fmt.Errorf("skill.%s is longer than %d characters", field, MaxSkillText)
 		}
 		return nil
 	}
@@ -131,8 +131,8 @@ func (s *Skill) Validate(params []WorkflowParam) error {
 
 // ValidateSkill checks a step's goal (trimmed).
 func (s *WorkflowStep) ValidateSkill() error {
-	if s.Goal = strings.TrimSpace(s.Goal); utf8.RuneCountInString(s.Goal) > maxStepGoal {
-		return fmt.Errorf("goal is longer than %d characters", maxStepGoal)
+	if s.Goal = strings.TrimSpace(s.Goal); utf8.RuneCountInString(s.Goal) > MaxStepGoal {
+		return fmt.Errorf("goal is longer than %d characters", MaxStepGoal)
 	}
 	return nil
 }

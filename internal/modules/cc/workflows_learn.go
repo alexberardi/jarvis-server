@@ -49,7 +49,7 @@ const (
 	learnMaxEvents    = 300  // events in the prompt; the rest of a longer trace is dropped
 	learnMaxValue     = 200  // runes of a value or an element name in the prompt
 	learnMaxNarration = 1000 // runes of the narration in the prompt
-	learnMaxTokens    = 4000
+	learnMaxTokens    = 6000 // a goal and an expectation on every step (WORKFLOW-SKILLS.md)
 )
 
 // traceEvent is one event of a browser trace (the agent's browser.RecordEvent; "filename" is
@@ -500,11 +500,13 @@ func downloadURLName(e traceEvent) string {
 const learnSystemPrompt = `You turn a recording of someone doing a task in their web browser into a workflow Jarvis can replay for them later. Answer only JSON.`
 
 const learnInstructions = `Answer with this JSON:
-{"name": "...", "triggers": ["..."], "steps": [{"intent": "...", "event_seqs": [1], "target": "..."}], "params": [{"name": "...", "kind": "...", "example": "...", "from_seqs": [1]}], "success": {...}}
+{"name": "...", "goal": {"reason": "...", "end_state": "..."}, "when_to_use": "...", "triggers": ["..."], "steps": [{"intent": "...", "goal": "...", "expect": "...", "event_seqs": [1], "target": "..."}], "params": [{"name": "...", "kind": "...", "example": "...", "from_seqs": [1]}], "success": {...}}
 
 - name: a short title for the task, like "Download bank statement".
+- goal: reason is why the user does this task, in one sentence; end_state is what is true once it worked, as someone could see it on the screen or in their files, like "The statement for {month} is in Downloads". Write a param as {name}.
+- when_to_use: one sentence saying what the user would be asking for when they want this done.
 - triggers: one to three things the user could say to run it, like "download my bank statement".
-- steps: the events grouped into steps, in order. intent is one short line saying what the step does; event_seqs are the numbers of its events; target is what it acts on, in a few words. Leave out events that do nothing for the task.
+- steps: the events grouped into steps, in order. intent is one short line saying what the step does; goal is the point of the step (why it is there, not what is clicked); expect is what the screen shows once the step worked, in one short sentence, like "The Statements page lists the months" (what is visible, not what the user did); event_seqs are the numbers of its events; target is what it acts on, in a few words. Leave out events that do nothing for the task.
 - params: the candidate values that change each time the task is done (another month, another file). name is lower_snake_case, like "month"; kind is one of date, month, text, number, file; example is the candidate's value; from_seqs are the numbers of the events it comes from. Only use the candidates listed above, and leave out the ones that stay the same. Write a param as {name} in the intents that use it.
 - success: how to tell the task worked: {"download": {"name_like": "statement_*.csv"}} for a download, {"url_contains": "..."} or {"text_present": ["..."]} for a page that shows it.
 - ••• is a value that was hidden on purpose: never guess it.`
@@ -680,10 +682,17 @@ func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 // --- the model's answer ---
 
 type learnOutput struct {
-	Name     string   `json:"name"`
-	Triggers []string `json:"triggers"`
-	Steps    []struct {
+	Name string `json:"name"`
+	Goal struct {
+		Reason   string `json:"reason"`
+		EndState string `json:"end_state"`
+	} `json:"goal"`
+	WhenToUse string   `json:"when_to_use"`
+	Triggers  []string `json:"triggers"`
+	Steps     []struct {
 		Intent    string `json:"intent"`
+		Goal      string `json:"goal"`
+		Expect    string `json:"expect"`
 		EventSeqs []int  `json:"event_seqs"`
 		Target    string `json:"target"`
 	} `json:"steps"`
@@ -728,29 +737,35 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 	}
 	var start string // the page the first step was on
 	for _, s := range out.Steps {
-		n := primaryEvent(evs, stepEvents(s.EventSeqs, len(evs)))
-		if n == 0 {
-			continue
+		last := -1 // the step's last event that became a step: what the step causes shows after it
+		for _, n := range stepActions(evs, stepEvents(s.EventSeqs, len(evs))) {
+			e := evs[n-1]
+			intent := stepIntent(s.Intent, describeEvent(e))
+			a, ok := eventAction(e, intent)
+			if !ok {
+				continue
+			}
+			// An action that opened a page expects that page, whatever the model said.
+			step := WStep{Intent: intent, Target: "browser", Action: a, Element: recordedElement(e.Element),
+				Goal: skillText(s.Goal, computer.MaxStepGoal), Expect: stepExpect("", e.ResultURL)}
+			if u, err := url.Parse(pages[n-1]); err == nil {
+				step.Site = u.Host
+			}
+			risk, ok := stepRisk(a, riskElement(e), computeruse.Target{Kind: "browser", Site: step.Site}, e.Masked)
+			if !ok {
+				continue
+			}
+			step.Risk = risk
+			if len(w.Steps) == 0 {
+				start = pages[n-1]
+			}
+			if addStep(&w, step, subs[n]) {
+				last = len(w.Steps) - 1
+			}
 		}
-		e := evs[n-1]
-		intent := stepIntent(s.Intent, describeEvent(e))
-		a, ok := eventAction(e, intent)
-		if !ok {
-			continue
+		if last >= 0 && w.Steps[last].Expect == nil {
+			w.Steps[last].Expect = stepExpect(s.Expect, "")
 		}
-		step := WStep{Intent: intent, Target: "browser", Action: a, Element: recordedElement(e.Element)}
-		if u, err := url.Parse(pages[n-1]); err == nil {
-			step.Site = u.Host
-		}
-		risk, ok := stepRisk(a, riskElement(e), computeruse.Target{Kind: "browser", Site: step.Site}, e.Masked)
-		if !ok {
-			continue
-		}
-		step.Risk = risk
-		if len(w.Steps) == 0 {
-			start = pages[n-1]
-		}
-		addStep(&w, step, subs[n])
 	}
 	if s, ok := startStep(w.Steps, start); ok {
 		w.Steps = append([]WStep{s}, w.Steps...)
@@ -787,6 +802,7 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 	w := newDraft(rec, out)
 	subs := learnParams(&w, out, cands)
 	for _, s := range out.Steps {
+		last := -1 // the step's last event that became a step: what the step causes shows after it
 		for _, n := range stepEvents(s.EventSeqs, len(evs)) {
 			e := evs[n-1]
 			described := describeDesktopEvent(e)
@@ -798,7 +814,8 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 			if !ok {
 				continue
 			}
-			step := WStep{Intent: intent, Target: "desktop", App: e.App, Action: a, Window: stepWindow(e)}
+			step := WStep{Intent: intent, Target: "desktop", App: e.App, Action: a, Window: stepWindow(e),
+				Goal: skillText(s.Goal, computer.MaxStepGoal)}
 			step.Element = desktopRecordedElement(e.Element)
 			var el *computeruse.Element
 			if e.Element != nil {
@@ -809,7 +826,12 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 				continue
 			}
 			step.Risk = risk
-			addStep(&w, step, subs[n])
+			if addStep(&w, step, subs[n]) {
+				last = len(w.Steps) - 1
+			}
+		}
+		if last >= 0 {
+			w.Steps[last].Expect = stepExpect(s.Expect, "")
 		}
 	}
 	// No URL or download on a desktop: the model's text or screen check, if any.
@@ -833,13 +855,15 @@ func stepWindow(e desktopEvent) *StepWindow {
 	return sw
 }
 
-// newDraft is the draft's owner, name and triggers.
+// newDraft is the draft's owner, name, goal and triggers.
 func newDraft(rec Recording, out learnOutput) TaughtWorkflow {
 	w := TaughtWorkflow{HouseholdID: rec.HouseholdID, OwnerID: rec.OwnerID, RecordingID: rec.ID,
 		Name: truncateRunes(oneLine(out.Name), maxWorkflowName)}
 	if w.Name == "" {
 		w.Name = "Recorded task"
 	}
+	w.Skill.Goal = computer.Goal{Reason: skillText(out.Goal.Reason, computer.MaxSkillText), EndState: skillText(out.Goal.EndState, computer.MaxSkillText)}
+	w.Skill.WhenToUse = skillText(out.WhenToUse, computer.MaxSkillText)
 	for _, t := range out.Triggers {
 		if t = oneLine(t); t != "" && !slices.Contains(w.Triggers, t) && len(w.Triggers) < maxWorkflowTriggers {
 			w.Triggers = append(w.Triggers, t)
@@ -927,13 +951,33 @@ func stepRisk(a computeruse.Action, el *computeruse.Element, t computeruse.Targe
 }
 
 // addStep writes the step's params and adds it, up to maxWorkflowSteps.
-func addStep(w *TaughtWorkflow, step WStep, subs []paramSub) {
+// addStep adds step with its params substituted; false when the workflow is full.
+func addStep(w *TaughtWorkflow, step WStep, subs []paramSub) bool {
 	for _, sb := range subs {
 		substitute(&step, sb.c, sb.name)
 	}
-	if len(w.Steps) < maxWorkflowSteps {
-		w.Steps = append(w.Steps, step)
+	if len(w.Steps) >= maxWorkflowSteps {
+		return false
 	}
+	w.Steps = append(w.Steps, step)
+	return true
+}
+
+// skillText is a text of the skill as the model gave it: one line, at most max runes.
+func skillText(s string, max int) string { return truncateRunes(oneLine(s), max) }
+
+// stepExpect is what can be observed once a step worked (WORKFLOW-SKILLS.md Q3, the inference
+// path: the recording holds no result). Where the step opened a page, that is the page's
+// address without its query (which holds what changes run to run): the recording proves it.
+// Otherwise it is the model's sentence, checked on the screen; nil when there is neither.
+func stepExpect(said, resultURL string) *computer.SuccessCheck {
+	if u, err := url.Parse(resultURL); err == nil && u.Host != "" {
+		return &computer.SuccessCheck{URLContains: u.Host + strings.TrimSuffix(u.Path, "/")}
+	}
+	if said = skillText(said, computer.MaxStepGoal); said != "" {
+		return &computer.SuccessCheck{Screen: said}
+	}
+	return nil
 }
 
 // finishDraft sets the success check and validates the draft, which needs a step.
@@ -945,20 +989,25 @@ func finishDraft(w TaughtWorkflow, sc computer.SuccessCheck) (TaughtWorkflow, er
 	return w, w.Validate()
 }
 
-// primaryEvent is the event a step's action replays: its last action (a click, typing, a key),
-// else its first navigation; 0 when it has neither (a download alone).
-func primaryEvent(evs []traceEvent, nums []int) int {
-	for i := len(nums) - 1; i >= 0; i-- {
-		if k := evs[nums[i]-1].Kind; k != "navigate" && k != "download" {
-			return nums[i]
+// stepActions are the events of a step that replay: every action (a click, typing, a key), in
+// order, else its first navigation; none when it has neither (a download alone). A model groups
+// several actions into one step ("sign in"), and each is needed.
+func stepActions(evs []traceEvent, nums []int) []int {
+	var acts []int
+	for _, n := range nums {
+		if k := evs[n-1].Kind; k != "navigate" && k != "download" {
+			acts = append(acts, n)
 		}
+	}
+	if len(acts) > 0 {
+		return acts
 	}
 	for _, n := range nums {
 		if evs[n-1].Kind == "navigate" {
-			return n
+			return []int{n}
 		}
 	}
-	return 0
+	return nil
 }
 
 // eventAction is the action that replays e (false when none does).

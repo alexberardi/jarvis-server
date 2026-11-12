@@ -38,7 +38,7 @@ func TestSkillValidate(t *testing.T) {
 		{"kind", Skill{Prerequisites: []Prerequisite{{Kind: "moon"}}}, "skill.prerequisites[0]: kind must be one of"},
 		{"subject", Skill{Prerequisites: []Prerequisite{{Kind: PrereqFileOpen, Text: "a file"}}}, "skill.prerequisites[0]: file_open needs what it is about"},
 		{"param", Skill{Prerequisites: []Prerequisite{{Kind: PrereqFileOpen, File: "{month}.xlsx"}}}, "skill.prerequisites[0]: {month} isn't one of the workflow's params"},
-		{"long", Skill{Goal: Goal{EndState: strings.Repeat("x", maxSkillText+1)}}, "skill.goal.end_state is longer than 500 characters"},
+		{"long", Skill{Goal: Goal{EndState: strings.Repeat("x", MaxSkillText+1)}}, "skill.goal.end_state is longer than 500 characters"},
 		{"note", Skill{Notes: []Note{{Text: " "}}}, "skill.notes[0]: empty"},
 		{"many", Skill{Prerequisites: make([]Prerequisite, maxPrerequisites+1)}, "skill.prerequisites: at most 20"},
 	} {
@@ -46,7 +46,7 @@ func TestSkillValidate(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
-	st := WorkflowStep{Goal: strings.Repeat("x", maxStepGoal+1)}
+	st := WorkflowStep{Goal: strings.Repeat("x", MaxStepGoal+1)}
 	if err := st.ValidateSkill(); err == nil {
 		t.Error("a step goal past the limit was accepted")
 	}
