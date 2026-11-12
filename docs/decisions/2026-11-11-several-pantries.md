@@ -95,3 +95,31 @@ All nine answered by the user, 2026-11-11, before anything was built.
 - **Every entry must be reachable from every node.** The node downloads, not the server
   (`pantry_url` in the install payload). `http://localhost:7721` is unreachable from any other
   machine, which is how this came up. A failure should name the store and the node.
+
+## Build order
+
+Four slices. Only the first has a migration and a wire change, so it carries the risk; the rest
+are additive on top of it and can land separately.
+
+1. **The setting and discovery** (`internal/modules/cc/packages.go`, `cmd/jarvisd/main.go`).
+   `pantry.base_url` becomes a list of `{url, name}`, migrating the existing string to one
+   entry named after its host. `PantryBaseURL` becomes a resolution by store with the first
+   entry as the default, and its `defaultPantryBaseURL` fallback goes: an empty list means no
+   store. `/services` keeps `services["jarvis-pantry"]` as the default store's URL and gains a
+   sibling `pantries` array. Wire change: follow the wire-change skill, add contract cases.
+2. **Provenance** (`internal/modules/cc/packages.go`, the node's install record). An install
+   records its store; updates and revert use it; a package whose store is gone keeps running
+   with updates unavailable; a name already installed is refused, naming its store.
+3. **The admin** (`web/admin/`). The settings editor for the list, a picker on the Store page
+   and on `/admin/nodes/:id/test`, each shown only when more than one store is configured, and
+   the store's name on the install confirmation. Follows the UI guide: design skills, then the
+   Impeccable audit with `scripts/screenshots` before the PR.
+4. **Mobile** (`jarvis-node-mobile`). Sniff `pantries` from `/services`; picker when it is
+   present and has more than one entry; selection per device; a store that cannot be reached
+   fails on its own rather than failing the screen (a LAN store is unreachable off the home
+   network, and the app talks to stores directly).
+
+The seam is small because `PantryBaseURL(ctx, householdID)` is the single accessor, with seven
+real call sites: the catalogue and download helper, the two `pantry_url` payloads to nodes, the
+draft fetch and the node's `pantry_download_url`, the Send to Forge feedback POST, and the
+`/services` entry.
