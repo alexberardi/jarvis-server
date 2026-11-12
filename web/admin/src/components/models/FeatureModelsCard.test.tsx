@@ -5,7 +5,7 @@ import * as llm from '@/api/llm'
 import * as settingsApi from '@/api/settings'
 import type { AggregatedSettingsResponse } from '@/types/settings'
 import FeatureModelsCard from './FeatureModelsCard'
-import { cloudProvider } from './features'
+import { FEATURES, cloudProvider, slotSeesImages } from './features'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 vi.mock('@/api/llm', async (orig) => ({ ...(await orig<typeof import('@/api/llm')>()), getLabels: vi.fn() }))
@@ -45,9 +45,26 @@ function cloudConfig(url: string): llm.LabelConfig {
   }
 }
 
-function labels(url: string): llm.LabelsResponse {
+/** A local slot: vision comes from a projector, as it does on a real install. */
+function localConfig(label: string, vision: boolean): llm.LabelConfig {
   return {
-    labels: [{ label: 'cloud', config: cloudConfig(url), state: url ? 'remote' : 'not_configured' }],
+    ...cloudConfig(''),
+    label,
+    engine: 'llama-server',
+    model: 'qwen3-9b.gguf',
+    model_path: `/models/${label}.gguf`,
+    mmproj: vision ? 'qwen3-9b-mmproj.gguf' : '',
+    remote_vision: false,
+  }
+}
+
+function labels(url: string, localVision = true): llm.LabelsResponse {
+  return {
+    labels: [
+      { label: 'live', config: localConfig('live', localVision), state: 'ready' },
+      { label: 'background', config: localConfig('background', localVision), state: 'ready' },
+      { label: 'cloud', config: cloudConfig(url), state: url ? 'remote' : 'not_configured' },
+    ],
     engines: [],
     voice: [],
     proposal: {},
@@ -64,26 +81,29 @@ function ccSettings(model: string): AggregatedSettingsResponse {
         success: true,
         error: null,
         latency_ms: 1,
-        settings: [
-          {
-            key: 'computer.model',
-            value: model,
-            value_type: 'string',
-            category: 'computer',
-            description: null,
-            requires_reload: false,
-            is_secret: false,
-            env_fallback: null,
-            from_db: model !== 'auto',
-            options: ['auto', 'live', 'background', 'cloud'],
-          },
-        ],
+        settings: FEATURES.map((f) => ({
+          key: f.key,
+          value: model,
+          value_type: 'string',
+          category: 'models',
+          description: null,
+          requires_reload: false,
+          is_secret: false,
+          env_fallback: null,
+          from_db: model !== 'auto',
+          options: ['auto', 'live', 'background', 'cloud'],
+        })),
       },
     ],
     total_services: 1,
     successful_services: 1,
     failed_services: 0,
   }
+}
+
+/** One row's option by its visible text: a global role query now matches every row. */
+function option(select: HTMLElement, name: string) {
+  return Array.from(select.querySelectorAll('option')).find((o) => o.textContent?.trim() === name)
 }
 
 function renderCard() {
@@ -115,7 +135,7 @@ describe('FeatureModelsCard', () => {
     stored = 'auto'
     renderCard()
     const select = await screen.findByLabelText('Computer control')
-    await waitFor(() => expect(screen.getByRole('option', { name: 'Cloud (Anthropic (api.anthropic.com))' })).toBeEnabled())
+    await waitFor(() => expect(option(select, 'Cloud (Anthropic (api.anthropic.com))')).toBeEnabled())
     expect(select).toHaveValue('auto')
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
 
@@ -140,9 +160,9 @@ describe('FeatureModelsCard', () => {
     api.getLabels.mockResolvedValue(labels(''))
     stored = 'auto'
     renderCard()
-    await screen.findByLabelText('Computer control')
+    const select = await screen.findByLabelText('Computer control')
     await waitFor(() => expect(api.getLabels).toHaveBeenCalled())
-    expect(screen.getByRole('option', { name: 'Cloud (not set up)' })).toBeDisabled()
+    expect(option(select, 'Cloud — not set up')).toBeDisabled()
   })
 
   it('warns when the saved choice is cloud but the slot is not set up', async () => {
@@ -161,5 +181,64 @@ describe('cloudProvider', () => {
     expect(cloudProvider(cloudConfig(''))).toBe('')
     expect(cloudProvider({ ...cloudConfig('https://api.openai.com/v1'), engine: 'off' })).toBe('')
     expect(cloudProvider(undefined)).toBe('')
+  })
+})
+
+describe('the feature table', () => {
+  it('lists every feature under a group, with auto naming the slot it resolves to', async () => {
+    api.getLabels.mockResolvedValue(labels('https://api.anthropic.com'))
+    stored = 'auto'
+    renderCard()
+    await screen.findByLabelText('Computer control')
+
+    for (const f of FEATURES) {
+      expect(screen.getByLabelText(f.title)).toBeInTheDocument()
+    }
+    for (const title of ['Someone is waiting', 'Runs in the background', 'Needs to see images']) {
+      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
+    }
+    // Auto says which slot it means, so a row reads as a value rather than as a word.
+    expect(screen.getAllByRole('option', { name: 'Auto — live' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('option', { name: 'Auto — background' }).length).toBeGreaterThan(0)
+  })
+
+  it('does not offer a slot that cannot see images to a feature that sends them', async () => {
+    api.getLabels.mockResolvedValue(labels('https://api.anthropic.com', false))
+    stored = 'auto'
+    renderCard()
+    const vision = await screen.findByLabelText('Computer control')
+    await waitFor(() => expect(api.getLabels).toHaveBeenCalled())
+
+    // The local slots have no projector; the cloud slot says it has vision.
+    await waitFor(() => expect(option(vision, 'Live — no vision')).toBeDisabled())
+    expect(option(vision, 'Background — no vision')).toBeDisabled()
+    expect(option(vision, 'Cloud (Anthropic (api.anthropic.com))')).toBeEnabled()
+
+    // A feature that sends no images is unaffected by the same labels.
+    const text = screen.getByLabelText('Memory')
+    expect(option(text, 'Live')).toBeEnabled()
+    expect(option(text, 'Background')).toBeEnabled()
+  })
+
+  it('explains a saved choice whose model lost vision, and keeps it selectable', async () => {
+    api.getLabels.mockResolvedValue(labels('', false))
+    stored = 'background'
+    renderCard()
+    const select = await screen.findByLabelText('Documents and images')
+    expect(
+      await screen.findByText(/Documents and images sends images, and the background model can't see them/),
+    ).toBeInTheDocument()
+    expect(select).toHaveValue('background')
+  })
+})
+
+describe('slotSeesImages', () => {
+  it('reads a local projector and a remote flag', () => {
+    expect(slotSeesImages(localConfig('live', true))).toBe(true)
+    expect(slotSeesImages(localConfig('live', false))).toBe(false)
+    expect(slotSeesImages(cloudConfig('https://api.anthropic.com'))).toBe(true)
+    expect(slotSeesImages({ ...cloudConfig('https://api.anthropic.com'), remote_vision: false })).toBe(false)
+    expect(slotSeesImages({ ...localConfig('live', true), engine: 'off' })).toBe(false)
+    expect(slotSeesImages(undefined)).toBe(false)
   })
 })
