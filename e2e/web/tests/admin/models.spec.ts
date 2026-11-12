@@ -101,11 +101,14 @@ test.describe('admin models', () => {
       await page.goto('/admin/models')
       const select = page.getByLabel('Computer control')
       await expect(select).toHaveValue('auto')
-      await expect(page.getByRole('option', { name: 'Cloud (not set up)' })).toBeDisabled()
+      await expect(select.getByRole('option', { name: 'Cloud — not set up' })).toBeDisabled()
 
       const card = page.getByTestId('label-cloud')
       await card.getByLabel('Base URL').fill('https://api.anthropic.com')
       await card.getByLabel('Model name').fill('claude-sonnet-5-5')
+      // Computer control sends screenshots, so the card only offers it a slot whose model can
+      // see them; for a remote that is this checkbox.
+      await card.getByLabel('The remote model accepts images').check()
       await card.getByRole('button', { name: 'Save' }).click()
       await expect(page.getByText('Cloud (optional) saved; its engine restarts if needed')).toBeVisible()
       expect(cloudOf(await get('/labels'))).toMatchObject({ state: 'remote', config: { remote_url: 'https://api.anthropic.com' } })
@@ -124,7 +127,10 @@ test.describe('admin models', () => {
       await expect(notice).toHaveCount(0)
     } finally {
       await must('PUT', settingURL, { ...superuser, body: { value: 'auto' } })
-      await must('PUT', `${LLM()}/labels`, { ...superuser, body: { cloud: { remote_url: '', remote_model: '' } } })
+      await must('PUT', `${LLM()}/labels`, {
+        ...superuser,
+        body: { cloud: { remote_url: '', remote_model: '', remote_vision: false } },
+      })
     }
   })
 
