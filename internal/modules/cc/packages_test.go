@@ -390,15 +390,26 @@ func TestPantryStores(t *testing.T) {
 		t.Fatalf("empty list: %q, %v; want errNoPantryStore", got, err)
 	}
 
+	// A new store leaves its id out and the server makes one (decision 1); existing ids stay.
+	if err := set("hh1", []any{store(id1, "http://a", "A"), map[string]any{"url": "http://b", "name": "B"},
+		store("", "http://c", "C")}); err != nil {
+		t.Fatal(err)
+	}
+	got := e.m.PantryStores(ctx, "hh1")
+	if len(got) != 3 || got[0].ID != id1 || !pantryStoreID.MatchString(got[1].ID) || !pantryStoreID.MatchString(got[2].ID) ||
+		got[1].ID == got[2].ID {
+		t.Fatal(got)
+	}
+
 	for name, v := range map[string]any{
-		"not a list":    "http://pantry.lan:7721",
-		"no id":         []any{store("", "http://a", "A")},
-		"id not a uuid": []any{store("abc", "http://a", "A")},
-		"duplicate id":  []any{store(id1, "http://a", "A"), store(id1, "http://b", "B")},
-		"no name":       []any{store(id1, "http://a", " ")},
-		"no scheme":     []any{store(id1, "localhost:7721", "A")},
-		"ftp":           []any{store(id1, "ftp://a", "A")},
-		"credentials":   []any{store(id1, "http://u:p@a", "A")},
+		"not a list":      "http://pantry.lan:7721",
+		"id not a string": []any{map[string]any{"id": 7, "url": "http://a", "name": "A"}},
+		"id not a uuid":   []any{store("abc", "http://a", "A")},
+		"duplicate id":    []any{store(id1, "http://a", "A"), store(id1, "http://b", "B")},
+		"no name":         []any{store(id1, "http://a", " ")},
+		"no scheme":       []any{store(id1, "localhost:7721", "A")},
+		"ftp":             []any{store(id1, "ftp://a", "A")},
+		"credentials":     []any{store(id1, "http://u:p@a", "A")},
 	} {
 		if err := set("hh1", v); !errors.Is(err, settings.ErrInvalidValue) {
 			t.Errorf("%s: stored (err %v)", name, err)

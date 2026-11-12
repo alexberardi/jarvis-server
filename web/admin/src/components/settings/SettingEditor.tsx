@@ -4,6 +4,8 @@ import { Button, Input, Select, Switch } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
 import type { SettingResponse } from '@/types/settings'
 import { secretIsSet } from '@/lib/settings'
+import { STORES_KEY } from '@/api/store'
+import PantryStoresEditor from './PantryStoresEditor'
 
 interface SettingEditorProps {
   setting: SettingResponse
@@ -16,7 +18,15 @@ interface SettingEditorProps {
 
 const OTHER = '__other__'
 
-export default function SettingEditor({ setting, onSave, onCancel, isSaving, label = setting.key }: SettingEditorProps) {
+export default function SettingEditor(props: SettingEditorProps) {
+  // pantry.stores is a list people edit by name and URL; its ids are the server's (decision 2026-11-11-several-pantries).
+  if (props.setting.key === STORES_KEY) {
+    return <PantryStoresEditor value={props.setting.value} onSave={props.onSave} onCancel={props.onCancel} isSaving={props.isSaving} />
+  }
+  return <ValueEditor {...props} />
+}
+
+function ValueEditor({ setting, onSave, onCancel, isSaving, label = setting.key }: SettingEditorProps) {
   const [rawValue, setRawValue] = useState(() => {
     // Write-only: a secret's editor starts empty, never with the mask (I5).
     if (setting.is_secret) return ''

@@ -79,6 +79,37 @@ beforeEach(() => {
 })
 
 describe('StorePage', () => {
+  it('shows no store picker with one store', async () => {
+    settings.getHouseholdSettings.mockResolvedValue({ 'pantry.stores': [{ id: 's1', url: 'https://a', name: 'Public Pantry' }] })
+    renderPage()
+    await screen.findByTestId('package-doorbell')
+    expect(screen.queryByRole('combobox', { name: 'Pantry store' })).toBeNull()
+    expect(store.browseStore).toHaveBeenCalledWith('h1', '', undefined)
+  })
+
+  it('browses and installs from the picked store, and remembers the pick', async () => {
+    settings.getHouseholdSettings.mockResolvedValue({
+      'pantry.stores': [
+        { id: 's1', url: 'https://a', name: 'Public Pantry' },
+        { id: 's2', url: 'http://10.0.0.5:7721', name: 'Workshop' },
+      ],
+    })
+    renderPage()
+    const picker = await screen.findByRole('combobox', { name: 'Pantry store' })
+    await waitFor(() => expect(store.browseStore).toHaveBeenCalledWith('h1', '', 's1'))
+    fireEvent.change(picker, { target: { value: 's2' } })
+    await waitFor(() => expect(store.browseStore).toHaveBeenCalledWith('h1', '', 's2'))
+    expect(localStorage.getItem('jarvis-admin:pantry-store:h1')).toBe('s2')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Install News' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('From Workshop. Choose the nodes to install on.')).toBeInTheDocument()
+    fireEvent.click(await within(dialog).findByRole('checkbox', { name: /kitchen/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Install on 1 node' }))
+    await waitFor(() => expect(store.requestInstall).toHaveBeenCalledWith('kitchen', pkgs.get_news, 's2'))
+    expect(store.getStorePackage).toHaveBeenCalledWith('h1', 'get_news', true, 's2')
+  })
+
   it('lists the packages and keeps the default bundle', async () => {
     renderPage()
     expect(await screen.findByTestId('package-doorbell')).toHaveTextContent('Doorbell')
@@ -104,7 +135,7 @@ describe('StorePage', () => {
 
     fireEvent.click(kitchen)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Install on 1 node' }))
-    await waitFor(() => expect(store.requestInstall).toHaveBeenCalledWith('kitchen', pkgs.doorbell))
+    await waitFor(() => expect(store.requestInstall).toHaveBeenCalledWith('kitchen', pkgs.doorbell, undefined))
     expect(store.requestInstall).toHaveBeenCalledTimes(1)
     const job = await within(dialog).findByTestId('install-job')
     await waitFor(() => expect(job).toHaveTextContent('kitchenInstalled'))

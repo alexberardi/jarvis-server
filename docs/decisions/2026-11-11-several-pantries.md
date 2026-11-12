@@ -164,7 +164,22 @@ are additive on top of it and can land separately.
 3. **The admin** (`web/admin/`). The settings editor for the list, a picker on the Store page
    and on `/admin/nodes/:id/test`, each shown only when more than one store is configured, and
    the store's name on the install confirmation. Follows the UI guide: design skills, then the
-   Impeccable audit with `scripts/screenshots` before the PR.
+   Impeccable audit with `scripts/screenshots` before the PR. As built:
+   - **Who edits the list: superusers only** (user, 2026-11-12). The Settings page edits the
+     system default and each household's own list (`pantry.stores` is `Household` for the
+     superuser BFF, listed with the inbound-call settings as admin-only in
+     `TestHouseholdSettingsAllowlistDeclared`). The household settings route stays read-only, so
+     household admins only pick. The no-store error says "An admin can add one in Settings".
+   - **Ids are the server's:** a settings `Normalize` hook gives an entry with no id a fresh UUID
+     before validation, so the editor (and any client) sends a new store without one. Existing
+     ids pass through, which is how an edited URL or name keeps its installs.
+   - The editor (`PantryStoresEditor`) replaces the JSON box for this key: a name and URL per
+     store, reorder, remove, add, the first marked Default, URL checks mirroring cc's.
+   - The picker (`StorePicker`, `usePantryStore`) reads the household's list from the household
+     settings, remembers the pick per browser and household (`jarvis-admin:pantry-store:{hh}`),
+     and sends `pantry_store_id` only when there are several stores. The Store page, a package's
+     page and the install dialog use it; the dialog says "From {store}". The test page has its own
+     labelled picker; the test keeps its store in the URL (`&store=`), so Reinstall goes back.
 4. **Mobile** (`jarvis-node-mobile`). Read `pantry.stores` from the household settings, falling
    back to `pantries` from `/services`, then to today's single URL; picker when it is
    present and has more than one entry; selection per device; a store that cannot be reached

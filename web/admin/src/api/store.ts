@@ -40,15 +40,35 @@ export interface InstallStatus {
   error_message: string | null
 }
 
+/** PantryStore is one entry of pantry.stores; the server makes the id and installs keep it. */
+export interface PantryStore {
+  id: string
+  url: string
+  name: string
+}
+
+/** STORES_KEY is the setting listing the household's Pantry stores, the first being the default. */
+export const STORES_KEY = 'pantry.stores'
+
+/** parseStores reads a pantry.stores value, dropping anything that isn't a whole entry. */
+export function parseStores(v: unknown): PantryStore[] {
+  if (!Array.isArray(v)) return []
+  return v.filter(
+    (s): s is PantryStore =>
+      !!s && typeof s.id === 'string' && typeof s.url === 'string' && typeof s.name === 'string',
+  )
+}
+
 /** BUNDLE_KEY is the household setting holding its default bundle (comma-separated names). */
 export const BUNDLE_KEY = 'pantry.default_bundle'
 
 const pantry = (householdId: string) =>
   `/api/cc/api/v0/households/${encodeURIComponent(householdId)}/pantry/commands`
 
-export async function browseStore(householdId: string, q: string): Promise<StorePackage[]> {
+/** storeId picks one of the household's stores; without it cc uses the default (the first). */
+export async function browseStore(householdId: string, q: string, storeId?: string): Promise<StorePackage[]> {
   const { data } = await apiClient.get<{ commands: StorePackage[] }>(pantry(householdId), {
-    params: { q: q || undefined, per_page: 100 },
+    params: { q: q || undefined, per_page: 100, pantry_store_id: storeId },
   })
   return data.commands ?? []
 }
@@ -57,21 +77,31 @@ export async function browseStore(householdId: string, q: string): Promise<Store
  * getStorePackage is a package's detail. forInstall adds the commit to install, which costs a
  * Pantry install count (cc asks Pantry's /download), so only the install dialog asks for it.
  */
-export async function getStorePackage(householdId: string, name: string, forInstall = false): Promise<StoreDetail> {
+export async function getStorePackage(
+  householdId: string,
+  name: string,
+  forInstall = false,
+  storeId?: string,
+): Promise<StoreDetail> {
   const { data } = await apiClient.get<StoreDetail>(`${pantry(householdId)}/${encodeURIComponent(name)}`, {
-    params: forInstall ? { install: 1 } : undefined,
+    params: forInstall || storeId ? { install: forInstall ? 1 : undefined, pantry_store_id: storeId } : undefined,
   })
   return data
 }
 
 const install = (nodeId: string) => `/api/cc/api/v0/nodes/${encodeURIComponent(nodeId)}/package-install`
 
-/** requestInstall asks one node to install a package; cc checks the household, role and Pantry. */
-export async function requestInstall(nodeId: string, pkg: StoreDetail): Promise<string> {
+/**
+ * requestInstall asks one node to install a package; cc checks the household, role and Pantry. An
+ * update goes back to the store the package came from whatever storeId says; cc refuses a
+ * different store (409 pantry_store_conflict) or a removed one (409 pantry_store_removed).
+ */
+export async function requestInstall(nodeId: string, pkg: StoreDetail, storeId?: string): Promise<string> {
   const { data } = await apiClient.post<{ id: string }>(install(nodeId), {
     command_name: pkg.command_name,
     github_repo_url: pkg.github_repo_url,
     git_tag: pkg.git_tag ?? null,
+    ...(storeId ? { pantry_store_id: storeId } : {}),
   })
   return data.id
 }

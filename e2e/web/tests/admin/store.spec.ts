@@ -100,3 +100,37 @@ test('installs a package on a chosen node', async ({ page }) => {
   await must('POST', `${base}/results`, { headers: node, body: { success: true } })
   await expect(dialog.getByTestId('install-job')).toContainText('Installed')
 })
+
+// Several pantries (decision 2026-11-11-several-pantries): with two stores the page offers a picker,
+// and what it lists and installs comes from the store picked, which this browser remembers.
+test('browses the store picked from several', async ({ page }) => {
+  const workshop = http.createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://x').pathname
+    const body =
+      path === '/v1/commands'
+        ? { commands: [{ command_name: 'e2e_garage', display_name: 'Garage', description: 'Opens the garage', author: 'e2e', latest_version: '0.3.0', categories: [], verified: true }], total: 1, page: 1, per_page: 100 }
+        : null
+    res.writeHead(body ? 200 : 404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(body ?? { detail: 'Not found' }))
+  })
+  await new Promise<void>((ok) => workshop.listen(0, '127.0.0.1', ok))
+  const token = tokenOf('superuser')
+  const put = (stores: unknown[]) => must('PUT', `${env('SBX_CC')}/settings/pantry.stores?household_id=${hh}`, { token, body: { value: stores } })
+  const one = (await must('GET', settingsURL(), { token })).settings['pantry.stores']
+  try {
+    // The new store is sent without an id: cc makes it.
+    await put([...one, { url: `http://127.0.0.1:${(workshop.address() as AddressInfo).port}`, name: 'Workshop' }])
+    await page.goto('/admin/store')
+    const picker = page.getByRole('combobox', { name: 'Pantry store' })
+    await expect(picker).toHaveValue(one[0].id)
+    await expect(page.getByTestId('package-e2e_hello')).toBeVisible()
+    await picker.selectOption({ label: 'Workshop' })
+    await expect(page.getByTestId('package-e2e_garage')).toBeVisible()
+    await expect(page.getByTestId('package-e2e_hello')).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByTestId('package-e2e_garage')).toBeVisible()
+  } finally {
+    await put(one)
+    workshop.close()
+  }
+})

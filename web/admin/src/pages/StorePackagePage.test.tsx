@@ -71,7 +71,7 @@ describe('StorePackagePage', () => {
   it('shows the package in full, without asking Pantry for an install', async () => {
     renderPage()
     expect(await screen.findByRole('heading', { level: 1, name: 'Home Assistant' })).toBeInTheDocument()
-    expect(store.getStorePackage).toHaveBeenCalledWith('h1', 'home-assistant')
+    expect(store.getStorePackage).toHaveBeenCalledWith('h1', 'home-assistant', false, undefined)
     const about = screen.getByRole('region', { name: 'About this package' })
     expect(within(about).getByText('Pi nodes only')).toBeInTheDocument() // apt packages
     expect(within(about).getByText('Apache-2.0')).toBeInTheDocument()
@@ -91,7 +91,7 @@ describe('StorePackagePage', () => {
     await waitFor(() => expect(settings.putHouseholdSetting).toHaveBeenCalledWith('h1', 'pantry.default_bundle', 'home-assistant'))
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
     await screen.findByRole('dialog')
-    await waitFor(() => expect(store.getStorePackage).toHaveBeenCalledWith('h1', 'home-assistant', true))
+    await waitFor(() => expect(store.getStorePackage).toHaveBeenCalledWith('h1', 'home-assistant', true, undefined))
   })
 
   it('goes back to the Store', async () => {

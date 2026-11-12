@@ -51,3 +51,17 @@ export function nodeNames(nodes: NodeLiveness[]): Map<string, string> {
     }),
   )
 }
+
+/** storeURLProblem mirrors cc's validatePantryStores, so a bad URL is caught before Save. */
+export function storeURLProblem(raw: string): string | undefined {
+  let u: URL
+  try {
+    u = new URL(raw.trim())
+  } catch {
+    return 'Enter a full URL, like http://10.0.0.5:7721'
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'Use an http or https URL'
+  if (u.username || u.password) return 'Leave out the user name and password'
+  if (u.search || u.hash) return 'Leave out the ? or # part'
+  return undefined
+}

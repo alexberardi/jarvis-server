@@ -131,6 +131,48 @@ describe('NodeTestPage', () => {
     expect(search()).toBe('?request=r1&code=AB3KM7')
   })
 
+  it('looks the code up in the picked store only, and Reinstall goes back to it', async () => {
+    poll = { ...completed, status: 'pending', details: null, runs: [] }
+    const base = get.getMockImplementation()!
+    get.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/api/cc/api/v0/mobile/household/hh1/settings')
+        return {
+          data: {
+            settings: {
+              'pantry.stores': [
+                { id: 's1', url: 'https://a', name: 'Public Pantry' },
+                { id: 's2', url: 'http://10.0.0.5:7721', name: 'Workshop' },
+              ],
+            },
+          },
+        }
+      if (url === `${TI}/r2`) return { data: poll }
+      return base(url, ...(rest as []))
+    })
+    post.mockImplementation(async (url: string) => {
+      if (url === TI) return { data: { id: post.mock.calls.length > 1 ? 'r2' : 'r1', status: 'pending', package_name: 'coin_flip' } }
+      throw new Error(`unexpected POST ${url}`)
+    })
+    renderPage()
+    const picker = await screen.findByLabelText('Pantry store')
+    fireEvent.change(picker, { target: { value: 's2' } })
+    fireEvent.change(screen.getByLabelText('Share code'), { target: { value: 'AB3KM7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Install on Office-PC' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith(TI, { share_code: 'AB3KM7', pantry_store_id: 's2' }))
+    await waitFor(() => expect(search()).toBe('?request=r1&code=AB3KM7&store=s2'))
+  })
+
+  it('reinstalls from the store the test came from', async () => {
+    renderPage('/admin/nodes/pc1/test?request=r1&code=AB3KM7&store=s2')
+    post.mockImplementation(async (url: string) => {
+      if (url === TI) return { data: { id: 'r2', status: 'pending', package_name: 'coin_flip' } }
+      throw new Error(`unexpected POST ${url}`)
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Reinstall' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith(TI, { share_code: 'AB3KM7', pantry_store_id: 's2' }))
+    await waitFor(() => expect(search()).toBe('?request=r2&code=AB3KM7&store=s2'))
+  })
+
   it("doesn't offer the install while the node is offline", async () => {
     get.mockImplementation(async (url: string) => {
       if (url === '/api/cc/api/v0/admin/nodes') return { data: [{ ...live, online: false }] }

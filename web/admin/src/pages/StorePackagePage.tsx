@@ -10,6 +10,7 @@ import { Badge, Banner, Button, Card, CardHeader, ErrorState, PageHeader, Skelet
 import type { BadgeTone } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useBundle } from '@/hooks/useBundle'
+import { usePantryStore } from '@/hooks/usePantryStore'
 import { errorMessage } from '@/lib/errors'
 import { notForComputer } from '@/lib/store'
 import { formatServerTime } from '@/lib/time'
@@ -42,10 +43,11 @@ export default function StorePackagePage() {
   const navigate = useNavigate()
   const { bundle, canEdit, toggle } = useBundle()
   const [installing, setInstalling] = useState(false)
+  const pantry = usePantryStore() // the store this browser picked on the Store page
   const detail = useQuery({
-    queryKey: ['store-package', hh, name],
-    queryFn: () => getStorePackage(hh, name),
-    enabled: !!hh && !!name,
+    queryKey: ['store-package', hh, pantry.storeId, name],
+    queryFn: () => getStorePackage(hh, name, false, pantry.storeId),
+    enabled: !!hh && !!name && pantry.ready,
   })
   const d = detail.data
   const title = d?.display_name || d?.command_name || name
@@ -123,7 +125,15 @@ export default function StorePackagePage() {
         </>
       )}
 
-      {installing && d && <InstallDialog names={[d.command_name]} label={title} householdId={hh} onClose={() => setInstalling(false)} />}
+      {installing && d && (
+        <InstallDialog
+          names={[d.command_name]}
+          label={title}
+          householdId={hh}
+          store={pantry.storeId ? pantry.store : undefined}
+          onClose={() => setInstalling(false)}
+        />
+      )}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { featureMissing } from './features'
+import { parseStores, STORES_KEY } from '@/api/store'
 import { restartJarvisd } from './restart'
 import type { ServiceSettingsResult, SettingResponse } from '@/types/settings'
 
@@ -25,6 +26,10 @@ export function withoutLabelSettings(services: ServiceSettingsResult[]): Service
 export function formatSettingValue(setting: SettingResponse): string {
   if (setting.is_secret) return secretIsSet(setting) ? 'set (hidden)' : 'not set'
   if (setting.value === null || setting.value === undefined) return '(not set)'
+  if (setting.key === STORES_KEY) {
+    const names = parseStores(setting.value).map((s) => s.name)
+    return names.length ? names.join(', ') : 'No stores'
+  }
   if (setting.value_type === 'json') return JSON.stringify(setting.value)
   return String(setting.value)
 }
