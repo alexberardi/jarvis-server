@@ -70,7 +70,7 @@ pixels, 0–999, 0–1), capture geometry, and pointer/keyboard input on wlroots
 ### Agent (`internal/agent/computer/`, `internal/agent/input/`)
 
 - Capture of the target window or screen with geometry, on every observe, for the first platform
-  (Open question 1).
+  (settled question 1).
 - Pointer and keyboard input through `internal/agent/input`, behind the existing guard
   (`guard.go`): deny list, blocked apps, never Jarvis's own windows or OS auth prompts.
 - MVP B on the agent: the indicator while a task holds the screen (island/tray; the existing
@@ -79,8 +79,8 @@ pixels, 0–999, 0–1), capture geometry, and pointer/keyboard input on wlroots
 
 ### Browser
 
-Browser tasks keep going through the extension (C3). See Open question 2 for whether they become
-vision-first too.
+Browser tasks keep going through the extension (C3). They stay element-first, with a tab screenshot every
+round (settled question 2).
 
 ### Not changing
 
@@ -160,18 +160,18 @@ o := Observe{RunID: r.run.ID, Target: t.Target, Screenshot: true, Snapshot: t.Ha
 
 1. On the first platform, with the cloud model: `notes_*`, `canvas_*`, `t1_writer_summary` and
    `stop_midtask` pass at least 3 of 3 repeats each.
-2. The same cases on the largest local vision model: numbers recorded, and each failure traced to
-   loop, prompt or model; target agreed after the first measured run (Open question 3).
+2. The same cases on the largest local vision model: numbers recorded, each failure traced to
+   loop, prompt or model, and no previously passing case regresses (settled question 3).
 3. Stop lands within one action, and taking the mouse pauses the task within one action, in both
    the suite and the user's live test.
 4. A blocked app is refused by the agent even when the model asks for it (a suite or unit case).
 5. The user completes user stories 1–4 live on this box and agrees it "feels like" the reference.
 
-## Open questions (each with a recommendation)
+## Settled questions (user, 2026-11-11)
 
-| # | Question | Recommendation |
+| # | Question | Answer |
 |---|---|---|
-| 1 | Which platform first? | **This box first** (wlroots/Hyprland live, X11 under Xvfb for the suite): fastest build-and-test loop with the user, desktop cases exist. macOS next on the MBP with the user (permissions need clicks), then Windows in the Win11 VM. |
-| 2 | Do browser tasks become vision-first too? | **No, not in this spec.** Keep them element-first through the extension (the DOM is rich, and C3's per-site rules depend on knowing the page), but send a tab screenshot every round so the model sees what it acts on. Revisit with suite numbers. |
-| 3 | Local-model pass target? | Measure first: set it after the first local run, from the cloud-vs-local gap. |
-| 4 | Element hints: always sent, or only on request? | Always, capped (e.g. 40 items with boxes), dropped for a model whose numbers improve without them. |
+| 1 | Which platform first? | **This box first** (wlroots/Hyprland live, X11 under Xvfb for the suite), then macOS on the MBP with the user, then Windows in the Win11 VM. |
+| 2 | Do browser tasks become vision-first too? | **No, not in this spec:** element-first through the extension, plus a tab screenshot every round. The extension approach keeps being improved on its own track. |
+| 3 | Local-model pass target? | **No fixed number.** The user judges from the cloud-vs-local suite table and live use; each local round must not regress a case that passed before. |
+| 4 | Element hints? | Always sent, capped (about 40 items with boxes); dropped for a model that does better without them. |
