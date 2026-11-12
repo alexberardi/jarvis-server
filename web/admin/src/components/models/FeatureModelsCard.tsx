@@ -88,7 +88,7 @@ function FeatureRow({
   return (
     <div className="space-y-3 py-4 first:pt-0 last:pb-0" data-testid={id}>
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor={id} className="text-small font-medium text-text sm:w-40">
+        <label htmlFor={id} className="text-small font-medium text-text sm:w-48">
           {feature.title}
         </label>
         <select
