@@ -152,6 +152,24 @@ Each fix gets a unit test that fails first.
 
 **CHECKPOINT B:** cloud passes every required desktop case 3/3.
 
+**Checkpoint B, 2026-11-12** (`claude-sonnet-5-5`, every required case ×3): the first full run
+found three product faults, one fixture fault and, on the second run, one agent race:
+- "this page" read the agent's task tab (a store checkout summarized as Velmora): the current tab
+  is now read by its id;
+- after a question was answered with Continue alone, the model didn't know what it had asked
+  and asked again to the round limit: the ask is kept in the run's history, and an empty
+  Continue says "Yes, go ahead as you suggested.";
+- the loop never said the date, so "last month" became a question: today, in the household's
+  zone, is in the prompt;
+- the store's saved address was for "Avery Quinn" while the user is Jordan: fixture fixed;
+- a stop landing as an action began left the island showing "controlling" with nothing running
+  (the action re-lit it): actions now light the indicator only if no stop came since they began.
+Result after the fixes: **every required case 3/3** (budget_last_month, store_order_approve,
+store_order_cancel, t1_writer_summary and the stop cases rerun after their fix). Pending:
+`notes_pointer_*` (task 9), `takeover_wlroots` (task 8). Watching: one budget run's replan once
+proposed per-category calculation steps instead of the spreadsheet (errand planner, not seen
+again).
+
 ### 6. T1 as a case: Wikipedia page → Writer document
 
 `t1_writer_summary`: summarize a fixture article into `~/Documents/<name>.odt` in LibreOffice
