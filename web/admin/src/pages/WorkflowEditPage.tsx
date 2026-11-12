@@ -1,13 +1,11 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowLeft, ArrowUp, GripVertical, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { saveWorkflow } from '@/api/workflows'
-import type { ParamKind, SuccessCheck, TaughtWorkflow, WStep } from '@/api/workflows'
+import type { ParamKind, Skill, SuccessCheck, TaughtWorkflow, WStep } from '@/api/workflows'
 import { Badge, Button, Card, CardHeader, ErrorState, Input, PageHeader, Select, Skeleton, Switch } from '@/components/ui'
-import { FieldFrame } from '@/components/ui/Field'
-import { fieldControl } from '@/components/ui/fieldStyles'
 import { useWorkflow, workflowKeys } from '@/hooks/useWorkflows'
 import { errorMessage, errorStatus } from '@/lib/errors'
 import { cn } from '@/lib/utils'
@@ -24,6 +22,7 @@ import {
 } from '@/lib/workflows'
 import type { Candidate, DraftStep } from '@/lib/workflows'
 import Sentence from '@/components/workflows/Sentence'
+import { GoalCard, NotesCard, PrerequisitesCard, TextArea } from '@/components/workflows/SkillFields'
 
 const KINDS: ParamKind[] = ['text', 'date', 'month', 'number', 'file']
 const TARGETS = [
@@ -74,6 +73,7 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
   const [steps, setSteps] = useState<DraftStep[]>(() => draftSteps(wf.steps))
   const [cands, setCands] = useState<Candidate[]>(() => candidatesOf(wf.params, draftSteps(wf.steps)))
   const [success, setSuccess] = useState<SuccessCheck>(wf.success ?? {})
+  const [skill, setSkill] = useState<Skill>(wf.skill ?? {})
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [newIntent, setNewIntent] = useState('')
   const [newTarget, setNewTarget] = useState<WStep['target']>(wf.steps[0]?.target ?? 'browser')
@@ -83,7 +83,7 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
   const problem = !name.trim() ? 'The workflow needs a name.' : !steps.length ? 'A workflow needs at least one step.' : paramError(live)
 
   const save = useMutation({
-    mutationFn: () => saveWorkflow(wf.id, toPut({ name, triggers: wf.triggers, steps, cands, success, shared })),
+    mutationFn: () => saveWorkflow(wf.id, toPut({ name, triggers: wf.triggers, steps, cands, success, shared, skill })),
     onSuccess: (got) => {
       qc.setQueryData(workflowKeys.item(wf.id), got)
       void qc.invalidateQueries({ queryKey: ['workflows'] })
@@ -137,6 +137,9 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
         <Input label="Name" value={name} disabled={!edit} maxLength={100} onChange={(e) => setName(e.target.value)} />
         <Switch label="Share with the household" checked={shared} disabled={!edit} onCheckedChange={setShared} />
       </Card>
+
+      <GoalCard skill={skill} edit={edit} onChange={setSkill} />
+      <PrerequisitesCard skill={skill} edit={edit} onChange={setSkill} />
 
       <Card as="section" aria-labelledby="wf-steps">
         <CardHeader id="wf-steps" title="Steps" className="mb-1" />
@@ -209,6 +212,38 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
                     />
                   ) : (
                     <p className="col-span-2 text-small text-text-muted">{d.step.intent}</p>
+                  )}
+                  {edit ? (
+                    <div className="col-span-2 grid gap-2">
+                      <Input
+                        label={<>Why<span className="sr-only"> (step {i + 1} goal)</span></>}
+                        placeholder="The point of this step"
+                        maxLength={300}
+                        value={raw.step.goal ?? ''}
+                        onChange={(e) => patch(raw.uid, (s) => ({ ...s, goal: e.target.value }))}
+                      />
+                      {expectFixed(raw.step.expect) ? (
+                        <p className="text-small text-text-muted [overflow-wrap:anywhere]">
+                          Then {successParts(raw.step.expect ?? {}).join(', and ')}.
+                        </p>
+                      ) : (
+                        <Input
+                          label={<>Then<span className="sr-only"> (what you see after step {i + 1})</span></>}
+                          placeholder="What you see once it worked"
+                          maxLength={300}
+                          value={raw.step.expect?.screen ?? ''}
+                          onChange={(e) => patch(raw.uid, (s) => ({ ...s, expect: { screen: e.target.value } }))}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    (d.step.goal || d.step.expect) && (
+                      <p className="col-span-2 text-small text-text-muted [overflow-wrap:anywhere]">
+                        {d.step.goal}
+                        {d.step.goal && d.step.expect ? ' ' : ''}
+                        {d.step.expect && `Then ${expectText(d.step.expect)}.`}
+                      </p>
+                    )
                   )}
                   {edit && (
                     <div className="col-start-1 row-start-3 flex flex-wrap items-center gap-x-3 gap-y-2 sm:col-span-2">
@@ -347,6 +382,8 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
         )}
       </Card>
 
+      <NotesCard skill={skill} edit={edit} onChange={setSkill} />
+
       {edit && (
         <div className="flex flex-wrap items-center justify-end gap-3">
           {problem && (
@@ -363,12 +400,12 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
   )
 }
 
-/** TextArea is a two-line field on the base components' frame and field style. */
-function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  const id = useId()
-  return (
-    <FieldFrame id={id} label={label}>
-      <textarea id={id} rows={2} className={cn(fieldControl, 'h-auto py-2')} value={value} onChange={(e) => onChange(e.target.value)} />
-    </FieldFrame>
-  )
+/** expectFixed: the recording proved this expectation (the page a step opened, a download), so it isn't typed over. */
+function expectFixed(c: SuccessCheck | undefined): boolean {
+  return !!c && (!!c.url_contains || !!c.download || !!c.file || !!c.text_present?.length)
+}
+
+/** expectText is a step's expectation in words: the sentence itself when it is one about the screen. */
+function expectText(c: SuccessCheck): string {
+  return expectFixed(c) ? successParts(c).join(', and ') : `you see: ${c.screen ?? ''}`
 }
