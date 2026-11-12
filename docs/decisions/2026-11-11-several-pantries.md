@@ -61,8 +61,27 @@ All nine answered by the user, 2026-11-11, before anything was built.
    into `pkgs/<name>` and the sidecar refuses a command another package provides, so two stores'
    same-named packages cannot both be live on a node whatever we chose. Changing a package's
    store is a deliberate uninstall, then install.
-9. **`/services` keeps reporting one URL** for `jarvis-pantry`, the default store. No wire
-   change. An empty list publishes no entry at all.
+9. **`/services` keeps reporting one URL** for `jarvis-pantry`, the default store, so every
+   client that reads it today keeps working. An empty list publishes no entry at all.
+10. **Clients sniff for the list; its absence is today's behaviour.** The `/services` response
+    is an envelope (`{"services": {...}}`), so it gains a sibling `pantries` array of
+    `{url, name}` beside the unchanged `services` map. A client that finds it shows a picker; a
+    client that does not carries on with the single `jarvis-pantry` URL. This is the only shape
+    that is compatible in both directions at once, which matters because the mobile app ships
+    on every merge: an installed app meets a newer jarvisd (no `pantries` key read, works), and
+    a newer app meets an older jarvisd (no `pantries` key present, works). Adding a property is
+    safe; requiring one is not. Being a wire change, it follows the wire-change skill and gets
+    contract cases.
+
+## The mobile app talks to stores directly
+
+`src/api/pantryApi.ts` uses raw axios against `getServiceConfig().pantryUrl`, resolved from
+`/services`, not through jarvisd. So:
+
+- The app is a client of every store's URL, exactly like a node. A LAN entry such as
+  `http://10.0.0.122:7721` works on the home network and fails off it, where a node on the LAN
+  is fine. A store that is unreachable should say so per store, not fail the screen.
+- `pantry.enabled` is read from household settings and is unchanged by any of this.
 
 ## Rules these imply
 
