@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -210,12 +211,17 @@ func TestShipTestEvents(t *testing.T) {
 	}
 }
 
-// fakeSecrets records the secrets forgotten.
-type fakeSecrets struct{ forgot []string }
+// fakeSecrets records the secrets forgotten and the command data cleared.
+type fakeSecrets struct{ forgot, cleared []string }
 
 func (f *fakeSecrets) ForgetSecret(key, scope string) error {
 	f.forgot = append(f.forgot, scope+"/"+key)
 	return nil
+}
+
+func (f *fakeSecrets) DeleteAllData(command string) (int, error) {
+	f.cleared = append(f.cleared, command)
+	return 1, nil
 }
 
 // A test install's settings go with it (user 2026-11-10): when it expires, the secrets it
@@ -261,5 +267,45 @@ func TestTestInstallSecretsGoWithIt(t *testing.T) {
 	m.ExpireTests(ctx)
 	if want := []string{"integration/Z2M_BASE_TOPIC", "integration/MQTT_HOST"}; !reflect.DeepEqual(fs.forgot, want) {
 		t.Fatalf("forgot %v, want %v", fs.forgot, want)
+	}
+}
+
+// A test install's saved data goes with it (user 2026-11-10: nothing it brought may stay
+// behind). When it expires, the JarvisStorage records its commands and agents own are cleared,
+// except a name an installed package's agent owns.
+func TestTestInstallSavedDataGoesWithIt(t *testing.T) {
+	m, _, _ := newTestManager(t, newRepos(t))
+	now := time.Date(2026, 11, 11, 21, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	fs := &fakeSecrets{}
+	m.Secrets = fs
+	// An installed package with an agents/digest: its data stays, whatever a draft calls its own.
+	if err := os.MkdirAll(m.dir("news"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	man := "name: news\ncomponents:\n  - type: agent\n    name: digest\n"
+	if err := os.WriteFile(filepath.Join(m.dir("news"), ManifestFile), []byte(man), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	draft := []DraftFile{
+		{Filename: "commands/z2m.py", Content: "from jarvis_command_sdk import IJarvisCommand\nclass C(IJarvisCommand): ...\n"},
+		{Filename: "agents/digest/agent.py", Content: "from jarvis_command_sdk import IJarvisAgent\nclass A(IJarvisAgent): ...\n"},
+		{Filename: "agents/sales/agent.py", Content: "from jarvis_command_sdk import IJarvisAgent\nclass A(IJarvisAgent): ...\n"},
+	}
+	ctx := context.Background()
+	if _, err := m.TestInstall(ctx, "z2m", "r-1", draft); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.cleared) != 0 {
+		t.Fatalf("cleared %v while the test was still being served", fs.cleared)
+	}
+
+	now = now.Add(21 * time.Minute)
+	m.ExpireTests(ctx)
+	// z2m_cmd is the command the fake sidecar loaded for test:z2m; digest is the installed one's.
+	cleared := slices.Clone(fs.cleared)
+	slices.Sort(cleared)
+	if want := []string{"sales", "z2m_cmd"}; !reflect.DeepEqual(cleared, want) {
+		t.Fatalf("cleared %v, want %v (news owns digest)", cleared, want)
 	}
 }
