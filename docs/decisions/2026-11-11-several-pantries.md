@@ -32,22 +32,24 @@ which store and which node could not reach it.
 
 ## Decided
 
-All nine answered by the user, 2026-11-11, before anything was built.
+All ten answered by the user, 2026-11-11, before anything was built; 11–14 settled in review the same day.
 
-1. **An entry is `{url, name}`.** The name is what the picker shows. The current single string
-   migrates to one entry, named after its host. There is no per-entry enabled flag: a store you
-   do not want is removed, which says the same thing with one less state.
+1. **An entry is `{id, url, name}`.** The name is what the picker shows. The `id` is a GUID the
+   server generates when the entry is added; clients cannot set or edit it (see 11). The current
+   single string migrates to one entry with a fresh id, named after its host. There is no
+   per-entry enabled flag: a store you do not want is removed, which says the same thing with one
+   less state.
 2. **First in the list wins.** List order is preference order, so entry one is the default for
    anything that does not pick: `/services`, a node download, a background job. Adding a store
    appends and never silently changes behaviour. The admin can reorder.
 3. **The picker's selection is per device**, remembered in the browser and in the app, never
    stored server-side. It is view state: the binding that matters is recorded at action time
    (4, 5), so browsing can never retroactively change where an installed package came from.
-4. **A share code is resolved against the picked store only**, and that store is saved on the
-   test install so Reinstall and Send to Forge (`testinstall_feedback.go`) return to it. A wrong
+4. **A share code is resolved against the picked store only**, and that store's id is saved on
+   the test install so Reinstall and Send to Forge (`testinstall_feedback.go`) return to it. A wrong
    code fails at once, naming the store. Codes are never broadcast to stores the user did not
    choose: a 6-character code is the only secret protecting an unpublished draft.
-5. **An install records its store.** Updates and revert go back to it. When that store is no
+5. **An install records its store's id.** Updates and revert go back to it. When that store is no
    longer listed the package keeps running and the UI says updates are unavailable because its
    store is gone. Packages installed before this change have no origin and fall back to the
    default store until reinstalled.
@@ -62,16 +64,30 @@ All nine answered by the user, 2026-11-11, before anything was built.
    same-named packages cannot both be live on a node whatever we chose. Changing a package's
    store is a deliberate uninstall, then install.
 9. **`/services` keeps reporting one URL** for `jarvis-pantry`, the default store, so every
-   client that reads it today keeps working. An empty list publishes no entry at all.
+   client that reads it today keeps working. An empty list publishes no entry at all. The
+   caller decides which list: an authenticated caller gets its household's list, an anonymous
+   one the system list (today `main.go` always passes `householdID ""`).
 10. **Clients sniff for the list; its absence is today's behaviour.** The `/services` response
-    is an envelope (`{"services": {...}}`), so it gains a sibling `pantries` array of
-    `{url, name}` beside the unchanged `services` map. A client that finds it shows a picker; a
+    is an envelope (`{"services": [...]}`), so it gains a sibling `pantries` array of
+    `{id, url, name}` beside the unchanged `services` array. A client that finds it shows a picker; a
     client that does not carries on with the single `jarvis-pantry` URL. This is the only shape
     that is compatible in both directions at once, which matters because the mobile app ships
     on every merge: an installed app meets a newer jarvisd (no `pantries` key read, works), and
     a newer app meets an older jarvisd (no `pantries` key present, works). Adding a property is
     safe; requiring one is not. Being a wire change, it follows the wire-change skill and gets
     contract cases.
+11. **A store is identified by its id, never its URL or name.** Installs and test installs record
+    the id server-side, so editing an entry's URL or name moves every install with it, including
+    nodes that are offline at the time: they get the new URL with their next payload. Removing an
+    entry discards its id; its packages keep running with updates unavailable, and getting
+    updates again means uninstall, then install from another entry.
+12. **`pantry.enabled` is the only off switch.** Disabling it leaves the list stored untouched.
+    An unset setting takes the definition's default, `[hosted]`.
+13. **Enabled with an empty list is an invalid config, not a mode.** Every Pantry action fails
+    gracefully with an error saying no store is configured. Nothing falls back to the hosted URL.
+14. **The server acts only on stores in the household's list.** A client picks a store by id; an
+    unknown id is refused. The server never fetches a draft or POSTs feedback to a URL the client
+    supplied.
 
 ## The mobile app talks to stores directly
 
@@ -89,9 +105,9 @@ All nine answered by the user, 2026-11-11, before anything was built.
   picker appears anywhere: the admin's Store page, the Forge test-install screen and the mobile
   app look exactly as they do now. The test-install screen gets a picker too, not just browse.
 - **An empty list means no stores, not the hosted one.** `PantryBaseURL` currently returns
-  `defaultPantryBaseURL` whenever the setting is empty. That fallback cannot survive: with a
-  list, empty has to mean the household contacts nothing, or a household that removed every
-  store still phones home. Nothing may hardcode the hosted URL as a fallback.
+  `defaultPantryBaseURL` whenever the setting is empty. That fallback cannot survive: an enabled
+  household with an empty list gets an error (13), never the hosted store, or a household that
+  removed every store still phones home. Nothing may hardcode the hosted URL as a fallback.
 - **Every entry must be reachable from every node.** The node downloads, not the server
   (`pantry_url` in the install payload). `http://localhost:7721` is unreachable from any other
   machine, which is how this came up. A failure should name the store and the node.
@@ -102,13 +118,15 @@ Four slices. Only the first has a migration and a wire change, so it carries the
 are additive on top of it and can land separately.
 
 1. **The setting and discovery** (`internal/modules/cc/packages.go`, `cmd/jarvisd/main.go`).
-   `pantry.base_url` becomes a list of `{url, name}`, migrating the existing string to one
-   entry named after its host. `PantryBaseURL` becomes a resolution by store with the first
-   entry as the default, and its `defaultPantryBaseURL` fallback goes: an empty list means no
-   store. `/services` keeps `services["jarvis-pantry"]` as the default store's URL and gains a
-   sibling `pantries` array. Wire change: follow the wire-change skill, add contract cases.
-2. **Provenance** (`internal/modules/cc/packages.go`, the node's install record). An install
-   records its store; updates and revert use it; a package whose store is gone keeps running
+   `pantry.base_url` changes from `settings.String` to `settings.JSON`, a list of
+   `{id, url, name}`. The migration converts the system value **and every per-household
+   override** to one entry each, with a fresh id, named after its host. `PantryBaseURL` becomes
+   a resolution by store id with the first entry as the default, and its `defaultPantryBaseURL`
+   fallback goes: an enabled, empty list is an error. `/services` resolves the caller's
+   household, keeps the `jarvis-pantry` entry as the default store's URL and gains a sibling
+   `pantries` array. Wire change: follow the wire-change skill, add contract cases.
+2. **Provenance** (`internal/modules/cc/packages.go`, the server's install record). An install
+   records its store id; a test install too; updates and revert use it; a package whose store is gone keeps running
    with updates unavailable; a name already installed is refused, naming its store.
 3. **The admin** (`web/admin/`). The settings editor for the list, a picker on the Store page
    and on `/admin/nodes/:id/test`, each shown only when more than one store is configured, and
