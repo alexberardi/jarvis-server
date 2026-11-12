@@ -353,6 +353,74 @@ func (s *Service) Rename(ctx context.Context, old, current string) error {
 	return nil
 }
 
+// Convert is Rename for a key whose value changes shape: every row stored under old, at every
+// scope, is passed through conv and stored under current at the same scope, typed as current's
+// definition, and the old rows are dropped. A value already stored under current at a scope
+// wins there. It runs in one transaction and is a no-op once nothing is stored under old. A
+// conv error or a value current's Validate rejects aborts it with nothing changed.
+func (s *Service) Convert(ctx context.Context, old, current string, conv func(raw string) (any, error)) error {
+	if _, ok := s.defs[old]; ok {
+		return fmt.Errorf("settings: convert %s: still a definition", old)
+	}
+	def, ok := s.defs[current]
+	if !ok {
+		return fmt.Errorf("settings: convert to %s: %w", current, ErrUnknownKey)
+	}
+	return s.db.Tx(ctx, func(tx *sql.Tx) error {
+		type row struct {
+			value    sql.NullString
+			hh, node sql.NullString
+			user     sql.NullInt64
+		}
+		rs, err := tx.QueryContext(ctx, "SELECT value, household_id, node_id, user_id FROM "+s.table+" WHERE key = ?", old)
+		if err != nil {
+			return fmt.Errorf("settings: convert %s: %w", old, err)
+		}
+		var rows []row
+		for rs.Next() {
+			var r row
+			if err := rs.Scan(&r.value, &r.hh, &r.node, &r.user); err != nil {
+				rs.Close()
+				return fmt.Errorf("settings: convert %s: %w", old, err)
+			}
+			rows = append(rows, r)
+		}
+		rs.Close()
+		if err := rs.Err(); err != nil {
+			return fmt.Errorf("settings: convert %s: %w", old, err)
+		}
+		for _, r := range rows {
+			if !r.value.Valid || r.value.String == "" {
+				continue // nothing of the user's: the scope falls through the cascade either way
+			}
+			v, err := conv(r.value.String)
+			if err != nil {
+				return fmt.Errorf("settings: convert %s: %w", old, err)
+			}
+			if err := s.Validate(current, v); err != nil {
+				return fmt.Errorf("settings: convert %s: %w", old, err)
+			}
+			ser, err := Serialize(v, def.Type)
+			if err != nil {
+				return fmt.Errorf("settings: convert %s: %w", old, err)
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO `+s.table+` (key, value, value_type, category, description, requires_reload, is_secret,
+				                         env_fallback, household_id, node_id, user_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (key, COALESCE(household_id, ''), COALESCE(node_id, ''), COALESCE(user_id, 0)) DO NOTHING`,
+				current, ser, string(def.Type), def.Category, def.Description, def.RequiresReload, def.IsSecret,
+				nullString(def.EnvFallback), r.hh, r.node, r.user); err != nil {
+				return fmt.Errorf("settings: convert %s: %w", old, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+s.table+" WHERE key = ?", old); err != nil {
+			return fmt.Errorf("settings: convert %s: drop old: %w", old, err)
+		}
+		return nil
+	})
+}
+
 // Forget reads and removes a retired key's stored system-scope value: for a setting that was
 // dropped rather than renamed, where the caller wants to tell the user what it is discarding.
 // The key must not be a current definition, so this cannot clear a live setting.

@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-11 (user)
 
-`cc`'s `pantry.base_url` becomes a **list** of stores instead of one URL. The admin and the
+`cc`'s `pantry.base_url` becomes a **list** of stores instead of one URL, under a new key, `pantry.stores`. The admin and the
 mobile app show a picker, and the store the user picks is the one that action talks to: its
 catalogue is browsed, and its URL is the `pantry_url` the node is given to download from.
 
@@ -118,13 +118,21 @@ Four slices. Only the first has a migration and a wire change, so it carries the
 are additive on top of it and can land separately.
 
 1. **The setting and discovery** (`internal/modules/cc/packages.go`, `cmd/jarvisd/main.go`).
-   `pantry.base_url` changes from `settings.String` to `settings.JSON`, a list of
-   `{id, url, name}`. The migration converts the system value **and every per-household
-   override** to one entry each, with a fresh id, named after its host. `PantryBaseURL` becomes
-   a resolution by store id with the first entry as the default, and its `defaultPantryBaseURL`
-   fallback goes: an enabled, empty list is an error. `/services` resolves the caller's
-   household, keeps the `jarvis-pantry` entry as the default store's URL and gains a sibling
-   `pantries` array. Wire change: follow the wire-change skill, add contract cases.
+   Split in two:
+   - **1a, the setting.** A new `settings.JSON` key, `pantry.stores`, a list of
+     `{id, url, name}`, replaces `pantry.base_url`. The key is new because settings rows keep
+     their own `value_type` when updated, so retyping the old key would leave every stored row
+     read as a string. cc's init converts the old key's rows at **every scope** with
+     `settings.Convert` (the scoped, value-changing sibling of `Rename`), before config syncs
+     `/services`: the public URL keeps the default store's fixed id, any other URL gets a fresh
+     id and its host as its name, and an unusable URL becomes an empty list (13) instead of
+     silently becoming the public Pantry. The `JARVIS_PANTRY_URL` env fallback goes: a JSON
+     list cannot fall back to a bare URL, and nothing sets it. `PantryBaseURL` becomes
+     `PantryStores` plus the default's URL; an enabled, empty list answers **503
+     `pantry_no_store`** on every Pantry route. `/services` reports the first store's URL, or
+     no entry. No wire shape changes.
+   - **1b, discovery.** `/services` gains the sibling `pantries` array. Wire change: follow the
+     wire-change skill, add contract cases.
 2. **Provenance** (`internal/modules/cc/packages.go`, the server's install record). An install
    records its store id; a test install too; updates and revert use it; a package whose store is gone keeps running
    with updates unavailable; a name already installed is refused, naming its store.

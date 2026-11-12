@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -357,20 +358,94 @@ func TestPackageSweepAndSchemaInvalidation(t *testing.T) {
 	}
 }
 
-func TestPantryBaseURL(t *testing.T) {
+// pantry.stores (decision 2026-11-11-several-pantries): the public Pantry by default, a
+// household's own list wins, the first entry is what nodes are handed, and an empty list is
+// no store at all, never the public one.
+func TestPantryStores(t *testing.T) {
 	e := newEnv(t, envOpts{noMQTT: true})
 	ctx := context.Background()
-	if got := e.m.PantryBaseURL(ctx, "hh1"); got != defaultPantryBaseURL {
+	set := func(hh string, v any) error {
+		return e.m.Settings().Set(ctx, settingPantryStores, v, settings.Scope{HouseholdID: hh})
+	}
+	store := func(id, url, name string) map[string]any { return map[string]any{"id": id, "url": url, "name": name} }
+	const id1, id2 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+
+	if got := e.m.PantryStores(ctx, "hh1"); len(got) != 1 ||
+		got[0] != (PantryStore{ID: defaultPantryStoreID, URL: defaultPantryBaseURL, Name: defaultPantryStoreName}) {
 		t.Fatal(got)
 	}
-	if err := e.m.Settings().Set(ctx, settingPantryBaseURL, "http://pantry.lan:7721", settings.Scope{HouseholdID: "hh1"}); err != nil {
+	if err := set("hh1", []any{store(id1, "http://pantry.lan:7721/", "Home"), store(id2, "https://p.example", "Other")}); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.m.PantryBaseURL(ctx, "hh1"); got != "http://pantry.lan:7721" {
-		t.Fatal(got)
+	if got, err := e.m.pantryURL(ctx, "hh1"); err != nil || got != "http://pantry.lan:7721" {
+		t.Fatal(got, err)
 	}
-	if got := e.m.PantryBaseURL(ctx, "hh2"); got != defaultPantryBaseURL {
-		t.Fatal(got)
+	if got, _ := e.m.pantryURL(ctx, "hh2"); got != defaultPantryBaseURL {
+		t.Fatal("hh1's list leaked to hh2:", got)
+	}
+	if err := set("hh1", []any{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.m.pantryURL(ctx, "hh1"); !errors.Is(err, errNoPantryStore) {
+		t.Fatalf("empty list: %q, %v; want errNoPantryStore", got, err)
+	}
+
+	for name, v := range map[string]any{
+		"not a list":    "http://pantry.lan:7721",
+		"no id":         []any{store("", "http://a", "A")},
+		"id not a uuid": []any{store("abc", "http://a", "A")},
+		"duplicate id":  []any{store(id1, "http://a", "A"), store(id1, "http://b", "B")},
+		"no name":       []any{store(id1, "http://a", " ")},
+		"no scheme":     []any{store(id1, "localhost:7721", "A")},
+		"ftp":           []any{store(id1, "ftp://a", "A")},
+		"credentials":   []any{store(id1, "http://u:p@a", "A")},
+	} {
+		if err := set("hh1", v); !errors.Is(err, settings.ErrInvalidValue) {
+			t.Errorf("%s: stored (err %v)", name, err)
+		}
+	}
+}
+
+// The retired pantry.base_url moves to pantry.stores at every scope: the public URL keeps the
+// default store's id, another gets a fresh id and its host as the name, and an unusable value
+// becomes an empty list rather than the public Pantry.
+func TestConvertPantryBaseURL(t *testing.T) {
+	e := newEnv(t, envOpts{noMQTT: true})
+	ctx := context.Background()
+	for hh, v := range map[string]string{"": defaultPantryBaseURL, "hh1": "http://10.0.0.5:7721", "hh2": "localhost:7721"} {
+		var scope any
+		if hh != "" {
+			scope = hh
+		}
+		if _, err := e.d.Write.Exec(`INSERT INTO cc_settings (key, value, value_type, category, household_id)
+			VALUES (?, ?, 'string', 'pantry', ?)`, legacyPantryBaseURL, v, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.m.convertPantryBaseURL(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.m.PantryStores(ctx, ""); len(got) != 1 || got[0].ID != defaultPantryStoreID || got[0].URL != defaultPantryBaseURL {
+		t.Fatal("system:", got)
+	}
+	hh1 := e.m.PantryStores(ctx, "hh1")
+	if len(hh1) != 1 || hh1[0].URL != "http://10.0.0.5:7721" || hh1[0].Name != "10.0.0.5:7721" ||
+		!pantryStoreID.MatchString(hh1[0].ID) || hh1[0].ID == defaultPantryStoreID {
+		t.Fatal("hh1:", hh1)
+	}
+	if got := e.m.PantryStores(ctx, "hh2"); len(got) != 0 {
+		t.Fatal("hh2: an unusable URL became", got)
+	}
+	var left int
+	_ = e.d.Read.QueryRow(`SELECT COUNT(*) FROM cc_settings WHERE key = ?`, legacyPantryBaseURL).Scan(&left)
+	if left != 0 {
+		t.Fatal(left, "legacy rows left")
+	}
+	if err := e.m.convertPantryBaseURL(ctx); err != nil { // the next start: a no-op
+		t.Fatal(err)
+	}
+	if got := e.m.PantryStores(ctx, "hh1"); got[0].ID != hh1[0].ID {
+		t.Fatal("id changed on a second pass")
 	}
 }
 

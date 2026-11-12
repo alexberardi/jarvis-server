@@ -34,6 +34,9 @@ func (m *Module) pantryStoreGate(w http.ResponseWriter, r *http.Request, u authn
 }
 
 func (m *Module) pantryStoreUnavailable(w http.ResponseWriter, err error) {
+	if noPantryStore(w, err) {
+		return
+	}
 	m.deps.Log.Warn("cc: Pantry store read failed", "err", err)
 	detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached right now. Try again later.",
 		pantryUnavailableCode)

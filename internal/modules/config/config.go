@@ -133,7 +133,7 @@ type Module struct {
 	// jarvis-mqtt-broker (scheme mqtt), which nodes resolve the broker URL from.
 	MQTTPort int
 	// External lists registry rows for services jarvisd doesn't serve but clients resolve
-	// through /services, by name → base URL (e.g. jarvis-pantry from cc's pantry.base_url,
+	// through /services, by name → base URL (e.g. jarvis-pantry from cc's pantry.stores,
 	// D48). Synced at startup.
 	External func(ctx context.Context) map[string]string
 

@@ -36,7 +36,8 @@ test.beforeAll(async () => {
   const token = tokenOf('superuser')
   hh = await householdOf(token)
   const url = `http://127.0.0.1:${(pantry.address() as AddressInfo).port}`
-  await must('PUT', `${env('SBX_CC')}/settings/pantry.base_url?household_id=${hh}`, { token, body: { value: url } })
+  const stores = [{ id: 'e2e0e2e0-0000-4000-8000-000000000001', url, name: 'E2E Pantry' }]
+  await must('PUT', `${env('SBX_CC')}/settings/pantry.stores?household_id=${hh}`, { token, body: { value: stores } })
   await must('PUT', `${settingsURL()}/pantry.enabled`, { token, body: { value: true } })
 })
 

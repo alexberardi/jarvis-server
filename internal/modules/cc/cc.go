@@ -317,6 +317,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	m.settings = svc
 	if err := svc.Migrate(context.Background()); err != nil {
 		deps.Log.Error("cc: settings table migration failed", "err", err)
+	} else if err := m.convertPantryBaseURL(context.Background()); err != nil {
+		// Before anything reads pantry.stores: config's /services entry is synced at its start.
+		deps.Log.Error("cc: pantry.base_url conversion failed; it is retried at the next start", "err", err)
 	}
 
 	pub := m.Publisher
