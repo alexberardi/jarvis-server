@@ -211,7 +211,8 @@ func TestFiresThroughQueue(t *testing.T) {
 		return nil, err
 	}})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// The worker may still be recording the job's result; let it stop before TempDir cleanup.
+	defer func() { cancel(); f.q.Wait() }()
 	f.q.Start(ctx)
 	f.s.Put(ctx, Trigger{Name: "hello", Kind: KindOnce, Spec: Spec{At: time.Now()}, JobType: "hello"})
 	f.run(t)

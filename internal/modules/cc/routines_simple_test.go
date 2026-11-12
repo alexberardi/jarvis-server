@@ -90,12 +90,14 @@ func TestSimpleRoutineUnattendedOutcomes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ce := newChatEnv(t, prompts.Qwen3_5_9B)
-			old := routineWait
+			old, oldTool := routineWait, chatToolWait
 			routineWait = time.Second
 			if tc.timeout {
-				routineWait = 100 * time.Millisecond
+				// The node's wait times out, not the whole run: that wait starts only after
+				// the tool call is sent, so a slow runner can't lose the call.
+				routineWait, chatToolWait = time.Minute, 10*time.Millisecond
 			}
-			t.Cleanup(func() { routineWait = old })
+			t.Cleanup(func() { routineWait, chatToolWait = old, oldTool })
 			caps, _ := json.Marshal(map[string]bool{"simple_routines": tc.capable})
 			if _, err := ce.d.Write.Exec(`UPDATE cc_nodes SET capabilities=? WHERE node_id=?`, string(caps), ce.node.id); err != nil {
 				t.Fatal(err)
