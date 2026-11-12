@@ -37,6 +37,15 @@ const anthropicDefaultMaxTokens = 4096
 // OpenAI-shaped history can't carry: not supported.
 var alwaysThinkingModels = []string{"fable", "mythos"}
 
+// betweenToolsModels reject {"type":"disabled"} with a 400 and turn thinking off with
+// {"type":"between_tools"} instead (Claude Sonnet 5.5; accepted at effort high or below, and
+// the request sends no effort, so the default high applies).
+var betweenToolsModels = []string{"sonnet-5-5"}
+
+// noForcedToolModels reject a forced tool_choice ({"type":"any"} or a named tool) with a 400;
+// a forced choice goes to them as auto, the closest they take.
+var noForcedToolModels = []string{"sonnet-5-5", "opus-5-5", "fable-5-1", "fable-5-2", "mythos-5-1", "mythos-5-2"}
+
 // anthropicRequest is the POST /v1/messages body.
 type anthropicRequest struct {
 	Model      string             `json:"model"`
@@ -99,7 +108,11 @@ func anthropicBody(p *chatPayload) (*anthropicRequest, error) {
 	if p.MaxTokens != nil && *p.MaxTokens > 0 {
 		r.MaxTokens = *p.MaxTokens
 	}
-	if !alwaysThinks(p.Model) {
+	switch {
+	case modelIn(p.Model, alwaysThinkingModels):
+	case modelIn(p.Model, betweenToolsModels):
+		r.Thinking = &anthropicThinking{Type: "between_tools"}
+	default:
 		// Omitted, Claude 5 models think adaptively, and thinking blocks would then have to be
 		// replayed on the tool-result round trip.
 		r.Thinking = &anthropicThinking{Type: "disabled"}
@@ -107,13 +120,25 @@ func anthropicBody(p *chatPayload) (*anthropicRequest, error) {
 	if len(p.Tools) > 0 {
 		r.Tools = anthropicTools(p.Tools)
 		r.ToolChoice = anthropicToolChoice(p.ToolChoice)
+		if modelIn(p.Model, noForcedToolModels) && forced(r.ToolChoice) {
+			r.ToolChoice = json.RawMessage(`{"type":"auto"}`)
+		}
 	}
 	return r, nil
 }
 
-func alwaysThinks(model string) bool {
+// modelIn reports whether a model id contains one of the names, ignoring case.
+func modelIn(model string, names []string) bool {
 	m := strings.ToLower(model)
-	return slices.ContainsFunc(alwaysThinkingModels, func(s string) bool { return strings.Contains(m, s) })
+	return slices.ContainsFunc(names, func(s string) bool { return strings.Contains(m, s) })
+}
+
+// forced reports whether a translated tool_choice forces a tool call (any, or a named tool).
+func forced(choice json.RawMessage) bool {
+	var o struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(choice, &o) == nil && (o.Type == "any" || o.Type == "tool")
 }
 
 // anthropicMessages splits OpenAI messages into the system text and Messages turns.
