@@ -110,6 +110,13 @@ func modules(env config.Env) []module.Module {
 		}
 		return nil
 	}
+	cfgm.Pantries = func(ctx context.Context) []map[string]string {
+		var out []map[string]string
+		for _, s := range cc.PantryStores(ctx, "") {
+			out = append(out, map[string]string{"id": s.ID, "url": s.URL, "name": s.Name})
+		}
+		return out
+	}
 
 	logs.Auth = auth
 	logs.SettingsRead = settingsRead()

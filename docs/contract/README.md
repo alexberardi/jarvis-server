@@ -114,7 +114,7 @@ then a login as that user and `DELETE /auth/me`.
 |---|---|---|
 | Health | `TestHealth/*`, `TestLogsPing` | `GET /health` on all 10 listeners: status, body shape, and the identity literals (`service`, `status` values). Logs `GET /ping`. |
 | Discovery | `TestConfigInfo` | `GET /info` == `{"service":"jarvis-config-service"}` (mobile LAN probe) |
-| | `TestConfigServices` | `GET /services` (ServiceResponse key set). The core names are present. `style=external&remote_host=H` rewrites to H, and the advertised auth and CC URLs actually answer `/health`. `style=dockerized` uses `host.docker.internal`. An unknown style is 422, which mobile's fallback relies on. |
+| | `TestConfigServices` | `GET /services` (ServiceResponse key set; jarvisd adds an optional `pantries` array of `{id, url, name}`, decision 2026-11-11-several-pantries). The core names are present. `style=external&remote_host=H` rewrites to H, and the advertised auth and CC URLs actually answer `/health`. `style=dockerized` uses `host.docker.internal`. An unknown style is 422, which mobile's fallback relies on. |
 | | `TestConfigServiceByName` | `GET /services/{name}` shape, and the 404 detail `Service '<name>' not found` |
 | App-to-app | `TestAuthAppPing` | 200 `{app_id,name}`. 401 `Missing app credentials` / `Invalid app credentials` for wrong key, unknown app or revoked app. |
 | Node validation | `TestAuthValidateNode` | 200 valid with `household_member_ids`. 200 `valid:false` with the exact reasons: `Invalid node credentials`, `Node not found`, `Node is inactive`, and `Node is not authorized to access service '<id>'`. 401 without app credentials; 422 on missing fields. |
