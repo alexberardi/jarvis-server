@@ -39,8 +39,19 @@ const (
 )
 
 const (
-	settingPantryBaseURL = "pantry.base_url"
+	// settingPantryStores is the household's Pantry stores, in preference order (decision
+	// 2026-11-11-several-pantries): a JSON list of {id, url, name}; the first is the default.
+	settingPantryStores = "pantry.stores"
+	// legacyPantryBaseURL is the single-URL setting pantry.stores replaced; convertPantryBaseURL
+	// moves its rows at start.
+	legacyPantryBaseURL  = "pantry.base_url"
 	defaultPantryBaseURL = "https://pantry-api.jarvisautomation.io"
+	// defaultPantryStoreID is the public Pantry's id in the default list: fixed, so an install
+	// recorded against the default keeps resolving after the list is first saved.
+	defaultPantryStoreID   = "6f1d3c2a-8b4e-4f7a-9c5d-2e8a1b0f4d6c"
+	defaultPantryStoreName = "Public Pantry"
+	pantryStoreNameMax     = 64
+	pantryStoresMax        = 16
 	// settingPantryEnabled is the household's privacy switch for the Pantry (default off).
 	settingPantryEnabled = "pantry.enabled"
 	// settingPantryDefaultBundle is the household's default bundle: the packages the admin Store
@@ -63,13 +74,15 @@ const pantryDisabledDetail = "The Pantry package store is turned off for this ho
 // from the node, not just from jarvisd.
 func packageDefinitions() []settings.Definition {
 	return []settings.Definition{
-		{Key: settingPantryBaseURL, Category: "pantry", Type: settings.String, Default: defaultPantryBaseURL,
-			EnvFallback: "JARVIS_PANTRY_URL",
-			Description: "Base URL of the Pantry package store (the public Pantry by default; point it at a " +
-				"private Pantry to install from there). Nodes must be able to reach it."},
+		{Key: settingPantryStores, Category: "pantry", Type: settings.JSON,
+			Default:  []any{map[string]any{"id": defaultPantryStoreID, "url": defaultPantryBaseURL, "name": defaultPantryStoreName}},
+			Validate: validatePantryStores,
+			Description: "The Pantry package stores, in preference order: a list of {id, url, name}. The first is " +
+				"the default for anything that doesn't pick one. Every node must be able to reach every URL, " +
+				"because nodes download from the store directly. Pantry on with an empty list is a config error."},
 		{Key: settingPantryEnabled, Category: "pantry", Type: settings.Bool, Default: false,
 			Description: "The household may use the Pantry package store. When on, the app, nodes and jarvisd " +
-				"contact the Pantry (pantry.base_url) to browse, download and verify packages. Default OFF: " +
+				"contact the Pantry (pantry.stores) to browse, download and verify packages. Default OFF: " +
 				"package installs and Forge test installs are refused (403, code pantry_disabled) until a " +
 				"household admin turns it on; uninstalling what's already installed keeps working."},
 		{Key: settingPantryDefaultBundle, Category: "pantry", Type: settings.String, Default: "",
@@ -99,16 +112,121 @@ func (m *Module) requirePantry(w http.ResponseWriter, r *http.Request, household
 	return false
 }
 
-// PantryBaseURL is the household's Pantry (D39, D48: consumed by the jarvis-pantry entry in
-// /services and anything handed to nodes).
-func (m *Module) PantryBaseURL(ctx context.Context, householdID string) string {
+// PantryStore is one entry of pantry.stores. ID is the store's identity: installs record it,
+// and editing the entry's URL or name keeps it.
+type PantryStore struct {
+	ID   string `json:"id"`
+	URL  string `json:"url"`
+	Name string `json:"name"`
+}
+
+// noPantryStoreCode marks a household with the Pantry on and no store configured.
+const noPantryStoreCode = "pantry_no_store"
+
+// errNoPantryStore: the Pantry is on but pantry.stores is empty, an invalid config that every
+// Pantry action reports rather than falling back to the public Pantry.
+var errNoPantryStore = fail(http.StatusServiceUnavailable, noPantryStoreDetail)
+
+const noPantryStoreDetail = "No Pantry store is configured. A household admin can add one in the Pantry settings."
+
+var pantryStoreID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// parsePantryStores decodes a pantry.stores value (as settings coerces JSON).
+func parsePantryStores(v any) ([]PantryStore, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out []PantryStore
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, errors.New("use a list of stores, each {id, url, name}")
+	}
+	return out, nil
+}
+
+func validatePantryStores(v any) error {
+	stores, err := parsePantryStores(v)
+	if err != nil {
+		return err
+	}
+	if len(stores) > pantryStoresMax {
+		return fmt.Errorf("at most %d stores", pantryStoresMax)
+	}
+	seen := map[string]bool{}
+	for _, st := range stores {
+		if !pantryStoreID.MatchString(st.ID) || seen[st.ID] {
+			return fmt.Errorf("store %q needs its own id", st.Name)
+		}
+		seen[st.ID] = true
+		if n := strings.TrimSpace(st.Name); n == "" || len([]rune(n)) > pantryStoreNameMax {
+			return fmt.Errorf("each store needs a name of at most %d characters", pantryStoreNameMax)
+		}
+		if u, err := url.Parse(st.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("store %q needs an http or https URL, such as http://10.0.0.5:7721", st.Name)
+		}
+	}
+	return nil
+}
+
+// PantryStores is the household's stores in preference order; empty when none are configured.
+func (m *Module) PantryStores(ctx context.Context, householdID string) []PantryStore {
 	if m.settings == nil {
-		return defaultPantryBaseURL
+		return nil
 	}
-	if v := m.settings.String(ctx, settingPantryBaseURL, settings.Scope{HouseholdID: householdID}); v != "" {
-		return v
+	v, err := m.settings.Get(ctx, settingPantryStores, settings.Scope{HouseholdID: householdID})
+	if err != nil {
+		m.deps.Log.Error("cc: pantry.stores read failed", "err", err)
+		return nil
 	}
-	return defaultPantryBaseURL
+	stores, err := parsePantryStores(v.Value)
+	if err != nil {
+		m.deps.Log.Error("cc: pantry.stores is malformed", "household_id", householdID, "err", err)
+		return nil
+	}
+	return stores
+}
+
+// noPantryStore writes errNoPantryStore's 503 with its code and reports whether err was it.
+func noPantryStore(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, errNoPantryStore) {
+		return false
+	}
+	detailCode(w, http.StatusServiceUnavailable, noPantryStoreDetail, noPantryStoreCode)
+	return true
+}
+
+// pantryURL is the household's default store's base URL (D39, D48: what nodes are handed), or
+// errNoPantryStore.
+func (m *Module) pantryURL(ctx context.Context, householdID string) (string, error) {
+	stores := m.PantryStores(ctx, householdID)
+	if len(stores) == 0 {
+		return "", errNoPantryStore
+	}
+	return strings.TrimRight(stores[0].URL, "/"), nil
+}
+
+// convertPantryBaseURL moves the retired pantry.base_url, at every scope, to a one-entry
+// pantry.stores named after its host, with a fresh id.
+func (m *Module) convertPantryBaseURL(ctx context.Context) error {
+	return m.settings.Convert(ctx, legacyPantryBaseURL, settingPantryStores, func(raw string) (any, error) {
+		raw = strings.TrimSpace(raw)
+		if validatePantryStores([]any{map[string]any{"id": defaultPantryStoreID, "url": raw, "name": "x"}}) != nil {
+			// Never silently swap in the public Pantry: no store makes the household's Pantry
+			// actions say so until an admin fixes the list.
+			m.deps.Log.Warn("cc: pantry.base_url is not a usable URL; pantry.stores starts empty", "was", raw)
+			return []any{}, nil
+		}
+		id := uuid4()
+		if raw == defaultPantryBaseURL {
+			id = defaultPantryStoreID
+		}
+		name := defaultPantryStoreName
+		if u, err := url.Parse(raw); err == nil && u.Host != "" && raw != defaultPantryBaseURL {
+			name = u.Host
+		}
+		return []any{map[string]any{"id": id, "url": raw, "name": name}}, nil
+	})
 }
 
 // notForComputersCode marks an install a computer can't run; the app leaves computers out of
@@ -142,7 +260,11 @@ type pantryCommand struct {
 func (m *Module) pantryGet(ctx context.Context, householdID, path string, v any) error {
 	ctx, cancel := context.WithTimeout(ctx, pantryDraftTimeout)
 	defer cancel()
-	u := strings.TrimRight(m.PantryBaseURL(ctx, householdID), "/") + path
+	base, err := m.pantryURL(ctx, householdID)
+	if err != nil {
+		return err
+	}
+	u := base + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
@@ -214,6 +336,9 @@ func isCommitSHA(s string) bool {
 // when the install can't go ahead.
 func (m *Module) pinDesktopInstall(ctx context.Context, w http.ResponseWriter, hh, name, repo string, tag *string) (string, *string, bool) {
 	unavailable := func(err error) (string, *string, bool) {
+		if noPantryStore(w, err) {
+			return "", nil, false
+		}
 		m.deps.Log.Warn("cc: Pantry can't vouch for a desktop install; refused", "command", name, "err", err)
 		detailCode(w, http.StatusServiceUnavailable, "The Pantry package store can't be reached to check "+name+
 			", so it can't be installed on a computer right now. Try again later.", pantryUnavailableCode)
@@ -550,11 +675,16 @@ func (m *Module) handleRequestInstall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pantry, err := m.pantryURL(r.Context(), p.householdID) // createPkg checked there is one
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
 	// The node ignores the repo info here and installs only what verify returns; it is kept
 	// for wire parity (D40 12.Q12). On a computer both are Pantry's (pinDesktopInstall).
 	m.publishPkg(p.nodeID, opInstall, map[string]any{
 		"request_id": p.id, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
-		"pantry_url": m.PantryBaseURL(r.Context(), p.householdID),
+		"pantry_url": pantry,
 	})
 	writeCreated(w, p)
 }
@@ -648,6 +778,9 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	if needsPantry && !m.requirePantry(w, r, hh) {
 		return nil, false
 	}
+	if _, err := m.pantryURL(ctx, hh); needsPantry && noPantryStore(w, err) {
+		return nil, false
+	}
 	if needsPantry && node.desktop() {
 		if repo, tag, ok = m.pinDesktopInstall(ctx, w, hh, name, repo, tag); !ok {
 			return nil, false
@@ -708,9 +841,14 @@ func (m *Module) handleVerifyPackage(w http.ResponseWriter, r *http.Request, n *
 		detail(w, out.status, out.detail)
 		return
 	}
+	pantry, err := m.pantryURL(r.Context(), p.householdID)
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"confirmed": true, "command_name": p.commandName, "github_repo_url": p.repoURL, "git_tag": nullable(p.gitTag),
-		"pantry_url": m.PantryBaseURL(r.Context(), p.householdID), // additive (D48): the household's Pantry
+		"pantry_url": pantry, // additive (D48): the household's default Pantry store
 	})
 }
 

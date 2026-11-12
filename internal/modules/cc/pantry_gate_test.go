@@ -118,3 +118,31 @@ func TestPantryGateRefusesWhenOff(t *testing.T) {
 	e.createNode("n3", "hh2")
 	wantOff(e.do("POST", "/api/v0/nodes/n3/package-install", install, bearer(stranger)))
 }
+
+// Pantry on with an empty pantry.stores is a config error that every Pantry action reports
+// (pantry_no_store), with nothing published, no row written and no fallback to the public Pantry.
+func TestPantryNoStoreRefuses(t *testing.T) {
+	e := newEnv(t)
+	enablePantry(t, e, "hh1", true)
+	if err := e.m.Settings().Set(context.Background(), settingPantryStores, []any{}, settings.Scope{HouseholdID: "hh1"}); err != nil {
+		t.Fatal(err)
+	}
+	member := e.auth.addUser(1, "hh1", authn.RoleMember)
+	e.createNode("n1", "hh1")
+	const want = `{"code":"` + noPantryStoreCode + `","detail":"` + noPantryStoreDetail + `"}`
+	for _, r := range []*resp{
+		e.do("POST", "/api/v0/nodes/n1/package-install",
+			map[string]any{"command_name": "weather", "github_repo_url": "https://example.com/r.git"}, bearer(member)),
+		e.do("POST", "/api/v0/nodes/n1/test-install", map[string]any{"share_code": "ABC123"}, bearer(member)),
+		e.do("GET", "/api/v0/households/hh1/pantry/commands", nil, bearer(member)),
+	} {
+		if got := string(bytes.TrimSpace(r.body)); r.status != 503 || got != want {
+			t.Errorf("%d %s", r.status, got)
+		}
+	}
+	var rows int
+	_ = e.d.Read.QueryRow(`SELECT (SELECT COUNT(*) FROM cc_package_install_requests) + (SELECT COUNT(*) FROM cc_test_install_requests)`).Scan(&rows)
+	if rows != 0 {
+		t.Fatal(rows, "requests written")
+	}
+}

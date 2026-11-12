@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -394,4 +395,97 @@ func TestNilServiceString(t *testing.T) {
 	if got := s.String(context.Background(), "memory.enabled", Scope{}); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
+}
+
+// Convert carries a retired key to a new key of another type at every scope, so a setting can
+// change shape without resetting what the system or a household chose.
+func TestConvert(t *testing.T) {
+	ctx := context.Background()
+	const old, current = "llm.old_automations", "signals.automations"
+	wrap := func(raw string) (any, error) { return map[string]any{"was": raw}, nil }
+	insertOld := func(s *Service, hh any, v string) {
+		t.Helper()
+		if _, err := s.db.Write.Exec("INSERT INTO "+s.table+" (key, value, value_type, category, household_id) VALUES (?, ?, 'string', 'x', ?)",
+			old, v, hh); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldRows := func(s *Service) int {
+		t.Helper()
+		var n int
+		if err := s.db.Read.QueryRow("SELECT COUNT(*) FROM "+s.table+" WHERE key = ?", old).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	t.Run("converts every scope and drops the old rows", func(t *testing.T) {
+		s := newService(t, nil)
+		insertOld(s, nil, "sys")
+		insertOld(s, "hh1", "own")
+		insertOld(s, "hh2", "")
+		if err := s.Convert(ctx, old, current, wrap); err != nil {
+			t.Fatal(err)
+		}
+		for sc, want := range map[Scope]any{{}: "sys", {HouseholdID: "hh1"}: "own"} {
+			v, found, err := s.GetExact(ctx, current, sc)
+			if err != nil || !found || v.(map[string]any)["was"] != want {
+				t.Errorf("scope %+v: got %v found=%v err=%v, want was=%v", sc, v, found, err, want)
+			}
+		}
+		if _, found, _ := s.GetExact(ctx, current, Scope{HouseholdID: "hh2"}); found {
+			t.Error("an empty old value became a household row")
+		}
+		if n := oldRows(s); n != 0 {
+			t.Errorf("%d old rows left", n)
+		}
+		if err := s.Convert(ctx, old, current, wrap); err != nil { // idempotent
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("a value already under the current key wins", func(t *testing.T) {
+		s := newService(t, nil)
+		if err := s.Set(ctx, current, map[string]any{"kept": true}, Scope{HouseholdID: "hh1"}); err != nil {
+			t.Fatal(err)
+		}
+		insertOld(s, "hh1", "own")
+		if err := s.Convert(ctx, old, current, wrap); err != nil {
+			t.Fatal(err)
+		}
+		if v, _, _ := s.GetExact(ctx, current, Scope{HouseholdID: "hh1"}); v.(map[string]any)["kept"] != true {
+			t.Errorf("got %v, want the value already set", v)
+		}
+	})
+
+	t.Run("a conv error changes nothing", func(t *testing.T) {
+		s := newService(t, nil)
+		insertOld(s, nil, "sys")
+		insertOld(s, "hh1", "bad")
+		err := s.Convert(ctx, old, current, func(raw string) (any, error) {
+			if raw == "bad" {
+				return nil, errors.New("unconvertible")
+			}
+			return wrap(raw)
+		})
+		if err == nil {
+			t.Fatal("no error")
+		}
+		if _, found, _ := s.GetExact(ctx, current, Scope{}); found {
+			t.Error("a partial conversion was kept")
+		}
+		if n := oldRows(s); n != 2 {
+			t.Errorf("%d old rows, want both kept", n)
+		}
+	})
+
+	t.Run("refuses a live or unknown key", func(t *testing.T) {
+		s := newService(t, nil)
+		if err := s.Convert(ctx, "memory.enabled", current, wrap); err == nil {
+			t.Error("converted away a current definition")
+		}
+		if err := s.Convert(ctx, old, "no.such.key", wrap); err == nil {
+			t.Error("converted onto an unknown key")
+		}
+	})
 }

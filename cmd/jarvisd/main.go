@@ -103,8 +103,12 @@ func modules(env config.Env) []module.Module {
 	cfgm.SettingsGuard = superuser
 	cfgm.MQTTPort = doctor.PortOf(env.MQTTAddr)
 	cfgm.External = func(ctx context.Context) map[string]string {
-		// The system-level Pantry; households can override it for their own installs.
-		return map[string]string{"jarvis-pantry": cc.PantryBaseURL(ctx, "")}
+		// The system-level default Pantry store; households can have their own list. None
+		// configured publishes no entry (decision 2026-11-11-several-pantries, 9).
+		if stores := cc.PantryStores(ctx, ""); len(stores) > 0 {
+			return map[string]string{"jarvis-pantry": stores[0].URL}
+		}
+		return nil
 	}
 
 	logs.Auth = auth

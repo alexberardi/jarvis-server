@@ -54,7 +54,9 @@ function PrivacyForm({ services, onDone }: { services: ServiceSettingsResult[]; 
     }
   }
 
-  const pantry = settingValue(services, 'cc', 'pantry.base_url')
+  // pantry.stores: a list of {id, url, name}; the first is the default store.
+  const stores = settingValue(services, 'cc', 'pantry.stores')
+  const pantry = Array.isArray(stores) ? (stores[0] as { url?: unknown } | undefined)?.url : undefined
   const hf = settingValue(services, 'llm', 'llm.hf_endpoint')
 
   const unavailable = ' (Not available in this jarvisd version.)'

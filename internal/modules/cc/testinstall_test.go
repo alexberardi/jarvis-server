@@ -96,7 +96,8 @@ func (p *fakePantry) lastAsked() string {
 // defaults to off; pantry_gate_test.go covers the off case).
 func setPantry(t *testing.T, e *env, hh, url string) {
 	t.Helper()
-	if err := e.m.Settings().Set(context.Background(), settingPantryBaseURL, url, settings.Scope{HouseholdID: hh}); err != nil {
+	if err := e.m.Settings().Set(context.Background(), settingPantryStores,
+		[]any{map[string]any{"id": uuid4(), "url": url, "name": "Test Pantry"}}, settings.Scope{HouseholdID: hh}); err != nil {
 		t.Fatal(err)
 	}
 	enablePantry(t, e, hh, true)
@@ -344,8 +345,7 @@ func TestTestInstallPantryErrors(t *testing.T) {
 	l.Close()
 	setPantry(t, e, "hh1", dead)
 	post("ABC123").detail(502, "Could not reach Pantry service")
-	setPantry(t, e, "hh1", "::not a url")
-	post("ABC123").detail(502, "Could not reach Pantry service")
+	// A malformed URL can't be stored any more: pantry.stores validates it (TestPantryStores).
 
 	if got := count(); got != 1 {
 		t.Fatalf("%d rows; only the successful create may insert one", got)

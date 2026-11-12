@@ -343,7 +343,7 @@ func TestSelfRegistrationDropsUnservedRows(t *testing.T) {
 	}
 }
 
-// D48: the Pantry clients install from is listed in /services from cc's pantry.base_url.
+// D48: the Pantry clients install from is listed in /services from cc's pantry.stores.
 func TestExternalServices(t *testing.T) {
 	m, h := setup(t)
 	url := "https://pantry.example.org"

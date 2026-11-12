@@ -181,7 +181,12 @@ func (m *Module) handleRequestTestInstall(w http.ResponseWriter, r *http.Request
 		detail(w, http.StatusBadRequest, "Invalid share code")
 		return
 	}
-	pkgName, err := m.fetchDraftPackage(ctx, pantryDraftURL(m.PantryBaseURL(ctx, hh), code))
+	pantry, err := m.pantryURL(ctx, hh)
+	if err != nil {
+		noPantryStore(w, err)
+		return
+	}
+	pkgName, err := m.fetchDraftPackage(ctx, pantryDraftURL(pantry, code))
 	if err != nil {
 		m.writeErr(w, err)
 		return
@@ -238,10 +243,15 @@ func (m *Module) handleVerifyTestInstall(w http.ResponseWriter, r *http.Request,
 		detail(w, out.status, out.detail)
 		return
 	}
+	pantry, err := m.pantryURL(r.Context(), t.householdID)
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"confirmed":           true,
 		"package_name":        t.packageName,
-		"pantry_download_url": pantryDraftURL(m.PantryBaseURL(r.Context(), t.householdID), t.shareCode),
+		"pantry_download_url": pantryDraftURL(pantry, t.shareCode),
 	})
 }
 

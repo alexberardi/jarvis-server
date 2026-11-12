@@ -63,7 +63,7 @@ There is no `/package-uninstall/{id}/verify` or `/package-revert/{id}/verify`. A
 
 The admin Store page (`/admin/store`, decision `2026-10-30-admin-store-page`) installs through §2.1's
 per-node routes, reached from the admin gateway at the superuser tier. It reads the household's
-Pantry through cc, so the household's `pantry.base_url` and `pantry.enabled` apply:
+Pantry through cc, so the household's `pantry.stores` and `pantry.enabled` apply:
 
 | Method + path | Auth | Answer |
 |---|---|---|
@@ -342,7 +342,8 @@ Both of the first two caches are per-process.
 
 ## 5. Settings
 
-jarvisd: `pantry.base_url`, `pantry.enabled` and `pantry.default_bundle` (household-controllable, a
+jarvisd: `pantry.stores` (a JSON list of `{id, url, name}`, first is the default; replaced `pantry.base_url`
+in decision 2026-11-11-several-pantries), `pantry.enabled` and `pantry.default_bundle` (household-controllable, a
 comma-separated list of Pantry package names the admin Store offers together; nothing installs on
 its own). Legacy: none. No settings-DB keys are read. The hard-coded constants a port must reproduce:
 
@@ -539,7 +540,7 @@ The same hook mechanism lets `node-tool-reports` complete a channel instead of w
 - Keep the `{name}_display` injection placement (invariant 10).
 - 422 bodies: the revert "name required" error has a string `detail`, and missing-field errors must match FastAPI's validation shape (shared contract-test helper, doc 00).
 
-**Pantry.** The only outbound Pantry call is test install's share-code check, `GET {pantry.base_url}/v1/forge/drafts/{code}` (10 s). The `pantry.base_url` setting (D39) defaults to the public Pantry URL and must be reachable from the node, which downloads the draft from the same URL.
+**Pantry.** The only outbound Pantry call is test install's share-code check, `GET {store url}/v1/forge/drafts/{code}` (10 s), against the household's default `pantry.stores` entry. The setting (D39, `pantry.base_url` until 2026-11-11) defaults to the public Pantry URL and must be reachable from the node, which downloads the draft from the same URL.
 
 **`pantry.enabled` (privacy, 2026-10-09; jarvisd-only).** A household-scoped bool, category `pantry`, default **false**, in the mobile household-settings allowlist (doc 13 §3.7; household admin writes, any member reads) and the admin setup wizard's privacy step. It says whether the household may use the Pantry at all. While it is off for the node's household (a household-less node reads the system row), the two routes that make a node or jarvisd contact the Pantry refuse with **403** `{"detail": "The Pantry package store is turned off for this household. A household admin can turn it on in the household's privacy settings.", "code": "pantry_disabled"}`:
 
