@@ -50,6 +50,8 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer) error {
 		return downCmd(args[1:], stdout)
 	case len(args) > 0 && args[0] == userInputCmd:
 		return userInput(ctx)
+	case len(args) > 0 && args[0] == userMouseCmd:
+		return userMouse(ctx)
 	}
 	return errors.New("usage: ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted|cloud] [--label live|background] [--include-pending] [--out DIR] [--keep]\n       ccsuite down --run DIR")
 }

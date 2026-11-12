@@ -1,0 +1,44 @@
+{
+  "name": "takeover_x11",
+  "about": "The user takes the mouse while a desktop task runs (the pointer moved 60 px from another process, as their first action begins): the task pauses within one action, the phone's Paused card is answered Continue, and the task finishes. Task 7 of PLAN-computer-use.md.",
+  "phase": "desktop-x11",
+  "status": "required",
+  "say": "In the Jarvis Test Notes app, make a new note titled Groceries with milk, eggs and bread in it, and save it.",
+  "target": "desktop",
+  "setup": {
+    "login": [],
+    "notes_layout": "default"
+  },
+  "answers": [
+    {
+      "when": "plan",
+      "tap": "approve"
+    },
+    {
+      "when": "confirm",
+      "tap": "approve"
+    }
+  ],
+  "interrupt": {
+    "do": "user_mouse",
+    "after_actions": 1
+  },
+  "checks": [
+    {
+      "kind": "paused"
+    },
+    {
+      "kind": "asked",
+      "pattern": "(?i)paused"
+    },
+    {
+      "kind": "note_exists",
+      "title": "Groceries",
+      "body": "eggs"
+    },
+    {
+      "kind": "indicator"
+    }
+  ],
+  "max_minutes": 10
+}

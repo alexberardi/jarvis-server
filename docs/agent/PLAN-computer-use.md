@@ -101,6 +101,21 @@ the home network that the server's fetch can't reach (and refuses: private hosts
 is, and a summary over half its material's length is sent back once with the counts. The case
 reads the saved `.odt`: key facts of a made-up town (so not from memory), at most 350 words.
 
+Task 7 as built: the suite watches every desktop case (the agent's status every 50 ms, its
+actions from the log) and can step in once the task's Nth action begins. `stop_midtask_x11`,
+`stop_midtask_wlroots` and `takeover_x11` are required, **3/3 each on Sonnet 5.5**: the stop
+cuts the batch in flight (`error_code=stopped`), no note is saved, the island clears and the
+phone says "Errand stopped"; a hand on the mouse pauses the task about 60 ms later, the Paused
+card's Continue resumes it, and the note is saved. The island's controlling and paused states
+render (`scripts/desktop-shot`). No product change was needed. Known gaps, for task 8:
+- **Keyboard-only take-over mid-batch is not seen**: the guard counts HID activity within 500 ms
+  of Jarvis's own input as Jarvis's, and a batch's actions come every ~250 ms. The pointer's
+  drift is what catches a hand on the mouse.
+- **sway can't see the pointer** (no cursor IPC), so on sway a mouse take-over mid-batch is also
+  missed (`takeover_wlroots`, pending). Hyprland reports it (`hyprctl cursorpos`): to confirm live.
+- **The stop hotkey on Hyprland** needs a bind in hyprland.conf (no GlobalShortcuts portal; the
+  agent logs the line to add): `bind = CTRL ALT, Escape, exec, jarvis-agent computer stop`.
+
 ### 3. A canvas fixture app (no accessibility tree)
 
 `tools/ccsites/canvasapp`: a small desktop app that draws its UI itself (buttons, a text field, a

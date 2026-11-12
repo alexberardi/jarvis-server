@@ -92,6 +92,13 @@ func fixtureState(t *testing.T) State {
 func TestChecks(t *testing.T) {
 	st := fixtureState(t)
 	empty := State{}
+	t0 := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	// The stop case: one action, the stop, the indicator off. The take-over case: paused at once.
+	stopped := State{Watch: &Watch{Interrupt: "stop", Interrupted: at(3), Actions: []time.Time{at(2)},
+		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(3), "idle"}}}}
+	paused := State{Watch: &Watch{Interrupt: "user_input", Interrupted: at(3), Actions: []time.Time{at(2), at(9)},
+		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(4), "paused: New note"}, {at(8), "controlling: Save"}}}}
 	tests := []struct {
 		name  string
 		check Check
@@ -113,6 +120,14 @@ func TestChecks(t *testing.T) {
 		{"document_has missing term", Check{Kind: "document_has", File: "Velmora.odt", Contains: []string{"Tessaly"}}, &st, `Velmora.odt has not all of ["Tessaly"]`},
 		{"document_has too long", Check{Kind: "document_has", File: "Velmora.odt", MaxWords: 10}, &st, "has 15 words, more than 10: not a summary"},
 		{"document_has no file", Check{Kind: "document_has", File: "Atlantis.odt"}, &st, "no file in ~/Documents matching Atlantis.odt"},
+		{"no_note", Check{Kind: "no_note"}, &empty, ""},
+		{"no_note fails", Check{Kind: "no_note"}, &st, "a note was saved: Groceries"},
+		{"stopped", Check{Kind: "stopped"}, &stopped, ""},
+		{"stopped, an action after", Check{Kind: "stopped"}, &paused, "1 actions landed after the stop"},
+		{"paused", Check{Kind: "paused"}, &paused, ""},
+		{"paused never", Check{Kind: "paused"}, &stopped, "never showed paused"},
+		{"indicator", Check{Kind: "indicator"}, &stopped, ""},
+		{"indicator left on", Check{Kind: "indicator"}, &paused, `still shows "controlling: Save"`},
 		{"spreadsheet_has xlsx", Check{Kind: "spreadsheet_has", Contains: []string{"dining", "Groceries", "Travel", "312.5"}}, &st, ""},
 		{"spreadsheet_has csv by glob", Check{Kind: "spreadsheet_has", File: "*.csv", Contains: []string{"Utilities"}}, &st, ""},
 		{"spreadsheet_has glob excludes", Check{Kind: "spreadsheet_has", File: "*.csv", Contains: []string{"Dining"}}, &st, "(files: spending-2026-09.csv)"},

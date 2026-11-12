@@ -297,6 +297,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	offset := fileSize(llmLog)
 	defer func() { r.Rounds = copyLines(llmLog, offset, filepath.Join(dir, "llm.jsonl")) }()
 
+	stopWatch := e.Watch(ctx, c.Interrupt) // ctx: it outlives the errand, to see how the indicator is left
+	defer stopWatch()
+
 	// Say it, from the seeded user to the agent node, as the app's chat does.
 	var (
 		mu      sync.Mutex
@@ -325,8 +328,11 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		}
 	}
 
+	watch := stopWatch()
+
 	// The state, from the fixtures themselves.
 	st, err := e.gather(ctx, cards)
+	st.Watch = watch
 	mu.Lock()
 	st.Replies = append(replies, st.Replies...)
 	mu.Unlock()

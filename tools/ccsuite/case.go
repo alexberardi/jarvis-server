@@ -29,6 +29,9 @@ type Case struct {
 	Answers    []Answer `json:"answers"`
 	Checks     []Check  `json:"checks"`
 	MaxMinutes float64  `json:"max_minutes"`
+	// Interrupt is the user stepping in mid-task (interrupt.go): the suite watches the agent's
+	// activity and actions in every case, and fires this once its actions have landed.
+	Interrupt *Interrupt `json:"interrupt,omitempty"`
 
 	File string `json:"-"` // the file it came from, relative to the repo
 }
@@ -95,6 +98,7 @@ var (
 	checkKinds = map[string]string{
 		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains", "document_has": "file",
 		"form_submitted": "fields", "note_exists": "title", "reply_matches": "pattern", "asked": "", "refused": "",
+		"stopped": "", "paused": "", "indicator": "", "no_note": "",
 	}
 	loginSites = []string{"store", "bank", "card"}
 	answerWhen = []string{"confirm", "plan"}
@@ -136,6 +140,16 @@ func (c *Case) Validate() error {
 	}
 	if o := c.Setup.Open; o != "" && (!strings.HasPrefix(o, "/") || c.Target != "browser") {
 		return fmt.Errorf("setup.open %q: a path from /, with target browser", o)
+	}
+	if in := c.Interrupt; in != nil {
+		switch {
+		case !oneOf(in.Do, "stop", "user_mouse", "user_input"):
+			return fmt.Errorf("interrupt.do %q: stop, user_mouse or user_input", in.Do)
+		case in.AfterActions < 0:
+			return fmt.Errorf("interrupt.after_actions %d: 0 (1) or more", in.AfterActions)
+		case in.Do != "stop" && c.Target != "desktop":
+			return errors.New("interrupt " + in.Do + " needs target desktop (the input guard is the desktop's)")
+		}
 	}
 	if d := c.Setup.Demonstrate; d != "" {
 		if _, ok := demonstrations[d]; !ok {

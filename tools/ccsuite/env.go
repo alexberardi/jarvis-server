@@ -1004,14 +1004,8 @@ func (e *Env) UserInput(ctx context.Context) error {
 	if d == nil {
 		return errors.New("no desktop session")
 	}
-	self, err := os.Executable()
-	if err != nil {
+	if err := e.pressKey(ctx); err != nil {
 		return err
-	}
-	cmd := exec.CommandContext(ctx, self, userInputCmd)
-	cmd.Env = d.env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %s", err, lastOutputLine(out))
 	}
 	// The idle notification comes a second after the input (idlenotify.Timeout).
 	time.Sleep(1500 * time.Millisecond)
@@ -1027,6 +1021,34 @@ func userInput(ctx context.Context) error {
 		return errors.New(why)
 	}
 	return in.Keys(ctx, []string{"shift"})
+}
+
+// userMouseCmd is ccsuite's own subcommand that moves the pointer 60 px (where the pointer can't
+// be read, to the screen's far corner), as a hand on the mouse.
+const userMouseCmd = "__user-mouse"
+
+func userMouse(ctx context.Context) error {
+	in := input.Native()
+	if in == nil {
+		return errors.New("no input backend here")
+	}
+	if ok, why := in.Available(ctx); !ok {
+		return errors.New(why)
+	}
+	x, y, err := in.Cursor(ctx)
+	if err != nil {
+		// wlroots tells no client where the pointer is: the hand lands in the screen's far
+		// corner, away from anything a case clicks.
+		return in.Move(ctx, 1270, 790)
+	}
+	dx, dy := 60, 60
+	if x > 600 { // stay on the 1280x800 session's screen
+		dx = -60
+	}
+	if y > 400 {
+		dy = -60
+	}
+	return in.Move(ctx, x+dx, y+dy)
 }
 
 // lastLine is a log's last non-empty line, for an error message.
