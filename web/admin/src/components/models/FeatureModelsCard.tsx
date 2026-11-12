@@ -84,6 +84,8 @@ function FeatureRow({
   }
   const saved = (settingValue(settings.data, feature.key) as Slot | undefined) ?? 'auto'
   const value = set.isPending && set.variables ? set.variables : saved
+  const notice = value === 'cloud' && provider ? `${id}-notice` : null
+  const blocked = value !== 'auto' && slots[value].blocked ? `${id}-blocked` : null
 
   return (
     <div className="space-y-3 py-4 first:pt-0 last:pb-0" data-testid={id}>
@@ -94,6 +96,9 @@ function FeatureRow({
         <select
           id={id}
           value={value}
+          // The banners below say what a cloud slot sends and why a slot cannot run this
+          // feature; without this a screen reader reaches a disabled option with no reason.
+          aria-describedby={[blocked, notice].filter(Boolean).join(' ') || undefined}
           disabled={set.isPending}
           onChange={(e) => set.mutate(e.target.value as Slot)}
           className={cn(fieldControl, 'w-full sm:ml-auto sm:w-auto sm:max-w-xs')}
@@ -112,14 +117,14 @@ function FeatureRow({
           })}
         </select>
       </div>
-      {value === 'cloud' && provider && (
-        <Banner tone="warning" icon={<Globe size={16} />}>
+      {notice && (
+        <Banner id={notice} tone="warning" icon={<Globe size={16} />}>
           {feature.notice(provider)}
         </Banner>
       )}
-      {value !== 'auto' && slots[value].blocked && (
-        <Banner tone="danger" icon={<Globe size={16} />}>
-          {slotBlockedMessage(feature, value, slots[value].blocked ?? '')}
+      {blocked && (
+        <Banner id={blocked} tone="danger" icon={<Globe size={16} />}>
+          {slotBlockedMessage(feature, value as Exclude<Slot, 'auto'>, slots[value as Exclude<Slot, 'auto'>].blocked ?? '')}
         </Banner>
       )}
     </div>

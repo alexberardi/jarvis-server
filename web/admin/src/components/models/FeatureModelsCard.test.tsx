@@ -242,3 +242,20 @@ describe('slotSeesImages', () => {
     expect(slotSeesImages(undefined)).toBe(false)
   })
 })
+
+describe('accessibility', () => {
+  it('points the select at the banner that explains a blocked or cloud choice', async () => {
+    api.getLabels.mockResolvedValue(labels('https://api.anthropic.com', false))
+    stored = 'background'
+    renderCard()
+    const vision = await screen.findByLabelText('Documents and images')
+    await waitFor(() => expect(vision.getAttribute('aria-describedby')).toBeTruthy())
+    const describedBy = vision.getAttribute('aria-describedby')!.split(' ')
+    const text = describedBy.map((id) => document.getElementById(id)?.textContent ?? '').join(' ')
+    expect(text).toMatch(/can't see them/)
+
+    // A feature with nothing to explain carries no dangling reference.
+    const plain = screen.getByLabelText('Memory')
+    expect(plain).not.toHaveAttribute('aria-describedby')
+  })
+})
