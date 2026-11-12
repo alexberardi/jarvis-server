@@ -340,22 +340,38 @@ func changedProps(old, now []Item) []itemProps {
 	return out
 }
 
+// checkGlyph is how a toggle shows its state on Linux: a literal "✓" in the label.
+//
+// The checkmark a tray host is supposed to draw from toggle-state cannot be relied on under
+// Wayland -- waybar does not draw one at all, and nm-applet's checked "Ethernet Network" is
+// equally blank there, so this is the host, not us. The label is the one thing every host
+// renders, so the tick goes in the text.
+//
+// The off state is padded to the tick's place so the labels line up. Menu fonts are
+// proportional, so this is close rather than exact.
+//
+// toggle-type/toggle-state are deliberately NOT published alongside it: a host that does draw
+// them (KDE, GNOME with AppIndicator) would then show a second tick next to this one.
+func checkGlyph(it Item) string {
+	if !it.Toggle {
+		return it.Label
+	}
+	if it.Checked {
+		return "✓  " + it.Label
+	}
+	return "     " + it.Label
+}
+
 func node(it Item) layout {
 	p := map[string]dbus.Variant{}
 	if it.Separator {
 		p["type"] = dbus.MakeVariant("separator")
 	} else {
-		p["label"] = dbus.MakeVariant(it.Label)
+		p["label"] = dbus.MakeVariant(checkGlyph(it))
 		p["enabled"] = dbus.MakeVariant(it.Enabled)
 	}
-	if it.Toggle {
-		p["toggle-type"] = dbus.MakeVariant("checkmark")
-		st := int32(0)
-		if it.Checked {
-			st = 1
-		}
-		p["toggle-state"] = dbus.MakeVariant(st)
-	}
+	// No toggle-type/toggle-state: the tick is in the label (checkGlyph). Publishing both
+	// would double it on any host that does draw them.
 	return layout{ID: it.ID, Props: p, Children: []dbus.Variant{}}
 }
 
@@ -459,8 +475,16 @@ func (m menuMethods) EventGroup(events []menuEvent) ([]int32, *dbus.Error) {
 // lines and the update line all change between openings.
 func (menuMethods) AboutToShow(id int32) (bool, *dbus.Error) { return true, nil }
 
-func (menuMethods) AboutToShowGroup(ids []int32) ([]int32, []int32, *dbus.Error) {
-	return []int32{}, []int32{}, nil
+// AboutToShowGroup is the plural form, and the one hosts actually call -- waybar asks it
+// before every menu opening and on every click. Returning an empty updatesNeeded said "none
+// of these changed", so the host kept its cached properties and drew the old checkmark even
+// though it had just re-read the right ones. Report the asked-for ids as needing an update,
+// matching AboutToShow.
+func (m menuMethods) AboutToShowGroup(ids []int32) ([]int32, []int32, *dbus.Error) {
+	if len(ids) == 0 {
+		return []int32{}, []int32{}, nil
+	}
+	return slices.Clone(ids), []int32{}, nil
 }
 
 // Probe says, for `status`, whether this desktop shows status icons. It only reads the bus.

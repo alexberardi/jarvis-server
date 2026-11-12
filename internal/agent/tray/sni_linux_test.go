@@ -143,10 +143,15 @@ func menuLabels(t *testing.T, menu dbus.BusObject) (labels []string, voiceState 
 			label = "(" + label + ")"
 		}
 		if n.ID == IDVoice {
-			if n.Props["toggle-type"].Value() != "checkmark" {
-				t.Fatalf("voice item isn't a checkmark: %v", n.Props)
+			// The tick lives in the label (checkGlyph): toggle-state is not published,
+			// because a host that draws it would show a second tick.
+			if _, ok := n.Props["toggle-state"]; ok {
+				t.Fatalf("toggle-state is published again; it would double the tick: %v", n.Props)
 			}
-			voiceState = n.Props["toggle-state"].Value().(int32)
+			voiceState = 0
+			if strings.HasPrefix(label, "✓") {
+				voiceState = 1
+			}
 		}
 		labels = append(labels, label)
 	}
@@ -212,7 +217,9 @@ func TestStatusNotifierItemOnAPrivateBus(t *testing.T) {
 		t.Fatalf("dbusmenu Version = %v (%v)", v, err)
 	}
 	labels, state := menuLabels(t, menu)
-	want := []string{"(Jarvis Automation Agent — Running)", "--", `Listen for "Hey Jarvis"`, "Open Jarvis Automation", "--", "Quit Jarvis Automation Agent"}
+	// The toggle spells its state into the label: the checkmark alone is not reliably drawn
+	// (stateLabel in sni_linux.go).
+	want := []string{"(Jarvis Automation Agent — Running)", "--", `     Listen for "Hey Jarvis"`, "Open Jarvis Automation", "--", "Quit Jarvis Automation Agent"}
 	if strings.Join(labels, "|") != strings.Join(want, "|") || state != 0 {
 		t.Fatalf("menu %q voice %d", labels, state)
 	}
@@ -233,8 +240,12 @@ func TestStatusNotifierItemOnAPrivateBus(t *testing.T) {
 	tr.Update(func(s *State) { s.Voice = true })
 	for s := within(t, sig, "LayoutUpdated"); s.Name != menuIface+".LayoutUpdated"; s = within(t, sig, "LayoutUpdated") {
 	}
-	if _, state := menuLabels(t, menu); state != 1 {
+	labelsOn, state := menuLabels(t, menu)
+	if state != 1 {
 		t.Fatalf("voice toggle-state %d after turning it on", state)
+	}
+	if !slices.Contains(labelsOn, `✓  Listen for "Hey Jarvis"`) {
+		t.Fatalf("the label carries no tick once it is on: %q", labelsOn)
 	}
 	if err := menu.Call(menuIface+".Event", 0, IDOpen, "clicked", dbus.MakeVariant(""), uint32(0)).Err; err != nil {
 		t.Fatal(err)
@@ -354,16 +365,14 @@ func TestTogglingSignalsItemsPropertiesUpdated(t *testing.T) {
 			if u.ID != IDVoice {
 				continue
 			}
-			v, ok := u.Props["toggle-state"]
+			// The tick IS the label (checkGlyph), so the label is what must be signalled --
+			// otherwise a host redraws the old text and the state looks stuck.
+			lbl, ok := u.Props["label"]
 			if !ok {
-				t.Fatalf("voice item signalled without toggle-state: %v", u.Props)
+				t.Fatalf("toggle signalled without its label: %v", u.Props)
 			}
-			if v.Value() != int32(1) {
-				t.Fatalf("toggle-state = %v, want 1", v.Value())
-			}
-			// Only what changed is sent: the label did not.
-			if _, sentLabel := u.Props["label"]; sentLabel {
-				t.Errorf("unchanged label was signalled too: %v", u.Props)
+			if got := lbl.Value().(string); got != `✓  Listen for "Hey Jarvis"` {
+				t.Fatalf("signalled label = %q", got)
 			}
 			return
 		}
