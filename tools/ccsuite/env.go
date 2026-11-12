@@ -387,6 +387,12 @@ func (e *Env) Desktop(ctx context.Context, kind string, wantBrowser bool) (*desk
 			return nil, err
 		}
 	}
+	if !wantBrowser && e.desk.browser != nil {
+		// A desktop case starts from a desktop without the browser: its windows, one per earlier
+		// browser errand, tile over the app under test (sway) or cover it (Xvfb). The next
+		// browser case starts it again; its logins come back with every reset anyway.
+		e.desk.stopBrowser()
+	}
 	if wantBrowser && (e.desk.browser == nil || !e.desk.browser.alive()) {
 		if err := e.startBrowser(ctx, e.desk); err != nil {
 			return nil, err
@@ -401,14 +407,23 @@ func (e *Env) stopDesktop() {
 		return
 	}
 	e.desk = nil
-	if d.cdp != nil {
-		d.cdp.Close()
-	}
 	d.notes.stop()
-	d.browser.stop()
+	d.stopBrowser()
 	d.agent.stop()
 	d.session.stop()
 	os.RemoveAll(d.rt)
+}
+
+// stopBrowser stops the session's browser and closes its DevTools pipe.
+func (d *desktop) stopBrowser() {
+	if d.cdp != nil {
+		d.cdp.Close()
+	}
+	d.browser.stop()
+	if d.cdpR != nil {
+		d.cdpR.Close() // the reader has seen EOF once the browser is gone
+	}
+	d.browser, d.cdp, d.cdpW, d.cdpR = nil, nil, nil, nil
 }
 
 // enroll makes the agent a node of the sandbox's household, once a run (its own HOME).
