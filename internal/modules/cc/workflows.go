@@ -326,6 +326,7 @@ func (m *Module) registerWorkflows(mux *http.ServeMux) {
 	mux.HandleFunc("PUT "+v0+"/workflows/{id}", m.user(m.handlePutWorkflow))
 	mux.HandleFunc("DELETE "+v0+"/workflows/{id}", m.user(m.handleDeleteWorkflow))
 	mux.HandleFunc("POST "+v0+"/workflows/{id}/run", m.user(m.handleRunWorkflow))
+	mux.HandleFunc("POST "+v0+"/workflows/{id}/relearn", m.user(m.handleRelearnWorkflow))
 }
 
 // workflowOut is a workflow as the API returns it: the row plus whether the caller may change it.
@@ -380,6 +381,41 @@ type workflowPut struct {
 	Shared   bool                  `json:"shared"`
 	// Skill replaces the skill; left out, the stored one is kept (a client from before it).
 	Skill *computer.Skill `json:"skill"`
+}
+
+// handleRelearnWorkflow learns the workflow again from its recording and answers the draft in
+// PUT's shape. Nothing is stored: the workflow changes only when the draft is saved. Only the
+// person who recorded it may ask, since the draft is made from their recording, which is theirs
+// alone (a household admin who edits the workflow doesn't get to read it this way).
+func (m *Module) handleRelearnWorkflow(w http.ResponseWriter, r *http.Request, u authn.User) {
+	wf, _, err := m.visibleWorkflow(r.Context(), u, r.PathValue("id"), true)
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	if wf.OwnerID != u.ID {
+		m.writeErr(w, fail(http.StatusForbidden, "Only the person who recorded this workflow can learn it again"))
+		return
+	}
+	var rec *Recording
+	if wf.RecordingID != "" {
+		if rec, err = m.getRecording(r.Context(), wf.RecordingID); err != nil {
+			m.writeErr(w, err)
+			return
+		}
+	}
+	if rec == nil || rec.OwnerID != u.ID {
+		m.writeErr(w, fail(http.StatusGone, "The recording this workflow was learnt from is no longer kept, so it can't be learnt again"))
+		return
+	}
+	draft, _, err := m.draftFromRecording(r.Context(), rec)
+	if err != nil {
+		m.deps.Log.Warn("cc: couldn't relearn a workflow", "workflow", wf.ID, "err", err)
+		m.writeErr(w, fail(http.StatusUnprocessableEntity, "Jarvis couldn't learn this again from the recording. Try again in a moment"))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, workflowPut{Name: draft.Name, Triggers: draft.Triggers, Params: draft.Params,
+		Steps: draft.Steps, Success: draft.Success, Shared: wf.Shared, Skill: &draft.Skill})
 }
 
 func (m *Module) handlePutWorkflow(w http.ResponseWriter, r *http.Request, u authn.User) {

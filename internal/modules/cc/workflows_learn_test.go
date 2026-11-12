@@ -18,6 +18,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/notifications"
+	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata/*.golden")
@@ -685,4 +686,40 @@ func TestLearnKeepsEveryActionOfAStep(t *testing.T) {
 	if w.Steps[1].Expect != nil || w.Steps[2].Expect != nil || w.Steps[3].Expect == nil || w.Steps[3].Expect.URLContains != "bank.example.com/accounts" {
 		t.Fatalf("expectations: %+v %+v %+v", w.Steps[1].Expect, w.Steps[2].Expect, w.Steps[3].Expect)
 	}
+}
+
+// Relearn answers a fresh draft from the kept recording and stores nothing; only the person
+// who recorded it may ask, and a recording that is gone is said so.
+func TestRelearnWorkflow(t *testing.T) {
+	le := newLearnEnv(t, bankModel)
+	w := le.store("rec_relearn", bankTrace(t), "")
+	owner := bearer(le.member)
+	admin := bearer(le.auth.addUser(6, cbHH, authn.RoleAdmin))
+	outsider := bearer(le.auth.addUser(7, "hh-other", authn.RoleMember))
+	url := wfBase + "/" + w.ID
+
+	edited := w
+	edited.Name = "My own name for it"
+	le.do("PUT", url, wfPutBody(edited), owner).want(200)
+
+	draft := le.do("POST", url+"/relearn", nil, owner).want(200).json()
+	if draft["name"] != "Download bank statement" || len(draft["steps"].([]any)) != len(w.Steps) {
+		t.Fatalf("draft = %v", draft)
+	}
+	if goal := draft["skill"].(map[string]any)["goal"].(map[string]any); goal["end_state"] == "" {
+		t.Fatalf("draft has no goal: %v", draft["skill"])
+	}
+	if got := le.do("GET", url, nil, owner).want(200).json(); got["name"] != "My own name for it" || got["version"] != float64(2) {
+		t.Fatalf("relearn changed the stored workflow: name %v, version %v", got["name"], got["version"])
+	}
+	// The draft saves as it came.
+	le.do("PUT", url, draft, owner).want(200)
+
+	le.do("POST", url+"/relearn", nil, admin).detail(403, "Only the person who recorded this workflow can learn it again")
+	le.do("POST", url+"/relearn", nil, outsider).detail(404, "Workflow not found")
+
+	if err := le.m.deleteRecordingRow(context.Background(), "rec_relearn"); err != nil {
+		t.Fatal(err)
+	}
+	le.do("POST", url+"/relearn", nil, owner).detail(410, "The recording this workflow was learnt from is no longer kept, so it can't be learnt again")
 }

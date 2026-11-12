@@ -21,8 +21,10 @@ and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-
 
 - [x] S1 the skill in the data model and API; S2 learning the goal, step goals and expectations
   (inference path). Runs don't read the skill yet.
-- [ ] S3 the workflow page, S4 Relearn; `capture` C1–C4 (the recorder keeps the starting state and
-  each action's result; C3 needs an extension release).
+- [x] S3 the workflow page shows and edits the skill; S4 Relearn (a draft from the kept recording,
+  for the person who recorded it; nothing stored until saved).
+- [ ] `capture` C1–C4 (the recorder keeps the starting state and each action's result; C3 needs an
+  extension release).
 - [ ] `verified-replay`, then `narration`, `refine`.
 - [ ] **The teach cases fail on the dev box, on main too** (2026-11-12): its `background` and
   `live` labels serve `qwen3-4b`, whose errand planner picks `computer_task` over `run_workflow`,

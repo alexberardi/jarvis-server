@@ -1262,18 +1262,35 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	w, note, err := m.draftFromRecording(ctx, rec)
+	if err != nil {
+		return err
+	}
+	stored, err := m.createWorkflow(ctx, w)
+	if err != nil {
+		return err
+	}
+	m.deps.Log.Info("cc: workflow learnt from a recording", "recording", id, "mode", rec.Mode, "workflow", stored.ID,
+		"steps", len(stored.Steps), "params", len(stored.Params))
+	m.postLearnedCard(ctx, stored, note)
+	return nil
+}
+
+// draftFromRecording learns a workflow draft from a recording without storing it (the job
+// stores it; Relearn hands it back for review). note is what the draft lacks (naming steps by
+// sight). What retrying can't fix is a queue.Permanent error.
+func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w TaughtWorkflow, note string, err error) {
 	var (
 		system, prompt string
 		build          func(learnOutput) (TaughtWorkflow, error)
-		note           string // for the card: what the draft lacks (naming steps by sight)
 	)
 	if rec.Mode == "browser" {
 		evs, err := parseTrace(rec.Trace)
 		if err != nil {
-			return queue.Permanent(err)
+			return w, "", queue.Permanent(err)
 		}
 		if len(evs) == 0 {
-			return queue.Permanent(errors.New("the recording has no events"))
+			return w, "", queue.Permanent(errors.New("the recording has no events"))
 		}
 		cands := paramCandidates(evs)
 		system, prompt = learnSystemPrompt, learnPrompt(evs, cands, rec.Narration)
@@ -1281,13 +1298,13 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	} else {
 		evs, err := parseDesktopTrace(rec.Trace)
 		if err != nil {
-			return queue.Permanent(err)
+			return w, "", queue.Permanent(err)
 		}
 		if len(evs) == 0 {
-			return queue.Permanent(errors.New("the recording has no events"))
+			return w, "", queue.Permanent(errors.New("the recording has no events"))
 		}
 		if err := m.awaitKeyframes(ctx, *rec, evs); err != nil {
-			return err
+			return w, "", err
 		}
 		note = m.nameClicksBySight(ctx, *rec, evs)
 		cands := desktopParamCandidates(evs)
@@ -1295,7 +1312,7 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 		build = func(out learnOutput) (TaughtWorkflow, error) { return buildDesktopWorkflow(*rec, evs, cands, out) }
 	}
 	if m.LLM == nil {
-		return errors.New("no llm module")
+		return w, "", errors.New("no llm module")
 	}
 	temp, maxTokens, think := 0.0, learnMaxTokens, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
@@ -1310,24 +1327,16 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 		},
 	})
 	if err != nil {
-		return err
+		return w, "", err
 	}
 	out, err := parseLearnOutput(resp.Content)
 	if err != nil {
-		return queue.Permanent(err)
+		return w, "", queue.Permanent(err)
 	}
-	w, err := build(out)
-	if err != nil {
-		return queue.Permanent(err)
+	if w, err = build(out); err != nil {
+		return w, "", queue.Permanent(err)
 	}
-	stored, err := m.createWorkflow(ctx, w)
-	if err != nil {
-		return err
-	}
-	m.deps.Log.Info("cc: workflow learnt from a recording", "recording", id, "mode", rec.Mode, "workflow", stored.ID,
-		"steps", len(stored.Steps), "params", len(stored.Params))
-	m.postLearnedCard(ctx, stored, note)
-	return nil
+	return w, note, nil
 }
 
 // postLearnedCard asks the workflow's owner to review it. The admin's inbox shows the body as
