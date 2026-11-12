@@ -986,7 +986,16 @@ func runAgent(ctx context.Context, args []string) error {
 		if hd != nil {
 			sw.addIndicator(&ledCue{leds: hd.leds, log: log})
 		}
-		r.OnConnected = sw.Serve
+		// sw.Serve is the blocking serve, but it must not replace what is already wired:
+		// wirePackages' test-event shipper is started there, and assigning over it dropped a
+		// Forge test install's events on every voice node (nothing reached Send to Forge).
+		wired := r.OnConnected
+		r.OnConnected = func(ctx context.Context, cc *node.CC) {
+			if wired != nil {
+				go wired(ctx, cc) // keeps running beside the voice loop, until ctx ends
+			}
+			sw.Serve(ctx, cc)
+		}
 	} else if *voiceOn {
 		log.Info("voice: not supported on " + runtime.GOOS + " yet")
 	}
