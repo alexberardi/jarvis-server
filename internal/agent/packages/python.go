@@ -148,6 +148,29 @@ func (p *Python) Install(ctx context.Context, reqs []string) error {
 	return nil
 }
 
+// InstallInto installs reqs into dir, apart from the venv: a test install's own packages.
+func (p *Python) InstallInto(ctx context.Context, dir string, reqs []string) error {
+	uv, err := p.uv(ctx)
+	if err != nil {
+		return err
+	}
+	args := append([]string{"pip", "install", "--python", p.Interpreter(), "--quiet", "--target", dir}, reqs...)
+	if out, err := p.Run(ctx, p.env(), uv, args...); err != nil {
+		return fmt.Errorf("installing Python packages: %v: %s", err, tail(out))
+	}
+	return nil
+}
+
+// sitePackages is the venv's package folder ("" before the venv exists).
+func (p *Python) sitePackages() string {
+	for _, pat := range []string{"lib/python*/site-packages", "Lib/site-packages"} {
+		if m, _ := filepath.Glob(filepath.Join(p.Root, "venv", filepath.FromSlash(pat))); len(m) > 0 {
+			return m[0]
+		}
+	}
+	return ""
+}
+
 // uv is the uv to run: UV, else uvVersion under Root/bin, downloaded and checked on first use.
 func (p *Python) uv(ctx context.Context) (string, error) {
 	if p.UV != "" {

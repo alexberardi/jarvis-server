@@ -549,6 +549,11 @@ def load_packages(listing: str) -> dict:
         sys.modules[top] = importlib.util.module_from_spec(spec)
         if root not in sys.path:
             sys.path.append(root)
+        deps = pathlib.Path(root, ".deps")
+        if deps.is_dir():  # a test install's own Python packages: after the venv's, which win
+            import site
+
+            site.addsitedir(str(deps))
         for rel in pkg.get("commands") or []:
             dotted = top + "." + rel[: -len(".py")].replace("/", ".")
             try:

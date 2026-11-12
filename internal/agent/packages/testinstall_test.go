@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"errors"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
 
 	"context"
@@ -45,6 +46,7 @@ func TestRequestsTestInstall(t *testing.T) {
 			{"filename": "command.py", "content": cmd},
 			{"filename": "helpers/util.py", "content": "X = 1\n"},
 			{"filename": "requirements.txt", "content": "httpx>=0.27\n# a comment\n\n--index-url http://evil\n"},
+			{"filename": "jarvis_command.yaml", "content": "name: hello\npackages:\n  - name: websockets\n    version: \">=10.0\"\n"},
 		}},
 		"EMPTY1": map[string]any{"package_name": "empty", "files": []any{}},
 		"ESCAPE": map[string]any{"package_name": "esc", "files": []map[string]string{{"filename": "../../x.py", "content": cmd}}},
@@ -63,7 +65,7 @@ func TestRequestsTestInstall(t *testing.T) {
 		q.Handle(ctx, api, TopicTestInstall, []byte(`{"request_id":"`+rid+`"}`))
 	}
 	want := map[string]map[string]any{
-		"t1": {"success": true, "details": map[string]any{"agents": []any{}, "commands": []any{"hello_cmd"}, "files_installed": 3.0, "managers": []any{}, "package_name": "hello", "pip_packages_added": 1.0, "protocols": []any{}}},
+		"t1": {"success": true, "details": map[string]any{"agents": []any{}, "commands": []any{"hello_cmd"}, "files_installed": 4.0, "managers": []any{}, "package_name": "hello", "pip_packages_added": 2.0, "protocols": []any{}}},
 		"t2": {"success": false, "error": "No files in draft"},
 		"t3": {"success": false, "error": `test install: path "../../x.py" is not inside the package`},
 		"t4": {"success": false, "error": "Verification failed"},
@@ -80,7 +82,8 @@ func TestRequestsTestInstall(t *testing.T) {
 		t.Fatalf("calls = %v", api.calls)
 	}
 	// Only the requirement, never uv options.
-	if pip := strings.Join(fr.calls[len(fr.calls)-1], " "); !strings.HasSuffix(pip, " httpx>=0.27") {
+	// And into the test's own folder, not the shared venv.
+	if pip := strings.Join(fr.calls[len(fr.calls)-1], " "); !strings.HasSuffix(pip, " --target "+filepath.Join(m.Root, "tests", "hello", ".deps")+" websockets>=10.0 httpx>=0.27") {
 		t.Fatalf("pip = %s", pip)
 	}
 	// It is served next to the installed packages, but isn't one.
@@ -307,5 +310,37 @@ func TestTestInstallSavedDataGoesWithIt(t *testing.T) {
 	slices.Sort(cleared)
 	if want := []string{"sales", "z2m_cmd"}; !reflect.DeepEqual(cleared, want) {
 		t.Fatalf("cleared %v, want %v (news owns digest)", cleared, want)
+	}
+}
+
+// A draft whose declared Python packages don't install is refused, not served without them.
+func TestTestInstallPipFailure(t *testing.T) {
+	r := newRepos(t)
+	m, fr, _ := newTestManager(t, r)
+	fr.pipFail = errors.New("exit status 1")
+	_, err := m.TestInstall(context.Background(), "hello", "r9", []DraftFile{
+		{Filename: "command.py", Content: "class X(IJarvisCommand): ...\n"},
+		{Filename: "jarvis_command.yaml", Content: "name: hello\npackages:\n  - name: nosuchpkg\n"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "nosuchpkg") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(m.Root, "tests", "hello")); !os.IsNotExist(err) {
+		t.Fatalf("kept: %v", err)
+	}
+}
+
+// The venv's version of a package wins over a test install's own copy, and the result says so.
+func TestShadowed(t *testing.T) {
+	deps, site := t.TempDir(), t.TempDir()
+	for _, d := range []string{deps + "/websockets-13.1.dist-info", deps + "/idna-3.7.dist-info", deps + "/new_pkg-1.0.dist-info",
+		site + "/websockets-12.0.dist-info", site + "/idna-3.7.dist-info"} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"websockets: the draft asked for 13.1, the node already has 12.0 and uses that"}
+	if got := shadowed(deps, site); !reflect.DeepEqual(got, want) {
+		t.Fatalf("shadowed = %v", got)
 	}
 }

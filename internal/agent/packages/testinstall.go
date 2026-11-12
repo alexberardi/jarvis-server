@@ -2,6 +2,7 @@ package packages
 
 import (
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
+	"sort"
 
 	"bufio"
 	"context"
@@ -225,7 +226,7 @@ func (m *Manager) ExpireTests(ctx context.Context) {
 var requirementRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,-]+\])?((==|>=|<=|~=|!=|>|<)[0-9A-Za-z.*+!_-]+(,(==|>=|<=|~=|!=|>|<)[0-9A-Za-z.*+!_-]+)*)?$`)
 
 // TestInstall serves a Forge draft as the test command name for testTTL: its files under
-// tests/<name>/, its requirements.txt in the venv (best effort, as on the Python node), and a
+// tests/<name>/, its manifest's packages and requirements.txt in its own folder, and a
 // sidecar that loads it. A draft whose commands don't load is removed again. rid is jarvisd's
 // request: the test's events go back under it (ShipTestEvents).
 func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []DraftFile) (map[string]any, error) {
@@ -254,9 +255,22 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 			return nil, err
 		}
 	}
-	reqs := readRequirements(filepath.Join(dir, "requirements.txt"))
-	if err := m.Python.Install(ctx, reqs); err != nil {
-		m.Log.Warn("packages: test install: pip failed", "package", name, "err", err)
+	// Its Python packages go in its own folder, never the shared venv: they leave with the test,
+	// and unreviewed code can't change what the installed packages run on.
+	reqs := append(manifestRequirements(dir), readRequirements(filepath.Join(dir, "requirements.txt"))...)
+	deps := filepath.Join(dir, depsDir)
+	err := m.Python.Install(ctx, nil)
+	if err == nil && len(reqs) > 0 {
+		err = m.Python.InstallInto(ctx, deps, reqs)
+	}
+	if err != nil {
+		// A draft without what it imports can't be tested: say so instead of serving it broken.
+		_ = os.RemoveAll(dir)
+		return nil, fmt.Errorf("couldn't install the Python packages %s declares (%s): %w", name, strings.Join(reqs, ", "), err)
+	}
+	older := shadowed(deps, m.Python.sitePackages())
+	if len(older) > 0 {
+		m.Log.Warn("packages: test install: the node's own versions are used", "package", name, "packages", older)
 	}
 	commands := draftCommands(dir)
 	families, managers, agents := draftComponents(dir)
@@ -297,9 +311,42 @@ func (m *Manager) TestInstall(ctx context.Context, name, rid string, files []Dra
 	m.Log.Info("packages: test install", "package", name, "files", len(files), "commands", commands,
 		"families", families, "managers", managers, "agents", agents)
 	// commands: the tool names that loaded; jarvisd records their runs for Send to Forge.
-	return map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
+	out := map[string]any{"package_name": name, "files_installed": len(files), "pip_packages_added": len(reqs),
 		"commands": loaded, "protocols": componentNames(families),
-		"managers": componentNames(managers), "agents": componentNames(agents)}, nil
+		"managers": componentNames(managers), "agents": componentNames(agents)}
+	if len(older) > 0 {
+		out["pip_shadowed"] = older
+	}
+	return out, nil
+}
+
+// depsDir holds a test install's Python packages, inside its folder; the sidecar puts it on
+// the import path after the venv.
+const depsDir = ".deps"
+
+// shadowed lists the packages in deps that the venv (site) has in another version. The venv's
+// wins, so the installed packages keep theirs and the draft may not get what it asked for.
+func shadowed(deps, site string) []string {
+	versions := func(dir string) map[string]string {
+		out := map[string]string{}
+		infos, _ := filepath.Glob(filepath.Join(dir, "*.dist-info"))
+		for _, p := range infos {
+			base := strings.TrimSuffix(filepath.Base(p), ".dist-info")
+			if i := strings.LastIndex(base, "-"); i > 0 {
+				out[strings.ToLower(base[:i])] = base[i+1:]
+			}
+		}
+		return out
+	}
+	have := versions(site)
+	var out []string
+	for name, v := range versions(deps) {
+		if hv, ok := have[name]; ok && hv != v {
+			out = append(out, fmt.Sprintf("%s: the draft asked for %s, the node already has %s and uses that", name, v, hv))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // draftComponents are a draft's device protocols, managers and background agents: its
@@ -323,6 +370,25 @@ func componentNames(paths []string) []string {
 	out := []string{}
 	for _, p := range paths {
 		out = append(out, filepath.Base(filepath.Dir(filepath.FromSlash(p))))
+	}
+	return out
+}
+
+// manifestRequirements are the manifest's packages, as a real install gets them (Forge drafts
+// declare their dependencies there). A manifest that doesn't parse declares none.
+func manifestRequirements(dir string) []string {
+	var out []string
+	for _, name := range []string{ManifestFile, CommandManifestFile} {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		if man, err := ParseManifest(b); err == nil {
+			for _, d := range man.Packages {
+				out = append(out, d.Spec())
+			}
+		}
+		break
 	}
 	return out
 }
@@ -361,6 +427,9 @@ func draftCommands(dir string) []string {
 	}
 	var out []string
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() && d.Name() == depsDir {
+			return filepath.SkipDir // its Python packages, not its commands
+		}
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".py") {
 			return nil
 		}
