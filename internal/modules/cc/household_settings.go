@@ -151,6 +151,17 @@ func (m *Module) handleGetHouseholdSettings(w http.ResponseWriter, r *http.Reque
 		}
 		values.Set(s.key, c)
 	}
+	// Read-only here: the app picks a store from the household's list (decision
+	// 2026-11-11-several-pantries, 1b); it is not in householdControllable, so the PUT refuses it.
+	stores := []any{}
+	for _, st := range m.PantryStores(ctx, hh) {
+		o := pyjson.NewObject()
+		o.Set("id", st.ID)
+		o.Set("url", st.URL)
+		o.Set("name", st.Name)
+		stores = append(stores, o)
+	}
+	values.Set(settingPantryStores, stores)
 	out := pyjson.NewObject()
 	out.Set("household_id", hh)
 	out.Set("settings", values)

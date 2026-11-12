@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -369,6 +370,34 @@ func TestExternalServices(t *testing.T) {
 	_, body = do(t, h, "GET", "/services", "")
 	if got := services(body)["jarvis-pantry"]["url"]; got != "http://10.0.0.5:7721" {
 		t.Errorf("moved pantry url %v", got)
+	}
+	// No store any more: the row goes (decision 2026-11-11-several-pantries, 9).
+	m.External = func(context.Context) map[string]string { return nil }
+	if err := m.syncSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, body = do(t, h, "GET", "/services", "")
+	if _, ok := services(body)["jarvis-pantry"]; ok {
+		t.Error("jarvis-pantry still listed with no store")
+	}
+}
+
+// Decision 2026-11-11-several-pantries (10): GET /services lists the Pantry stores beside the
+// services, so a newer client can offer a picker and an older one ignores the key.
+func TestServicesListsPantries(t *testing.T) {
+	m, h := setup(t)
+	if _, body := do(t, h, "GET", "/services", ""); body["pantries"] != nil {
+		t.Fatal("pantries listed with no source:", body["pantries"])
+	}
+	var stores []map[string]string
+	m.Pantries = func(context.Context) []map[string]string { return stores }
+	if _, body := do(t, h, "GET", "/services", ""); fmt.Sprint(body["pantries"]) != "[]" {
+		t.Fatalf("no stores should list an empty array: %#v", body["pantries"])
+	}
+	stores = []map[string]string{{"id": "a", "url": "http://10.0.0.5:7721", "name": "Home"}}
+	_, body := do(t, h, "GET", "/services", "")
+	if got := fmt.Sprint(body["pantries"]); got != "[map[id:a name:Home url:http://10.0.0.5:7721]]" {
+		t.Fatal(got)
 	}
 }
 

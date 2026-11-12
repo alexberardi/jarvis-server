@@ -29,6 +29,13 @@ var serviceShape = Obj{
 	"path": Optional(NullOr(String)),
 }
 
+// servicesBody is GET /services: the service list and, jarvisd addition (decision
+// 2026-11-11-several-pantries, 10), the Pantry stores in preference order. Legacy omits it.
+var servicesBody = Obj{
+	"services": NonEmptyArrayOf(serviceShape),
+	"pantries": Optional(ArrayOf(Obj{"id": UUID, "url": NonEmptyString, "name": NonEmptyString})),
+}
+
 // TestConfigInfo: the mobile app's LAN probe (configDiscoveryService.ts probeHost) accepts a
 // host only if GET /info returns service == "jarvis-config-service". Unauthenticated.
 func TestConfigInfo(t *testing.T) {
@@ -53,7 +60,7 @@ func TestConfigServices(t *testing.T) {
 	tg := T(t)
 	tg.Need(t, Config)
 
-	r := tg.Get(t, Config, "/services").Expect(http.StatusOK, Obj{"services": NonEmptyArrayOf(serviceShape)})
+	r := tg.Get(t, Config, "/services").Expect(http.StatusOK, servicesBody)
 	byName := servicesByName(t, r)
 	// Mobile gives up unless both of these are present (fetchServiceUrls); every backend
 	// resolves jarvis-auth through discovery.
@@ -68,7 +75,7 @@ func TestConfigServices(t *testing.T) {
 		// node-setup and GPU satellites pass remote_host. With remote_host = the target host,
 		// the advertised URLs must actually work from here.
 		q := url.Values{"style": {"external"}, "remote_host": {tg.Host}}
-		r := tg.Get(t, Config, "/services?"+q.Encode()).Expect(http.StatusOK, Obj{"services": NonEmptyArrayOf(serviceShape)})
+		r := tg.Get(t, Config, "/services?"+q.Encode()).Expect(http.StatusOK, servicesBody)
 		byName := servicesByName(t, r)
 		for _, name := range []string{"jarvis-auth", "jarvis-command-center"} {
 			raw := byName[name]["url"].(string)
@@ -91,7 +98,7 @@ func TestConfigServices(t *testing.T) {
 	})
 
 	t.Run("style=dockerized uses host.docker.internal for localhost entries", func(t *testing.T) {
-		r := tg.Get(t, Config, "/services?style=dockerized").Expect(http.StatusOK, Obj{"services": NonEmptyArrayOf(serviceShape)})
+		r := tg.Get(t, Config, "/services?style=dockerized").Expect(http.StatusOK, servicesBody)
 		for name, s := range servicesByName(t, r) {
 			if s["host"] != "localhost" {
 				continue
