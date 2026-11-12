@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
@@ -86,4 +87,49 @@ func mainContent(page string) string {
 		return page[start:]
 	}
 	return page[start:end]
+}
+
+// openPageRE is words that mean the page open in the user's browser ("this page", "the article
+// I have open", "the page open in my browser"), not an address or words to search for.
+var openPageRE = regexp.MustCompile(`(?i)\b(this|current|open|opened|active)\s+(\S+\s+)?(web\s*)?(page|tab|article)\b|` +
+	`\b(page|tab|article)\s+(\S+\s+){0,2}(open|opened)\b|\bopen\s+in\s+(the|my)\s+browser\b`)
+
+// meansOpenPage is whether s names the page open in the browser rather than an address.
+func meansOpenPage(s string) bool {
+	return !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") && openPageRE.MatchString(s)
+}
+
+// toolReadPage is the agent's browser_read_page (internal/agent/browser, not imported: it brings
+// the desktop's libraries), whose content is the page's text between a "<<<PAGE TEXT" line and
+// a "<<<END PAGE TEXT>>>" line.
+const toolReadPage = "browser_read_page"
+
+// pageText is browser_read_page's content without its markers.
+func pageText(content string) string {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "<<<PAGE TEXT") {
+		lines = lines[1:]
+	}
+	if n := len(lines); n > 0 && strings.HasPrefix(lines[n-1], "<<<END PAGE TEXT") {
+		lines = lines[:n-1]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// openPageSource is the page open in the browser on the user's computer, as its extension reads
+// it (browser_read_page on the current tab): the page the user sees, logins and home network
+// included, which the server's own fetch can't reach.
+func (m *Module) openPageSource(ctx context.Context, nodeID string, uid int64) (computer.Source, error) {
+	out := m.agentRecordingCall(ctx, nodeID, toolReadPage, map[string]any{"max_chars": sourceRunes}, uid)
+	if !dispatchOK(out) {
+		return computer.Source{}, fmt.Errorf("couldn't read the page open in the browser: %s", agentError(out))
+	}
+	tab, _ := out["tab"].(map[string]any)
+	url, _ := tab["url"].(string)
+	content, _ := out["content"].(string)
+	text := pageText(content)
+	if (!strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://")) || text == "" {
+		return computer.Source{}, errors.New("there is no web page open in the browser")
+	}
+	return computer.Source{URL: url, Text: truncateRunes(text, sourceRunes)}, nil
 }

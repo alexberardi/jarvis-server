@@ -297,7 +297,8 @@ const websiteRule = "COMPUTER TASKS: everything the user wants done on one websi
 // written directly instead.
 const documentRule = "DOCUMENTS: to write, summarize into, or change a document or spreadsheet (Writer, Calc, " +
 	"Word, Excel), plan ONE write_document step with the file's path, everything the user asked for as its " +
-	"instructions and the web page to write from as its source (or search words: it reads the top results " +
+	"instructions and the web page to write from as its source (\"the open page\" when the user means the page they " +
+	"have open, e.g. \"this page\"; or search words: it reads the top results " +
 	"itself, so research for a document needs no deep_research step); never a computer_task that types in the app. " +
 	"A write_document step after other steps (a search, a file read, a computer task) writes from their results.\n\n"
 

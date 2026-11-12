@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 )
 
@@ -46,5 +47,23 @@ func TestComputerSource(t *testing.T) {
 	fetch.body = "<p>" + strings.Repeat("word ", 10000) + "</p>"
 	if src, _ := e.m.computerSource(ctx, sigHH, "https://example.com/long"); len([]rune(src.Text)) > sourceRunes {
 		t.Errorf("text is %d runes, want at most %d", len([]rune(src.Text)), sourceRunes)
+	}
+}
+
+// pageText strips the agent's markers exactly (internal/agent/browser Wrap), and meansOpenPage
+// tells "this page" from an address or a page's name.
+func TestOpenPageWords(t *testing.T) {
+	wrapped := browser.Wrap("Velmora is a town.\nOn Lake Orrin.")
+	if got := pageText(wrapped); got != "Velmora is a town.\nOn Lake Orrin." {
+		t.Errorf("pageText = %q", got)
+	}
+	for s, want := range map[string]bool{
+		"this page": true, "Summarize this wiki page into a document": true, "the current tab": true,
+		"the article I have open": true, "the wiki page currently open in the browser": true,
+		"Velmora wiki page": false, "https://this.page/open": false, "moon landing hoax claims": false, "": false,
+	} {
+		if got := meansOpenPage(s); got != want {
+			t.Errorf("meansOpenPage(%q) = %v, want %v", s, got, want)
+		}
 	}
 }

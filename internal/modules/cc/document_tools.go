@@ -73,7 +73,7 @@ func (*writeDocumentTool) Definition() *pyjson.Object {
 		servertools.Obj("path", strProp("The file name, e.g. Apollo 11 summary.odt (.odt unless the user named another type), saved in "+
 			"the household's documents folder; a path only when the user named a folder, e.g. ~/Documents/Taxes/2026.xlsx"),
 			"instructions", strProp("What to write or change, with every detail the user gave (length, tone, sections, values)"),
-			"source", strProp("Optional: the web address of the page to write from, or words to search for it"),
+			"source", strProp("Optional: the web address of the page to write from, words to search for it, or \"the open page\" for the page open in the user's browser (\"this page\")"),
 			"computer", computerProp()), "path", "instructions")
 }
 
@@ -132,7 +132,18 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	}
 	var material []string
 	var sources []any
-	if ref := argText(call, "source"); ref != "" {
+	ref := argText(call, "source")
+	// "This page": the one open in the browser, whatever the planner made of it (the page's
+	// name as search words, or nothing), unless it gave an address or earlier steps are the material.
+	if meansOpenPage(ref) || (!strings.HasPrefix(ref, "http") && turn.Prior == "" && len(turn.PriorFiles) == 0 &&
+		(meansOpenPage(turn.Utterance) || meansOpenPage(instr))) {
+		src, err := m.openPageSource(ctx, nodeID, turn.Speaker.UserID)
+		if err != nil {
+			return recordingRefusal("source_failed", "I couldn't read the source: "+err.Error()), nil
+		}
+		material = append(material, "Source: "+src.URL+" (the page open in the browser)\n"+truncateRunes(src.Text, docMaterialRunes))
+		sources = append(sources, src.URL)
+	} else if ref != "" {
 		pages, err := m.documentSources(ctx, turn.HouseholdID, ref)
 		if err != nil {
 			return recordingRefusal("source_failed", "I couldn't read the source: "+err.Error()), nil
@@ -301,6 +312,7 @@ func (m *Module) documentEdits(ctx context.Context, goal, instr string, sheet bo
 				Messages: []llm.Message{
 					{Role: "system", Content: llm.TextContent("You write and edit a household's documents as a list of edits. " +
 						"Write from the material when there is some, never from memory, and do exactly what the task asks. " +
+						"A summary is the main points in your own words, much shorter than its material, never the material section by section. " +
 						"Plain text only: no Markdown (no **, #, or backticks); headings are paragraphs with a heading style.\n\n" + guide)},
 					{Role: "user", Content: llm.TextContent(prompt)},
 				}})
@@ -350,6 +362,20 @@ func (m *Module) documentEdits(ctx context.Context, goal, instr string, sheet bo
 					continue
 				}
 			}
+			if !sheet && asksForSummary(goal+" "+instr) {
+				// T1: the page rewritten section by section, 523 words of 560, saved as its summary.
+				if bad := notASummary(out.Ops, material); bad != "" {
+					lastErr = errors.New(bad)
+					m.deps.Log.Warn("cc: write_document: not a summary", "label", label, "try", try, "problem", bad)
+					if try == 0 {
+						prompt = b.String() + "\n\nYour previous edits were wrong: " + bad +
+							". Answer with the complete edits for a summary: the main points in your own words, at most a third as long as the material."
+						continue
+					}
+					// The second long answer is saved: a long summary beats none, and the step's
+					// result says how long it is.
+				}
+			}
 			for _, o := range out.Ops {
 				if om, ok := o.(map[string]any); ok {
 					if s, ok := om["text"].(string); ok {
@@ -361,6 +387,32 @@ func (m *Module) documentEdits(ctx context.Context, goal, instr string, sheet bo
 		}
 	}
 	return nil, lastErr
+}
+
+// summaryRE is a task that asks for a summary of its material.
+var summaryRE = regexp.MustCompile(`(?i)\b(summar(y|ies|ise|ize|ising|izing)|sum\s+(it\s+)?up|recap|tl;?dr|key\s+points|main\s+points|overview)\b`)
+
+func asksForSummary(s string) bool { return summaryRE.MatchString(s) }
+
+// notASummary says why edits that should summarize material don't: they run more than half the
+// material's length (when there is enough material, 200 words, for that to tell). "" when fine.
+func notASummary(ops []any, material string) string {
+	have := len(strings.Fields(material))
+	if have < 200 {
+		return ""
+	}
+	wrote := 0
+	for _, o := range ops {
+		if om, ok := o.(map[string]any); ok {
+			if s, ok := om["text"].(string); ok {
+				wrote += len(strings.Fields(s))
+			}
+		}
+	}
+	if wrote*2 <= have {
+		return ""
+	}
+	return fmt.Sprintf("%d words from %d words of material is not a summary, it is the material rewritten", wrote, have)
 }
 
 // cellRef is one cell or range a formula refers to ("B2", "B2:B9"), with the $ signs allowed.
