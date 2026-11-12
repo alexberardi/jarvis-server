@@ -12,6 +12,21 @@ learns it all and is able to repeat it." A taught workflow should hold what a pe
 down to hand the task to someone else: what it is for, when it applies, what to start from, what
 each step is for and what should happen after it, and what to watch for.
 
+## Intent (confirmed by the user, 2026-11-12)
+
+- **Outcome:** record a task once; Jarvis learns a structured skill and repeats the task later
+  with other inputs, on a screen that looks different.
+- **Who:** household members at their own computers, by voice, from the phone or on a schedule,
+  often with nobody watching.
+- **Success:** a run ends in the goal's end state, verified from the screen and the files. On the
+  way it achieves its prerequisites, verifies each step, and tries other routes before it asks.
+- **Repeat first.** Learning know-how about an app, to do tasks never demonstrated, is added only
+  if it turns out cheap; notes may belong to an app as well as a workflow so there is room.
+- **First tasks:** a monthly budget or spending summary in a spreadsheet; downloading a statement
+  and filing it under the right name; a regular report email built from a document; moving files
+  between folders. Single-pass tasks with a few changing values (moving *every* matching file is
+  repetition: see `control-flow`).
+
 ## What exists (survey, origin/main @ e84f2b73)
 
 - **Learning** (`internal/modules/cc/workflows_learn.go`): one model call names and groups the
@@ -40,7 +55,15 @@ each step is for and what should happen after it, and what to watch for.
 5. **Prerequisites first** (user, 2026-11-12). A workflow lists what must be true before it starts
    ("file abc is open"). A run checks each one and tries to achieve the unmet ones itself, under the
    same rules as any step; one it can't achieve stops the run before step 1 and asks.
-6. **Rules unchanged:** risk and confirmations, masked values, ownership and sharing, per-computer
+6. **Try hard, then ask** (user, 2026-11-12). A run that meets something unexpected works toward
+   the goal by other routes within its budget. It asks only when out of options or before a risky
+   action.
+7. **Guardrails per workflow: Strict or Creative** (user, 2026-11-12), Strict for a new workflow.
+   *Strict:* only the apps and sites recorded in, any route inside them. *Creative:* any means
+   (another app, a website, editing a file directly). Reaching the end state by another route is
+   a success in both; neither repeats the recorded steps literally. Prerequisites, verification
+   and risk confirmations are the same in both.
+8. **Rules unchanged:** risk and confirmations, masked values, ownership and sharing, per-computer
    opt-in (C2, C11) apply as today.
 
 ## Capability map
@@ -56,7 +79,9 @@ each step is for and what should happen after it, and what to watch for.
 | `compose` | Workflows return values and call each other. | `skill-doc` |
 
 Build order: `capture` and `skill-doc` together (the learner falls back to inference until a
-recording has results, so neither blocks the other) → `verified-replay` → `narration` → `refine` → `control-flow` → `compose`.
+recording has results, so neither blocks the other) → `verified-replay` → `narration` → `refine`.
+`control-flow` and `compose` wait until a real task needs them (user, 2026-11-12).
+Superseded order: `verified-replay` → `narration` → `refine` → `control-flow` → `compose`.
 Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
 
 ## Decided
@@ -104,12 +129,13 @@ What a skill holds, each a separate field (Q2):
 
 | Part | Says | Today |
 |---|---|---|
-| Goal | What the task achieves, in a sentence or two | — |
+| Goal | Two parts: the **reason** for the task and the **desired end state**. Learnt, editable. The end state is what a run is checked against when it finishes, with `success` for what can be checked exactly, and what the model steers by when a step goes differently | — |
+| Guardrails | Strict or Creative (principle 7); Strict when learnt | — |
 | When to use | What the user would be asking for, beyond the trigger phrases | `triggers` only |
 | Prerequisites | A list of what must be true before step 1 ("file abc is open", "signed in to the bank"), each one checkable. A run tries to achieve each unmet one before it starts (user, 2026-11-12) | — |
 | Step goal | The point of each step. Learnt, and the owner can enter or correct it on the workflow page (Q3) | `intent` (what, not why) |
 | Step expectation | What can be observed once the step worked, learnt from the result the recorder captured (Q3); editable | — |
-| Notes | Things to watch for; empty when learnt, filled by `refine` | — |
+| Notes | Things to watch for; empty when learnt, filled by `refine`. A note belongs to the workflow or to an app | — |
 | Done | How to tell the whole task worked | `success` |
 
 ### Commands
