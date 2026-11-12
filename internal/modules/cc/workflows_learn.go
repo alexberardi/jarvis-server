@@ -1250,7 +1250,7 @@ func (m *Module) learnFromRecording(ctx context.Context, id string) error {
 	}
 	temp, maxTokens, think := 0.0, learnMaxTokens, 0
 	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{
-		Label:           llm.LabelBackground,
+		Label:           m.featureSlot(ctx, SettingWorkflowsModel, llm.LabelBackground),
 		Temperature:     &temp, // greedy: structured, stable run to run
 		MaxTokens:       &maxTokens,
 		ReasoningBudget: &think,

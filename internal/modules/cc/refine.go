@@ -175,7 +175,7 @@ func (m *Module) refineCall(ctx context.Context, prompt string) *pyjson.Object {
 	maxTok := 256
 	zero := 0.0
 	off := 0
-	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{Label: llm.LabelLive, MaxTokens: &maxTok, Temperature: &zero,
+	resp, err := m.LLM.Chat(ctx, llm.ChatRequest{Label: m.conversationSlot(ctx), MaxTokens: &maxTok, Temperature: &zero,
 		ReasoningBudget: &off, Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}}})
 	if err != nil || resp.Content == "" {
 		return nil

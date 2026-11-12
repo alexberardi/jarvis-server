@@ -367,13 +367,23 @@ type LLM interface {
 	Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error)
 }
 
-// LLMVision asks a vision model to transcribe the image (legacy LLMProxyVisionProvider, label
-// "background").
+// LLMVision asks a vision model to transcribe the image (legacy LLMProxyVisionProvider).
 type LLMVision struct {
 	LLM LLM
 	// TimeoutFn is the per-image timeout (the module reads ocr.llm_vision_timeout_seconds);
 	// nil: defaultLLMVisionTimeout.
 	TimeoutFn func(context.Context) time.Duration
+	// SlotFn is the label to transcribe on (the module reads ocr.model); nil: background,
+	// which is what this ran on before the setting existed.
+	SlotFn func(context.Context) string
+}
+
+// slot is SlotFn, or background when it is unset.
+func (l *LLMVision) slot(ctx context.Context) string {
+	if l.SlotFn == nil {
+		return llm.LabelBackground
+	}
+	return l.SlotFn(ctx)
 }
 
 // defaultLLMVisionTimeout is 180 s: the legacy 60 s timed out on a dense page with a 9B model
@@ -419,7 +429,7 @@ func (l *LLMVision) Recognize(ctx context.Context, img Image, o Options) (Result
 	cctx, cancel := context.WithTimeout(ctx, l.timeout(ctx))
 	defer cancel()
 	resp, err := l.LLM.Chat(cctx, llm.ChatRequest{
-		Label: llm.LabelBackground,
+		Label: l.slot(ctx),
 		Messages: []llm.Message{{Role: "user", Content: &llm.Content{Parts: []llm.Part{
 			{Type: "text", Text: prompt},
 			{Type: "image_url", ImageURL: &llm.ImageURL{URL: "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(img.Data)}},

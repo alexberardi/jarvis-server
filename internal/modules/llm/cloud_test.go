@@ -70,3 +70,25 @@ func TestSlotSetting(t *testing.T) {
 		}
 	}
 }
+
+// Slot resolves a feature's stored slot choice to a label: a named slot wins, and anything else
+// (auto, unset, or a value a hand-edited DB smuggled past the validator) takes the fallback.
+func TestSlot(t *testing.T) {
+	for _, tc := range []struct {
+		value, fallback, want string
+	}{
+		{SlotAuto, LabelBackground, LabelBackground},
+		{SlotAuto, LabelLive, LabelLive},
+		{"", LabelBackground, LabelBackground},       // unset: Get falls back to the default
+		{"Background", LabelLive, LabelLive},         // case-sensitive, as the validator is
+		{"gpt-4o", LabelBackground, LabelBackground}, // not a slot
+		{LabelLive, LabelBackground, LabelLive},
+		{LabelBackground, LabelLive, LabelBackground},
+		{LabelCloud, LabelLive, LabelCloud},
+		{LabelEmbeddings, LabelLive, LabelLive}, // not a chat slot: never selectable
+	} {
+		if got := Slot(tc.value, tc.fallback); got != tc.want {
+			t.Errorf("Slot(%q, %q) = %q, want %q", tc.value, tc.fallback, got, tc.want)
+		}
+	}
+}

@@ -58,7 +58,7 @@ const settingUpdatesAllowCheck = "updates.allow_check"
 func Definitions() []settings.Definition {
 	return markHouseholdControllable(routineDefinitions(slices.Concat(nodeDefinitions(),
 		voiceDefinitions(prompts.DefaultPersona), followUpGateDefinitions(), packageDefinitions(), smartHomeDefinitions(),
-		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(),
+		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(), slotDefinitions(),
 		householdSettingDefinitions(), compactionDefinitions(), watchDefinitions(),
 		recordingDefinitions(), computerDefinitions())))
 }

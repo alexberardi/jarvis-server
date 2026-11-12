@@ -434,7 +434,7 @@ func (s *Service) callCategories(ctx context.Context, business, goal string) []s
 	}
 	temp, maxTok, budget := 0.0, 20, 0
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
-		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
+		Label: s.planningSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
 		Messages: []llm.Message{
 			{Role: "system", Content: llm.TextContent(categorySystemPrompt)},
 			{Role: "user", Content: llm.TextContent("Business: " + business + "\nGoal: " + goal)},
@@ -465,7 +465,7 @@ func (s *Service) draftDetails(ctx context.Context, business, goal, initiator st
 	}
 	temp, maxTok, budget := 0.3, 200, 0
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
-		Label: "background", Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
+		Label: s.planningSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &budget,
 		Messages: []llm.Message{
 			{Role: "system", Content: llm.TextContent(draftSystemPrompt)},
 			{Role: "user", Content: llm.TextContent(user)},

@@ -399,7 +399,7 @@ func (m *Module) streamContinueLLM(ctx context.Context, plan *continuePlan, say 
 	temp := 0.7
 	tr := traceFrom(ctx)
 	llmStart := tr.since()
-	frames, err := m.LLM.Stream(ctx, llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(plan.llmMsgs), MaxTokens: &maxTok,
+	frames, err := m.LLM.Stream(ctx, llm.ChatRequest{Label: m.conversationSlot(ctx), Messages: toLLM(plan.llmMsgs), MaxTokens: &maxTok,
 		Temperature: &temp, ReasoningBudget: m.thinkingBudget(ctx, conv.householdID)})
 	if err != nil {
 		m.deps.Log.Error("cc: continue stream failed", "conversation_id", conv.id, "err", err)
@@ -570,7 +570,7 @@ func (m *Module) handleWakeResponse(w http.ResponseWriter, r *http.Request, n *n
 	off := 0
 	wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	resp, err := m.LLM.Chat(wctx, llm.ChatRequest{Label: llm.LabelLive, MaxTokens: &maxTok, Temperature: &temp, ReasoningBudget: &off,
+	resp, err := m.LLM.Chat(wctx, llm.ChatRequest{Label: m.conversationSlot(wctx), MaxTokens: &maxTok, Temperature: &temp, ReasoningBudget: &off,
 		Messages: []llm.Message{{Role: "system", Content: llm.TextContent(wakeSystemPrompt)}, {Role: "user", Content: llm.TextContent(user)}}})
 	if err != nil || resp.Content == "" {
 		if err != nil {

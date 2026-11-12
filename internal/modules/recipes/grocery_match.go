@@ -14,7 +14,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/recipes/quantity"
 	"github.com/alexberardi/jarvis-server/internal/platform/queue"
-	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // The background SKU-matching pass (recipes.grocery_match; RD1 ports it; prompt P5,
@@ -79,11 +78,7 @@ func buildMatchPrompt(candidates []skuMapping, unmatched []string) []llm.Message
 // matchRequest is the chat request for the pass: temperature 0, JSON mode, 1500 tokens, on the
 // label the setting names.
 func (m *Module) matchRequest(ctx context.Context, msgs []llm.Message) llm.ChatRequest {
-	setting := m.settings.String(ctx, SettingBackgroundModel, settings.Scope{})
-	label := llm.NormalizeLabel(setting)
-	if !strings.EqualFold(setting, llm.LabelLive) && !strings.EqualFold(setting, llm.LabelBackground) {
-		m.deps.Log.Warn("recipes: llm.background_model_name is not a label; using live", "value", setting)
-	}
+	label := llm.SlotFor(ctx, m.settings, SettingGroceryModel, llm.LabelBackground)
 	temp, maxTok := 0.0, matchMaxTokens
 	return llm.ChatRequest{
 		Label: label, Messages: msgs, Temperature: &temp, MaxTokens: &maxTok,

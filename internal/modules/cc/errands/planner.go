@@ -818,7 +818,7 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 	temp, maxTok := 0.0, s.plannerMaxTokens(ctx)
 	start := time.Now()
 	req := llm.ChatRequest{
-		Label: "background", Temperature: &temp, MaxTokens: &maxTok,
+		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
 	}
 	// The thinking attempt gets a wall-clock cap as well as max_tokens: the background label

@@ -5,12 +5,15 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // Setting keys (settings_definitions.py:776-859). M12 drops phone_calls.attempt_cap.
 // web_search.enabled and household.location are declared by the voice pipeline (5b).
 const (
+	SettingModel          = "phone_calls.model"
+	SettingPlanningModel  = "phone_calls.planning_model"
 	SettingEnabled        = "phone_calls.enabled"
 	SettingCallContext    = "phone_calls.call_context"
 	SettingPlanTTL        = "phone_calls.plan_ttl_minutes"
@@ -27,6 +30,14 @@ const (
 // Definitions are the phone settings, appended to cc's.
 func Definitions() []settings.Definition {
 	return append([]settings.Definition{
+		llm.SlotSetting(SettingModel, "phone_calls",
+			"Which model speaks on a call: auto (live), live, background or cloud (the optional cloud slot: "+
+				"what is said on the call goes to its provider). A call is real time, so a slow slot is heard "+
+				"as dead air."),
+		llm.SlotSetting(SettingPlanningModel, "phone_calls",
+			"Which model plans a call, classifies it and picks follow-ups afterwards: auto (background), live, "+
+				"background or cloud (the optional cloud slot: the call's goal and transcript go to its "+
+				"provider). Nobody waits on these, so a slower, larger slot is fine."),
 		{Key: SettingEnabled, Category: "phone_calls", Type: settings.Bool, Default: false,
 			Description: "Master toggle for AI phone calls (default OFF, fail-closed)"},
 		{Key: SettingCallContext, Category: "phone_calls", Type: settings.String, Default: "", IsSecret: true,
@@ -122,4 +133,15 @@ func (s *Service) loadCallContext(ctx context.Context, userID *int64) []ContextF
 		return nil
 	}
 	return ParseCallContext(v.Value)
+}
+
+// modelSlot is the label a live call turn goes to: the phone feature's slot, live by default.
+func (s *Service) modelSlot(ctx context.Context) string {
+	return llm.SlotFor(ctx, s.Settings, SettingModel, llm.LabelLive)
+}
+
+// planningSlot is the label a call's planning, classification and follow-up picks go to: the
+// call-planning feature's slot, background by default.
+func (s *Service) planningSlot(ctx context.Context) string {
+	return llm.SlotFor(ctx, s.Settings, SettingPlanningModel, llm.LabelBackground)
 }

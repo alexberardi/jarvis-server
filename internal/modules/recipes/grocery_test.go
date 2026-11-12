@@ -339,18 +339,32 @@ func TestGroceryMatchFailures(t *testing.T) {
 	}
 }
 
-// TestMatchRequestLabel: the setting names the label; anything else is live.
+// TestMatchRequestLabel: unset (auto) keeps grocery matching on background, as it was hardcoded
+// before the slot setting; a named slot moves it. A value the validator would reject takes the
+// feature's own default, where it used to fall through to live.
 func TestMatchRequestLabel(t *testing.T) {
 	e := setup(t)
 	if r := e.m.matchRequest(e.ctx, nil); r.Label != llm.LabelBackground {
-		t.Fatalf("default: %s", r.Label)
+		t.Fatalf("auto: %s, want %s", r.Label, llm.LabelBackground)
 	}
-	for v, want := range map[string]string{"live": llm.LabelLive, "BACKGROUND": llm.LabelBackground, "qwen3-14b": llm.LabelLive} {
-		if err := e.m.settings.Set(e.ctx, SettingBackgroundModel, v, settings.Scope{}); err != nil {
+	for v, want := range map[string]string{
+		"auto":       llm.LabelBackground,
+		"live":       llm.LabelLive,
+		"background": llm.LabelBackground,
+		"cloud":      llm.LabelCloud,
+	} {
+		if err := e.m.settings.Set(e.ctx, SettingGroceryModel, v, settings.Scope{}); err != nil {
 			t.Fatal(err)
 		}
 		if r := e.m.matchRequest(e.ctx, nil); r.Label != want {
 			t.Errorf("%s: %s, want %s", v, r.Label, want)
+		}
+	}
+	// The slot setting's validator keeps a free-text model name out of the store, which the
+	// pre-2026-11-11 string setting accepted and then silently resolved to live.
+	for _, bad := range []string{"qwen3-14b", "BACKGROUND", ""} {
+		if err := e.m.settings.Set(e.ctx, SettingGroceryModel, bad, settings.Scope{}); err == nil {
+			t.Errorf("%q accepted", bad)
 		}
 	}
 }
@@ -410,5 +424,40 @@ func TestGoldenPromptP5(t *testing.T) {
 	if req.Label != want.Model || *req.Temperature != want.Temperature || *req.MaxTokens != want.MaxTokens ||
 		req.ResponseFormat.Type != want.ResponseFormat["type"] || want.Stream {
 		t.Fatalf("parameters: %+v vs %+v", req, want)
+	}
+}
+
+// TestRenameModelSettings: an install that had tuned the pre-2026-11-11 model settings keeps its
+// choices under the new keys, and the dropped lightweight pass is reported rather than lost.
+func TestRenameModelSettings(t *testing.T) {
+	e := setup(t) // Start already ran the rename once, over an empty store
+	store := func(key, value string) {
+		t.Helper()
+		if _, err := e.d.Write.Exec(
+			`INSERT INTO recipes_settings (key, value, value_type, category) VALUES (?, ?, 'string', 'llm')`,
+			key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store(legacyFullModel, "background")
+	store(legacyBackgroundModel, "live")
+	store(legacyLightweightModel, "live") // differs from the full pass: warned about, then dropped
+	if err := e.m.renameModelSettings(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.m.importSlot(e.ctx); got != llm.LabelBackground {
+		t.Errorf("import slot = %s, want the renamed value background", got)
+	}
+	if got := llm.SlotFor(e.ctx, e.m.settings, SettingGroceryModel, llm.LabelBackground); got != llm.LabelLive {
+		t.Errorf("grocery slot = %s, want the renamed value live", got)
+	}
+	for _, old := range []string{legacyFullModel, legacyBackgroundModel, legacyLightweightModel} {
+		var n int
+		if err := e.d.Read.QueryRow(`SELECT count(*) FROM recipes_settings WHERE key = ?`, old).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s: %d rows left", old, n)
+		}
 	}
 }

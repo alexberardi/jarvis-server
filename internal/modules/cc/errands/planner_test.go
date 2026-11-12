@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
@@ -142,6 +143,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("checkpoint = %+v", plan.Steps[1])
 	}
 	req := e.llm.requests("plan")[0]
+	// Label: unset (auto) keeps planning on background, as it was hardcoded before errands.model.
 	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != defaultPlannerMaxTokens || req.ReasoningBudget != nil {
 		t.Fatalf("planner request = %+v", req)
 	}
@@ -335,6 +337,7 @@ type intSettings map[string]int64
 
 func (f intSettings) Int(_ context.Context, key string, _ settings.Scope) int64 { return f[key] }
 func (intSettings) Bool(context.Context, string, settings.Scope) bool           { return true }
+func (intSettings) String(context.Context, string, settings.Scope) string       { return "" }
 
 // confirmFreeTool is a fakeTool declaring run_without_confirmation (servertools.ConfirmFreeTool).
 type confirmFreeTool struct{ fakeTool }
@@ -404,5 +407,26 @@ func TestStepObjectFlags(t *testing.T) {
 	if len(steps) != 2 || steps[0].RunWithoutConfirmation || steps[0].Approved ||
 		!steps[1].RunWithoutConfirmation || !steps[1].Approved {
 		t.Fatalf("round trip = %+v", steps)
+	}
+}
+
+// TestPlannerModelSlot: errands.model moves planning off its background default.
+func TestPlannerModelSlot(t *testing.T) {
+	for _, tc := range []struct{ slot, want string }{
+		{"", llm.LabelBackground},           // nothing stored
+		{llm.SlotAuto, llm.LabelBackground}, // auto: the feature's own default
+		{llm.LabelLive, llm.LabelLive},
+		{llm.LabelBackground, llm.LabelBackground},
+		{llm.LabelCloud, llm.LabelCloud},
+		{"qwen3-14b", llm.LabelBackground}, // not a slot: the feature's own default
+	} {
+		s := &Service{Settings: withSlot{key: SettingModel, slot: tc.slot}}
+		if got := s.modelSlot(context.Background()); got != tc.want {
+			t.Errorf("errands.model=%q: %s, want %s", tc.slot, got, tc.want)
+		}
+	}
+	// No settings service at all behaves as auto rather than panicking.
+	if got := (&Service{}).modelSlot(context.Background()); got != llm.LabelBackground {
+		t.Errorf("no settings: %s", got)
 	}
 }

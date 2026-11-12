@@ -344,7 +344,7 @@ func (m *Module) warmup(ctx context.Context, n *nodeCtx, req startRequest) (*con
 		defer cancel()
 		one := 1
 		zero := 0.0
-		creq := llm.ChatRequest{Label: llm.LabelLive, Messages: toLLM(conv.messages), MaxTokens: &one, Temperature: &zero}
+		creq := llm.ChatRequest{Label: m.conversationSlot(ctx), Messages: toLLM(conv.messages), MaxTokens: &one, Temperature: &zero}
 		if mode.Native() {
 			creq.Tools = nativePayload(conv.tools, "")
 			creq.ToolChoice = json.RawMessage(`"auto"`)

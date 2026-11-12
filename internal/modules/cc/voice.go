@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -83,7 +84,11 @@ func (m *Module) registerServerTools() {
 	if m.deps.Queue != nil {
 		m.tools.Register(servertools.NewDeepResearch(m.deps.Queue, gate, m.deps.Log))
 		if m.LLM != nil && m.Notify != nil {
-			servertools.NewResearchRunner(search, nil, m.LLM, m.Notify, m.deps.Log).Register(m.deps.Queue)
+			rr := servertools.NewResearchRunner(search, nil, m.LLM, m.Notify, m.deps.Log)
+			rr.Slot = func(ctx context.Context) string {
+				return m.featureSlot(ctx, SettingResearchModel, llm.LabelBackground)
+			}
+			rr.Register(m.deps.Queue)
 		}
 	}
 }

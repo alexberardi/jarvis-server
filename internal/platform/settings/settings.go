@@ -326,6 +326,57 @@ func (s *Service) Delete(ctx context.Context, key string, sc Scope) (bool, error
 	return n > 0, nil
 }
 
+// Rename moves a renamed setting's stored system-scope value from an old key to its current one
+// and drops the old rows, so a key can be cleaned up without losing what the user set. It is
+// idempotent, and a no-op once nothing is stored under old. The new key must be a current
+// definition; old must not be one, so a rename cannot overwrite a live setting. A value already
+// stored under the new key wins, and scoped rows are not carried over: renames so far are
+// system-wide settings only.
+func (s *Service) Rename(ctx context.Context, old, current string) error {
+	if _, ok := s.defs[old]; ok {
+		return fmt.Errorf("settings: rename %s: still a definition", old)
+	}
+	if _, ok := s.defs[current]; !ok {
+		return fmt.Errorf("settings: rename to %s: %w", current, ErrUnknownKey)
+	}
+	sys, args := exactWhere(Scope{})
+	if _, err := s.db.Write.ExecContext(ctx,
+		"UPDATE "+s.table+" SET key = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE key = ? AND "+sys+
+			" AND NOT EXISTS (SELECT 1 FROM "+s.table+" WHERE key = ? AND "+sys+")",
+		append(append(append([]any{current, old}, args...), current), args...)...); err != nil {
+		return fmt.Errorf("settings: rename %s: %w", old, err)
+	}
+	// Anything left under old is a duplicate of a value already set under current, or scoped.
+	if _, err := s.db.Write.ExecContext(ctx, "DELETE FROM "+s.table+" WHERE key = ?", old); err != nil {
+		return fmt.Errorf("settings: rename %s: drop old: %w", old, err)
+	}
+	return nil
+}
+
+// Forget reads and removes a retired key's stored system-scope value: for a setting that was
+// dropped rather than renamed, where the caller wants to tell the user what it is discarding.
+// The key must not be a current definition, so this cannot clear a live setting.
+func (s *Service) Forget(ctx context.Context, key string) (value string, existed bool, err error) {
+	if _, ok := s.defs[key]; ok {
+		return "", false, fmt.Errorf("settings: forget %s: still a definition", key)
+	}
+	sys, args := exactWhere(Scope{})
+	var raw sql.NullString
+	err = s.db.Read.QueryRowContext(ctx, "SELECT value FROM "+s.table+" WHERE key = ? AND "+sys,
+		append([]any{key}, args...)...).Scan(&raw)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return "", false, fmt.Errorf("settings: forget %s: %w", key, err)
+	default:
+		value, existed = raw.String, true
+	}
+	if _, err := s.db.Write.ExecContext(ctx, "DELETE FROM "+s.table+" WHERE key = ?", key); err != nil {
+		return "", false, fmt.Errorf("settings: forget %s: drop: %w", key, err)
+	}
+	return value, existed, nil
+}
+
 func (s *Service) fallback(def Definition) any {
 	if def.EnvFallback != "" {
 		if v, ok := lookupEnv(s.getenv, def.EnvFallback); ok {
@@ -525,7 +576,12 @@ func (s *Service) value(ctx context.Context, key string, sc Scope) any {
 	return v.Value
 }
 
+// String is nil-receiver safe: a module with no settings service yet has nothing stored, so it
+// answers "". Callers that need the definition's default must hold a service.
 func (s *Service) String(ctx context.Context, key string, sc Scope) string {
+	if s == nil {
+		return ""
+	}
 	switch v := s.value(ctx, key, sc).(type) {
 	case string:
 		return v

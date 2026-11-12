@@ -8,7 +8,14 @@ import { Banner, ErrorState, Skeleton } from '@/components/ui'
 import { fieldControl } from '@/components/ui/fieldStyles'
 import { cn } from '@/lib/utils'
 import type { AggregatedSettingsResponse } from '@/types/settings'
-import { FEATURES, SLOT_TITLE, cloudProvider, type Feature, type Slot } from './features'
+import {
+  FEATURES,
+  SLOT_TITLE,
+  cloudProvider,
+  slotSeesImages,
+  type Feature,
+  type Slot,
+} from './features'
 import ModelCard from './ModelCard'
 
 function settingValue(data: AggregatedSettingsResponse | undefined, key: string): unknown {
@@ -19,7 +26,30 @@ function settingValue(data: AggregatedSettingsResponse | undefined, key: string)
   return undefined
 }
 
-function FeatureRow({ feature, provider }: { feature: Feature; provider: string }) {
+/** Why a chosen slot cannot run the feature, and what to do about it. */
+function slotBlockedMessage(feature: Feature, slot: Exclude<Slot, 'auto'>, blocked: string): string {
+  const name = feature.title.toLowerCase()
+  if (slot === 'cloud' && blocked === 'not set up') {
+    return `The cloud slot isn't set up, so ${name} fails until it is. Set it up under Labels, or pick another model.`
+  }
+  if (blocked === 'no vision') {
+    return `${feature.title} sends images, and the ${slot} model can't see them, so it fails until that model gets a vision projector. Add one under Labels, or pick another model.`
+  }
+  return `The ${slot} slot can't run ${name} right now (${blocked}).`
+}
+
+/** The slots a feature may run on: everything the slot picker offers, with why not when it can't. */
+type SlotState = { blocked?: string }
+
+function FeatureRow({
+  feature,
+  provider,
+  slots,
+}: {
+  feature: Feature
+  provider: string
+  slots: Record<Exclude<Slot, 'auto'>, SlotState>
+}) {
   const qc = useQueryClient()
   const queryKey = ['settings', feature.service]
   const settings = useQuery({ queryKey, queryFn: () => getServiceSettings(feature.service) })
@@ -54,39 +84,49 @@ function FeatureRow({ feature, provider }: { feature: Feature; provider: string 
   }
   const saved = (settingValue(settings.data, feature.key) as Slot | undefined) ?? 'auto'
   const value = set.isPending && set.variables ? set.variables : saved
+  const notice = value === 'cloud' && provider ? `${id}-notice` : null
+  const blocked = value !== 'auto' && slots[value].blocked ? `${id}-blocked` : null
 
   return (
     <div className="space-y-3 py-4 first:pt-0 last:pb-0" data-testid={id}>
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor={id} className="text-small font-medium text-text sm:w-40">
+        <label htmlFor={id} className="text-small font-medium text-text sm:w-48">
           {feature.title}
         </label>
         <select
           id={id}
           value={value}
+          // The banners below say what a cloud slot sends and why a slot cannot run this
+          // feature; without this a screen reader reaches a disabled option with no reason.
+          aria-describedby={[blocked, notice].filter(Boolean).join(' ') || undefined}
           disabled={set.isPending}
           onChange={(e) => set.mutate(e.target.value as Slot)}
           className={cn(fieldControl, 'w-full sm:ml-auto sm:w-auto sm:max-w-xs')}
         >
-          <option value="auto">Auto ({feature.auto})</option>
-          <option value="live">Live</option>
-          <option value="background">Background</option>
-          <option value="cloud" disabled={!provider && value !== 'cloud'}>
-            {provider ? `Cloud (${provider})` : 'Cloud (not set up)'}
-          </option>
+          <option value="auto">Auto — {SLOT_TITLE[feature.auto].toLowerCase()}</option>
+          {(['live', 'background', 'cloud'] as const).map((slot) => {
+            const blocked = slots[slot].blocked
+            const name = slot === 'cloud' && provider ? `Cloud (${provider})` : SLOT_TITLE[slot]
+            return (
+              // A slot already chosen stays selectable, so a choice made before the model
+              // changed is visible and can be moved rather than silently re-reading as another.
+              <option key={slot} value={slot} disabled={Boolean(blocked) && value !== slot}>
+                {blocked ? `${name} — ${blocked}` : name}
+              </option>
+            )
+          })}
         </select>
       </div>
-      {value === 'cloud' &&
-        (provider ? (
-          <Banner tone="warning" icon={<Globe size={16} />}>
-            {feature.notice(provider)}
-          </Banner>
-        ) : (
-          <Banner tone="danger" icon={<Globe size={16} />}>
-            The cloud slot isn't set up, so {feature.title.toLowerCase()} fails until it is. Set it up under Labels, or
-            pick another model.
-          </Banner>
-        ))}
+      {notice && (
+        <Banner id={notice} tone="warning" icon={<Globe size={16} />}>
+          {feature.notice(provider)}
+        </Banner>
+      )}
+      {blocked && (
+        <Banner id={blocked} tone="danger" icon={<Globe size={16} />}>
+          {slotBlockedMessage(feature, value as Exclude<Slot, 'auto'>, slots[value as Exclude<Slot, 'auto'>].blocked ?? '')}
+        </Banner>
+      )}
     </div>
   )
 }
@@ -97,8 +137,20 @@ function FeatureRow({ feature, provider }: { feature: Feature; provider: string 
  */
 export default function FeatureModelsCard() {
   const labels = useLabels()
-  const cloud = labels.data?.labels.find((l) => l.label === 'cloud')?.config
+  const config = (label: string) => labels.data?.labels.find((l) => l.label === label)?.config
+  const cloud = config('cloud')
   const provider = cloudProvider(cloud)
+
+  const slotStates = (feature: Feature): Record<Exclude<Slot, 'auto'>, SlotState> => {
+    const state = (slot: Exclude<Slot, 'auto'>): SlotState => {
+      if (slot === 'cloud' && !provider) return { blocked: 'not set up' }
+      // Vision is only known once the labels load; until then nothing is blocked, so a slow
+      // request never makes a valid choice look broken.
+      if (feature.vision && labels.data && !slotSeesImages(config(slot))) return { blocked: 'no vision' }
+      return {}
+    }
+    return { live: state('live'), background: state('background'), cloud: state('cloud') }
+  }
 
   return (
     <ModelCard
@@ -108,7 +160,7 @@ export default function FeatureModelsCard() {
     >
       <div className="divide-y divide-border">
         {FEATURES.map((f) => (
-          <FeatureRow key={f.key} feature={f} provider={provider} />
+          <FeatureRow key={f.key} feature={f} provider={provider} slots={slotStates(f)} />
         ))}
       </div>
     </ModelCard>

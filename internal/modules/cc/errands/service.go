@@ -42,6 +42,7 @@ type Tools interface {
 type Settings interface {
 	Bool(ctx context.Context, key string, sc settings.Scope) bool
 	Int(ctx context.Context, key string, sc settings.Scope) int64
+	String(ctx context.Context, key string, sc settings.Scope) string
 }
 
 // Nodes is the node data plane (the cc Bus), headless.
@@ -226,6 +227,7 @@ func (s *Service) timezone(ctx context.Context, hh string) string {
 
 // Setting keys owned by errands.
 const (
+	SettingModel      = "errands.model"
 	SettingEnabled    = "errands.enabled"
 	SettingAutonomous = "errands.autonomous_enabled"
 	// SettingPlannerMaxTokens caps one planning call's output, thinking included.
@@ -242,6 +244,9 @@ const (
 // Definitions are the errand settings (D40 Q12, D9).
 func Definitions() []settings.Definition {
 	return []settings.Definition{
+		llm.SlotSetting(SettingModel, "errands",
+			"Which model plans and runs errands: auto (background), live, background or cloud (the optional "+
+				"cloud slot: the errand's goal and what it reads on the way go to its provider)."),
 		{Key: SettingEnabled, Category: "errands", Type: settings.Bool, Default: true,
 			Description: "Offer errands: the run_errand, schedule_errand and list_scheduled_errands voice tools, " +
 				"and scheduled errand fires. Off removes the tools from the voice prompt."},
@@ -349,4 +354,13 @@ func PurgeUser(ctx context.Context, tx *sql.Tx, userID int64, withQueue bool) er
 		}
 	}
 	return nil
+}
+
+// modelSlot is the label an errand's planning and composing calls go to: the errands feature's
+// slot, background by default.
+func (s *Service) modelSlot(ctx context.Context) string {
+	if s.Settings == nil {
+		return llm.LabelBackground
+	}
+	return llm.SlotFor(ctx, s.Settings, SettingModel, llm.LabelBackground)
 }

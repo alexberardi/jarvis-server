@@ -534,7 +534,7 @@ func (m *Module) generateMealPlan(ctx context.Context, c caller, req mealPlanReq
 	sort.SliceStable(days, func(i, j int) bool { return days[i].Date < days[j].Date })
 	used := map[string]bool{} // B20: keyed by source:id
 	failures := 0
-	label := m.label(ctx, SettingFullModel)
+	label := m.importSlot(ctx)
 	out := []dayResult{}
 	for _, day := range days {
 		dr := dayResult{Date: day.Date, Meals: map[string]slotResult{}}
