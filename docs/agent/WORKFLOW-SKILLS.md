@@ -266,11 +266,15 @@ is theirs.
 - [ ] **C1 — trace format.** `start` and `result` kinds, caps, tolerant parsing on the server.
   - Acceptance: a trace with them learns as before; one without them still learns.
   - Verify: parse tests both ways.
-- [ ] **C2 — desktop capture.** Starting windows and the result diff after each action settles,
-  Wayland/AT-SPI first (this box), then X11 and macOS. The settle wait uses the recorder's
-  injected clock.
+- [ ] **C2 — desktop capture.** Starting windows and the result diff after each action settles.
+  The three platforms share one recorder (`record_desktop.go`, a `DeskPlatform` table of
+  functions per OS), and computer control already has what capture needs on each: the window
+  list with PIDs (`Windows.List`) and the tree of a window (`ax.Snapshot`, `atspi.Snapshot`). So
+  the capture is written once in the shared recorder and each OS wires two existing functions in
+  (survey 2026-11-12). The settle wait uses the recorder's injected clock.
   - Acceptance: a recording on this box holds a `start` and a `result` per action, under the cap.
-  - Verify: `record_*_test.go` with a fake tree; one live recording here.
+  - Verify: `record_desktop_test.go` with a fake platform; live recordings on this box (Wayland),
+    an X11 session and the Mac test host.
 - [ ] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
   limited to what the steps touch, `{param}` where the recorded name is one.
   - Acceptance: criteria 1 (captured path) and 1a.
@@ -279,7 +283,12 @@ is theirs.
   - Acceptance: a browser recording holds `start` and `result` events; masked values still never
     travel.
   - Verify: `internal/agent/browser` tests and `jstest`; the `release_xpi` gate.
-  - **Held for the user:** signing and both store uploads.
+  - The stores have approved the extension (source is at 0.3.10); this needs a **new version**,
+    because the capture is in `background.js`. It asks for no new permission (`tabs`, `scripting`
+    and all sites are already granted), so users see no prompt. The next release tag submits it
+    to both stores through `browser-ext-publish.yml`, after the user approves the
+    `browser-stores` environment; Chrome publishes when its review of the update passes.
+  - **Held for the user:** the signed `.xpi` and that approval.
 
 ### Checkpoints
 
@@ -293,5 +302,5 @@ is theirs.
 | The local model's answer grows past its budget or loses accuracy | Goldens on the real model before S2 merges; a second call if needed |
 | Result diffs blow the trace cap on busy pages | Cap per result and in total; drop oldest diffs, never events |
 | "Settled" is wrong (slow pages, animations) | The result is taken at quiet or just before the next action, whichever is first; the learner treats a result as evidence, and the owner can edit |
-| The extension waits on store review | C3 is last; browser recordings use inference until then |
+| The extension update waits on Chrome's review of the new version | C3 is last; browser recordings use inference until it is out |
 | Skill parts shown but not yet used by runs | Nothing here is released before `verified-replay` |
