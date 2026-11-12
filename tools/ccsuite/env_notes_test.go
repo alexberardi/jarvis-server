@@ -102,3 +102,19 @@ func TestNotesLauncherIdempotent(t *testing.T) {
 		t.Fatal("the launcher did not start the app fresh")
 	}
 }
+
+// The session's stale FUSE mounts (the document portal's doc, gvfsd-fuse's gvfs) are found under
+// its runtime dir only, deepest first, so the teardown can unmount them before removing it.
+func TestMountsUnder(t *testing.T) {
+	info := "36 25 0:32 / /tmp/ccs.12 rw - tmpfs tmpfs rw\n" +
+		"40 36 0:50 / /tmp/ccs.12/doc rw,nosuid - fuse.portal portal rw\n" +
+		"41 36 0:51 / /tmp/ccs.12/gvfs rw,nosuid - fuse.gvfsd-fuse gvfsd-fuse rw\n" +
+		"42 41 0:52 / /tmp/ccs.12/gvfs/x/y rw - fuse f rw\n" +
+		"43 25 0:53 / /tmp/ccs.123/doc rw - fuse.portal portal rw\n" +
+		"44 25 0:54 / /run/user/1000/doc rw - fuse.portal portal rw\n"
+	got := mountsUnder(info, "/tmp/ccs.12/")
+	want := []string{"/tmp/ccs.12/gvfs/x/y", "/tmp/ccs.12/gvfs", "/tmp/ccs.12/doc"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("mountsUnder = %v, want %v", got, want)
+	}
+}

@@ -411,7 +411,40 @@ func (e *Env) stopDesktop() {
 	d.stopBrowser()
 	d.agent.stop()
 	d.session.stop()
+	unmountUnder(d.rt)
 	os.RemoveAll(d.rt)
+}
+
+// unmountUnder lazily unmounts the FUSE mounts under dir: the session's D-Bus starts the
+// document portal and gvfsd-fuse on demand, which mount $XDG_RUNTIME_DIR/doc and /gvfs and die
+// with the session, leaving stale mounts that RemoveAll can't remove. Linux only (mountinfo).
+func unmountUnder(dir string) {
+	b, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return
+	}
+	fm, err := exec.LookPath("fusermount3")
+	if err != nil {
+		if fm, err = exec.LookPath("fusermount"); err != nil {
+			return
+		}
+	}
+	for _, m := range mountsUnder(string(b), dir) {
+		exec.Command(fm, "-uz", m).Run()
+	}
+}
+
+// mountsUnder is the mount points in mountinfo (proc(5): the fifth field) inside dir, deepest first.
+func mountsUnder(mountinfo, dir string) []string {
+	var out []string
+	for _, line := range strings.Split(mountinfo, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 4 && strings.HasPrefix(f[4], filepath.Clean(dir)+"/") {
+			out = append(out, f[4])
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
 }
 
 // stopBrowser stops the session's browser and closes its DevTools pipe.
