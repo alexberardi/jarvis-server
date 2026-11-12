@@ -72,6 +72,11 @@ Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
   Recordings without it fall back to inferring from the next step. Every step also has a **goal**
   the owner can enter or correct on the workflow page.
   [Decision](../decisions/2026-11-12-step-results-are-recorded.md).
+- **Q5 (2026-11-12): prerequisites are the recording's starting point.** The recorder keeps the
+  state when recording began (what is open, which file or page, what is signed in); the learner
+  turns it into the list, limited to the apps, files and pages the steps touch; the owner keeps,
+  drops or adds on the workflow page.
+  [Decision](../decisions/2026-11-12-prerequisites-from-the-starting-state.md).
 
 ---
 
@@ -161,8 +166,8 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 
 ### Open questions for `skill-doc` (asked one at a time, in this order)
 
-1. **Q5 — prerequisites:** where they come from: inferred from how the recording begins, said by
-   the user, or both; and whether one can use a param ("file {name} is open").
+1. **Q6 — prerequisites and params:** whether a prerequisite can use a value that changes each
+   run ("file {name} is open").
 2. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
    is still kept?
 
