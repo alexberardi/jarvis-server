@@ -149,6 +149,9 @@ type Task struct {
 	ApprovedReason string
 	// Answer is the user's reply to the run's last question.
 	Answer string
+	// Today is the day in the household's zone ("Thursday, November 12, 2026"), so a goal's
+	// "last month" or "this Friday" means a date ("" = not said).
+	Today string
 	// Progress, when set, is called after every round with the run as saved (its history), so
 	// the errand's card can show what the task is doing.
 	Progress func(run *Run)
@@ -646,7 +649,7 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error) {
 	t := r.task
 	text := renderPrompt(promptInput{
-		Goal: t.Goal, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
+		Goal: t.Goal, Today: t.Today, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 		Source: t.Source,
@@ -1075,6 +1078,12 @@ func (l *Loop) end(ctx context.Context, run *Run, out Outcome) Outcome {
 		run.State = RunDone
 	case StateAsk, StateNeedsApproval:
 		run.State = RunWaiting
+		if out.State == StateAsk && out.Ask != "" {
+			// The next round, after the user's answer, sees what was asked: an answer like
+			// "Carry on." means nothing without it (checkpoint B: the same question until the
+			// round limit).
+			run.History = append(run.History, Entry{Round: run.Rounds, Kind: "ask", Intent: out.Ask, Result: "asked the user"})
+		}
 	case StatePaused:
 		run.State = RunPaused
 	case StateStopped:

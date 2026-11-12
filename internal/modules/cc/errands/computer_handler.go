@@ -103,7 +103,8 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	if rc.workflowID == "" {
 		return failed("computer step has no workflow link")
 	}
-	t := computer.Task{HouseholdID: rc.householdID, UserID: rc.userID, WorkflowID: rc.workflowID, Step: i}
+	t := computer.Task{HouseholdID: rc.householdID, UserID: rc.userID, WorkflowID: rc.workflowID, Step: i,
+		Today: s.now().In(zoneOf(rc.timezone)).Format("Monday, January 2, 2006")}
 	// A saved workflow replays (its own goal, targets and success check); anything else is the
 	// loop on the step's goal.
 	run := func(t computer.Task) computer.Outcome { return s.Computer.Loop.Run(ctx, t) }
@@ -509,8 +510,9 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 		return "", nil, false
 	}
 	for _, h := range run.History {
-		// What the task did: not the actions it held for the user, nor the ones that never ran.
-		if h.Intent != "" && h.Result != heldResult && h.Result != "not run" {
+		// What the task did: not the actions it held for the user, nor the ones that never ran,
+		// nor its questions (the question card says those).
+		if h.Intent != "" && h.Kind != "ask" && h.Result != heldResult && h.Result != "not run" {
 			intents = append(intents, h.Intent)
 		}
 	}
@@ -581,7 +583,9 @@ func (s *Service) handleAnswerStep(ctx context.Context, c CallbackContext) Callb
 	if !revisionsMatch(c.Data["revision"], w.Revision) {
 		return fail("This errand was updated — open the latest card.")
 	}
-	answer := firstNonEmpty(strings.TrimSpace(dataStr(c.Data, "instruction")), "Carry on.")
+	// Continue with nothing typed: yes to what the question proposed (a purchase still asks
+	// for its own approval).
+	answer := firstNonEmpty(strings.TrimSpace(dataStr(c.Data, "instruction")), "Yes, go ahead as you suggested.")
 	if s.Computer == nil || s.Computer.Loop == nil || s.Computer.Loop.Store == nil {
 		return fail("Computer tasks are unavailable right now.")
 	}

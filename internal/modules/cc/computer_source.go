@@ -104,6 +104,10 @@ func meansOpenPage(s string) bool {
 // a "<<<END PAGE TEXT>>>" line.
 const toolReadPage = "browser_read_page"
 
+// toolListTabs is the agent's browser_list_tabs, whose tabs say which one is current (the active
+// tab of the window the user last focused).
+const toolListTabs = "browser_list_tabs"
+
 // pageText is browser_read_page's content without its markers.
 func pageText(content string) string {
 	lines := strings.Split(strings.TrimSpace(content), "\n")
@@ -119,8 +123,25 @@ func pageText(content string) string {
 // openPageSource is the page open in the browser on the user's computer, as its extension reads
 // it (browser_read_page on the current tab): the page the user sees, logins and home network
 // included, which the server's own fetch can't reach.
+// The tab is named: without one the agent reads its task tab, where an earlier errand worked,
+// not the page the user is looking at.
 func (m *Module) openPageSource(ctx context.Context, nodeID string, uid int64) (computer.Source, error) {
-	out := m.agentRecordingCall(ctx, nodeID, toolReadPage, map[string]any{"max_chars": sourceRunes}, uid)
+	tabs := m.agentRecordingCall(ctx, nodeID, toolListTabs, map[string]any{}, uid)
+	if !dispatchOK(tabs) {
+		return computer.Source{}, fmt.Errorf("couldn't list the browser's tabs: %s", agentError(tabs))
+	}
+	var current any
+	list, _ := tabs["tabs"].([]any)
+	for _, t := range list {
+		if tm, ok := t.(map[string]any); ok && tm["current"] == true && tm["tab_id"] != nil {
+			current = tm["tab_id"]
+			break
+		}
+	}
+	if current == nil {
+		return computer.Source{}, errors.New("there is no web page open in the browser")
+	}
+	out := m.agentRecordingCall(ctx, nodeID, toolReadPage, map[string]any{"tab_id": current, "max_chars": sourceRunes}, uid)
 	if !dispatchOK(out) {
 		return computer.Source{}, fmt.Errorf("couldn't read the page open in the browser: %s", agentError(out))
 	}

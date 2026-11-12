@@ -26,13 +26,23 @@ type fakeDocAgent struct {
 	files    map[string]map[string]any // other files by path, read as they are
 	page     map[string]any            // browser_read_page's answer: the page open in the browser
 	reads    int                       // browser_read_page calls
+	readTab  any                       // the tab_id the last read asked for
+	tabs     []any                     // browser_list_tabs' tabs (nil: one current tab, chrome:7)
 }
 
 func (f *fakeDocAgent) call(_ context.Context, _, tool string, args map[string]any, _ int64) map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if tool == "browser_list_tabs" {
+		tabs := f.tabs
+		if tabs == nil {
+			tabs = []any{map[string]any{"tab_id": "chrome:3", "current": false}, map[string]any{"tab_id": "chrome:7", "current": true}}
+		}
+		return map[string]any{"success": true, "tabs": tabs}
+	}
 	if tool == "browser_read_page" {
 		f.reads++
+		f.readTab = args["tab_id"]
 		if f.page == nil {
 			return map[string]any{"success": false, "error": "no browser"}
 		}
@@ -240,6 +250,11 @@ func TestWriteDocumentOpenPage(t *testing.T) {
 			if agent.reads != c.reads {
 				t.Fatalf("read the open page %d times, want %d", agent.reads, c.reads)
 			}
+			// The tab in front, by its id: without one the agent reads its task tab, where an
+			// earlier errand worked (checkpoint B: a store's checkout summarized as Velmora).
+			if c.reads > 0 && agent.readTab != "chrome:7" {
+				t.Fatalf("read tab %v, want the current tab chrome:7", agent.readTab)
+			}
 			p := lastUserText(t, ve.eng.last())
 			if !strings.Contains(p, "Lake Orrin") {
 				t.Errorf("prompt lacks the page:\n%s", p)
@@ -255,8 +270,18 @@ func TestWriteDocumentOpenPage(t *testing.T) {
 	}
 }
 
-// No web page open in the browser: the step fails saying so, and writes nothing.
+// No web page open in the browser: the step fails saying so, and writes nothing. No tab in
+// front at all is the same.
 func TestWriteDocumentOpenPageMissing(t *testing.T) {
+	none := &fakeDocAgent{tabs: []any{map[string]any{"tab_id": "chrome:3", "current": false}}, page: map[string]any{"success": true}}
+	vn := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = none.call })
+	vn.setComputerControl("on")
+	tn := vn.recTurn(7)
+	tn.Utterance = "summarize this page into a document"
+	if out := runTool(t, tool(vn), `{"path": "x.odt", "instructions": "a summary"}`, tn); !strings.Contains(fmt.Sprint(out["message"]), "no web page open") || none.reads != 0 {
+		t.Fatalf("no current tab: %v (reads %d)", out, none.reads)
+	}
+
 	agent := &fakeDocAgent{page: map[string]any{"success": true, "tab": map[string]any{"url": "chrome://newtab/"}, "content": "<<<PAGE TEXT>>>\n\n<<<END PAGE TEXT>>>"}}
 	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
 	ve.setComputerControl("on")

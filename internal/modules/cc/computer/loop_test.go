@@ -927,3 +927,41 @@ func TestBrowserRunEndsOnComputer(t *testing.T) {
 		t.Fatalf("failed: outcome %+v, stops %v", out, e.exec.stops)
 	}
 }
+
+// A question the model asked stays in the run's history, so the round after the user's answer
+// knows what was answered: without it, "Carry on." answered nothing the model could see and it
+// asked the same question until the round limit (checkpoint B, store_order_approve).
+func TestAnswerKnowsTheQuestion(t *testing.T) {
+	e := newEnv(t)
+	e.script(`{"ask": "The saved address is Jordan Quinn's. Ship there?", "reason": "unclear"}`, doneAnswer)
+	out := e.run()
+	if out.State != StateAsk {
+		t.Fatalf("outcome %+v", out)
+	}
+	tk := task()
+	tk.RunID, tk.Answer = out.RunID, "Yes, go ahead as you suggested."
+	if out = e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("resumed outcome %+v", out)
+	}
+	txt := userText(e.llm.reqs[len(e.llm.reqs)-1])
+	for _, want := range []string{`ask "The saved address is Jordan Quinn's. Ship there?"`, "The user answered your question: Yes, go ahead as you suggested."} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("resumed prompt lacks %q:\n%s", want, txt)
+		}
+	}
+}
+
+// The task's day is in the prompt: "last month" in a goal is a month only once the model knows
+// today's date (checkpoint B, budget_last_month: "Which one is last month: 2026-10 or 2026-09?").
+func TestPromptHasToday(t *testing.T) {
+	e := newEnv(t)
+	e.script(doneAnswer)
+	tk := task()
+	tk.Today = "Thursday, November 12, 2026"
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if txt := userText(e.llm.reqs[0]); !strings.Contains(txt, "Today is Thursday, November 12, 2026.") {
+		t.Fatalf("no date in the prompt:\n%s", txt)
+	}
+}

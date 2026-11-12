@@ -58,6 +58,7 @@ const defaultRules = "Risky actions (pay, send, delete, sharing, install, subscr
 // promptInput is what one round's prompt is made of.
 type promptInput struct {
 	Goal        string
+	Today       string // the day in the household's zone, "" = not said
 	Success     *SuccessCheck
 	Rules       string
 	Answer      string // the user's reply to the run's last question
@@ -76,6 +77,9 @@ type promptInput struct {
 func renderPrompt(in promptInput) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Task: %s\n", oneLine(in.Goal))
+	if in.Today != "" {
+		fmt.Fprintf(&b, "Today is %s.\n", in.Today)
+	}
 	if s := in.Success.describe(); s != "" {
 		fmt.Fprintf(&b, "Done when: %s\n", s)
 	}
