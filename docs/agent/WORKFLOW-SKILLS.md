@@ -77,6 +77,11 @@ Out of scope: Pantry export (Q7 of COMPUTER-CONTROL, 2026-10-19).
   turns it into the list, limited to the apps, files and pages the steps touch; the owner keeps,
   drops or adds on the workflow page.
   [Decision](../decisions/2026-11-12-prerequisites-from-the-starting-state.md).
+- **Q6 (2026-11-12): prerequisites use the workflow's per-run values.** "File {file} is open", not
+  the file that happened to be recorded (user: "they need to be dynamic and smart, otherwise
+  they're not useful"). The learner proposes a value where the recorded name is, or looks like, a
+  param; the owner can make it fixed again.
+  [Decision](../decisions/2026-11-12-prerequisites-from-the-starting-state.md).
 
 ---
 
@@ -166,9 +171,7 @@ Reuse `computer.SuccessCheck` for expectations; no second check type.
 
 ### Open questions for `skill-doc` (asked one at a time, in this order)
 
-1. **Q6 — prerequisites and params:** whether a prerequisite can use a value that changes each
-   run ("file {name} is open").
-2. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
+1. **Q4 — existing workflows:** left with an empty skill, or relearnt from their recording when it
    is still kept?
 
 ## Later modules' questions (not yet ordered)

@@ -12,5 +12,9 @@ recording. What's open. What's logged in.").
 - The learner turns that into prerequisites, only for the apps, files and pages the steps act on,
   so an unrelated open window isn't one.
 - The owner keeps, drops or adds prerequisites on the workflow page.
+- **A prerequisite can use a per-run value** (Q6, user: "they need to be dynamic and smart,
+  otherwise they're not useful"): "file {file} is open", so one recording works on another file,
+  site or account. The learner proposes one where the recorded name is already a param or looks
+  like one (a date or month in it); the owner can make it a fixed name again.
 
 An empty list the owner fills in was rejected: a workflow nobody annotates would start blind.
