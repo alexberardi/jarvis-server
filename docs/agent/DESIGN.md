@@ -431,7 +431,7 @@ extension (background) ⇄ native messaging (stdin/stdout, 4-byte length + JSON)
 | `browser_switch_tab` (tab_id) | `switch_tab` | activates the tab and focuses its window |
 | `browser_close_tab` (tab_id) | `close_tab` | `is_risky`; no confirmation (same policy as closing windows) |
 | `browser_navigate` (action, tab_id?) | `navigate` | back / forward / reload |
-| `browser_read_page` (tab_id?, max_chars?) | `read_page` | visible text, main/article first; 4000 chars default, 20000 max |
+| `browser_read_page` (tab_id?, max_chars?) | `read_page` | visible text, main/article first; 4000 chars default, 50000 max (the extension's cap); the server sizes it to the model (whole article for a cloud model) |
 | `browser_media` (action, seconds?, tab_id?) | `media` | play, pause, mute, unmute, skip_forward, skip_back, restart, status |
 | `browser_scroll` (direction, tab_id?) | `scroll` | up/down a screen, top, bottom (inner scroll panes too) |
 | `browser_find` (text, tab_id?) | `find` | highlights + scrolls to the first match; count and context |

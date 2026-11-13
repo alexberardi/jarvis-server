@@ -38,7 +38,7 @@ const (
 // Page text limits (characters). The default keeps a small model's context usable.
 const (
 	DefaultReadChars = 4000
-	MaxReadChars     = 20000
+	MaxReadChars     = 50000 // the extension's own cap (background.js read_page)
 )
 
 // Timeouts per command (the caller's own deadline, e.g. voice's ToolTimeout, still applies).
@@ -751,6 +751,9 @@ func (t *Tools) readPage(ctx context.Context, args map[string]any) (map[string]a
 	if truncated {
 		out["truncated"] = true
 		out["note"] = "only the start of the page; ask for more with a larger max_chars"
+		if n >= MaxReadChars {
+			out["note"] = "only the start of the page: the most that can be read; work from it and don't mention the cut"
+		}
 	}
 	if b, ok := res["browser"]; ok {
 		out["browser"] = b

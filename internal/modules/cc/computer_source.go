@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
@@ -153,4 +158,86 @@ func (m *Module) openPageSource(ctx context.Context, nodeID string, uid int64) (
 		return computer.Source{}, errors.New("there is no web page open in the browser")
 	}
 	return computer.Source{URL: url, Text: truncateRunes(text, sourceRunes)}, nil
+}
+
+// Page reads sized to the model that reads them (browser_read_page's max_chars, when the model
+// gives none). The agent's own default (4000) suits a small local model; a cloud model, whose
+// window the endpoint doesn't report, gets the whole article up to what the browser extension
+// returns (50000). A local model with a known window gets about a fifth of it (4 characters a
+// token). Found live 2026-11-13: Sonnet summarized only the top of a Wikipedia article.
+const (
+	readPageMinChars = 4000
+	readPageMaxChars = 50000
+)
+
+// readPageCharsFor is the max_chars for a page read on ep, or 0 to leave the agent's default.
+func readPageCharsFor(ep llm.Endpoint, ok bool) int {
+	switch {
+	case !ok:
+		return 0
+	case ep.Remote:
+		return readPageMaxChars
+	case ep.ContextLength > 0:
+		return min(max(ep.ContextLength*4/5, readPageMinChars), readPageMaxChars)
+	}
+	return 0
+}
+
+// readPageChars is readPageCharsFor the slot this turn runs on.
+func (m *Module) readPageChars(ctx context.Context) int {
+	ep, ok := m.endpoint(ctx, m.conversationSlot(ctx))
+	return readPageCharsFor(ep, ok)
+}
+
+// fillReadPageChars is call's arguments with max_chars n, when call is a browser_read_page that
+// asks for less (or gives none) and n is known. The model's own smaller size cost a second read
+// (2026-11-13: 30000, "the page was cut off", then 80000); a larger one is kept.
+func fillReadPageChars(call parse.ToolCall, n int) (string, bool) {
+	if call.Function.Name != toolReadPage || n <= 0 {
+		return "", false
+	}
+	v, err := pyjson.Loads(call.Function.Arguments)
+	o, isObj := v.(*pyjson.Object)
+	if err != nil || !isObj {
+		return "", false
+	}
+	if x, ok := o.Get("max_chars"); ok && x != nil {
+		if have, isNum := readSize(x); !isNum || have >= n {
+			return "", false
+		}
+	}
+	o.Set("max_chars", n)
+	return pyjson.Dumps(o, true), true
+}
+
+// PageSummaryHint is the turn's line when the user asks for a summary and the page reader is
+// offered: the whole page, not its opening (found live 2026-11-13: a summary of a Wikipedia
+// article's first paragraphs, "the intro gives a solid summary").
+const PageSummaryHint = "[summary: read the whole page and cover all of it, start to end: the main points of each " +
+	"part in your own words, never just the intro or first paragraphs. Spoken, a few sentences that still span the " +
+	"whole page; typed or written, a few short paragraphs.]"
+
+// pageSummaryHint is PageSummaryHint for a summary request with the page reader, or "".
+func pageSummaryHint(conv *conversation, utterance string) string {
+	if !conv.hasTool(toolReadPage) || !asksForSummary(utterance) {
+		return ""
+	}
+	return PageSummaryHint
+}
+
+// readSize is a decoded max_chars as an int: a number, or a numeric string (the agent takes
+// both).
+func readSize(x any) (int, bool) {
+	switch v := x.(type) {
+	case *big.Int:
+		if v.IsInt64() {
+			return int(v.Int64()), true
+		}
+	case float64:
+		return int(v), true
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		return n, err == nil
+	}
+	return 0, false
 }
