@@ -42,6 +42,9 @@ const (
 const (
 	iterMaxTokens        = 256
 	doubleCheckMaxTokens = 1536
+	// lengthRetryMaxTokens is a step's second try after it was cut off at iterMaxTokens: room
+	// for a tool call whose arguments the model writes itself (a summary to type, a note).
+	lengthRetryMaxTokens = 2048
 	// doubleCheckThinkBudget caps the re-check's thinking: uncapped, Gemma 4 thought for up
 	// to 16 s (1536 tokens, no answer) where Qwen 3.5 used ~200 tokens.
 	doubleCheckThinkBudget = 256
@@ -187,12 +190,17 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 	nudged := map[[2]string]bool{}
 	dedupePending := false
 	deduped := false // a [TOOL_DEDUPE] nudge this run: answering from earlier results is the point
-	nextMax := iterMaxTokens
+	// A summary's answer runs past iterMaxTokens: it starts with room instead of a cut first try.
+	baseMax := iterMaxTokens
+	if asksForSummary(in.utterance) {
+		baseMax = lengthRetryMaxTokens
+	}
+	nextMax := baseMax
 	tr := traceFrom(ctx)
 
 	for iter := 0; iter < in.maxIter; iter++ {
 		maxTok := nextMax
-		nextMax = iterMaxTokens
+		nextMax = baseMax
 		temp := loopTemperature
 		req := llm.ChatRequest{Label: m.conversationSlot(ctx), Messages: toLLM(msgs), MaxTokens: &maxTok, Temperature: &temp,
 			ReasoningBudget: budget}
@@ -221,6 +229,22 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			return engineResult{Stop: stopError, Err: llmErrText(err)}, msgs
 		}
 		conv.noteUsage(resp.Usage)
+		if resp.FinishReason == "length" && maxTok < lengthRetryMaxTokens {
+			// Cut off: a long tool call (the summary it was typing) would be lost whole, and the
+			// user would hear only its preamble. Once more with room; a second cut is kept.
+			m.deps.Log.Info("cc: step cut off, asking again with room", "conversation_id", conv.id,
+				"max_tokens", maxTok, "retry_max_tokens", lengthRetryMaxTokens)
+			mt := lengthRetryMaxTokens
+			req.MaxTokens = &mt
+			again, err := m.LLM.Chat(ctx, req)
+			llmEnd = tr.since()
+			if err == nil {
+				conv.noteUsage(again.Usage)
+				resp = again
+			} else {
+				m.deps.Log.Warn("cc: retry after a cut-off step failed; keeping the cut answer", "conversation_id", conv.id, "err", err)
+			}
+		}
 		raw := resp.Content
 		for _, mt := range thinkCaptureRE.FindAllStringSubmatch(raw, -1) {
 			if s := parse.PyStrip(mt[1]); s != "" {
@@ -278,6 +302,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 			if only && toolRanThisTurn(msgs[:len(msgs)-1]) && countNags(msgs, nagAnswerAfterTool) < 1 && iter+1 < in.maxIter {
 				msgs = msgs[:len(msgs)-1]
 				msgs = append(msgs, sysMsg(answerAfterToolRetry))
+				m.logNudge(conv, "answer_after_tool", iter)
 				continue
 			}
 			if only {
@@ -308,6 +333,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				}
 				msgs = append(msgs, chatMsg{Role: "user", Content: dc})
 				nextMax = doubleCheckMaxTokens
+				m.logNudge(conv, "double_check", iter)
 				continue
 			}
 			return withReasoning(engineResult{Stop: stopNotForMe, Message: raw}), msgs
@@ -333,6 +359,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				}
 				msgs = msgs[:len(msgs)-1]
 				msgs = append(msgs, sysMsg(mustCallRetry(retries+1)))
+				m.logNudge(conv, "must_call", iter)
 				continue
 			}
 			// A tool failed this turn but the reply claims it worked (beyond legacy; the pipeline
@@ -341,6 +368,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				tf.ResponseClaimsAction(parse.OutsideThink(message)) && toolFailedThisTurn(msgs) {
 				msgs = msgs[:len(msgs)-1]
 				msgs = append(msgs, sysMsg(failedClaimRetry))
+				m.logNudge(conv, "failed_claim", iter)
 				continue
 			}
 			// The request was left half done: a memory request answered "noted" with no tool to
@@ -352,6 +380,7 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				if nag := followThroughNag(conv, in.utterance, parse.OutsideThink(message), msgs); nag != "" {
 					msgs = msgs[:len(msgs)-1]
 					msgs = append(msgs, sysMsg(nag))
+					m.logNudge(conv, "follow_through", iter)
 					continue
 				}
 			}
@@ -388,6 +417,12 @@ func (m *Module) runEngine(ctx context.Context, in engineInput) (engineResult, [
 				if out, changed := fillTypedApp(in.voiceCommand, calls[i]); changed {
 					calls[i].Function.Arguments = out
 					m.deps.Log.Info("cc: typed_app_filled", "conversation_id", conv.id)
+				}
+			}
+			// 2b'. A page read is sized to the model reading it (computer_source.go).
+			for i := range calls {
+				if out, changed := fillReadPageChars(calls[i], m.readPageChars(ctx)); changed {
+					calls[i].Function.Arguments = out
 				}
 			}
 			// 2c. desktop_confirm carries the user's answer, never the model's; without one it
@@ -875,4 +910,10 @@ func trailingBareCall(message string, offered func(string) bool) (parse.ToolCall
 		i += 1 + j
 	}
 	return parse.ToolCall{}, "", false
+}
+
+// logNudge records that the loop asked the model again (which guard, after which step): a turn's
+// extra model calls are otherwise invisible in the log.
+func (m *Module) logNudge(conv *conversation, kind string, iter int) {
+	m.deps.Log.Info("cc: nudge", "conversation_id", conv.id, "kind", kind, "after_iter", iter+1)
 }
