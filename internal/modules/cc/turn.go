@@ -227,6 +227,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		m.desktopAppHint(conv, in.VoiceCommand),
 		sameDeviceHint(conv, in),
 		m.computerControlHint(ctx, conv, in.VoiceCommand),
+		pageSummaryHint(conv, in.VoiceCommand),
 		computerActivityHint(in.Computer, in.VoiceCommand),
 		m.pendingConfirmHint(conv),
 	}
