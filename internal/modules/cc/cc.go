@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	dbridge "github.com/alexberardi/jarvis-server/internal/modules/cc/discord"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -60,7 +61,7 @@ func Definitions() []settings.Definition {
 		voiceDefinitions(prompts.DefaultPersona), followUpGateDefinitions(), packageDefinitions(), smartHomeDefinitions(),
 		memoryDefinitions(), signalDefinitions(), phone.Definitions(), errands.Definitions(), slotDefinitions(),
 		householdSettingDefinitions(), compactionDefinitions(), watchDefinitions(),
-		recordingDefinitions(), computerDefinitions())))
+		recordingDefinitions(), computerDefinitions(), dbridge.Definitions())))
 }
 
 func nodeDefinitions() []settings.Definition {
@@ -233,6 +234,10 @@ type Module struct {
 	sig        *signalState     // 5c signals, proposals and attention (signals.go)
 	phone      *phone.Service   // 5c phone calls (phone_wire.go)
 	errands    *errands.Service // 5c errands and workflows (errands.go)
+	// The Discord bridge (discord_wire.go).
+	discord      *dbridge.Manager
+	discordStore *dbridge.Store
+	discordCodes *dbridge.Codes
 
 	// tasks tracks fire-and-forget goroutines so shutdown waits for them (tasks.go, Wait).
 	tasks taskGroup
@@ -450,6 +455,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Household settings from mobile (doc 13 §3.7).
 	m.registerHouseholdSettings(mux)
 	m.registerHouseholdPrompt(mux)
+	// The Discord bridge and its app routes (docs/discord-bridge.md).
+	m.discordSetup()
+	m.registerDiscord(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -501,6 +509,7 @@ func (m *Module) Start(ctx context.Context) error {
 	if err := m.startPhone(ctx); err != nil {
 		return err
 	}
+	m.startDiscord(ctx)
 	m.startErrands(ctx)
 	if m.deps.Scheduler == nil {
 		return nil
@@ -568,6 +577,9 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
 			return err
 		}
+	}
+	if err := purgeDiscordUser(ctx, tx, userID); err != nil {
+		return err
 	}
 	// Phone (D20): call drafts and call context go; sessions stay, de-identified.
 	return phone.PurgeUser(ctx, tx, "cc_settings", userID)

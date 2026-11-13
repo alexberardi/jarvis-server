@@ -14,6 +14,21 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 - [x] Pilot on a Surface Pro 6: reboot, automatic kiosk login, Jabra voice, finger touch, full-screen speech waveform and PIN exit confirmed. Other screen-equipped devices are untested.
 - [ ] Real external Chromecast routing, phone sender applications and subscription website compatibility sign-off. See [touch display operation](agent/touch-display.md).
 
+### Discord bridge (2026-11-13)
+
+Talk to Jarvis from anywhere through a household Discord bot: text (DM, or a thread in one channel),
+voice clips, photos, slash commands, opt-in reminder DMs, and live voice in one voice channel.
+Built (branch `feature/discord-bridge`): `internal/modules/cc/discord` (+ `clip`, `opusnative`),
+`cc/discord_wire.go`, `cc.Module.ChatText`, `cc_discord_links`, the `discord.*` household settings and
+four app routes. Tested: unit, handler and race tests; by hand on the real bot (DM, channel thread, slash
+commands, voice clip, photo, live voice through Discord's encrypted voice, an opt-in reminder DM); and the
+mobile app's Discord card on an Android 16 emulator against this build running as a sandbox container, with
+the real bot linked through the app and a real chat turn answered by a scripted model. Not yet exercised: the
+real speech to text and text to speech behind voice clips and live voice, and the real language model. The mobile app has a Discord card (jarvis-node-mobile,
+`feature/discord-link`). Not yet: live voice on the production container (needs `libopus0`, added to
+the Dockerfile), and `dave-go` is pre-1.0. Guide: [discord-bridge.md](discord-bridge.md). Decision:
+[decisions/2026-11-13-discord-bridge.md](decisions/2026-11-13-discord-bridge.md).
+
 ### Workflow skills (2026-11-12)
 
 A taught workflow learns a structured skill (goal, prerequisites, step goals and expectations)

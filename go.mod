@@ -25,7 +25,7 @@ require (
 	github.com/warthog618/go-gpiocdev v0.9.2
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zaf/g711 v1.4.0
-	golang.org/x/crypto v0.53.0
+	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.46.0
 	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.49.0
@@ -36,6 +36,11 @@ require (
 )
 
 require (
+	github.com/disgoorg/disgo v0.20.0 // indirect
+	github.com/disgoorg/godave v0.3.0 // indirect
+	github.com/disgoorg/json/v2 v2.0.0 // indirect
+	github.com/disgoorg/omit v1.0.0 // indirect
+	github.com/disgoorg/snowflake/v2 v2.0.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emiago/dtls/v3 v3.0.0-20260122183559-8b8d23e359c0 // indirect
 	github.com/go-audio/riff v1.0.0 // indirect
@@ -45,6 +50,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/miekg/dns v1.1.43 // indirect
@@ -64,7 +70,10 @@ require (
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rs/xid v1.4.0 // indirect
+	github.com/sasha-s/go-csync v0.0.0-20240107134140-fcbab37b09ad // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
+	github.com/thomas-vilte/dave-go v0.5.1 // indirect
+	github.com/thomas-vilte/mls-go v1.6.0 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xuri/efp v0.0.1 // indirect

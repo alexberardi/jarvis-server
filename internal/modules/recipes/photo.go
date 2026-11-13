@@ -162,3 +162,8 @@ func preparePhoto(data []byte) ([]byte, bool) {
 	}
 	return buf.Bytes(), true
 }
+
+// PrepareVisionPhoto is preparePhoto for other modules (the Discord bridge shrinks a phone photo
+// the way a recipe photo is): decoded, turned upright by its EXIF orientation, scaled within the
+// vision budget and re-encoded as JPEG. ok is false when the bytes are not a decodable image.
+func PrepareVisionPhoto(data []byte) ([]byte, bool) { return preparePhoto(data) }

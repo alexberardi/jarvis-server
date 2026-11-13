@@ -22,7 +22,7 @@ LABEL org.opencontainers.image.title="jarvisd" \
       org.opencontainers.image.version="${VERSION}"
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl libgomp1 tini tzdata \
+ && apt-get install -y --no-install-recommends ca-certificates curl libgomp1 libopus0 tini tzdata \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=unpack /out/ /
