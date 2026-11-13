@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	dbridge "github.com/alexberardi/jarvis-server/internal/modules/cc/discord"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
@@ -69,6 +70,12 @@ var householdControllable = []householdSetting{
 	{key: settingWatchesEnabled, typ: "bool"},        // A8: watches (autonomy P2)
 	{key: errands.SettingAutonomous, typ: "bool"},    // A1: household rules may run background errands
 	{key: settingRecordingRetention, typ: "int"},     // plan P3 piece 27: the Recordings page
+	// Discord bridge (docs/discord-bridge.md): the household's bot, entered in the app by an admin.
+	{key: dbridge.SettingEnabled, typ: "bool"},
+	{key: dbridge.SettingBotToken, typ: "string", own: true, secret: true},
+	{key: dbridge.SettingGuildID, typ: "string", own: true},
+	{key: dbridge.SettingChannelID, typ: "string", own: true},
+	{key: dbridge.SettingVoiceChannelID, typ: "string", own: true},
 }
 
 func householdSettingType(key string) (householdSetting, bool) {

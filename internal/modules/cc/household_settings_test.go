@@ -40,7 +40,7 @@ func TestHouseholdSettingsAllowlistDeclared(t *testing.T) {
 			t.Errorf("admin-only definition %s is mobile-controllable", key)
 		}
 	}
-	if len(householdControllable) != 23 {
+	if len(householdControllable) != 28 { // 23 + the five Discord bridge keys
 		t.Fatal(len(householdControllable))
 	}
 	for _, s := range householdControllable {
@@ -75,7 +75,7 @@ func TestInboundSettingsStayOutsideMobileHouseholdAPI(t *testing.T) {
 		}
 	}
 	got := e.do("GET", "/api/v0/mobile/household/hh1/settings", nil, bearer(admin)).want(200).json()["settings"].(map[string]any)
-	if len(got) != 24 { // 23 controllable + the read-only pantry.stores
+	if len(got) != 29 { // 28 controllable + the read-only pantry.stores
 		t.Fatalf("mobile settings shape changed: %v", got)
 	}
 	for key := range values {
@@ -96,6 +96,7 @@ func TestHouseholdSettingsGet(t *testing.T) {
 		`"phone_calls.monthly_minutes_cap":60,"phone_calls.max_concurrent_calls":1,"household.location":"",` +
 		`"persona.household_prompt":` + jsonStr(prompts.DefaultPersona) + `,"memory.enabled":true,"memory.extraction_enabled":true,` +
 		`"household.timezone":"","phone.twilio_account_sid":null,"phone.twilio_auth_token":null,"phone.twilio_from_number":null,"pantry.enabled":false,"pantry.default_bundle":"","watches.enabled":false,"errands.autonomous_enabled":false,"computer.recording_retention_days":30,` +
+		`"discord.enabled":false,"discord.bot_token":null,"discord.guild_id":null,"discord.channel_id":null,"discord.voice_channel_id":null,` +
 		`"pantry.stores":[{"id":"` + defaultPantryStoreID + `","url":"` + defaultPantryBaseURL + `","name":"` + defaultPantryStoreName + `"}]}}`
 	if got := string(bytes.TrimSpace(r.body)); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)

@@ -17,7 +17,7 @@ scripts/container-build.sh dist v1.2.3 amd64 jarvisd:v1.2.3
 exactly ports 7700/7710/1884 listening, `/services` URLs with paths, jarvisd running as uid 99,
 the setup token in `docker logs`, and the data surviving `docker rm` and a new `docker run`.
 
-The base is `ubuntu:24.04` with `ca-certificates curl libgomp1 tini tzdata`. tini is PID 1;
+The base is `ubuntu:24.04` with `ca-certificates curl libgomp1 libopus0 tini tzdata` (`libopus0` is loaded at run time by the Discord bridge for voice clips and live voice). tini is PID 1;
 `HEALTHCHECK` curls `/health` on 7700.
 
 ## Run
