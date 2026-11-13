@@ -215,7 +215,7 @@ func fillReadPageChars(call parse.ToolCall, n int) (string, bool) {
 // article's first paragraphs, "the intro gives a solid summary").
 const PageSummaryHint = "[summary: read the whole page and cover all of it, start to end: the main points of each " +
 	"part in your own words, never just the intro or first paragraphs. Spoken, a few sentences that still span the " +
-	"whole page; typed or written, a few short paragraphs.]"
+	"whole page; typed into an app, under 2000 characters (one typing call); written to a document, a few short paragraphs.]"
 
 // pageSummaryHint is PageSummaryHint for a summary request with the page reader, or "".
 func pageSummaryHint(conv *conversation, utterance string) string {

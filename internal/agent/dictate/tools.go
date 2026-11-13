@@ -86,7 +86,7 @@ var appParam = node.Param{Name: "app", Type: "string",
 
 func typeSpec() node.Spec {
 	return node.Spec{Name: ToolType,
-		Description: "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill. A job inside an app ('make a note titled X and save it') is an errand: run_errand.",
+		Description: "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill. A job inside an app ('make a note titled X and save it') is an errand: run_errand. At most 2000 characters a call: longer text goes in parts, in order; line breaks are typed as spaces.",
 		Params: []node.Param{
 			{Name: "text", Type: "string", Required: true, Description: "Only the words to type"},
 			appParam,

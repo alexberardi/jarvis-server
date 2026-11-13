@@ -62,6 +62,12 @@ func FailureText(tool string, err error) string {
 	if s, ok := pageFailure(what, tell, err); ok {
 		return s
 	}
+	var tl tooLongError
+	if errors.As(err, &tl) {
+		// The model's to fix, not the user's to hear: in parts, one call each.
+		return fmt.Sprintf("%s: the text is %d characters, more than one call types. Type it in parts of at most %d characters, "+
+			"one %s call each, in order, splitting between sentences.", what, tl.n, MaxText, ToolType)
+	}
 	if errors.Is(err, errSubmit) {
 		return fmt.Sprintf("The text was typed, but Enter wasn't pressed (%s). Tell the user it was typed but not sent.", unwrapMsg(err))
 	}

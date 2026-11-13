@@ -636,3 +636,22 @@ func TestSpokenShortcutCanEndTheExchange(t *testing.T) {
 		t.Fatalf("turn %+v", tr)
 	}
 }
+
+// A failed round's reply is trusted when it asks the user something: a question can't claim
+// success, and the user answers it. When the error is spoken instead, its instructions to the
+// model aren't (2026-11-13: "Want me to type a shorter version?" was replaced by "Sorry, that
+// didn't work: Nothing was typed: bad arguments: … Tell the user nothing was typed and why.").
+func TestFailedRoundKeepsAQuestionAndSpeaksOnlyTheUsersPart(t *testing.T) {
+	tools := funcTools{"desktop_type_text": func(context.Context, map[string]any) map[string]any {
+		return node.Fail("Nothing was typed: bad arguments: text is 3487 characters; at most 2000 can be typed at once. Tell the user nothing was typed and why.")
+	}}
+	q := "Nothing got typed. The summary is too long to type at once. Want me to type a shorter version?"
+	r, _ := toolRig(t, tools, toolCalls(call("c1", "desktop_type_text", `{}`)), steps(t, complete(q)))
+	if r.srv.spoken != q {
+		t.Fatalf("spoke %q", r.srv.spoken)
+	}
+	r, _ = toolRig(t, tools, toolCalls(call("c1", "desktop_type_text", `{}`)), steps(t, complete("Typed it!")))
+	if want := "Sorry, that didn't work: Nothing was typed: text is 3487 characters; at most 2000 can be typed at once."; r.srv.spoken != want {
+		t.Fatalf("spoke %q, want %q", r.srv.spoken, want)
+	}
+}

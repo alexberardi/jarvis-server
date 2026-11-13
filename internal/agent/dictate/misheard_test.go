@@ -106,3 +106,19 @@ func TestFailureTexts(t *testing.T) {
 		t.Errorf("island %q", island)
 	}
 }
+
+// Text over MaxText is a model's to split, not the user's to hear about (2026-11-13: a 3487-
+// character summary was refused and the raw error was spoken). The error says how: in parts,
+// one call each, in order.
+func TestTooLongSaysTypeInParts(t *testing.T) {
+	ts := &Tools{KB: &fakeKB{ok: true}, Win: newWin(), Sleep: noSleep}
+	out := call(t, ts, ToolType, map[string]any{"text": strings.Repeat("a", MaxText+500), "app": "claude"})
+	e, _ := out["error"].(string)
+	if out["error_code"] != "invalid_argument" || !strings.Contains(e, "in parts of at most 2000 characters") ||
+		strings.Contains(e, "Tell the user") {
+		t.Fatalf("%v: %q", out["error_code"], e)
+	}
+	if !strings.Contains(typeSpec().Description, "2000") {
+		t.Fatalf("the limit isn't in the description: %q", typeSpec().Description)
+	}
+}

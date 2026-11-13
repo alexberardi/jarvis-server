@@ -163,7 +163,7 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 			s.log.Warn("model repeated the same tool calls; giving up", "round", round)
 			msg := stuckMessage
 			if last != nil && last.firstErr != "" {
-				msg = "Sorry, that didn't work: " + last.firstErr
+				msg = "Sorry, that didn't work: " + spokenError(last.firstErr)
 			}
 			return p.say(ctx, s, ex, msg, "")
 		}
@@ -262,10 +262,11 @@ func (p *Pipeline) resolve(ctx context.Context, s *session, ex *Exchange, c *Con
 		return ""
 	}
 	switch {
-	case last != nil && last.allFailed && last.firstErr != "":
+	case last != nil && last.allFailed && last.firstErr != "" && !asksBack(msg):
 		// Every tool failed: say so rather than trusting a reply that may claim success
-		// (small models report success anyway).
-		msg = "Sorry, that didn't work: " + last.firstErr
+		// (small models report success anyway). A question back claims nothing, and the user
+		// answers it ("Want me to type a shorter version?"), so it stays.
+		msg = "Sorry, that didn't work: " + spokenError(last.firstErr)
 	case last != nil && sig.WaitForInput && last.toolMessage != "":
 		// An informational command's own words beat the model's reading of its data.
 		msg = last.toolMessage
@@ -342,4 +343,18 @@ func (p *Pipeline) askValidation(ctx context.Context, s *session, ex *Exchange, 
 	ex.Validations = append(ex.Validations, Validation{Question: q, Answer: text})
 	s.log.Info("validation answer", "answer", text)
 	return text, nil
+}
+
+// asksBack reports a reply that ends by asking the user something.
+func asksBack(msg string) bool {
+	return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(msg), `"'”’)`), "?")
+}
+
+// spokenError is a tool's error as said to the user: without the instructions it carries for
+// the model ("Tell the user nothing was typed and why.") and the "bad arguments: " label.
+func spokenError(e string) string {
+	if i := strings.Index(e, " Tell the user "); i >= 0 {
+		e = e[:i]
+	}
+	return strings.TrimSpace(strings.Replace(e, "bad arguments: ", "", 1))
 }

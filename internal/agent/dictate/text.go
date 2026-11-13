@@ -42,7 +42,7 @@ func Sanitize(s string) (string, error) {
 		return "", fmt.Errorf("%w: text is empty", errBadArgs)
 	}
 	if n := len([]rune(out)); n > MaxText {
-		return "", fmt.Errorf("%w: text is %d characters; at most %d can be typed at once", errBadArgs, n, MaxText)
+		return "", tooLongError{n}
 	}
 	return out, nil
 }
@@ -139,3 +139,12 @@ func ClassifyAnswer(s string) Answer {
 	}
 	return AnswerUnclear
 }
+
+// tooLongError is text over MaxText: bad arguments, which the model fixes by typing it in parts.
+type tooLongError struct{ n int }
+
+func (e tooLongError) Error() string {
+	return fmt.Sprintf("%v: text is %d characters; at most %d can be typed at once", errBadArgs, e.n, MaxText)
+}
+
+func (tooLongError) Is(target error) bool { return target == errBadArgs }
