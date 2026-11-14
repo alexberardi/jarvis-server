@@ -148,8 +148,8 @@ Ported from #649 with the service names removed.
 ## Questions
 
 None open. Voice clips, the inbound request, the two PRs and node-less households are answered
-above. `channels-core`'s own questions (the route's exact shape, how the outbox is drained) are
-asked when its plan is written.
+above. The route's shape and how the outbox is drained are settled in the `channels-core` plan
+below, for the user's review.
 
 ## Plan: `desktop-agents` and `daemon`
 
@@ -210,3 +210,92 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
 | A daemon's process costs memory on a Pi Zero (one Python process each) | Measure in D2 on the lab Pi; daemons are few |
 | A desktop sidecar with backends changes what existing desktop packages see | A1 gives only alerts and the command-centre client; the rest stays at the SDK's defaults, pinned by a test |
 | The secrets push restarts a daemon mid-reply | The supervisor stops it with the cancellation `run()` already has to honour; a message in flight is retried by the service or lost, stated in the package guide |
+
+## Plan: `channels-core`, the SDK helper and the first packages (awaiting the user's review)
+
+### Shape
+
+- **A provider is a name a package picks** (`discord`, `slack`; `[a-z0-9_]`, at most 32). Core
+  never lists them. A daemon makes itself known by calling in, and core remembers which node of
+  the household spoke for it and when.
+- **Who may speak for a provider:** any enrolled node of the household, as that node. A package a
+  household installs on its own node is the household's; core does not police one package against
+  another on the same node. Another household's node cannot reach these links.
+- **Every call is a POST from the daemon** (the SDK's `cc_post` is POST only), under
+  `/api/v0/node/channels/{provider}/`:
+
+  | Route | Body | Answer |
+  |---|---|---|
+  | `message` | external user, place, text, images | `{reply}`; `{linked: false}` for an account that isn't linked (the package says nothing) |
+  | `command` | external user, place, name, args | `{text, private}`; the names are core's: `link`, `new`, `node`, `voice`, `notify`, `status` |
+  | `outbox` | ids to acknowledge | reminders waiting for this provider's linked users; the call is also the daemon's sign of life |
+
+  A `message` is held open for the whole chat turn (up to three minutes), so the agent's `cc.post`
+  gets a turn-length timeout for these paths; the node client's usual limit is 15 s.
+- **The app** (member tier) under `/api/v0/mobile/household/{id}/channels`: the list (each
+  provider that called in, whether it did so in the last minute, and my link), and per provider a
+  link code, my preferences and unlink. The bot's credentials are the package's settings, entered
+  where an agent's are.
+- **Data:** `cc_channel_links` (as #649's table, plus `provider`), `cc_channel_providers`
+  (household, provider, node, last seen) and `cc_channel_outbox` (rows dropped when acknowledged or
+  a day old). Link codes and the conversation of each person and place stay in memory, as in #649:
+  a restart starts a fresh conversation.
+- **Reminders:** where #649 called Discord from the node push handler, a reminder a node pushes
+  becomes an outbox row for each provider the user opted into. The daemon asks every few seconds.
+- **Limits** stay in core, as #649 had them: turn timeout, four images of 2 MiB after shrinking,
+  reply length is the package's (it knows its service's limit and splits).
+
+### Tasks (in order; each is one PR)
+
+- [ ] **K1 — `ChatText`.** A chat turn as a user without the SSE stream, ported from #649
+  (`chat_text.go`, the `sseWriter` collector).
+  - Verify: its tests from #649; `scripts/sandbox` with the scripted model.
+- [ ] **K2 — links and the app's routes.** The three tables, the link store and codes from #649
+  with the provider added, the member routes, `PurgeUser`.
+  - New routes: tier expectations in the same PR; **held for the user's review**.
+  - Verify: #649's store and route tests against the generic names; another household gets 404.
+- [ ] **K3 — the daemon's routes.** `message` (text and images, #649's rules: linked accounts
+  only, a conversation per person and place), `command`, the provider's sign of life, and the
+  agent's timeout for these paths.
+  - New node routes: **held for the user's review**.
+  - Verify: #649's bridge tests moved to the route; a turn through a real sidecar daemon and a
+    sandbox jarvisd with the scripted model.
+- [ ] **K4 — reminders.** The outbox, filled from the node push handler for users who opted in
+  (off by default), following the push as #649 did (a withheld reminder is not sent).
+  - Verify: route tests; nothing queued without opt-in.
+- [ ] **S1 — the SDK's channel helper** (`jarvis_command_sdk.channel`, 0.18.0): async calls for
+  the three routes that run the blocking `cc_post` in a thread, and the dataclasses a package
+  maps its service's events to. Then the Pantry is redeployed (`--no-cache`) so the Forge has it.
+  - Verify: the SDK's tests with a fake backend.
+- [ ] **P1 — `jarvis-channel-discord`.** A daemon on `discord.py`: direct messages and one
+  channel (threads), slash commands mapped to core's, photos, the typing indicator, replies split
+  at Discord's limit. Its token and channel are its settings. Submitted to the Pantry.
+  - Verify: against the user's test bot, from a desktop node and the lab Pi.
+- [ ] **P2 — `jarvis-channel-slack`.** The same over Socket Mode.
+  - Acceptance: **no change to jarvisd, the agent or the SDK was needed.** If one is, the
+    contract was wrong and is fixed before Slack is called done.
+  - Verify: against the user's Slack workspace.
+- [ ] **M1 — the mobile card** (jarvis-node-mobile, batched into one PR): the channels list with
+  link code, preferences and unlink (the member half of #158), and a `daemon` settings entry
+  worded as a daemon, not an agent with an interval.
+- [ ] **K5 — voice clips.** `internal/audio/opus` (libopus by purego, #649's `opusnative` and Ogg
+  code) on all four release targets; `message` takes a clip and can answer with one, by the
+  user's voice-reply preference.
+  - Verify: the conversions' tests; a real clip from Discord and from Slack.
+- [ ] **Then:** close #649 and jarvis-node-mobile#158 with an explanation and credit; live voice
+  as a follow-up inside the Discord package.
+
+### Checkpoints
+
+- After K3: a message typed into a test daemon gets Jarvis's answer, with nothing service-named
+  in jarvisd. The user tries it before the packages are written.
+- After P2: the acceptance above. This is the point of the whole design.
+
+### Risks
+
+| Risk | Mitigation |
+|---|---|
+| The contract fits Discord and not Slack | P2 is the test; K3's shapes are written against both services' events before any package |
+| A held-open request per turn ties up a daemon thread and a server connection for minutes | Turns are few and bounded by the timeout; a stream replaces it only if live voice needs one |
+| A package on a household's node can speak as any linked user of any provider | Stated above as the trust boundary; the Pantry's review is what stands between a package and a node |
+| libopus is missing on an install | K5 is last and separate; without it only clips say so |
