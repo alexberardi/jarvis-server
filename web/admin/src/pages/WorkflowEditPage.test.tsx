@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TaughtWorkflow, WorkflowPut } from '@/api/workflows'
 import WorkflowEditPage from './WorkflowEditPage'
 
-const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn() }))
+const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn(), getLastRun: vi.fn(), runWorkflow: vi.fn() }))
 vi.mock('@/api/workflows', async (orig) => ({ ...(await orig<typeof import('@/api/workflows')>()), ...api }))
 
 const bank = (over: Partial<TaughtWorkflow> = {}): TaughtWorkflow => ({
@@ -60,6 +60,8 @@ async function save(): Promise<WorkflowPut> {
 beforeEach(() => {
   vi.clearAllMocks()
   api.getWorkflow.mockResolvedValue(bank())
+  api.getLastRun.mockResolvedValue(null)
+  api.runWorkflow.mockResolvedValue(undefined)
   api.saveWorkflow.mockImplementation(async (_id: string, body: WorkflowPut) => ({ ...bank(), ...body, version: 2, updated_at: 'x' }))
 })
 
@@ -368,7 +370,7 @@ describe('WorkflowEditPage', () => {
     renderPage()
     await screen.findAllByTestId('step')
     expect(screen.getByText('This workflow hasn’t had its first run')).toBeInTheDocument()
-    expect(screen.getByText(/Run it once from Workflows while you watch/)).toBeInTheDocument()
+    expect(screen.getByText(/Run it once below while you watch/)).toBeInTheDocument()
   })
 
   it('says nothing about a first run once the workflow has proved itself', async () => {
@@ -376,5 +378,56 @@ describe('WorkflowEditPage', () => {
     renderPage()
     await screen.findAllByTestId('step')
     expect(screen.queryByText('This workflow hasn’t had its first run')).not.toBeInTheDocument()
+  })
+
+  it('runs the workflow with its values and shows the run step by step', async () => {
+    api.getLastRun.mockResolvedValue({
+      run_id: 'cr_1',
+      state: 'waiting',
+      ask: 'I did step 2, but I couldn’t confirm it worked. Tap Continue if it is fine.',
+      started_at: '2026-11-14T08:00:00Z',
+      updated_at: '2026-11-14T08:00:20Z',
+      items: [
+        { kind: 'prerequisite', text: 'signed in to bank.example.com', state: 'done' },
+        { kind: 'step', text: 'Open the bank', state: 'verified', expected: 'the address contains "bank.example.com"' },
+        { kind: 'step', text: 'Go to statements', state: 'asked', expected: 'The page lists the months', seen: 'the page shows a sign-in form' },
+        { kind: 'result', text: 'The statement is in Downloads', state: 'waiting', expected: 'a file like "statement*.csv" is in Downloads' },
+      ],
+    })
+    renderPage()
+    await screen.findAllByTestId('step')
+    const items = await screen.findAllByTestId('run-item')
+    expect(items).toHaveLength(4)
+    expect(screen.getByText('Waiting for you')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('I did step 2, but I couldn’t confirm it worked')
+    expect(items[1]).toHaveTextContent('Step 1: Open the bank (done and checked)')
+    expect(items[2]).toHaveTextContent('Step 2: Go to statements (needs you)')
+    expect(items[2]).toHaveTextContent('Expected: The page lists the months')
+    expect(items[2]).toHaveTextContent('Found: the page shows a sign-in form')
+    expect(items[3]).toHaveTextContent('Result: The statement is in Downloads (not reached)')
+
+    // It needs the month before it can start, and sends it.
+    const run = screen.getByRole('button', { name: 'Run again' })
+    expect(run).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('month'), { target: { value: '2026-10' } })
+    await act(async () => {
+      fireEvent.click(run)
+    })
+    expect(api.runWorkflow).toHaveBeenCalledWith('tw_1', { month: '2026-10' })
+    expect(api.saveWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('offers no run panel to someone who may not edit', async () => {
+    api.getWorkflow.mockResolvedValue(bank({ editable: false, owner_id: 9, shared: true }))
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.queryByRole('heading', { name: 'Run it' })).not.toBeInTheDocument()
+  })
+
+  it('drops the run panel when the server refuses the record (an admin who isn’t the owner)', async () => {
+    api.getLastRun.mockRejectedValue(Object.assign(new Error('forbidden'), { response: { status: 403 } }))
+    renderPage()
+    await screen.findAllByTestId('step')
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Run it' })).not.toBeInTheDocument())
   })
 })

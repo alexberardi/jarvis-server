@@ -114,6 +114,8 @@ type WorkflowStore interface {
 	Heal(ctx context.Context, id string, version int, heals []Heal) error
 	// Proved records that a run of workflow id at version finished with its result verified.
 	Proved(ctx context.Context, id string, version int) error
+	// Record stores workflow id's run as it stands (record.go), over the one before.
+	Record(ctx context.Context, id string, rec RunRecord) error
 }
 
 // target is the step's computer target.

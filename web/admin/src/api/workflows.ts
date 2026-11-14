@@ -149,8 +149,38 @@ export async function relearnWorkflow(id: string): Promise<WorkflowPut> {
 }
 
 /** runWorkflow asks cc to replay it now, in an errand whose card shows how it goes (piece 31). */
-export async function runWorkflow(id: string): Promise<void> {
-  await apiClient.post(`${V0}/workflows/${encodeURIComponent(id)}/run`, {})
+export async function runWorkflow(id: string, params?: Record<string, string>): Promise<void> {
+  await apiClient.post(`${V0}/workflows/${encodeURIComponent(id)}/run`, params ? { params } : {})
+}
+
+export type RunState = 'running' | 'waiting' | 'done' | 'failed' | 'stopped'
+export type RunItemState = 'waiting' | 'done' | 'verified' | 'asked' | 'failed'
+
+/** One prerequisite, step or the result of a run, with what it expected and what a failed check found. */
+export interface RunItem {
+  kind: 'prerequisite' | 'step' | 'result'
+  text: string
+  state: RunItemState
+  expected?: string
+  seen?: string
+}
+
+/** computer.RunRecord: a workflow's last run, for whoever taught it. */
+export interface RunRecord {
+  run_id: string
+  state: RunState
+  params?: Record<string, string>
+  summary?: string
+  ask?: string
+  started_at: string
+  updated_at: string
+  items: RunItem[] | null
+}
+
+/** getLastRun is the workflow's last run (null: it has never run). Only its owner may ask: 403 otherwise. */
+export async function getLastRun(id: string): Promise<RunRecord | null> {
+  const { data } = await apiClient.get<{ run: RunRecord | null }>(`${V0}/workflows/${encodeURIComponent(id)}/last-run`)
+  return data.run ?? null
 }
 
 /** One recorded event (the extension's trace format, plan P3 piece 28). */

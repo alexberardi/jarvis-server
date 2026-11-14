@@ -23,7 +23,13 @@ import (
 
 // Replay runs wf with params as t's computer task, or resumes the run t.RunID after a
 // confirmation or a question. t.Goal and t.Target default to the workflow's name and first step.
-func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[string]string) Outcome {
+func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[string]string) (out Outcome) {
+	var (
+		run   *Run
+		steps []WorkflowStep
+	)
+	// However the call ends, the workflow's page shows where the run stands.
+	defer func() { l.recordRun(ctx, wf, steps, params, run, &out) }()
 	steps, err := wf.Bind(params)
 	if err != nil {
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: err.Error() + "."}
@@ -145,6 +151,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 		if t.Progress != nil {
 			t.Progress(run)
 		}
+		l.recordRun(ctx, wf, steps, params, run, nil)
 	}
 	if held := run.Pending; held != nil && next >= len(steps) && len(steps) > 0 {
 		// A confirmation asked while working toward the result, after the last step.

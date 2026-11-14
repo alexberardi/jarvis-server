@@ -18,7 +18,7 @@ export default function WorkflowsPage() {
   const me = state.user?.id
   const list = useWorkflows()
   const run = useMutation({
-    mutationFn: runWorkflow,
+    mutationFn: (id: string) => runWorkflow(id),
     onSuccess: () => toast.success('Started'),
     // The server says why it can't start: a value it needs (it asks by voice), no computer with
     // computer control on, errands off.

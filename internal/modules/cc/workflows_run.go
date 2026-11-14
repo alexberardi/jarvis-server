@@ -99,6 +99,45 @@ func (t taughtWorkflows) Proved(ctx context.Context, id string, version int) err
 	return nil
 }
 
+// Record stores workflow id's run as it stands, over the one before.
+func (t taughtWorkflows) Record(ctx context.Context, id string, rec computer.RunRecord) error {
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	_, err = t.m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_taught_workflows SET last_run = ? WHERE id = ?`, string(raw), id)
+	return err
+}
+
+// handleWorkflowLastRun is the workflow's last run, for its page: each prerequisite, step and the
+// result, with what was expected and what a failed check found. It is its owner's alone: the
+// record holds what was on their screen. Another member who sees a shared workflow, and a
+// household admin who manages it, get 403; someone who can't see the workflow gets 404.
+func (m *Module) handleWorkflowLastRun(w http.ResponseWriter, r *http.Request, u authn.User) {
+	wf, _, err := m.visibleWorkflow(r.Context(), u, r.PathValue("id"), false)
+	if err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	if wf.OwnerID != u.ID {
+		detail(w, http.StatusForbidden, "Only whoever taught a workflow sees its runs")
+		return
+	}
+	var raw string
+	if err := m.deps.DB.Read.QueryRowContext(r.Context(), `SELECT last_run FROM cc_taught_workflows WHERE id = ?`, wf.ID).Scan(&raw); err != nil {
+		m.writeErr(w, err)
+		return
+	}
+	var rec *computer.RunRecord
+	if raw != "" {
+		rec = &computer.RunRecord{}
+		if err := json.Unmarshal([]byte(raw), rec); err != nil {
+			rec = nil // a record this build can't read is no record
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"run": rec})
+}
+
 // replay is the workflow as the replay runs it.
 func (w TaughtWorkflow) replay() computer.Workflow {
 	return computer.Workflow{ID: w.ID, Name: w.Name, Slug: w.Slug, Triggers: w.Triggers, Params: w.Params,

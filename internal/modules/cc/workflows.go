@@ -358,6 +358,7 @@ func (m *Module) registerWorkflows(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE "+v0+"/workflows/{id}", m.user(m.handleDeleteWorkflow))
 	mux.HandleFunc("POST "+v0+"/workflows/{id}/run", m.user(m.handleRunWorkflow))
 	mux.HandleFunc("POST "+v0+"/workflows/{id}/relearn", m.user(m.handleRelearnWorkflow))
+	mux.HandleFunc("GET "+v0+"/workflows/{id}/last-run", m.user(m.handleWorkflowLastRun))
 }
 
 // workflowOut is a workflow as the API returns it: the row plus whether the caller may change it.
