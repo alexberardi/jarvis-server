@@ -283,6 +283,10 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		if err := e.StartNotes(cctx, c); err != nil {
 			return fail("notes app: " + err.Error())
 		}
+	}
+	if strings.HasPrefix(c.Phase, "desktop-") || c.Target == "desktop" {
+		// A browser-phase case that works in a desktop app needs someone there too: it passed
+		// only when a desktop case had run in the few minutes before it.
 		if err := e.UserInput(cctx); err != nil {
 			return fail("user input: " + err.Error())
 		}
@@ -677,7 +681,7 @@ func (e *Env) chat(ctx context.Context, node, message string) ([]string, error) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.Sbx["SBX_TOKEN"])
+	req.Header.Set("Authorization", "Bearer "+e.token(ctx))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

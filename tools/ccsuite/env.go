@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
@@ -35,7 +36,9 @@ import (
 // away again (or, with Keep, leaves it all running for `ccsuite down`); every process it starts
 // is in its own process group.
 type Env struct {
-	Root     string        // the jarvis-server checkout
+	Root     string // the jarvis-server checkout
+	tokenMu  sync.Mutex
+	tokenAt  time.Time     // when SBX_TOKEN was issued (zero: at sandbox start)
 	Dir      string        // the run dir (absolute): bin/, logs/, agent-home/, browser/, ...
 	Name     string        // the sandbox: ccsuite-<run>
 	LLM      string        // shared, scripted or cloud
@@ -105,6 +108,45 @@ func (e *Env) CloseLeftoverApps() {
 			e.logf("closed a leftover %s (pid %d)", strings.TrimSpace(string(comm)), pid)
 		}
 	}
+	// A killed LibreOffice opens on its recovery dialog next time, and a task waiting for a
+	// Writer window never sees one: the next case starts from a fresh profile and no locks.
+	os.RemoveAll(e.path("agent-home", ".config", "libreoffice")) //nolint:errcheck // absent is fine
+	locks, _ := filepath.Glob(e.path("agent-home", "Documents", ".~lock.*#"))
+	for _, l := range locks {
+		os.Remove(l) //nolint:errcheck // absent is fine
+	}
+}
+
+// tokenLife is how long the suite uses a sign-in before taking a new one: well inside the
+// access token's life, which a three-run pass outlasts.
+const tokenLife = 10 * time.Minute
+
+// token is the test user's access token, renewed by signing in again once it is tokenLife
+// old. A failed sign-in keeps the old token, and the call that uses it reports the 401.
+func (e *Env) token(ctx context.Context) string {
+	e.tokenMu.Lock()
+	defer e.tokenMu.Unlock()
+	if e.tokenAt.IsZero() {
+		e.tokenAt = time.Now() // the sandbox signed in when it came up
+	}
+	if time.Since(e.tokenAt) < tokenLife || e.Sbx["SBX_AUTH"] == "" {
+		return e.Sbx["SBX_TOKEN"]
+	}
+	b, _ := json.Marshal(map[string]string{"email": e.Sbx["SBX_EMAIL"], "password": e.Sbx["SBX_PASSWORD"]})
+	req, err := http.NewRequestWithContext(ctx, "POST", e.Sbx["SBX_AUTH"]+"/auth/login", strings.NewReader(string(b)))
+	if err != nil {
+		return e.Sbx["SBX_TOKEN"]
+	}
+	req.Header.Set("Content-Type", "application/json")
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := doJSON(req, &out); err != nil || out.AccessToken == "" {
+		e.logf("sign-in to renew the token failed: %v", err)
+		return e.Sbx["SBX_TOKEN"]
+	}
+	e.Sbx["SBX_TOKEN"], e.tokenAt = out.AccessToken, time.Now()
+	return out.AccessToken
 }
 
 // sessionAlive is whether the session is still there; the Mac's is the user's own, which the
@@ -374,7 +416,7 @@ func (e *Env) api(ctx context.Context, method, url string, body, out any) error 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if e.Sbx != nil {
-		req.Header.Set("Authorization", "Bearer "+e.Sbx["SBX_TOKEN"])
+		req.Header.Set("Authorization", "Bearer "+e.token(ctx))
 	}
 	return doJSON(req, out)
 }
