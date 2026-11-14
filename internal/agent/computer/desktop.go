@@ -332,7 +332,7 @@ func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 	}
 	for _, w := range ws {
 		if w.normal() && (app == "" || sameApp([]string{w.App}, app)) {
-			return w, true
+			return dialogOf(ws, w), true
 		}
 	}
 	for _, w := range ws {
@@ -341,6 +341,22 @@ func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 		}
 	}
 	return DesktopWindow{}, false
+}
+
+// dialogOf is the window of w's process that has the keyboard focus, when that is another one:
+// the app's own dialog (LibreOffice's Save dialog is app "soffice", a window of Writer's
+// process), which is where the task is now. Else w. Found live 2026-11-13: each look focused
+// Writer's main window again, over its Save dialog, and the task never saw the dialog.
+func dialogOf(ws []DesktopWindow, w DesktopWindow) DesktopWindow {
+	if w.PID <= 0 || w.Focused {
+		return w
+	}
+	for _, f := range ws {
+		if f.Focused && f.normal() && f.PID == w.PID && f.ID != w.ID {
+			return f
+		}
+	}
+	return w
 }
 
 // window is app's front window, launching the app through desktop_open's catalogue when it has
