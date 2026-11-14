@@ -234,3 +234,59 @@ export function NotesCard({ skill, edit, onChange }: { skill: Skill; edit: boole
     </Card>
   )
 }
+
+const GUARDRAILS = [
+  {
+    value: 'strict',
+    title: 'Strict',
+    text: 'Only the apps and sites this workflow uses. If the usual way is blocked, Jarvis looks for another way inside them, then asks you.',
+  },
+  {
+    value: 'creative',
+    title: 'Creative',
+    text: 'Any way that reaches the same result, in other sites too. Risky actions still ask first.',
+  },
+]
+
+/** GuardrailsCard is how far a run may stray from what was recorded: Strict unless the owner says otherwise. */
+export function GuardrailsCard({ skill, edit, onChange }: { skill: Skill; edit: boolean; onChange: (s: Skill) => void }) {
+  const name = useId()
+  const value = skill.guardrails === 'creative' ? 'creative' : 'strict'
+  const chosen = GUARDRAILS.find((g) => g.value === value) ?? GUARDRAILS[0]
+  return (
+    <Card as="section" aria-labelledby="wf-guardrails" className="space-y-4">
+      <CardHeader id="wf-guardrails" title="When something is in the way" className="mb-2" />
+      {edit ? (
+        <fieldset className="space-y-2">
+          <legend className="sr-only">How far Jarvis may go to finish</legend>
+          {GUARDRAILS.map((g) => (
+            <label
+              key={g.value}
+              className={cn(
+                'flex cursor-pointer items-start gap-3 rounded-control border p-3 transition-colors duration-(--duration-hover)',
+                value === g.value ? 'border-primary bg-primary-soft' : 'border-border hover:border-border-strong',
+              )}
+            >
+              <input
+                type="radio"
+                name={name}
+                value={g.value}
+                checked={value === g.value}
+                onChange={() => onChange({ ...skill, guardrails: g.value })}
+                className="mt-1 accent-primary"
+              />
+              <span className="min-w-0 space-y-0.5">
+                <span className="block text-subheading text-text">{g.title}</span>
+                <span className="block text-small text-text-muted">{g.text}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ) : (
+        <p className="text-body text-text">
+          <span className="text-subheading">{chosen.title}.</span> {chosen.text}
+        </p>
+      )}
+    </Card>
+  )
+}

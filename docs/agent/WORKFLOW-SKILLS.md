@@ -404,13 +404,21 @@ its access rule at the top and carries its tier expectations.
     screen shows ("the browser begins downloading"), so it now expects the file in Downloads.
     The suite's slow-page case is not written: the fixture sites have no delayed-content page,
     and the path is covered by a unit test; it belongs with R3's cases.
-- [ ] **R3 — the model decides on a failed check; Strict or Creative.** The model round: redo,
+- [x] **R3 — the model decides on a failed check; Strict or Creative.** The model round: redo,
   another way, or carry on. A risky step is not redone without asking. Three attempts per step,
   then ask. Strict bounds the round to the apps and sites the workflow names; the radio on the
   workflow page.
   - Acceptance: criteria 3, 4 and 7.
   - Verify: unit tests for each choice, the risky step and the limit; Strict refusing another
     app; a suite case with a renamed button and one with a "send" step; Vitest, screenshots.
+  - Built (2026-11-13). The model's round is the step's own fallback round, told the step ran
+    and what its check found. A risky step goes straight to the question, with no model round.
+    An answer that isn't a plain "continue" is given to the model as what to do. Strict holds a
+    model round to the workflow's sites (a subdomain of one counts as inside); a round already
+    acts only in its step's app or browser window, so **Creative for now lifts the site bound
+    only**: reaching the result in another app or by editing a file needs the run to switch
+    targets, which comes with R4's work toward the end state. No new suite case: the renamed
+    button is `replay_moved_button`, and the fixture sites have no "send" step.
 - [ ] **R4 — the end state.** The goal's end state is verified with the success check; not
   reached, the model works toward it within the run's budget, then asks.
   - Acceptance: a run whose steps all "worked" but whose result is missing is not done.

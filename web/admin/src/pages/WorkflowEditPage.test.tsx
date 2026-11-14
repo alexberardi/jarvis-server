@@ -345,4 +345,21 @@ describe('WorkflowEditPage', () => {
     expect(screen.getByText('Its recording is no longer kept, so it can’t be learnt again.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Relearn' })).not.toBeInTheDocument()
   })
+
+  it('is Strict until the owner chooses Creative, and saves the choice', async () => {
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.getByRole('radio', { name: /Strict/ })).toBeChecked()
+    fireEvent.click(screen.getByRole('radio', { name: /Creative/ }))
+    const body = await save()
+    expect(body.skill?.guardrails).toBe('creative')
+  })
+
+  it('reads the guardrail out to a member who may not change it', async () => {
+    api.getWorkflow.mockResolvedValue(bank({ editable: false, owner_id: 9, shared: true, skill: { guardrails: 'creative' } }))
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.getByText('Creative.')).toBeInTheDocument()
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+  })
 })
