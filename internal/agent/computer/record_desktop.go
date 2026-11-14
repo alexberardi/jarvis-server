@@ -439,12 +439,25 @@ func (d *deskRecorder) begin() {
 
 // front is the window a result is read from and how many of each named element it holds, with
 // the elements in tree order (nil without Elements, or when the app has no tree to read): the
-// front window of the app the last action was in, else the focused window. The acted-on app
+// front window of the app the last action was in, else of the app with the keyboard focus,
+// else the focused window by the window list. The acted-on app
 // comes first because the window list's order isn't the focus everywhere (a Mac listed another
 // app's window ahead of the one in use). full: the read hit captureTree, so what is missing
 // from it may only be past the cap.
 func (d *deskRecorder) front(ctx context.Context, ws []DesktopWindow) (win *DesktopWindow, count map[ResultElement]int, order []ResultElement, full bool) {
-	i := slices.IndexFunc(ws, func(w DesktopWindow) bool { return d.pid != 0 && w.PID == d.pid && w.normal() })
+	of := func(pid int) int {
+		return slices.IndexFunc(ws, func(w DesktopWindow) bool { return pid != 0 && w.PID == pid && w.normal() })
+	}
+	i := of(d.pid)
+	if i < 0 {
+		// The action was in something with no window of its own (the Dock, a panel): the app
+		// that has the keyboard focus now is the one it brought up.
+		if d.p.Focused != nil {
+			if el, err := d.p.Focused(); err == nil && el != nil {
+				i = of(el.PID)
+			}
+		}
+	}
 	if i < 0 {
 		f, ok := findWindow(ws, "")
 		if !ok {

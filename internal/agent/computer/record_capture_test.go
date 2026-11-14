@@ -203,6 +203,23 @@ func TestCappedReadReportsNothingGone(t *testing.T) {
 	}
 }
 
+// A click on something with no window of its own (the Dock) reads the app that has the
+// keyboard focus afterwards, not whatever the window list puts first.
+func TestResultAfterAClickWithNoWindow(t *testing.T) {
+	e, scr := captureEnv(t)
+	e.rec.begin()
+	e.desk.at[[2]float64{5, 5}] = &ax.Recorded{Role: "AXDockItem", Name: "Files", PID: 1, App: "com.apple.dock"}
+	e.rec.handle(DeskInput{Kind: InClick, X: 5, Y: 5, At: e.desk.tick(time.Second)})
+	e.desk.focus(&ax.Recorded{Role: "AXOutline", PID: 43, App: "com.apple.finder"})
+	scr.pid = 43
+	scr.tree = els("cell:budget")
+	e.rec.finish()
+	evs := e.events(t)
+	if last := evs[len(evs)-1]; last.Kind != KindResult || last.App != "Files" {
+		t.Fatalf("result read from %+v, want the Files window", last)
+	}
+}
+
 // Without a tree (an app off the accessibility bus) the result still says which window is in front.
 func TestResultWithoutATree(t *testing.T) {
 	e, scr := captureEnv(t)

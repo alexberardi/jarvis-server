@@ -293,8 +293,9 @@ is theirs.
   - Live: sway on this box (start, and a result after every click and Enter); the MBP (macOS 26),
     where the first run found results read from another app's window, since fixed and rerun; X11
     only in a headless server with no window manager, which lists no windows. Those runs were
-    before the review fixes above. Still open on the Mac: a click with no window of its own (the
-    Dock) falls back to the first listed window, which there was not the one in use.
+    before the review fixes above. A click with no window of its own (the Dock) read the
+    first listed window on the Mac, which was not the one in use; it now reads the app that has
+    the keyboard focus afterwards (fixed with C4, not rerun on the Mac).
 - [x] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
   limited to what the steps touch, `{param}` where the recorded name is one.
   - Acceptance: criteria 1 (captured path) and 1a.
