@@ -799,13 +799,14 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 // ask sends the round's prompt and parses the answer, with one retry on an unreadable one.
 func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error) {
 	t := r.task
-	text := renderPrompt(promptInput{
+	text, stable := renderPromptSplit(promptInput{
 		Goal: t.Goal, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 		Source: t.Source,
 	})
-	parts := []llm.Part{{Type: "text", Text: text}}
+	// The task and its source text are the same every round: a cloud model keeps them.
+	parts := []llm.Part{{Type: "text", Text: text, CachePrefix: stable}}
 	for _, im := range r.shots {
 		url := "data:" + im.MIME + ";base64," + base64.StdEncoding.EncodeToString(im.Data)
 		parts = append(parts, llm.Part{Type: "image_url", ImageURL: &llm.ImageURL{URL: url}})

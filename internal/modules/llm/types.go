@@ -103,6 +103,10 @@ type Part struct {
 	Type     string    `json:"type"`
 	Text     string    `json:"text,omitempty"`
 	ImageURL *ImageURL `json:"image_url,omitempty"`
+	// CachePrefix says the first CachePrefix bytes of Text, and everything before this part,
+	// are the same in the caller's next requests: a provider with a prompt cache keeps them
+	// (the Anthropic dialect; the others ignore it). It must fall on a UTF-8 boundary.
+	CachePrefix int `json:"-"`
 }
 
 // MarshalJSON keeps an empty text part's "text" key.

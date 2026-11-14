@@ -76,7 +76,16 @@ type promptInput struct {
 
 // renderPrompt is the user turn's text for one round.
 func renderPrompt(in promptInput) string {
+	text, _ := renderPromptSplit(in)
+	return text
+}
+
+// renderPromptSplit is renderPrompt with where the part that repeats every round ends: the
+// task and the text it works from, ahead of the history and the screen. 0 when there is no
+// source text (the rest is too short to be worth keeping).
+func renderPromptSplit(in promptInput) (string, int) {
 	var b strings.Builder
+	stable := 0
 	fmt.Fprintf(&b, "Task: %s\n", oneLine(in.Goal))
 	if in.Today != "" {
 		fmt.Fprintf(&b, "Today is %s.\n", in.Today)
@@ -105,6 +114,7 @@ func renderPrompt(in promptInput) string {
 			"A type action holds at most %d characters: keep a summary within one; only text that must be longer goes in several type actions, in order, each as full as it can be; "+
 			"line breaks in its text start new paragraphs. Write the text into the document first, then save)\n", defang(src.URL), computeruse.MaxText)
 		b.WriteString(PageBegin + "\n" + renderText(src.Text) + "\n" + PageEnd + "\n")
+		stable = b.Len()
 	}
 
 	b.WriteString("\nWhat you did so far:\n")
@@ -172,7 +182,7 @@ func renderPrompt(in promptInput) string {
 		fmt.Fprintf(&b, "\n%d screenshot(s) follow, the newest last. %s\n", in.Images, in.Coordinates)
 	}
 	b.WriteString("\nYour JSON answer:")
-	return b.String()
+	return b.String(), stable
 }
 
 // renderElement is one snapshot line: e12 button "Place order" value="2" [disabled]. A desktop
