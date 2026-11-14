@@ -34,8 +34,9 @@ and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-
   for the person who recorded it; nothing stored until saved).
 - [x] `capture` C1 the trace's `start` and `result` entries; C2 the desktop recorder writes them
   (macOS, X11, Wayland share it). Live recordings done on sway and macOS; X11 still to do.
-- [ ] `capture` C4 learning from them, C3 the same in the browser extension (needs an extension
-  release).
+- [x] `capture` C4 learning from them (desktop): results on the learn prompt's lines,
+  prerequisites from the windows open at the start.
+- [ ] `capture` C3 the same in the browser extension (needs an extension release).
 - [ ] `verified-replay`, then `narration`, `refine`.
 - [ ] **The teach cases fail on the dev box, on main too** (2026-11-12): its `background` and
   `live` labels serve `qwen3-4b`, whose errand planner picks `computer_task` over `run_workflow`,

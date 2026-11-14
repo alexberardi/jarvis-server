@@ -399,3 +399,94 @@ func TestCaptureEventsAreNotSteps(t *testing.T) {
 		t.Fatalf("the odd trace counts %d steps, want 4 (everything in it but the result)", n)
 	}
 }
+
+// capturedTrace is a desktop recording with what the recorder captures: the budget sheet for
+// the month and a browser were open; the task typed the month into the sheet.
+const capturedTrace = `[
+	{"ts":900,"kind":"start","windows":[
+		{"app":"libreoffice-calc","title":"budget-2026-09.xlsx — LibreOffice Calc","focused":true},
+		{"app":"firefox","title":"News — Mozilla Firefox"},
+		{"app":"libreoffice-calc","title":"budget-2026-09.xlsx — LibreOffice Calc"}]},
+	{"seq":1,"ts":1000,"kind":"click","app":"libreoffice-calc","window":{"class":"libreoffice-calc","title":"budget-2026-09.xlsx — LibreOffice Calc"},"element":{"role":"menu item","name":"Insert Sheet"}},
+	{"ts":1500,"kind":"result","of":1,"app":"libreoffice-calc","window":{"class":"libreoffice-calc","title":"Insert Sheet"},
+		"appeared":[{"role":"textbox","name":"Name"},{"role":"button","name":"OK"},{"role":"panel"},{"role":"button","name":"Cancel"}]},
+	{"seq":2,"ts":2000,"kind":"input","app":"libreoffice-calc","element":{"role":"textbox","name":"Name"},"value":"2026-09"},
+	{"seq":3,"ts":3000,"kind":"key","app":"libreoffice-calc","key":"Enter","window":{"class":"libreoffice-calc","title":"Insert Sheet"}},
+	{"ts":3500,"kind":"result","of":3,"app":"libreoffice-calc","window":{"class":"libreoffice-calc","title":"budget-2026-09.xlsx — LibreOffice Calc"}},
+	{"ts":3600,"kind":"result","of":99,"app":"firefox","window":{"title":"stray"}}]`
+
+// Each action's result reaches the model on its line, so a step's expectation is written from
+// what the screen showed; a recording without results has the prompt it always had.
+func TestLearnPromptShowsResults(t *testing.T) {
+	evs, err := parseDesktopTrace(json.RawMessage(capturedTrace))
+	if err != nil || len(evs) != 3 {
+		t.Fatalf("events %d, %v", len(evs), err)
+	}
+	prompt := desktopLearnPrompt(evs, nil, "")
+	for _, want := range []string{
+		`1. click menu item "Insert Sheet" in libreoffice-calc — "budget-2026-09.xlsx — LibreOffice Calc" at (0,0) (then: the window is "Insert Sheet"; new on screen: textbox "Name", button "OK", button "Cancel")` + "\n",
+		`2. type into textbox "Name" in libreoffice-calc: "2026-09"` + "\n",
+		`3. press Enter in libreoffice-calc — "Insert Sheet" (then: the window is "budget-2026-09.xlsx — LibreOffice Calc")` + "\n",
+		learnResultNote,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q\n%s", want, prompt)
+		}
+	}
+	for i := range evs {
+		evs[i].Result = nil
+	}
+	if plain := desktopLearnPrompt(evs, nil, ""); strings.Contains(plain, "then:") {
+		t.Errorf("a recording without results mentions them:\n%s", plain)
+	}
+}
+
+// Criterion 1a: the file that was open, named with the month the task takes, is a prerequisite
+// with the param in its name; the browser the task never touched is not listed.
+func TestPrerequisitesFromTheStart(t *testing.T) {
+	raw := json.RawMessage(capturedTrace)
+	evs, err := parseDesktopTrace(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := desktopPrerequisites(desktopStart(raw), evs, []Param{{Name: "month", Kind: "month", Example: "2026-09"}})
+	want := []computer.Prerequisite{{Kind: computer.PrereqFileOpen, File: "budget-{month}.xlsx", App: "libreoffice-calc"}}
+	if g, w := mustJSON(t, got), mustJSON(t, want); g != w {
+		t.Fatalf("prerequisites\n got %s\nwant %s", g, w)
+	}
+	sk := computer.Skill{Prerequisites: got}
+	if err := sk.Validate([]Param{{Name: "month", Kind: "month", Example: "2026-09"}}); err != nil {
+		t.Fatal(err)
+	}
+	// An app with no document in its title is "the app is open"; a site name is not a file.
+	apps := desktopPrerequisites([]desktopStartWindow{{App: "Notes", Title: "All Notes"}, {App: "Notes", Title: "jarvis.example.com"}},
+		[]desktopEvent{{Kind: "click", App: "com.apple.Notes", Result: &desktopResult{App: "Notes"}}}, nil)
+	if g, w := mustJSON(t, apps), mustJSON(t, []computer.Prerequisite{{Kind: computer.PrereqAppOpen, App: "Notes"}}); g != w {
+		t.Fatalf("app prerequisite\n got %s\nwant %s", g, w)
+	}
+	// A recording from before the capture has none.
+	if p := desktopPrerequisites(desktopStart(json.RawMessage(`[{"kind":"click","app":"Notes"}]`)), evs, nil); p != nil {
+		t.Fatalf("no start entry, yet %v", p)
+	}
+}
+
+// Through the job: a captured recording learns its prerequisite, and the model saw the results.
+func TestLearnFromCapturedRecording(t *testing.T) {
+	le := newLearnEnv(t, `{"name": "Add the month's sheet",
+	 "goal": {"reason": "Keep one sheet a month", "end_state": "The budget has a sheet named {month}"},
+	 "steps": [{"intent": "open Insert Sheet", "goal": "start a new sheet", "expect": "The Insert Sheet window with a Name field", "event_seqs": [1]},
+	           {"intent": "name it {month}", "goal": "name the sheet", "expect": "The budget window is back", "event_seqs": [2, 3]}],
+	 "params": [{"name": "month", "kind": "month", "example": "2026-09", "from_seqs": [2]}],
+	 "success": {"screen": "A sheet named {month} exists"}}`)
+	w := le.storeMode("rec_captured1", "desktop", json.RawMessage(capturedTrace), "")
+	want := []computer.Prerequisite{{Kind: computer.PrereqFileOpen, File: "budget-{month}.xlsx", App: "libreoffice-calc"}}
+	if g, wnt := mustJSON(t, w.Skill.Prerequisites), mustJSON(t, want); g != wnt {
+		t.Fatalf("prerequisites\n got %s\nwant %s", g, wnt)
+	}
+	if len(w.Steps) != 3 || w.Steps[0].Expect == nil || w.Steps[0].Expect.Screen != "The Insert Sheet window with a Name field" {
+		t.Fatalf("steps: %s", mustJSON(t, w.Steps))
+	}
+	if p := le.model.userPrompt(t); !strings.Contains(p, `(then: the window is "Insert Sheet"`) {
+		t.Fatalf("the model wasn't shown the results:\n%s", p)
+	}
+}

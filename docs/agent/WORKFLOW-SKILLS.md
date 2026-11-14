@@ -295,10 +295,18 @@ is theirs.
     only in a headless server with no window manager, which lists no windows. Those runs were
     before the review fixes above. Still open on the Mac: a click with no window of its own (the
     Dock) falls back to the first listed window, which there was not the one in use.
-- [ ] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
+- [x] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
   limited to what the steps touch, `{param}` where the recorded name is one.
   - Acceptance: criteria 1 (captured path) and 1a.
   - Verify: goldens; a recording made with a month-named file open, learnt in the sandbox.
+  - Built for desktop recordings (2026-11-13); browser recordings wait for C3. Each action's
+    result is put on its line of the learn prompt ("then: the window is …; new on screen: …",
+    five names at most), so the model writes a step's expectation from what the screen showed.
+    Prerequisites need no model: a window open at the start, of an app the task then acted in,
+    is "this file is open" when its title holds a document name (a param's recorded value in the
+    name becomes `{param}`), else "this app is open". Two limits: a file name with spaces gives
+    only its last word, and a param matches only as the recorded text. "Signed in" is a browser
+    prerequisite and comes with C3. The live recording of checkpoint 2 is still to do.
 - [ ] **C3 — browser capture.** The same in the extension, a version bump, the re-signed `.xpi`.
   - Acceptance: a browser recording holds `start` and `result` events; masked values still never
     travel.

@@ -216,6 +216,44 @@ type desktopEvent struct {
 	// KeyframePoint: the event has a keyframe with its point marked, here in the JPEG's pixels
 	// (Wayland); the agent uploads it after the trace (recording_keyframes.go).
 	KeyframePoint *desktopPoint `json:"keyframe_point,omitempty"`
+	// A result entry (kind result) names its action in Of and says what that action changed:
+	// the window in front afterwards (App, Window) and the elements that appeared. Parsing
+	// moves it onto its action as Result; it is never an event of its own.
+	Of       int64            `json:"of,omitempty"`
+	Appeared []desktopElement `json:"appeared,omitempty"`
+	Result   *desktopResult   `json:"-"`
+}
+
+// desktopResult is what an action changed once it settled (the agent's result entry).
+type desktopResult struct {
+	App      string // the window list's name for the app in front, not the event's bundle id
+	Title    string
+	Appeared []desktopElement
+}
+
+// desktopStartWindow is one window open when the recording began (the agent's start entry).
+type desktopStartWindow struct {
+	App     string `json:"app,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Focused bool   `json:"focused,omitempty"`
+}
+
+// desktopStart is the windows open when a desktop recording began: its start entry's, nil for
+// a recording from before the recorder kept one.
+func desktopStart(raw json.RawMessage) []desktopStartWindow {
+	var all []struct {
+		Kind    string               `json:"kind"`
+		Windows []desktopStartWindow `json:"windows"`
+	}
+	if json.Unmarshal(raw, &all) != nil {
+		return nil
+	}
+	for _, e := range all {
+		if e.Kind == "start" {
+			return e.Windows
+		}
+	}
+	return nil
 }
 
 type desktopPoint struct {
@@ -275,9 +313,20 @@ func parseDesktopTrace(raw json.RawMessage) ([]desktopEvent, error) {
 	}
 	var out []desktopEvent
 	for _, e := range all {
+		if e.Kind == "result" {
+			if i := slices.IndexFunc(out, func(a desktopEvent) bool { return a.Seq == e.Of }); i >= 0 && e.Of != 0 {
+				r := &desktopResult{App: e.App, Appeared: e.Appeared}
+				if e.Window != nil {
+					r.Title = e.Window.Title
+				}
+				out[i].Result = r
+			}
+			continue
+		}
 		if !slices.Contains(desktopKinds, e.Kind) {
 			continue
 		}
+		e.Of, e.Appeared = 0, nil
 		if e.Kind == "input" && e.Context == desktopContextNone {
 			e.Masked = true
 		}
@@ -534,10 +583,91 @@ func learnPrompt(evs []traceEvent, cands []paramCandidate, narration string) str
 // desktopLearnPrompt is learnPrompt for a desktop trace.
 func desktopLearnPrompt(evs []desktopEvent, cands []paramCandidate, narration string) string {
 	lines := make([]string, len(evs))
+	instructions := desktopLearnInstructions
 	for i, e := range evs {
 		lines[i] = describeDesktopEvent(e)
+		if then := describeResult(e); then != "" {
+			lines[i] += then
+			instructions = learnResultNote + desktopLearnInstructions
+		}
 	}
-	return eventsPrompt(lines, cands, narration, desktopLearnInstructions)
+	return eventsPrompt(lines, cands, narration, instructions)
+}
+
+// learnResultNote tells the model what a line's "(then: …)" is, when a recording has results.
+const learnResultNote = `A line ending "(then: …)" says what the screen showed once that event had settled: write a step's "expect" from its last event's.
+
+`
+
+// learnResultNames is how many appeared elements a line names: enough to say what came up, few
+// enough for a long recording's prompt.
+const learnResultNames = 5
+
+// describeResult is what an event's result adds to its line: the window in front afterwards
+// when it isn't the one the event was in, and the first named elements that appeared. "" when
+// the recording kept no result for it, or nothing changed.
+func describeResult(e desktopEvent) string {
+	r := e.Result
+	if r == nil {
+		return ""
+	}
+	var parts []string
+	if t := oneLine(r.Title); t != "" && (e.Window == nil || t != oneLine(e.Window.Title)) {
+		parts = append(parts, "the window is "+strconv.Quote(truncateRunes(t, learnMaxValue)))
+	}
+	var names []string
+	for _, el := range r.Appeared {
+		if name := oneLine(el.Name); name != "" && len(names) < learnResultNames {
+			names = append(names, orDefault(el.Role, "element")+" "+strconv.Quote(truncateRunes(name, 60)))
+		}
+	}
+	if len(names) > 0 {
+		parts = append(parts, "new on screen: "+strings.Join(names, ", "))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (then: " + strings.Join(parts, "; ") + ")"
+}
+
+// fileInTitle finds a document's file name in a window title ("budget-2026-09.xlsx —
+// LibreOffice Calc"). Only known document extensions count: a title also holds site names and
+// versions that look the same.
+// shortcut: a name with spaces gives only its last word; read the app's document path when a task needs it.
+var fileInTitle = regexp.MustCompile(`(?i)[^\s/\\:"<>|]+\.(?:xlsx?|csv|ods|docx?|odt|rtf|txt|md|pdf|pptx?|odp|json|xml|ya?ml|html?|png|jpe?g|gif|svg|zip|numbers|pages|key)\b`)
+
+// desktopPrerequisites is what was open when the recording began and the task then used: a
+// window of an app some event was in. A document's name in the title makes it "this file is
+// open", with a param's recorded value in the name written as the param; otherwise the app is
+// open. A window the task never touched is left out.
+// shortcut: a param matches only as the recorded text ("2026-09" typed, "2026-09" in the name), not another spelling of the same month.
+func desktopPrerequisites(start []desktopStartWindow, evs []desktopEvent, params []Param) []computer.Prerequisite {
+	touched := map[string]bool{}
+	for _, e := range evs {
+		touched[strings.ToLower(e.App)] = true
+		if e.Result != nil {
+			touched[strings.ToLower(e.Result.App)] = true
+		}
+	}
+	var out []computer.Prerequisite
+	for _, w := range start {
+		if w.App == "" || !touched[strings.ToLower(w.App)] {
+			continue
+		}
+		p := computer.Prerequisite{Kind: computer.PrereqAppOpen, App: w.App}
+		if file := fileInTitle.FindString(w.Title); file != "" {
+			for _, par := range params {
+				if par.Example != "" {
+					file = strings.ReplaceAll(file, par.Example, "{"+par.Name+"}")
+				}
+			}
+			p.Kind, p.File = computer.PrereqFileOpen, file
+		}
+		if !slices.Contains(out, p) && len(out) < 10 {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func eventsPrompt(lines []string, cands []paramCandidate, narration, instructions string) string {
@@ -1309,7 +1439,14 @@ func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w Taug
 		note = m.nameClicksBySight(ctx, *rec, evs)
 		cands := desktopParamCandidates(evs)
 		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
-		build = func(out learnOutput) (TaughtWorkflow, error) { return buildDesktopWorkflow(*rec, evs, cands, out) }
+		build = func(out learnOutput) (TaughtWorkflow, error) {
+			w, err := buildDesktopWorkflow(*rec, evs, cands, out)
+			if err != nil {
+				return w, err
+			}
+			w.Skill.Prerequisites = desktopPrerequisites(desktopStart(rec.Trace), evs, w.Params)
+			return w, w.Skill.Validate(w.Params)
+		}
 	}
 	if m.LLM == nil {
 		return w, "", errors.New("no llm module")
