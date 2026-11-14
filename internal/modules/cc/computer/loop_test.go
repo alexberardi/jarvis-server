@@ -1102,3 +1102,20 @@ func TestLongTypeIsSplit(t *testing.T) {
 		t.Error("a too-long value for an element passed")
 	}
 }
+
+// Told it is stuck and still answering the same, the task ends saying what it was stuck on
+// rather than burning its rounds (suite on Qwen3.5-9B, 2026-11-13: 16 more rounds).
+func TestStuckTaskGivesUp(t *testing.T) {
+	press := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e1", "intent": "Close the dialog"}]}`
+	e := newEnv(t)
+	for range 12 {
+		e.script(press)
+	}
+	out := e.run()
+	if out.State != StateFailed || !strings.Contains(out.Summary, "I got stuck: I kept trying to close the dialog") {
+		t.Fatalf("outcome %+v", out)
+	}
+	if n := len(e.llm.reqs); n != stuckGiveUp+1 || len(e.exec.batches) != stuckAfter {
+		t.Fatalf("calls %d, batches %d", n, len(e.exec.batches))
+	}
+}

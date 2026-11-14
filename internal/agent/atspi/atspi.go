@@ -59,7 +59,16 @@ var ErrUnsupported = &Error{Code: CodeUnsupported, Msg: "AT-SPI snapshots are on
 // Snapshot walks the active window (else the first window) of the app with this pid, depth-first,
 // and returns at most max interactive elements (DefaultMax when max <= 0) under a new generation.
 func Snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
-	return snapshotOf(ctx, pid, max, false)
+	return snapshotOf(ctx, pid, max, false, "")
+}
+
+// SnapshotWindow is Snapshot of the app's window titled title, when it has one: the window the
+// compositor says has the focus, which the app's own "active" state doesn't always name. Found
+// in the suite 2026-11-13: with LibreOffice's Save dialog in front, the snapshot was the main
+// window's (88 menu items and none of the dialog's controls), and a model working by elements
+// pressed "Save As..." again every round. No such window: the active one, as Snapshot.
+func SnapshotWindow(ctx context.Context, pid int, title string, max int) (computeruse.Snapshot, error) {
+	return snapshotOf(ctx, pid, max, false, title)
 }
 
 // Press performs ref's first action (Action.DoAction(0)) from snapshot generation gen.
@@ -67,7 +76,7 @@ func Snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, erro
 // (a closed menu, a hidden panel) is skipped whole. Voice reads this one: live, LibreOffice's
 // closed menus filled a full snapshot's cap before its toolbars (ELEMENT-LAYER-WORK.md 4b).
 func SnapshotShowing(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
-	return snapshotOf(ctx, pid, max, true)
+	return snapshotOf(ctx, pid, max, true, "")
 }
 
 // Peek is SnapshotShowing for a reader that acts on nothing (a desktop recording's results):

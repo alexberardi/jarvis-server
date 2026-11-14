@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -95,6 +96,14 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	}
 	if !s.Enabled(ctx, turn.HouseholdID) {
 		return disabledResult(), nil
+	}
+	// A date the user gave that the model's goal dropped goes back in, worked out: "do my
+	// budget for last month" became "download bank and card statements", and the task downloaded
+	// every month (suite on Qwen3.5-9B, 2026-11-13).
+	if dc := dates.New(s.now(), turn.Timezone); dc.Explain(goal) == "" {
+		if said := dc.Explain(turn.Utterance); said != "" {
+			goal += " (" + said + ")"
+		}
 	}
 	speaker := speakerPtr(turn)
 	var available []*pyjson.Object

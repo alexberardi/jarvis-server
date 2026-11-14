@@ -8,7 +8,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-func snapshotOf(context.Context, int, int, bool) (computeruse.Snapshot, error) {
+func snapshotOf(context.Context, int, int, bool, string) (computeruse.Snapshot, error) {
 	return computeruse.Snapshot{}, ErrUnsupported
 }
 

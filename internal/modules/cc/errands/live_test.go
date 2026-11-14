@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +215,40 @@ func TestComputerTaskGetsItsDatesWorkedOut(t *testing.T) {
 	c2.idle()
 	if txt := c2.llm.requests("computer")[0].Messages[1].Content.Parts[0].Text; strings.Contains(txt, "Dates in the task") {
 		t.Fatal("a goal with no dates got a dates line")
+	}
+}
+
+// A date the user gave that the model's goal for the errand dropped goes back in, worked out
+// (suite on Qwen3.5-9B, 2026-11-13: "do my budget for last month" became "download bank and
+// card statements", and every month was downloaded).
+func TestRunErrandKeepsTheUsersDate(t *testing.T) {
+	c := newComputerEnv(t)
+	c.s.Now = func() time.Time { return time.Date(2026, 11, 13, 21, 0, 0, 0, time.UTC) }
+	tool := &RunErrandTool{Svc: func() *Service { return c.s }}
+	goalOf := func(utterance, goal string) string {
+		t.Helper()
+		turn := turnFor(7)
+		turn.Timezone, turn.Utterance = "UTC", utterance
+		if got := res(tool.Execute(context.Background(), servertools.Call{Args: servertools.Obj("goal", goal)}, turn)); !strings.Contains(got, "accepted") {
+			t.Fatal(got)
+		}
+		var payload string
+		if err := c.d.Read.QueryRow(`SELECT payload FROM platform_jobs WHERE type = ? ORDER BY id DESC LIMIT 1`, JobPlan).Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		var j struct {
+			Goal string `json:"goal"`
+		}
+		_ = json.Unmarshal([]byte(payload), &j)
+		return j.Goal
+	}
+	if g := goalOf("Do my budget for last month: download the statements from my bank", "Download bank and card statements and make a spending spreadsheet"); g != "Download bank and card statements and make a spending spreadsheet (last month = October 2026 (2026-10-01 to 2026-10-31))" {
+		t.Errorf("dropped date: %q", g)
+	}
+	if g := goalOf("Do my budget for last month", "Do the budget for last month"); g != "Do the budget for last month" {
+		t.Errorf("a goal that kept the date changed: %q", g)
+	}
+	if g := goalOf("order the blue mug", "Order the blue mug"); g != "Order the blue mug" {
+		t.Errorf("no date: %q", g)
 	}
 }

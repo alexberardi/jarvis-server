@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
@@ -301,6 +302,9 @@ type round struct {
 	// is sent back (stuckFeedback) instead of run.
 	lastBatch string
 	sameBatch int
+	// lastActs and sameActs are the same for the actions alone, whatever the screen showed.
+	lastActs string
+	sameActs int
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
@@ -527,19 +531,59 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	// The same actions on the same screen, round after round, aren't working: the house model
 	// pressed one button 26 rounds running (suite on Qwen3.5-9B, 2026-11-13: Writer's Tip of
 	// the Day). The third time it is told so instead of run.
-	if key := batchKey(obs, actions); key == r.lastBatch {
-		if r.sameBatch++; r.sameBatch >= stuckAfter {
-			r.feedback = stuckFeedback(r.task.Target.Kind, r.sameBatch+1)
-			return Outcome{}, false
-		}
+	// Told so and still answering the same, it won't get anywhere: the task ends saying what it
+	// was stuck on, rather than burning its rounds (16 more in the suite, same day). The same
+	// actions on a screen that does change (a name typed again into a field that keeps filling)
+	// are caught a little later, by the actions alone.
+	acts := batchKey(Observation{}, actions)
+	if acts != "" && acts == r.lastActs {
+		r.sameActs++
+	} else {
+		r.lastActs, r.sameActs = acts, 0
+	}
+	key := batchKey(obs, actions)
+	if key != "" && key == r.lastBatch {
+		r.sameBatch++
 	} else {
 		r.lastBatch, r.sameBatch = key, 0
+	}
+	switch {
+	case r.sameActs >= stuckGiveUp:
+		return Outcome{State: StateFailed, Summary: fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.",
+			lowerFirst(firstIntent(actions)))}, true
+	case r.sameBatch >= stuckAfter, r.sameActs >= stuckAnyScreen:
+		r.feedback = stuckFeedback(r.task.Target.Kind, r.sameActs+1)
+		return Outcome{}, false
 	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
 }
 
-// stuckAfter is how many repeats of a batch on an unchanged screen run before it is sent back.
-const stuckAfter = 2
+// stuckAfter is how many repeats of a batch on an unchanged screen run before it is sent back;
+// stuckAnyScreen how many repeats of the same actions run whatever the screen shows; and
+// stuckGiveUp how many in all (run or sent back) before the task ends as stuck.
+const (
+	stuckAfter     = 2
+	stuckAnyScreen = 4
+	stuckGiveUp    = 7
+)
+
+// firstIntent is what a batch was trying to do, for the user: its first action's intent.
+func firstIntent(actions []computeruse.Action) string {
+	for _, a := range actions {
+		if s := strings.TrimSpace(a.Intent); s != "" {
+			return s
+		}
+	}
+	return "do the same thing"
+}
+
+func lowerFirst(s string) string {
+	r := []rune(s)
+	if len(r) > 1 && unicode.IsUpper(r[0]) && !unicode.IsUpper(r[1]) {
+		r[0] = unicode.ToLower(r[0])
+	}
+	return string(r)
+}
 
 // batchKey identifies a batch decided on a screen: the actions (without their intents and
 // capture ids, which vary) and what the screen showed. "" for a batch that only waits, scrolls
@@ -573,7 +617,7 @@ func stuckFeedback(target string, times int) string {
 	if target == "desktop" {
 		other = "the keyboard (Escape closes a dialog, Enter confirms it), a click on the control where the screenshot shows it, or a menu"
 	}
-	return fmt.Sprintf("you have now answered with exactly these actions %d times and the screen hasn't changed: they aren't working. "+
+	return fmt.Sprintf("you have now answered with exactly these actions %d times and they haven't got you further: they aren't working. "+
 		"Don't send them again. Try something different: %s. If nothing else can work, ask the user.", times, other)
 }
 

@@ -323,6 +323,40 @@ func activeWindow(ctx context.Context, pid int) (obj, error) {
 	return wins[0], nil
 }
 
+// windowTitled is the top-level window named title of an accessible app of pid. A process can
+// be more than one app on the bus (a toolkit's own dialog beside the app's bridge), so every
+// one of pid's is looked through.
+func windowTitled(ctx context.Context, pid int, title string) (obj, bool) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return obj{}, false
+	}
+	c, err := bus(ctx)
+	if err != nil {
+		return obj{}, false
+	}
+	apps, err := obj{c, objRef{registryName, rootPath}}.children(ctx)
+	if err != nil {
+		return obj{}, false
+	}
+	for _, a := range apps {
+		var p uint32
+		cctx, cancel := context.WithTimeout(ctx, callTimeout)
+		err := c.BusObject().CallWithContext(cctx, "org.freedesktop.DBus.GetConnectionUnixProcessID", 0, a.ref.Name).Store(&p)
+		cancel()
+		if err != nil || int(p) != pid {
+			continue
+		}
+		wins, _ := a.children(ctx)
+		for _, w := range wins {
+			if strings.TrimSpace(w.name(ctx)) == title {
+				return w, true
+			}
+		}
+	}
+	return obj{}, false
+}
+
 // findApp is the registry's app whose bus connection belongs to pid.
 func findApp(ctx context.Context, c *dbus.Conn, pid int) (obj, error) {
 	apps, err := obj{c, objRef{registryName, rootPath}}.children(ctx)
@@ -359,8 +393,8 @@ type refTable struct {
 var refs refTable
 
 // snapshotOf walks the pid's active window; showing skips subtrees not on screen.
-func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computeruse.Snapshot, error) {
-	w, err := walk(ctx, pid, max, showing)
+func snapshotOf(ctx context.Context, pid int, max int, showing bool, title string) (computeruse.Snapshot, error) {
+	w, err := walk(ctx, pid, max, showing, title)
 	if err != nil {
 		return computeruse.Snapshot{}, err
 	}
@@ -373,7 +407,7 @@ func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computerus
 
 // peek is what is on screen in the app's active window, without touching the ref table.
 func peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, error) {
-	w, err := walk(ctx, pid, max, true)
+	w, err := walk(ctx, pid, max, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -384,10 +418,13 @@ func peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, err
 }
 
 // walk is one depth-first walk of the active window (else the first) of the app with this pid.
-func walk(ctx context.Context, pid int, max int, showing bool) (*walker, error) {
+func walk(ctx context.Context, pid int, max int, showing bool, title string) (*walker, error) {
 	win, err := activeWindow(ctx, pid)
 	if err != nil {
 		return nil, err
+	}
+	if w, ok := windowTitled(ctx, pid, title); ok {
+		win = w
 	}
 	if max <= 0 {
 		max = DefaultMax
