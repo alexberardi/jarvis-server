@@ -290,3 +290,33 @@ func TestEditsThatUnproveAWorkflow(t *testing.T) {
 		t.Error("a run's own heal unproved the workflow")
 	}
 }
+
+// A workflow's last run is its owner's alone: a member it is shared with and a household admin
+// are refused, and someone who can't see the workflow doesn't learn it exists.
+func TestWorkflowLastRunIsTheOwners(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	owner := bearer(ve.auth.addUser(7, voiceHH, authn.RoleMember))
+	member := bearer(ve.auth.addUser(8, voiceHH, authn.RoleMember))
+	admin := bearer(ve.auth.addUser(9, voiceHH, authn.RoleAdmin))
+	outsider := bearer(ve.auth.addUser(10, "hh-elsewhere", authn.RoleMember))
+	shared := seedTaught(t, ve.m, voiceHH, 7, "Order ink", true)
+	private := seedTaught(t, ve.m, voiceHH, 7, "Pay rent", false)
+	url := func(id string) string { return wfBase + "/" + id + "/last-run" }
+
+	if got := ve.do("GET", url(shared.ID), nil, owner).want(200).json(); got["run"] != nil {
+		t.Fatalf("never run, yet %v", got)
+	}
+	rec := computer.RunRecord{RunID: "cr_1", State: computer.RecordWaiting, Ask: "Sign in, then tap Continue.",
+		Items: []computer.RunItem{{Kind: "step", Text: "Open the statements", State: computer.ItemAsked, Seen: "the address is /login"}}}
+	if err := (taughtWorkflows{ve.m}).Record(context.Background(), shared.ID, rec); err != nil {
+		t.Fatal(err)
+	}
+	got := ve.do("GET", url(shared.ID), nil, owner).want(200).json()["run"].(map[string]any)
+	if got["run_id"] != "cr_1" || got["state"] != "waiting" || got["items"].([]any)[0].(map[string]any)["seen"] != "the address is /login" {
+		t.Fatalf("the owner's read: %v", got)
+	}
+	ve.do("GET", url(shared.ID), nil, member).detail(403, "Only whoever taught a workflow sees its runs")
+	ve.do("GET", url(shared.ID), nil, admin).detail(403, "Only whoever taught a workflow sees its runs")
+	ve.do("GET", url(private.ID), nil, member).detail(404, "Workflow not found")
+	ve.do("GET", url(shared.ID), nil, outsider).detail(404, "Workflow not found")
+}

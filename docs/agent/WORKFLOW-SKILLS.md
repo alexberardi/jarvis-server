@@ -469,11 +469,18 @@ its access rule at the top and carries its tier expectations.
     one), and there is no extra pause before the first risky step, since a risky step already
     holds for a confirmation.
   - Adds a membership and presence check to starting a run (approved in advance, 2026-11-13).
-- [ ] **R8 — the run on the workflow page.** The last run's record (migration), a route to
+- [x] **R8 — the run on the workflow page.** The last run's record (migration), a route to
   read it, and the panel: each prerequisite and step with its state, what was expected and, on
   a failure, what was seen; live while a run goes.
   - Acceptance: a failed run shows where it failed and what it saw; another member can't read it.
   - Verify: route tests with tier expectations; Vitest; `scripts/e2e web`; screenshots, audit.
+  - Built (2026-11-14). The record is rebuilt from the run's history after every step and at
+    every end of a call, and kept as `last_run` on the workflow, replaced by the next run.
+    `GET /api/v0/workflows/{id}/last-run` is the owner's alone: a member the workflow is shared
+    with and a household admin get 403, anyone who can't see the workflow 404. The page's "Run
+    it" card takes the run's values, starts it, and follows it (every 2 s while it goes, 5 s
+    while it waits). **Not built:** answering a question from the page: the card points to the
+    Inbox, where the run's card has Continue. `scripts/e2e web` has no spec for the panel.
   - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
 - [ ] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
   sends the text and the run's record to the learning model and answers proposed edits; the

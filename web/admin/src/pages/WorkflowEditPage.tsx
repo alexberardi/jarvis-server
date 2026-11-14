@@ -22,6 +22,7 @@ import {
 } from '@/lib/workflows'
 import type { Candidate, DraftStep } from '@/lib/workflows'
 import Sentence from '@/components/workflows/Sentence'
+import RunPanel from '@/components/workflows/RunPanel'
 import { GoalCard, GuardrailsCard, NotesCard, PrerequisitesCard, TextArea } from '@/components/workflows/SkillFields'
 
 const KINDS: ParamKind[] = ['text', 'date', 'month', 'number', 'file']
@@ -170,7 +171,7 @@ function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
       {wf.proven === false && !isDraft && (
         <Banner tone="warning" icon={<Eye size={20} aria-hidden />} title="This workflow hasn’t had its first run">
           {edit
-            ? 'Run it once from Workflows while you watch. After one run that checks out, it can run on a schedule or when someone asks for it.'
+            ? 'Run it once below while you watch. After one run that checks out, it can run on a schedule or when someone asks for it.'
             : 'Until whoever taught it has run it once and it checked out, only they can run it.'}
         </Banner>
       )}
@@ -185,6 +186,8 @@ function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
           Your workflow is unchanged until you save. Discard the draft to go back to it.
         </Banner>
       )}
+
+      {edit && !isDraft && <RunPanel wf={wf} />}
 
       <Card as="section" aria-labelledby="wf-about" className="space-y-4">
         <h2 id="wf-about" className="sr-only">

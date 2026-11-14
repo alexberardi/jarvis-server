@@ -16,10 +16,16 @@ type fakeWorkflows struct {
 	version int
 	heals   []Heal
 	proved  []int // the versions a run proved
+	records []RunRecord
 }
 
 func (f *fakeWorkflows) Heal(_ context.Context, id string, version int, heals []Heal) error {
 	f.id, f.version, f.heals = id, version, heals
+	return nil
+}
+
+func (f *fakeWorkflows) Record(_ context.Context, _ string, rec RunRecord) error {
+	f.records = append(f.records, rec)
 	return nil
 }
 
@@ -832,5 +838,66 @@ func TestReplayProvesTheWorkflow(t *testing.T) {
 	out = e.replay(wf, map[string]string{"month": "October 2026"})
 	if out = e.resume(wf, out.RunID, "continue"); out.State != StateDone || len(wfs.proved) != 0 {
 		t.Fatalf("vouched: %+v, proved %v", out, wfs.proved)
+	}
+}
+
+func itemLines(r RunRecord) string {
+	var out []string
+	for _, it := range r.Items {
+		s := it.Kind + " " + it.State
+		if it.Seen != "" {
+			s += " (" + it.Seen + ")"
+		}
+		out = append(out, s)
+	}
+	return r.State + ": " + strings.Join(out, "; ")
+}
+
+// The workflow's page follows a run: a record after every step and at the end, saying what each
+// step expected and, where a check failed, what was seen.
+func TestReplayRecordsTheRun(t *testing.T) {
+	e := newEnv(t, bankPage(download))
+	wfs := &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	wf := checkedWorkflow()
+	wf.Skill.Prerequisites = []Prerequisite{{Kind: PrereqSignedIn, Site: "bank.example.com"}}
+	wf.Skill.Goal.EndState = "The {month} statement is saved"
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(wfs.records) != 3 {
+		t.Fatalf("outcome %+v, %d records", out, len(wfs.records))
+	}
+	for i, want := range []string{
+		"running: prerequisite done; step verified; step waiting; result waiting",
+		"running: prerequisite done; step verified; step verified; result waiting",
+		"done: prerequisite done; step verified; step verified; result verified",
+	} {
+		if got := itemLines(wfs.records[i]); got != want {
+			t.Errorf("record %d: %s\nwant      %s", i, got, want)
+		}
+	}
+	last := wfs.records[2]
+	if it := last.Items[1]; it.Text != "Open the statements for October 2026" || it.Expected != `the address contains "bank.example.com/statements"` {
+		t.Errorf("step 1: %+v", it)
+	}
+	if it := last.Items[3]; it.Text != "The October 2026 statement is saved" || it.Expected != `the address contains "/statements"` {
+		t.Errorf("result: %+v", it)
+	}
+	if last.Items[0].Text != "signed in to bank.example.com" || last.Params["month"] != "October 2026" || last.RunID != out.RunID {
+		t.Errorf("record %+v", last)
+	}
+
+	// A step the run is asking about says what its check found.
+	elsewhere := Observation{URL: "https://bank.example.com/login", Title: "Sign in", Gen: 1}
+	e = newEnv(t, bankPage(download), elsewhere)
+	e.sleeps()
+	wfs = &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	wf = checkedWorkflow()
+	wf.Steps[0].Risk = "sharing"
+	e.replay(wf, map[string]string{"month": "October 2026"})
+	got := itemLines(wfs.records[len(wfs.records)-1])
+	want := `waiting: step asked (the address is https://bank.example.com/login, not one with "bank.example.com/statements"); step waiting; result waiting`
+	if got != want {
+		t.Errorf("asking: %s\nwant    %s", got, want)
 	}
 }
