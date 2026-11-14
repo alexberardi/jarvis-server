@@ -82,9 +82,14 @@ export function eventSentence(e: TraceEvent): Part[] {
   return [{ text: e.kind ?? 'Something happened' }]
 }
 
-/** traceEvents is a recording's trace as a list of events (empty when it isn't one). */
+/** Kinds the recorder adds that aren't something the user did: what was open, what an action changed. */
+const CAPTURE_KINDS = ['start', 'result']
+
+/** traceEvents is what the user did in a recording's trace, as a list of events (empty when it isn't one). */
 export function traceEvents(trace: unknown): TraceEvent[] {
-  return Array.isArray(trace) ? trace.filter((e): e is TraceEvent => !!e && typeof e === 'object') : []
+  return Array.isArray(trace)
+    ? trace.filter((e): e is TraceEvent => !!e && typeof e === 'object' && !CAPTURE_KINDS.includes((e as TraceEvent).kind ?? ''))
+    : []
 }
 
 /** How soon after a click, submit or key a navigation in its tab is that action's doing (ms). */

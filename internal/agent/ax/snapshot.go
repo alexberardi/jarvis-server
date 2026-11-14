@@ -100,6 +100,33 @@ func Snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, erro
 	return refs.snapshot(ctx, win, max)
 }
 
+// Peek is the same walk for a reader that acts on nothing (a desktop recording's results):
+// the elements only, with no refs kept and the ref table and its generation left as they are,
+// so a snapshot computer control or voice is acting on stays valid. An element's name is its
+// label alone: where Snapshot falls back to AXValue (a cell's or a row's contents), Peek leaves
+// the name empty, and it returns no values.
+func Peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, error) {
+	win, err := frontWindow(pid)
+	if err != nil {
+		return nil, err
+	}
+	return peek(ctx, win, max)
+}
+
+func peek(ctx context.Context, root axNode, max int) ([]computeruse.SnapElement, error) {
+	if max <= 0 {
+		max = DefaultMax
+	}
+	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, labels: true}
+	if !w.visit(root, "", 0) {
+		root.release()
+	}
+	for _, e := range w.nodes {
+		e.node.release()
+	}
+	return w.out, w.err
+}
+
 // snapshot walks root (which it releases, unless kept) and replaces the table with what it kept.
 func (t *refTable) snapshot(ctx context.Context, root axNode, max int) (computeruse.Snapshot, error) {
 	if max <= 0 {
@@ -132,6 +159,8 @@ type walker struct {
 	out   []computeruse.SnapElement
 	nodes map[string]entry
 	err   error
+	// labels: Peek's walk, where a name is a label and no value is read out.
+	labels bool
 }
 
 func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
@@ -162,6 +191,9 @@ func (w *walker) visit(n axNode, parentRole string, depth int) bool {
 func (w *walker) keep(n axNode, role string) {
 	role, secure := secureRole(n, role)
 	name, v := describe(n, role, secure)
+	if w.labels {
+		name, v = label(n), ""
+	}
 	el := computeruse.SnapElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: name, Bounds: n.bounds()}
 	switch {
 	case toggleRoles[role]:
@@ -199,11 +231,7 @@ func secureRole(n axNode, role string) (string, bool) {
 // AXLabel that is set, then AXValue, but only for roles whose value isn't typed text or a toggle
 // (and value is "" once it became the name). A secure field's value is never read.
 func describe(n axNode, role string, secure bool) (name, value string) {
-	for _, a := range []string{"AXTitle", "AXDescription", "AXLabel"} {
-		if name = clip(n.attr(a)); name != "" {
-			break
-		}
-	}
+	name = label(n)
 	if secure {
 		return name, ""
 	}
@@ -212,6 +240,16 @@ func describe(n axNode, role string, secure bool) (name, value string) {
 		return value, ""
 	}
 	return name, value
+}
+
+// label is the first of n's AXTitle, AXDescription and AXLabel that is set.
+func label(n axNode) string {
+	for _, a := range []string{"AXTitle", "AXDescription", "AXLabel"} {
+		if name := clip(n.attr(a)); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 func clip(s string) string {

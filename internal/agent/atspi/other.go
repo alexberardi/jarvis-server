@@ -12,6 +12,8 @@ func snapshotOf(context.Context, int, int, bool) (computeruse.Snapshot, error) {
 	return computeruse.Snapshot{}, ErrUnsupported
 }
 
+func peek(context.Context, int, int) ([]computeruse.SnapElement, error) { return nil, ErrUnsupported }
+
 func press(int, string) error                                       { return ErrUnsupported }
 func setValue(int, string, string) error                            { return ErrUnsupported }
 func focus(int, string) error                                       { return ErrUnsupported }

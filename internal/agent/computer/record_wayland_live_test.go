@@ -5,6 +5,7 @@ package computer
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -28,7 +29,9 @@ func TestWaylandRecordLive(t *testing.T) {
 		secs = 15
 	}
 	e := newRecEnv(t)
-	src := NewDesktopSource(e.r.Dir, screen.Native(), nil)
+	// The recorder's own debug lines (why a keyframe or an element is missing) go to the test log.
+	log := slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	src := NewDesktopSource(e.r.Dir, screen.Native(), log)
 	e.r.Sources[ModeDesktop] = src
 	id, err := e.r.Start(context.Background(), ModeDesktop)
 	if err != nil {
@@ -52,9 +55,13 @@ func TestWaylandRecordLive(t *testing.T) {
 		}
 		t.Logf("keyframe %d: %s crop %q", k.Seq, k.Path, k.Crop)
 	}
-	var click, typed, enter bool
+	var click, typed, enter, start, result bool
 	for _, ev := range evs {
 		switch {
+		case ev.Kind == KindStart:
+			start = len(ev.Windows) > 0
+		case ev.Kind == KindResult:
+			result = result || (ev.Of > 0 && ev.Window != nil)
 		case ev.Kind == InClick:
 			click = true
 			if ev.Window == nil || ev.App == "" {
@@ -69,8 +76,19 @@ func TestWaylandRecordLive(t *testing.T) {
 			enter = true
 		}
 	}
+	if !start || !result {
+		t.Errorf("want the open windows at the start and a result after an action; got start %v result %v", start, result)
+	}
 	if !click || !typed || !enter || len(tr.Keyframes) == 0 {
 		t.Fatalf("want a click, the typed hi, Enter and a keyframe; got click %v typed %v enter %v keyframes %d",
 			click, typed, enter, len(tr.Keyframes))
 	}
+}
+
+// testLog writes a logger's lines to the test's log.
+type testLog struct{ t *testing.T }
+
+func (l testLog) Write(b []byte) (int, error) {
+	l.t.Log(strings.TrimSpace(string(b)))
+	return len(b), nil
 }

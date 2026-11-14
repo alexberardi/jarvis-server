@@ -70,6 +70,13 @@ func SnapshotShowing(ctx context.Context, pid int, max int) (computeruse.Snapsho
 	return snapshotOf(ctx, pid, max, true)
 }
 
+// Peek is SnapshotShowing for a reader that acts on nothing (a desktop recording's results):
+// the elements only, with the ref table and its generation left as they are, so a snapshot
+// computer control or voice is acting on stays valid.
+func Peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, error) {
+	return peek(ctx, pid, max)
+}
+
 func Press(gen int, ref string) error { return press(gen, ref) }
 
 // SetValue replaces ref's text (EditableText.SetTextContents). A password text is refused

@@ -360,23 +360,41 @@ var refs refTable
 
 // snapshotOf walks the pid's active window; showing skips subtrees not on screen.
 func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computeruse.Snapshot, error) {
-	win, err := activeWindow(ctx, pid)
+	w, err := walk(ctx, pid, max, showing)
 	if err != nil {
 		return computeruse.Snapshot{}, err
-	}
-	if max <= 0 {
-		max = DefaultMax
-	}
-	w := walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
-	w.visit(win, 0, "", true)
-	if w.err != nil {
-		return computeruse.Snapshot{}, w.err
 	}
 	refs.mu.Lock()
 	defer refs.mu.Unlock()
 	refs.gen++
 	refs.nodes = w.nodes
 	return computeruse.Snapshot{Gen: refs.gen, Elements: w.out}, nil
+}
+
+// peek is what is on screen in the app's active window, without touching the ref table.
+func peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, error) {
+	w, err := walk(ctx, pid, max, true)
+	if err != nil {
+		return nil, err
+	}
+	for i := range w.out {
+		w.out[i].Value = "" // a reader of names has no use for what a field holds
+	}
+	return w.out, nil
+}
+
+// walk is one depth-first walk of the active window (else the first) of the app with this pid.
+func walk(ctx context.Context, pid int, max int, showing bool) (*walker, error) {
+	win, err := activeWindow(ctx, pid)
+	if err != nil {
+		return nil, err
+	}
+	if max <= 0 {
+		max = DefaultMax
+	}
+	w := &walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
+	w.visit(win, 0, "", true)
+	return w, w.err
 }
 
 type walker struct {

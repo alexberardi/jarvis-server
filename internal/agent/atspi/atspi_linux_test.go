@@ -398,6 +398,14 @@ func TestSnapshotShowingSkipsClosedMenus(t *testing.T) {
 	if got, want := names(voice), []string{"Bold@top-left"}; !slices.Equal(got, want) {
 		t.Errorf("showing: %q, want %q", got, want)
 	}
+	// Peek reads the same, and leaves the refs of the snapshot before it usable.
+	els, err := Peek(context.Background(), os.Getpid(), 0)
+	if err != nil || len(els) != 1 || els[0].Name != "Bold" {
+		t.Errorf("peek: %+v, %v", els, err)
+	}
+	if _, err := Element(voice.Gen, voice.Elements[0].Ref); err != nil {
+		t.Errorf("the snapshot's ref is stale after a peek: %v", err)
+	}
 	all, err := Snapshot(context.Background(), os.Getpid(), 0)
 	if err != nil {
 		t.Fatal(err)

@@ -349,3 +349,53 @@ func TestDesktopTraceTrimsStopClicks(t *testing.T) {
 		}
 	}
 }
+
+// A recording's start and result events (docs/agent/WORKFLOW-SKILLS.md, capture) aren't
+// something the user did: a trace with them parses to the same events as one without, and
+// they don't count as steps.
+func TestCaptureEventsAreNotSteps(t *testing.T) {
+	const plain = `[
+		{"seq":1,"ts":1000,"kind":"click","app":"Notes","element":{"role":"button","name":"New note"}},
+		{"seq":2,"ts":2000,"kind":"input","app":"Notes","element":{"role":"textbox","name":"Title"},"value":"Groceries"},
+		{"seq":3,"ts":3000,"kind":"key","app":"Notes","key":"Enter"}]`
+	const captured = `[
+		{"ts":900,"kind":"start","windows":[{"app":"Notes","title":"All Notes","focused":true},{"app":"Files","title":"budget.xlsx"}]},
+		{"seq":1,"ts":1000,"kind":"click","app":"Notes","element":{"role":"button","name":"New note"}},
+		{"ts":1500,"kind":"result","of":1,"app":"Notes","window":{"class":"Notes","title":"New Note"},"appeared":[{"role":"textbox","name":"Title"}]},
+		{"seq":2,"ts":2000,"kind":"input","app":"Notes","element":{"role":"textbox","name":"Title"},"value":"Groceries"},
+		{"seq":3,"ts":3000,"kind":"key","app":"Notes","key":"Enter"},
+		{"ts":3500,"kind":"result","of":3,"app":"Notes","window":{"class":"Notes","title":"Groceries"}}]`
+	want, err := parseDesktopTrace(json.RawMessage(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseDesktopTrace(json.RawMessage(captured))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, w := mustJSON(t, got), mustJSON(t, want); g != w || len(got) != 3 {
+		t.Fatalf("with capture events\n got %s\nwant %s", g, w)
+	}
+
+	e := newEnv(t, envOpts{noMQTT: true})
+	ctx := context.Background()
+	if _, err := e.m.createRecording(ctx, Recording{HouseholdID: "hh-1", OwnerID: 1, NodeID: "n", Mode: "desktop", Trace: json.RawMessage(captured)}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := e.m.listRecordings(ctx, "hh-1", 1)
+	if err != nil || len(recs) != 1 || recs[0].Steps != 3 {
+		t.Fatalf("steps = %+v (%v), want 3", recs, err)
+	}
+	// A trace holding something that isn't an event still lists: only objects have a kind.
+	if _, err := e.m.createRecording(ctx, Recording{HouseholdID: "hh-1", OwnerID: 1, NodeID: "n", Mode: "desktop",
+		Trace: json.RawMessage(`["stray", 3, null, {"kind":"click"}, {"kind":"result","of":1}]`)}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err = e.m.listRecordings(ctx, "hh-1", 1)
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("a trace with a bare string breaks the list: %d recordings, %v", len(recs), err)
+	}
+	if n := max(recs[0].Steps, recs[1].Steps); n != 4 {
+		t.Fatalf("the odd trace counts %d steps, want 4 (everything in it but the result)", n)
+	}
+}

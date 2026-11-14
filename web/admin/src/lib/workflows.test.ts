@@ -35,6 +35,8 @@ describe('eventSentence', () => {
   it('reads a trace that is not a list as empty', () => {
     expect(traceEvents({ events: [] })).toEqual([])
     expect(traceEvents([{ kind: 'click' }, null, 3])).toEqual([{ kind: 'click' }])
+    // What was open and what an action changed are the recorder's, not something the user did.
+    expect(traceEvents([{ kind: 'start', windows: [] }, { kind: 'click' }, { kind: 'result', of: 1 }])).toEqual([{ kind: 'click' }])
   })
 })
 
