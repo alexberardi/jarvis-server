@@ -22,7 +22,7 @@ in core, `IJarvisDaemon` in the SDK, agents and daemons on desktop nodes. Replac
 
 - [x] Agents on desktop nodes (A1, A2) and package daemons (D1 the SDK's `IJarvisDaemon`, D2 the
   agent's supervisor); the `daemon` component in the Pantry and its web app, deployed.
-- [ ] D3 one host node per daemon (#662, in review).
+- [x] D3 one host node per daemon.
 - [ ] `channels-core` (K1–K5), the SDK helper, the Discord and Slack packages, the mobile card:
   planned in CHANNELS.md, awaiting the user's review. Not yet run for real: a daemon on a Pi,
   Windows or macOS, or from an installed agent.

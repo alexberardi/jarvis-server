@@ -28,6 +28,8 @@ func (m *Module) PurgeUserHousehold(ctx context.Context, tx *sql.Tx, userID int6
 		`DELETE FROM cc_proposal_suppressions WHERE user_id = ? AND household_id = ?`,
 		`UPDATE cc_attention_events SET target_user_id = NULL, payload_json = NULL WHERE target_user_id = ? AND household_id = ?`,
 		`DELETE FROM cc_callback_jobs WHERE user_id = ? AND household_id = ?`,
+		// Their accounts on chat services no longer speak in this household (docs/CHANNELS.md).
+		`DELETE FROM cc_channel_links WHERE user_id = ? AND household_id = ?`,
 		`DELETE FROM cc_request_traces WHERE user_id = ? AND household_id = ?`,
 		`UPDATE cc_bluetooth_scan_requests SET user_id = NULL WHERE user_id = ? AND household_id = ?`,
 		`UPDATE cc_provisioning_tokens SET created_by_user_id = NULL WHERE created_by_user_id = ? AND household_id = ?`,

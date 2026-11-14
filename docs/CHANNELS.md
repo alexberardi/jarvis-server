@@ -256,8 +256,14 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
 - [x] **K1 — `ChatText`.** A chat turn as a user without the SSE stream, ported from #649
   (`chat_text.go`, the `sseWriter` collector).
   - Verify: its tests from #649; `scripts/sandbox` with the scripted model.
-- [ ] **K2 — links and the app's routes.** The three tables, the link store and codes from #649
+- [x] **K2 — links and the app's routes.** The three tables, the link store and codes from #649
   with the provider added, the member routes, `PurgeUser`.
+  - Built (in review): `cc/channels` (links, codes, the providers that called in),
+    `cc_channel_links` and `cc_channel_providers`, and the four member routes. A code is for one
+    provider and household; a link also goes when its user leaves the household
+    (`PurgeUserHousehold`), which #649 did not do. The outbox table comes with K4. The routes
+    are jarvisd's own (the mobile app's), not yet in the web app's gateway, so its tier table is
+    unchanged.
   - New routes: tier expectations in the same PR; **held for the user's review**.
   - Verify: #649's store and route tests against the generic names; another household gets 404.
 - [ ] **K3 — the daemon's routes.** `message` (text and images, #649's rules: linked accounts

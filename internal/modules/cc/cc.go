@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/channels"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -233,6 +234,9 @@ type Module struct {
 	sig        *signalState     // 5c signals, proposals and attention (signals.go)
 	phone      *phone.Service   // 5c phone calls (phone_wire.go)
 	errands    *errands.Service // 5c errands and workflows (errands.go)
+	// Chat-service channels (channels_wire.go).
+	channelStore *channels.Store
+	channelCodes *channels.Codes
 
 	// tasks tracks fire-and-forget goroutines so shutdown waits for them (tasks.go, Wait).
 	tasks taskGroup
@@ -450,6 +454,9 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Household settings from mobile (doc 13 §3.7).
 	m.registerHouseholdSettings(mux)
 	m.registerHouseholdPrompt(mux)
+	// Chat-service channels: the app's routes (docs/CHANNELS.md).
+	m.channelsSetup()
+	m.registerChannels(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
@@ -568,6 +575,9 @@ func (m *Module) PurgeUser(ctx context.Context, tx *sql.Tx, userID int64) error 
 		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
 			return err
 		}
+	}
+	if err := purgeChannelLinks(ctx, tx, userID, ""); err != nil {
+		return err
 	}
 	// Phone (D20): call drafts and call context go; sessions stay, de-identified.
 	return phone.PurgeUser(ctx, tx, "cc_settings", userID)
