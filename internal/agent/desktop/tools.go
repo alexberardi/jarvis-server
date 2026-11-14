@@ -39,9 +39,11 @@ const (
 	ToolListApps  = "desktop_list_apps"
 )
 
-// OpenPolicy decides what desktop_open may hand to the OS: web and mail links, and installed
-// applications by name (the apps catalogue). Never a path, a custom URI scheme or arguments
-// from the model: an arbitrary target is program execution driven by an STT transcript.
+// OpenPolicy decides what desktop_open may hand to the OS: web and mail links, installed
+// applications by name (the apps catalogue), and a file of the user's by name (files.go: found
+// in their Documents, Downloads or Desktop; a program or script only after they say yes). Never
+// a path, a custom URI scheme or arguments from the model: an arbitrary target is program
+// execution driven by an STT transcript.
 type OpenPolicy struct {
 	AllowAny bool // opt-in escape hatch (--allow-open-any); restores "anything the OS can open"
 }
@@ -110,9 +112,12 @@ type Tools struct {
 	Log      *slog.Logger // nil: no logs
 	// Show puts a window command's outcome on the island ("Maximized Firefox"); nil: not shown.
 	Show func(text string, d time.Duration)
-	// Confirm holds closing every window of an app for the user's yes (Q8); nil or off: no
-	// question.
+	// Confirm holds closing every window of an app for the user's yes (Q8; nil or off: no
+	// question), and running a program or script found by name (files.go: always asked).
 	Confirm *dictate.Confirmer
+	// FileRoots are the folders desktop_open looks for a file by name in (nil: the user's
+	// Documents, Downloads and Desktop).
+	FileRoots []string
 	// Now is the clock for "it" (the last window acted on, for a minute); nil: time.Now.
 	Now func() time.Time
 	// Views lists and switches the tabs and sheets inside app windows (views.go); nil: the
@@ -313,9 +318,16 @@ func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, 
 		return nil, err
 	}
 	p, err := apps.Find(list, target)
-	if errors.Is(err, apps.ErrNotFound) && reDomain.MatchString(strings.TrimSpace(target)) {
-		// "open google.com": no app has that name, so it's the site.
-		return t.openLink(ctx, "https://"+strings.TrimSpace(target))
+	if errors.Is(err, apps.ErrNotFound) {
+		// No app has that name: a file of the user's with it (files.go), before a site, since
+		// "notes.md" also reads as a domain.
+		if out, handled, ferr := t.openFile(ctx, target); handled {
+			return out, ferr
+		}
+		if reDomain.MatchString(strings.TrimSpace(target)) {
+			// "open google.com": no app and no file has that name, so it's the site.
+			return t.openLink(ctx, "https://"+strings.TrimSpace(target))
+		}
 	}
 	if err != nil {
 		return nil, err

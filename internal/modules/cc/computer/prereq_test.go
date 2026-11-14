@@ -123,3 +123,40 @@ func TestPrerequisitePageOpen(t *testing.T) {
 		t.Fatalf("first action %+v, want the prerequisite's page opened", a)
 	}
 }
+
+// A file that isn't open is found by name and opened by the computer, and then looked for: one
+// match is opened, several are asked about, a program is left to the user. The run never sends a path.
+func TestPrerequisiteFileIsOpenedByName(t *testing.T) {
+	p := Prerequisite{Kind: PrereqFileOpen, File: "budget-{month}.xlsx", App: "LibreOffice Calc"}
+	sheet := Observation{Title: "budget-October 2026.xlsx — LibreOffice Calc", App: "LibreOffice Calc", Gen: 1}
+
+	// Opening the window, the look that doesn't find it, then (after it is opened) the sheet.
+	e := newEnv(t, bankPage(download), bankPage(download), sheet, bankPage(download))
+	e.sleeps()
+	e.exec.openFile = func(name string) (OpenResult, error) {
+		return OpenResult{Opened: name, Folder: "Documents"}, nil
+	}
+	out := e.replay(withPrereqs(p), map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(e.exec.opened) != 1 || e.exec.opened[0] != "budget-October 2026.xlsx" {
+		t.Fatalf("one match: %+v, asked to open %v", out, e.exec.opened)
+	}
+
+	for name, tc := range map[string]struct {
+		res  OpenResult
+		want string
+	}{
+		"several": {OpenResult{Candidates: []string{"budget.xlsx in Documents", "budget.xlsx in Downloads"}},
+			"more than one file has that name: budget.xlsx in Documents; budget.xlsx in Downloads"},
+		"a program": {OpenResult{NeedsConfirm: true}, "it is a program or script: I only run one when you say so"},
+		"none":      {OpenResult{}, "budget-October 2026.xlsx needs to be open in LibreOffice Calc. Open it and tap Continue."},
+		"not shown": {OpenResult{Opened: "budget-October 2026.xlsx", Folder: "Documents"}, "I opened it from Documents, but I can't see it there"},
+	} {
+		e := newEnv(t, bankPage(download))
+		e.sleeps()
+		e.exec.openFile = func(string) (OpenResult, error) { return tc.res, nil }
+		out := e.replay(withPrereqs(p), map[string]string{"month": "October 2026"})
+		if out.State != StateAsk || !strings.Contains(out.Ask, tc.want) || len(e.exec.batches) != 0 {
+			t.Errorf("%s: %+v", name, out)
+		}
+	}
+}

@@ -51,6 +51,17 @@ type fakeExec struct {
 	fileArgs []Files
 	// observeErr fails a look (nil: none do).
 	observeErr func(Observe) error
+	// openFile answers OpenFile (nil: no file has that name); opened are the names asked for.
+	openFile func(name string) (OpenResult, error)
+	opened   []string
+}
+
+func (f *fakeExec) OpenFile(_ context.Context, _ string, name string) (OpenResult, error) {
+	f.opened = append(f.opened, name)
+	if f.openFile == nil {
+		return OpenResult{}, nil
+	}
+	return f.openFile(name)
 }
 
 func (f *fakeExec) Observe(_ context.Context, o Observe) (Observation, error) {

@@ -444,7 +444,7 @@ its access rule at the top and carries its tier expectations.
     way and the run goes on. *Other:* judged on the screen by a model that can see. The model
     does not yet work toward an unmet "other": the run asks. No suite case: the fixture bank
     has no sign-out control and its workflow learns no prerequisite.
-- [ ] **R6 — open a file by name.** The agent's open policy takes a file's name: the node finds
+- [x] **R6 — open a file by name.** The agent's open policy takes a file's name: the node finds
   it in Documents, Downloads and Desktop, opens a document on a single match, and a program,
   script or shortcut after a confirmation. `desktop_open` by voice, and the file prerequisite.
   A step that runs a program is learnt as "Ask me first", which its owner can turn off.
@@ -452,6 +452,19 @@ its access rule at the top and carries its tier expectations.
   - Verify: agent tests on fake folders (one, none, several, a script, a path refused); the
     open-policy guard tests updated, not weakened; a voice pipeline scenario.
   - Changes `internal/agent/CLAUDE.md` invariant 9 (approved in advance, 2026-11-13).
+  - Built (2026-11-14), after R7 to R9. `desktop_open`, given a name that is no installed app,
+    looks in Documents, Downloads and Desktop (four folders deep, hidden ones skipped): one
+    match is opened, a known document type at once, anything else (a script, a program, a
+    shortcut, an unknown type, a document marked executable) after a question that names it and
+    its folder; several matches are listed back; a name with a path separator finds nothing. A
+    run opens a file prerequisite the same way and then looks for it. **By voice it works
+    without the tool saying so, about two times in three on qwen3.5-9b.** Saying in the tool's
+    description that it opens files made that 6/6 but cost the window commands ("move to a
+    workspace" 9/9 on main, 4/10 with the longer description, 3/6 with one added word), so the
+    description is unchanged and the two new scenarios are marked known-bug. A request that
+    names a document type ("spreadsheet", ".xlsx") is routed to a computer task as before.
+    **Not built:** a recorded step that runs a program being learnt as "Ask me first" (the
+    recorder doesn't know a click ran a program).
 - [x] **R7 — proven, and who may start an unproven run.** The proven version (migration); an
   unproven workflow refuses a schedule, another member, or its owner away from the computer,
   and pauses before its first risky step; a verified run proves it; which edits unprove it;

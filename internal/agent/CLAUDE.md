@@ -257,9 +257,14 @@ the agent (+~4.5 MB), the price of one verification path.
    validates its own format before an id reaches a subprocess or AppleScript. The Python
    macOS provider spliced ids into AppleScript unvalidated; don't regress that.
 9. **The open policy is in `internal/agent/desktop` + `internal/agent/apps`, not `host`.** Allowed: http,
-   https and mailto links, and any installed app *named* by the model, resolved against the
-   catalogue (platform app folders + `apps.json` allow globs − deny globs). The launched path is
-   always the catalogue's: never a path, URI scheme or argument from the model. Ambiguity is
+   https and mailto links, any installed app *named* by the model, resolved against the
+   catalogue (platform app folders + `apps.json` allow globs − deny globs), and one of the
+   user's files *named* by the model (`desktop/files.go`, decision
+   2026-11-13-programs-open-after-a-confirmation): found in their Documents, Downloads or
+   Desktop, opened only on a single match; a document at once, a program, script, shortcut or
+   unknown type only after the user's yes (`Confirm.Ask`, whatever the confirm mode). The path
+   opened is always the catalogue's or the one found: never a path, URI scheme or argument from
+   the model. Ambiguity is
    reported with candidates, never guessed. `--allow-open-any` restores "anything the OS can
    open" (i.e. program execution).
 10. **Runs in the user's interactive session on all three platforms** (systemd *user* unit,

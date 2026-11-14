@@ -250,6 +250,38 @@ func (e computerExec) Act(ctx context.Context, b computer.Batch) (computer.ActRe
 	return computer.ActResult{Results: parsed.Results, Paused: parsed.Paused}, nil
 }
 
+// OpenFile opens one of the user's files by its name on the run's computer, through the agent's
+// desktop_open: the agent finds it in the user's own folders and opens a document on a single
+// match. cc never sends a path.
+func (e computerExec) OpenFile(ctx context.Context, runID, name string) (computer.OpenResult, error) {
+	run, err := e.node(ctx, runID)
+	if err != nil {
+		return computer.OpenResult{}, err
+	}
+	out := errandNodes{e.m}.RunTool(ctx, run.NodeID, "desktop_open", toArgs(map[string]any{"target": name}), run.UserID, "", computerObserveTimeout)
+	var parsed struct {
+		Opened     string   `json:"opened"`
+		Folder     string   `json:"folder"`
+		Status     string   `json:"status"`
+		Candidates []string `json:"candidates"`
+		Launched   string   `json:"launched"`
+	}
+	if err := json.Unmarshal([]byte(pyjson.Dumps(out, false)), &parsed); err != nil {
+		return computer.OpenResult{}, fmt.Errorf("unreadable answer: %w", err)
+	}
+	switch {
+	case parsed.Status == "ambiguous_file":
+		return computer.OpenResult{Candidates: parsed.Candidates}, nil
+	case parsed.Status == "awaiting_confirmation":
+		return computer.OpenResult{NeedsConfirm: true}, nil
+	case parsed.Opened != "" && parsed.Folder != "":
+		return computer.OpenResult{Opened: parsed.Opened, Folder: parsed.Folder}, nil
+	}
+	// Not a file of the user's: nothing was opened as one (an app of that name may have been
+	// launched, which is not what a file prerequisite asked for).
+	return computer.OpenResult{}, nodeFailure(out)
+}
+
 func (e computerExec) Files(ctx context.Context, f computer.Files) (computer.FileInfo, error) {
 	run, err := e.node(ctx, f.RunID)
 	if err != nil {

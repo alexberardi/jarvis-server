@@ -17,6 +17,21 @@ import (
 // never signs in: signed out, it asks the user to and carries on when they say so. One it can't
 // achieve stops the run before step 1 with a question.
 
+// Opener is an Executor that can open one of the user's files by its name on the run's computer.
+// It never takes a path: the computer finds the file itself.
+type Opener interface {
+	OpenFile(ctx context.Context, runID, name string) (OpenResult, error)
+}
+
+// OpenResult is what came of opening a file by name. At most one of these is set; none means
+// no file has that name.
+type OpenResult struct {
+	Opened       string   // the file opened, and
+	Folder       string   // where it was
+	Candidates   []string // several files have the name: none was opened
+	NeedsConfirm bool     // it is a program or script: the computer asks its user first
+}
+
 // entryPrereq is a prerequisite's history entry: Ref names it ("p1"), Result is "ok" or what
 // the run asked.
 const entryPrereq = "prereq"
@@ -90,15 +105,42 @@ func (l *Loop) prerequisite(ctx context.Context, r *round, wf *Workflow, p Prere
 
 	case PrereqFileOpen:
 		file := bind(p.File)
-		if p.App != "" {
-			obs, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: computeruse.Target{Kind: "desktop", App: p.App}, Snapshot: true})
-			if err == nil && strings.Contains(strings.ToLower(obs.Title), strings.ToLower(file)) {
-				return Outcome{}, true, false
+		shown := func() bool {
+			if p.App == "" {
+				return false
 			}
+			obs, err := l.Exec.Observe(ctx, Observe{RunID: r.run.ID, Target: computeruse.Target{Kind: "desktop", App: p.App}, Snapshot: true})
+			return err == nil && strings.Contains(strings.ToLower(obs.Title), strings.ToLower(file))
+		}
+		if shown() {
+			return Outcome{}, true, false
 		}
 		in := ""
 		if p.App != "" {
 			in = " in " + p.App
+		}
+		// Not open: the computer finds it by name in the user's folders and opens it, when
+		// exactly one file has that name and it is a document (Q1; the agent's desktop_open).
+		if op, ok := l.Exec.(Opener); ok {
+			switch res, err := op.OpenFile(ctx, r.run.ID, file); {
+			case err != nil:
+			case res.Opened != "":
+				if p.App == "" {
+					return Outcome{}, true, false // no app to look at: opening it is what can be done
+				}
+				l.sleep(ctx, stepSettle)
+				if shown() {
+					return Outcome{}, true, false
+				}
+				return ask(ReasonUnclear, "Before I start, %s needs to be open%s. I opened it from %s, but I can't see it there. "+
+					"Check it's open and tap Continue.", file, in, firstNonEmpty(res.Folder, "your files"))
+			case len(res.Candidates) > 0:
+				return ask(ReasonUnclear, "Before I start, %s needs to be open%s, and more than one file has that name: %s. "+
+					"Open the right one and tap Continue.", file, in, strings.Join(res.Candidates, "; "))
+			case res.NeedsConfirm:
+				return ask(ReasonUnclear, "Before I start, %s needs to be open, and it is a program or script: I only run one when you say so. "+
+					"Open it yourself and tap Continue.", file)
+			}
 		}
 		return ask(ReasonUnclear, "Before I start, %s needs to be open%s. Open it and tap Continue.", file, in)
 
