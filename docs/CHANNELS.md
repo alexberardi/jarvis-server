@@ -172,16 +172,33 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
     `TestsOnly` is gone. A package with only an agent now installs on a computer. Tested with a
     real sidecar and a fake command-center on both backend sets (the agent's inbox post arrives
     as the node). Not yet run from an installed desktop agent against a real jarvisd.
-- [ ] **D1 — `IJarvisDaemon` in the SDK** (jarvis-command-sdk): the class, its Forge hints, the
+- [x] **D1 — `IJarvisDaemon` in the SDK** (jarvis-command-sdk): the class, its Forge hints, the
   manifest's `daemons/<name>/daemon.py` convention, an SDK release.
   - Verify: the SDK's own tests.
-- [ ] **D2 — the Go agent runs daemons.** `packages/manifest.go` knows the `daemon` component; a
+  - Built: SDK 0.17.0 (jarvis-command-sdk#21). The component types are also listed in the
+    Pantry and its web app, which nothing keeps in step: `daemon` was added there
+    (jarvis-pantry#40 and #41, jarvis-pantry-web#37), and the SDK's and the Pantry's `CLAUDE.md`
+    name every place. **The Pantry and its web app still have to be deployed** (`fly deploy`,
+    and the cached test base image rebuilt) before a daemon package can be published.
+- [x] **D2 — the Go agent runs daemons.** `packages/manifest.go` knows the `daemon` component; a
   supervisor (`internal/agent/pkgdaemons`) starts one sidecar process per daemon with the node's
   backends, restarts it with backoff, stops it on uninstall and agent stop, restarts it on a
   secrets push, and reports its package failing after repeated crashes.
   - Acceptance: the `daemon` success criteria above, on both profiles.
   - Verify: a fake child and an injected clock (no wall-clock waits); test packages for a daemon
     that stays up, one that crashes and one that returns; a live run on the dev box and the lab Pi.
+  - Built: `sidecar.StartDaemon` runs one daemon in a Python process of its own; its backend
+    requests overlap (a chat turn takes minutes while its connection still needs serving), so a
+    daemon calls the SDK's blocking helpers from a thread. Closing its input cancels `run()`; it
+    is killed after 5 s. `pkgdaemons.Supervisor` restarts an ended daemon after 5 s, doubling to
+    5 min, reports its package failing after three ends in a row, restarts it on new code, and
+    stops it when its package goes. The commands sidecar describes a daemon's settings, so the
+    app lists them with the agents' (marked `daemon`; the app still words it as an agent with an
+    interval, to fix with the mobile card).
+  - Not built: daemons in a Forge test install. Shortcut: any secrets push restarts every
+    daemon, not only the one whose secret changed.
+  - Not verified: on a Pi, on Windows or macOS, or from an installed agent with a real package;
+    the memory a daemon's process costs on a Pi Zero.
 - [ ] **D3 — one host node per daemon.** jarvisd refuses to install a package with a daemon on a
   second node of the household, with a message the app shows.
   - Verify: route tests. This is a new refusal on an existing route, not a new route.

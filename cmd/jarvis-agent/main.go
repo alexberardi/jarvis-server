@@ -57,6 +57,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/packages"
 	"github.com/alexberardi/jarvis-server/internal/agent/pinode"
 	"github.com/alexberardi/jarvis-server/internal/agent/pkgagents"
+	"github.com/alexberardi/jarvis-server/internal/agent/pkgdaemons"
 	"github.com/alexberardi/jarvis-server/internal/agent/playback"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/sdkhost"
@@ -943,6 +944,16 @@ func runAgent(ctx context.Context, args []string) error {
 			r.BeatNow()
 		}
 	}
+	if tf.daemons != nil {
+		// A daemon read its secrets (a bot's token) when it connected: start it again on the new ones.
+		families := secrets
+		secrets = func() {
+			if families != nil {
+				families()
+			}
+			tf.daemons.Restart()
+		}
+	}
 	wireNodeSettings(r, st, tools, nodeConfig, devs, secrets, log)
 	wirePackages(r, tf.pkgs, tf.live, log)
 	if tf.agents != nil {
@@ -1183,8 +1194,9 @@ type toolFlags struct {
 	// the sidecar on them and leaves pkgs to answer the app's install requests.
 	pkgRoot string
 	pkgs    *packages.Manager
-	// agents runs the packages' background agents (a Pi's), or only test installs' (a computer).
-	agents *pkgagents.Scheduler
+	// agents runs the packages' background agents, and daemons keeps their daemons running.
+	agents  *pkgagents.Scheduler
+	daemons *pkgdaemons.Supervisor
 	// pi: the Pi profile's toolset, with no desktop, screen, dictation or browser tools; its
 	// sidecar also loads the node's built-in commands, whose SDK backends host answers.
 	pi   bool
@@ -1329,8 +1341,27 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 		// computer alike: their alerts in the node's queue (said, and read by "what's up"); one
 		// that keeps failing marks its package failed in the app. A Forge test install's run too.
 		f.agents = &pkgagents.Scheduler{Sidecar: live, Alerts: f.alerts, Log: log}
-		f.pkgs.AgentHealth = f.agents.Failing
 		go f.agents.Run(ctx)
+		// The packages' daemons (a chat channel's connection), each in a process of its own
+		// with the node's storage and backends, until ctx ends.
+		opts := sidecar.Options{Storage: storage}
+		if f.host != nil { // a nil *sdkhost.Host must stay a nil interface: no backends
+			opts.Host = f.host
+		}
+		f.daemons = &pkgdaemons.Supervisor{Log: log, Daemons: f.pkgs.Daemons,
+			Start: func(d packages.DaemonDef) (pkgdaemons.Proc, error) {
+				p, err := sidecar.StartDaemon(f.pkgs.Python.Interpreter(), d.Root, d.Package, d.Path, log, opts)
+				if err != nil {
+					return nil, err
+				}
+				return p, nil
+			}}
+		go f.daemons.Run(ctx)
+		f.pkgs.AgentHealth = func() map[string]string {
+			failing := f.agents.Failing()
+			maps.Copy(failing, f.daemons.Failing())
+			return failing
+		}
 		if f.pi && f.host != nil {
 			// The first start installs the built-ins (a download): the node comes up meanwhile,
 			// and their tools join the next turn's list.

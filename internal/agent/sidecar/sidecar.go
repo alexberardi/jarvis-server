@@ -142,27 +142,11 @@ func Start(ctx context.Context, python, commandsDir string, log *slog.Logger, st
 
 // StartWith is Start with the Pi's backends: o.Host set registers them in the child.
 func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger, o Options) (*Sidecar, error) {
-	dir, err := os.MkdirTemp("", "jarvis-sidecar-")
+	// Not CommandContext: the child lives as long as the Sidecar, and Close ends it.
+	cmd, dir, err := child(python, commandsDir, o)
 	if err != nil {
 		return nil, err
 	}
-	script := filepath.Join(dir, "jarvis_sidecar.py")
-	if err := os.WriteFile(script, hostScript, 0o600); err != nil {
-		os.RemoveAll(dir)
-		return nil, err
-	}
-	// Not CommandContext: the child lives as long as the Sidecar, and Close ends it.
-	args := []string{"-u", script, commandsDir}
-	if o.Host != nil {
-		flag := "--backends"
-		if s, ok := o.Host.(Subset); ok && len(s.Backends()) > 0 {
-			flag += "=" + strings.Join(s.Backends(), ",")
-		}
-		args = append(args, flag)
-	}
-	cmd := exec.Command(python, args...)
-	// UTF-8 both ways whatever the platform's locale (Windows' Python would speak cp1252).
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		os.RemoveAll(dir)
@@ -218,6 +202,11 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			Description  string                    `json:"description"`
 			Secrets      []nodesettings.SecretSpec `json:"secrets"`
 		} `json:"agents"`
+		Daemons []struct {
+			Name        string                    `json:"name"`
+			Description string                    `json:"description"`
+			Secrets     []nodesettings.SecretSpec `json:"secrets"`
+		} `json:"daemons"`
 		deviceComponents
 	}
 	if err := s.roundTrip("describe", nil, &desc); err != nil {
@@ -255,8 +244,42 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 			"schedule": map[string]any{"interval_seconds": a.Interval, "run_on_startup": a.RunOnStartup},
 		}})
 	}
+	for _, d := range desc.Daemons {
+		// A daemon's settings (a bot's token) are entered where an agent's are: the settings
+		// snapshot's agents, marked as a daemon (always running, no interval).
+		s.agentComps = append(s.agentComps, nodesettings.DeviceComponent{Secrets: d.Secrets, Entry: map[string]any{
+			"agent_name": d.Name, "description": d.Description, "enabled": true, "daemon": true,
+			"schedule": map[string]any{"interval_seconds": 0, "run_on_startup": true},
+		}})
+	}
 	s.setDevices(desc.deviceComponents)
 	return s, nil
+}
+
+// child is the command that runs the host script over target (not started), with the node's
+// backends registered when o.Host is set, and the temporary directory the script is in.
+func child(python, target string, o Options, more ...string) (*exec.Cmd, string, error) {
+	dir, err := os.MkdirTemp("", "jarvis-sidecar-")
+	if err != nil {
+		return nil, "", err
+	}
+	script := filepath.Join(dir, "jarvis_sidecar.py")
+	if err := os.WriteFile(script, hostScript, 0o600); err != nil {
+		os.RemoveAll(dir)
+		return nil, "", err
+	}
+	args := []string{"-u", script, target}
+	if o.Host != nil {
+		flag := "--backends"
+		if s, ok := o.Host.(Subset); ok && len(s.Backends()) > 0 {
+			flag += "=" + strings.Join(s.Backends(), ",")
+		}
+		args = append(args, flag)
+	}
+	cmd := exec.Command(python, append(args, more...)...)
+	// UTF-8 both ways whatever the platform's locale (Windows' Python would speak cp1252).
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
+	return cmd, dir, nil
 }
 
 // Failed are the installed packages whose commands didn't load, with why.
@@ -569,6 +592,16 @@ type storageParams struct {
 
 // answer serves one reverse request from the child.
 func (s *Sidecar) answer(q reply) error {
+	b, err := s.answerTo(q)
+	if err != nil {
+		return err
+	}
+	_, err = s.stdin.Write(b)
+	return err
+}
+
+// answerTo is the line that answers the child's request q.
+func (s *Sidecar) answerTo(q reply) ([]byte, error) {
 	var result any
 	var err error
 	switch {
@@ -586,10 +619,9 @@ func (s *Sidecar) answer(q reply) error {
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = s.stdin.Write(append(b, '\n'))
-	return err
+	return append(b, '\n'), nil
 }
 
 // expiry parses the child's expires_at (Python isoformat; a naive time is local, as the node's).
