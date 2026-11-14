@@ -14,7 +14,9 @@ const listener = () => {
 
 // load runs background.js with a fake api: tabs are the open tabs, granted whether it has
 // access to websites, and blocked the urls whose injection the browser refuses.
-function load({ tabs = [], granted = true, blocked = [], firefox = true, timers = false } = {}) {
+// signedIn are the tab ids whose page shows a way to sign out, and held what each tab's recorder
+// still holds when the recording stops (recStop's events).
+function load({ tabs = [], granted = true, blocked = [], firefox = true, timers = false, signedIn = [], held = {} } = {}) {
   const sent = [];
   const injected = []; // tab ids recInstall ran in
   const port = { onMessage: listener(), onDisconnect: listener(), postMessage: (m) => sent.push(m) };
@@ -38,8 +40,9 @@ function load({ tabs = [], granted = true, blocked = [], firefox = true, timers 
         if (func.name === "recInstall") {
           if (blocked.includes(t?.url)) throw new Error("Missing host permission for the tab");
           injected.push(target.tabId);
-          return [{ frameId: 0, result: { token: "tok" + target.tabId } }];
+          return [{ frameId: 0, result: { token: "tok" + target.tabId, signed_in: signedIn.includes(target.tabId) } }];
         }
+        if (func.name === "recStop") return [{ frameId: 0, result: { events: held[target.tabId] ?? [] } }];
         return [{ frameId: 0, result: { events: [], alive: false } }]; // recPoll: the document is gone
       },
     },
@@ -58,7 +61,9 @@ function load({ tabs = [], granted = true, blocked = [], firefox = true, timers 
     }
     throw new Error(`no result for ${cmd}`);
   };
-  return { call, sent, injected, ctx, api, events: () => sent.filter((m) => m.event === "record") };
+  const records = () => sent.filter((m) => m.event === "record");
+  // events: what the user did (and cannot_watch); the start entry is the recorder's own.
+  return { call, sent, injected, ctx, api, records, events: () => records().filter((m) => m.kind !== "start") };
 }
 
 const TABS = [
@@ -308,3 +313,43 @@ test("a target over 2048 bytes is dropped in the extension, the element kept", (
   }
 });
 
+
+test("a recording starts with the pages that were open, and which of them were signed in", async () => {
+  const tabs = [
+    { id: 1, url: "http://localhost:7710/chat", title: "Jarvis" },
+    { id: 2, url: "https://bank.example.com/", title: "My Bank", active: true },
+    { id: 3, url: "about:addons", title: "Add-ons" },
+  ];
+  const b = load({ tabs, signedIn: [2] });
+  await b.call("record_start", { recording_id: "rec_1" });
+  const [start, ...rest] = b.records();
+  assert.deepEqual(rest, []);
+  assert.equal(start.kind, "start");
+  assert.equal(start.seq, undefined); // not something the user did
+  assert.deepEqual(JSON.parse(JSON.stringify(start.tabs)), [
+    { url: "http://localhost:7710/chat", title: "Jarvis" },
+    { url: "https://bank.example.com/", title: "My Bank", active: true, signed_in: true },
+  ]);
+  // Starting the same recording again says nothing new.
+  await b.call("record_start", { recording_id: "rec_1" });
+  assert.equal(b.records().filter((m) => m.kind === "start").length, 1);
+});
+
+test("a result names the action it follows and takes no number of its own", async () => {
+  const held = { 2: [
+    { kind: "result", url: "https://bank.example.com/", title: "stray", appeared: [] }, // no action before it: dropped
+    { kind: "click", url: "https://bank.example.com/", element: { role: "button", name: "Statements" } },
+    { kind: "input", url: "https://bank.example.com/", element: { role: "textbox", name: "Month" }, value: "2026-09" },
+    { kind: "result", url: "https://bank.example.com/", title: "Statements", appeared: [{ role: "link", name: "September" }], disappeared: [] },
+    { kind: "key", key: "Enter", url: "https://bank.example.com/" },
+  ] };
+  const b = load({ tabs: TABS, held });
+  await b.call("record_start", { recording_id: "rec_1" });
+  const stop = await b.call("record_stop", { recording_id: "rec_1" });
+  assert.equal(stop.result.events, 3); // the click, the typing, the key
+  const evs = b.events();
+  assert.deepEqual(evs.map((e) => [e.kind, e.seq, e.of]), [["click", 1, undefined], ["input", 2, undefined], ["result", undefined, 1], ["key", 3, undefined]]);
+  assert.equal(evs[2].title, "Statements");
+  assert.deepEqual(JSON.parse(JSON.stringify(evs[2].appeared)), [{ role: "link", name: "September" }]);
+  assert.equal(evs[2]["value"], undefined);
+});

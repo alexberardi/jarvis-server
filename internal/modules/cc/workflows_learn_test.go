@@ -723,3 +723,59 @@ func TestRelearnWorkflow(t *testing.T) {
 	}
 	le.do("POST", url+"/relearn", nil, owner).detail(410, "The recording this workflow was learnt from is no longer kept, so it can't be learnt again")
 }
+
+// capturedBrowserTrace is a browser recording with what the extension captures: the bank was
+// open and signed in, a news site was open too; a click opened a panel in the page, and a form
+// was submitted by its button.
+const capturedBrowserTrace = `[
+	{"kind":"start","ts":900,"seq":0,"tabs":[
+		{"url":"https://bank.example/accounts","title":"Accounts","active":true,"signed_in":true},
+		{"url":"https://news.example/","title":"News","signed_in":true},
+		{"url":"https://shop.example/","title":"Shop"}]},
+	{"kind":"click","seq":1,"ts":1000,"tab":7,"url":"https://bank.example/accounts","element":{"role":"button","name":"Export"}},
+	{"kind":"result","seq":0,"of":1,"ts":2500,"tab":7,"url":"https://bank.example/accounts","title":"Accounts",
+		"appeared":[{"role":"combobox","name":"Format"},{"role":"button","name":"Download"}]},
+	{"kind":"click","seq":2,"ts":3000,"tab":7,"url":"https://bank.example/accounts","element":{"role":"button","name":"Download"}},
+	{"kind":"submit","seq":3,"ts":3010,"tab":7,"url":"https://bank.example/accounts","element":{"role":"form","name":"export"}},
+	{"kind":"result","seq":0,"of":3,"ts":4600,"tab":7,"url":"https://bank.example/accounts","title":"Export ready","appeared":[]},
+	{"kind":"click","seq":4,"ts":5000,"tab":8,"url":"https://shop.example/","element":{"role":"link","name":"Cart"}},
+	{"kind":"result","seq":0,"of":99,"ts":5100,"title":"stray"}]`
+
+// A browser recording's results reach the model on their lines (a submit's on the click that
+// caused it), and a site that was signed in when the recording began, and that the task used, is
+// a prerequisite; one it never touched, or with no sign of an account, is not.
+func TestLearnFromCapturedBrowserTrace(t *testing.T) {
+	raw := json.RawMessage(capturedBrowserTrace)
+	evs, err := parseTrace(raw)
+	if err != nil || len(evs) != 3 {
+		t.Fatalf("events %d, %v", len(evs), err)
+	}
+	prompt := learnPrompt(evs, nil, "")
+	for _, want := range []string{
+		`1. click button "Export" (then: new on screen: combobox "Format", button "Download")` + "\n",
+		`2. click button "Download" (then: the page is "Export ready")` + "\n",
+		`3. click link "Cart"` + "\n",
+		learnResultNote,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q\n%s", want, prompt)
+		}
+	}
+	got := browserPrerequisites(traceStart(raw), evs)
+	want := []computer.Prerequisite{{Kind: computer.PrereqSignedIn, Site: "bank.example"}}
+	if g, w := mustJSON(t, got), mustJSON(t, want); g != w {
+		t.Fatalf("prerequisites\n got %s\nwant %s", g, w)
+	}
+	sk := computer.Skill{Prerequisites: got}
+	if err := sk.Validate(nil); err != nil {
+		t.Fatal(err)
+	}
+	// A recording from before the capture: the prompt it always had, and no prerequisites.
+	old, err := parseTrace(bankTrace(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := learnPrompt(old, nil, ""); strings.Contains(p, "then:") || browserPrerequisites(traceStart(bankTrace(t)), old) != nil {
+		t.Errorf("a recording without the capture learns differently:\n%s", p)
+	}
+}

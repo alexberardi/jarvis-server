@@ -308,16 +308,27 @@ is theirs.
     name becomes `{param}`), else "this app is open". Two limits: a file name with spaces gives
     only its last word, and a param matches only as the recorded text. "Signed in" is a browser
     prerequisite and comes with C3. The live recording of checkpoint 2 is still to do.
-- [ ] **C3 — browser capture.** The same in the extension, a version bump, the re-signed `.xpi`.
+- [x] **C3 — browser capture.** The same in the extension, a version bump, the re-signed `.xpi`.
   - Acceptance: a browser recording holds `start` and `result` events; masked values still never
     travel.
   - Verify: `internal/agent/browser` tests and `jstest`; the `release_xpi` gate.
-  - The stores have approved the extension (source is at 0.3.10); this needs a **new version**,
+  - The stores have approved the extension (source was at 0.3.10; this work makes it 0.3.11); this needs a **new version**,
     because the capture is in `background.js`. It asks for no new permission (`tabs`, `scripting`
     and all sites are already granted), so users see no prompt. The next release tag submits it
     to both stores through `browser-ext-publish.yml`, after the user approves the
     `browser-stores` environment; Chrome publishes when its review of the update passes.
   - **Held for the user:** the signed `.xpi` and that approval.
+  - Built (2026-11-13) as extension 0.3.11. A recording opens with the pages that were open; a
+    click, submit or key gets a result once the user has done nothing more for 1.5 s: the page's
+    title and the controls (role and name, never a value) that appeared and disappeared, 40 each
+    way, from the first 1000 controls. Neither entry takes a seq. A page that navigates away
+    takes its pending result with it: the address it led to is already in the trace.
+  - **Signed in** is not read as first planned ("no password field and no masked input", which
+    would call every public site signed in): a page counts as signed in when it shows a way to
+    sign out, and the prerequisite is listed only for a site the task then used. To confirm with
+    the user.
+  - Verified in a real headless browser by the suite's two teach cases on qwen3.5-9b: the
+    result reached the learn prompt ("then: the page is …") and both replays passed.
 
 ### Checkpoints
 
