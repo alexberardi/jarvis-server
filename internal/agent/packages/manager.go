@@ -89,7 +89,7 @@ type Manager struct {
 	// System, when set (the Pi profile), runs a package's apt sources, apt packages and
 	// post_install ops; without it a package that needs them is refused.
 	System *System
-	// AgentHealth, when set (the Pi profile: pkgagents.Scheduler.Failing), are the packages
+	// AgentHealth, when set (pkgagents.Scheduler.Failing), are the packages
 	// whose agents keep failing, with why: Report marks them failed.
 	AgentHealth func() map[string]string
 	// Secrets, when set, is where a removed test install's secrets are forgotten.
@@ -210,14 +210,9 @@ func (m *Manager) Boot(ctx context.Context) error {
 	return nil
 }
 
-// runs are the component types beyond commands this node's sidecar loads: device families and
-// managers on every node, and on a Pi (the one with built-ins) agents too.
-func (m *Manager) runs() []string {
-	if m.Builtins != nil {
-		return PiTypes
-	}
-	return DeviceTypes
-}
+// runs are the component types beyond commands a node's sidecar loads, a Pi's and a
+// computer's alike: device families, managers and agents.
+func (m *Manager) runs() []string { return NodeTypes }
 
 func (m *Manager) builtinsStamp() string { return filepath.Join(m.Root, "builtins.txt") }
 

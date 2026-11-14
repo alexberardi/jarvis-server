@@ -259,9 +259,8 @@ func (m *Manifest) CheckPi(runs ...string) error {
 	return nil
 }
 
-// Commands are the components every sidecar loads. Device components run on every node
-// (DeviceTypes), agents on a Pi (PiTypes); none of the other Pi component types runs on the Go
-// node yet.
+// Commands are the components every sidecar loads. Device components and agents run on every
+// node too (NodeTypes); none of the other Pi component types runs on the Go node yet.
 func (m *Manifest) Commands() []Component {
 	var out []Component
 	for _, c := range m.Components {
@@ -272,15 +271,12 @@ func (m *Manifest) Commands() []Component {
 	return out
 }
 
-// DeviceTypes are the device component types every node's sidecar loads: families and managers.
-var DeviceTypes = []string{"device_protocol", "device_manager"}
-
 // Agent is the component type of a package's background agent (an IJarvisAgent: comfyui's
-// comfyui_jobs), which a Pi's sidecar loads and internal/agent/pkgagents runs on its schedule.
+// comfyui_jobs), which a node's sidecar loads and internal/agent/pkgagents runs on its schedule.
 const Agent = "agent"
 
-// PiTypes are the component types beyond commands a Pi's sidecar loads.
-var PiTypes = append(slices.Clone(DeviceTypes), Agent)
+// NodeTypes are the component types beyond commands a node's sidecar loads.
+var NodeTypes = []string{"device_protocol", "device_manager", Agent}
 
 // conventional is where a device component or an agent declared without a path is (the Pi's convention).
 var conventional = map[string]string{"device_protocol": "device_families/%s/protocol.py", "device_manager": "device_managers/%s/manager.py",

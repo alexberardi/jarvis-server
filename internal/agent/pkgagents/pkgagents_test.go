@@ -143,16 +143,15 @@ func TestSchedulerRunStopsWithItsContext(t *testing.T) {
 	}
 }
 
-// A desktop runs only test installs' agents (TestsOnly). A test agent runs as soon as it loads,
-// whatever its schedule, then on its interval; a reinstall (a new sidecar) runs it at once again.
+// A test install's agent runs as soon as it loads, whatever its schedule, then on its interval; a
+// reinstall (a new sidecar) runs it at once again. An installed package's keeps its own schedule.
 func TestSchedulerRunsTestAgentsAtOnce(t *testing.T) {
 	now := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
 	sc := &fakeSidecar{agents: []sidecar.AgentDef{
-		{Name: "comfyui_jobs", Package: "comfyui", Interval: 20 * time.Second, RunOnStartup: true, Sidecar: 1},
+		{Name: "comfyui_jobs", Package: "comfyui", Interval: 3 * time.Hour, Sidecar: 1},
 		{Name: "zigbee_watch", Package: "test:zigbee", Interval: time.Hour, Sidecar: 1},
 	}}
 	s, _ := newScheduler(sc, &now)
-	s.TestsOnly = true
 	ctx := context.Background()
 	at := func(d time.Duration, want ...string) {
 		t.Helper()
@@ -169,10 +168,6 @@ func TestSchedulerRunsTestAgentsAtOnce(t *testing.T) {
 	at(CheckEvery, "zigbee_watch")
 	at(CheckEvery)
 	at(time.Hour, "zigbee_watch")
-
-	// On a Pi (not TestsOnly) the installed package's agent runs too, the test agent at once.
-	s = &Scheduler{Sidecar: sc, Now: func() time.Time { return now }}
-	at(0, "comfyui_jobs", "zigbee_watch")
 }
 
 // "Run agents now" runs every test agent at once, due or not, and no installed package's; each

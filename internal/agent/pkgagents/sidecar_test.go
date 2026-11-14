@@ -37,8 +37,14 @@ func python(t *testing.T) string {
 // The whole path of the user's QA (2026-10-23), with a fake command-center: the scheduler runs
 // a package agent in a real sidecar on start, the agent's inbox post with a picture goes out
 // as this node (the upload, then the item with its id, for the user's web and mobile inbox),
-// and its alert lands in the Pi's queue.
+// and its alert lands in the node's queue. On a Pi (every backend family) and on a desktop
+// (sdkhost.DesktopBackends) alike.
 func TestAPackageAgentPostsToTheInboxThroughTheSidecar(t *testing.T) {
+	t.Run("pi", func(t *testing.T) { packageAgentPosts(t, nil) })
+	t.Run("desktop", func(t *testing.T) { packageAgentPosts(t, sdkhost.DesktopBackends) })
+}
+
+func packageAgentPosts(t *testing.T, only []string) {
 	py := python(t)
 	var mu sync.Mutex
 	var uploads []string
@@ -61,7 +67,7 @@ func TestAPackageAgentPostsToTheInboxThroughTheSidecar(t *testing.T) {
 	}))
 	defer cc.Close()
 
-	host := &sdkhost.Host{Alerts: &sdkhost.Alerts{}}
+	host := &sdkhost.Host{Alerts: &sdkhost.Alerts{}, Only: only}
 	host.SetCC(node.NewCC(cc.URL, node.Creds{NodeID: "n1", NodeKey: "k"}))
 	root, err := filepath.Abs(filepath.Join("..", "sidecar", "testdata", "packages", "watcher"))
 	if err != nil {
@@ -105,7 +111,7 @@ func TestAPackageAgentPostsToTheInboxThroughTheSidecar(t *testing.T) {
 	}
 }
 
-// A Forge test install's agents on a desktop (TestsOnly): they run at once, though crashy's
+// A Forge test install's agents: they run at once, though crashy's
 // schedule says an hour and neither is an installed package's, and each run is a test event
 // for Send to Forge: ticker's with its alert, crashy's with the end of its traceback.
 func TestATestInstallsAgentsRunAtOnceAsTestEvents(t *testing.T) {
@@ -136,7 +142,7 @@ func TestATestInstallsAgentsRunAtOnceAsTestEvents(t *testing.T) {
 	live.Swap(sc)
 	defer live.Close()
 
-	(&Scheduler{Sidecar: live, Log: log, TestsOnly: true}).Tick(context.Background())
+	(&Scheduler{Sidecar: live, Log: log}).Tick(context.Background())
 
 	// The app's Tasks tab lists them, with their settings to fill in (the settings snapshot).
 	if err := st.SetSecret("CRASHY_URLS", "https://example.com", "integration", "", nil); err != nil {

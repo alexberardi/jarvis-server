@@ -24,8 +24,7 @@ func TestInstallServesThePackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"package_name": "get_weather_meteo", "version": "1.0.0", "components": 2,
-		"skipped_components": []string{"agent:weather_context"}}
+	want := map[string]any{"package_name": "get_weather_meteo", "version": "1.0.0", "components": 2}
 	if !reflect.DeepEqual(details, want) {
 		t.Fatalf("details = %v", details)
 	}
@@ -167,8 +166,8 @@ func TestInstallRefusals(t *testing.T) {
 			"made for Pi nodes"},
 		"apt": {map[string]string{"jarvis_package.yaml": "name: needs_apt\napt_packages: [mpv]\n", "command.py": ""},
 			"only a Pi node runs"},
-		"no commands": {map[string]string{"jarvis_package.yaml": "name: jobs\ncomponents:\n  - {type: agent, name: jobs, path: agents/jobs/agent.py}\n",
-			"agents/jobs/agent.py": ""}, "no commands a computer can run"},
+		"no commands": {map[string]string{"jarvis_package.yaml": "name: tone\ncomponents:\n  - {type: prompt_provider, name: tone, path: prompt_providers/tone/provider.py}\n",
+			"prompt_providers/tone/provider.py": ""}, "no commands a computer can run"},
 		"no manifest": {map[string]string{"README.md": ""}, "not a Jarvis package"},
 		"missing file": {map[string]string{"jarvis_package.yaml": "name: gone\ncomponents:\n  - {type: command, name: gone, path: commands/gone/command.py}\n"},
 			"commands/gone/command.py is missing"},
@@ -346,8 +345,8 @@ func TestDeviceFamiliesOnEveryNode(t *testing.T) {
 }
 
 // The user's QA (2026-10-23): comfyui's comfyui_jobs agent was logged skipped on the Go node,
-// so its finished videos never reached the inbox. On a Pi a package's agents are listed for
-// the sidecar and not skipped; a desktop still skips them. An agent the scheduler reports
+// so its finished videos never reached the inbox. On a Pi and on a desktop a package's agents
+// are listed for the sidecar and not skipped. An agent the scheduler reports
 // failing (AgentHealth) marks its package failed, as a command that didn't load does.
 func TestPiRunsPackageAgents(t *testing.T) {
 	r := newRepos(t)
@@ -377,7 +376,7 @@ func TestPiRunsPackageAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, _ = readList(filepath.Join(desk.Root, "commands.json"))
-	if !reflect.DeepEqual(details["skipped_components"], []string{"agent:weather_context"}) || list[0].Agents != nil {
+	if details["skipped_components"] != nil || !reflect.DeepEqual(list[0].Agents, []string{"agents/weather_context/agent.py"}) {
 		t.Fatalf("desktop: details %v, list %+v", details, list)
 	}
 }
