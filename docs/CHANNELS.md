@@ -247,7 +247,7 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
 
 ### Tasks (in order; each is one PR)
 
-- [ ] **K1 — `ChatText`.** A chat turn as a user without the SSE stream, ported from #649
+- [x] **K1 — `ChatText`.** A chat turn as a user without the SSE stream, ported from #649
   (`chat_text.go`, the `sseWriter` collector).
   - Verify: its tests from #649; `scripts/sandbox` with the scripted model.
 - [ ] **K2 — links and the app's routes.** The three tables, the link store and codes from #649
