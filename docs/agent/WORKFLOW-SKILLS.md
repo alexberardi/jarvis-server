@@ -213,11 +213,267 @@ None: Q2–Q6 are decided. `capture`'s own questions (how long to wait for an ac
 limits, what "signed in" is read from) are settled in its plan, with the user asked where a choice
 is theirs.
 
+## Spec: `verified-replay` (approved by the user, 2026-11-13)
+
+### Objective
+
+A run uses what the workflow learnt. Today a replay does each recorded step (directly when its
+element is found, else one model round "do only this step") and checks once at the end. After
+this module a run makes sure of the prerequisites, checks every step against its expectation,
+works toward the goal when something is off, and confirms the end state; and a new workflow is
+watched through its first run, with the owner's corrections turned into a revision.
+
+For the owner: a workflow that either does the task and says what it checked, or stops at the
+point it went wrong and says what it saw. Never "done" on a wrong screen.
+
+### Behaviour
+
+A run has four phases. Risk rules, confirmations, masked values and household blocks apply in
+every phase as today (principle 8).
+
+1. **May it run?** An unproven workflow (no verified run of its current version) runs only when
+   its owner starts it and is at the computer (computer control's attended check: screen
+   unlocked, recent input). A schedule or a request from another member is refused with the
+   reason. It pauses before its first risky step even where that step isn't "Ask me first".
+2. **Prerequisites** (Q1), each checked, an unmet one achieved, in the order listed:
+   - *App open:* in the window list, else launched from the catalogue.
+   - *File open:* a window whose title holds the name (after `{param}`), else found by name in
+     the user's document folders and opened when exactly one matches; none or several asks. The
+     node finds the file itself: the model names it and never supplies a path.
+   - *Page open:* a tab on that address, else opened.
+   - *Signed in:* the site's page shows a way to sign out; if not, the run asks the user to
+     sign in and continues when they say so. It never types a password.
+   - *Other:* the model judges it on screen; unmet, the model works toward it, then asks.
+   One it can't achieve stops the run before step 1.
+3. **Steps**, each look, act, verify (principles 3 and 4):
+   - *Act:* directly when the step's recorded element is found exactly once, by role and name,
+     in the right app; otherwise the model does the step, given its intent and goal, the
+     workflow's goal, the notes for the app, and the recorded element as a hint.
+   - *Verify:* the step's expectation. An address, text, download or file check is observed;
+     a screen sentence is judged by the model on a fresh look. No expectation: the step counts
+     as done when its action succeeded, as today.
+   - *A failed check* (Q2): wait and look again; still failing, the model chooses to redo the
+     step, reach the result another way, or carry on because the result is there in another
+     form. A risky step is never redone without asking. After 3 attempts on one step the run
+     asks, showing the step, what was expected and what it sees.
+4. **End state:** the workflow's goal end state and success check are verified. Reached: done,
+   saying what was checked. Not reached after every step: the model works toward it within the
+   run's remaining budget, then asks.
+
+**Opening files** (in a run and by voice). A document opens without asking. A program, script
+or shortcut opens after a confirmation that names it and its folder: a risky action like paying
+or sending. A workflow step that runs one is learnt as "Ask me first", which its owner can turn
+off for that step. `desktop_open` takes a file's name the same way outside a run ("open my
+budget spreadsheet", "run my backup script").
+
+**Strict or Creative** (principle 7) bounds "another way" in phases 2 to 4. Strict: only the
+apps and sites the workflow's steps and prerequisites name. Creative: any means the node offers.
+The workflow page gets the radio, Strict by default. A Creative action in an app or site the
+workflow doesn't name is risk-classified like any other and reported in the run's summary.
+
+**Proven.** A run of an unproven workflow that finishes with the end state verified marks that
+version proven. Saving a change to the steps, prerequisites, goal end state, success check or
+guardrails makes it unproven; renaming, sharing, triggers and notes don't. Relearn's saved
+draft makes it unproven. Step healing (a moved element) doesn't.
+
+**The watched run and its revision** (Q3, Q3a). The workflow page shows a run of that workflow
+as it goes: each prerequisite and step with its state (waiting, doing, verified, failed), what
+was expected and, on a failure, what was seen. Beside it, a box: "What went wrong?" Submitting
+it, during a pause or after the run, sends the text and the run's record to the model, which
+answers proposed edits to that workflow; the page loads them as a draft with the changed fields
+marked, as Relearn's draft is. Save, then Run again. Text the model can't turn into an edit is
+proposed as a note.
+
+### Project structure
+
+```
+internal/modules/cc/computer/replay.go       the run: phases 1 to 4 (replaces today's step loop)
+internal/modules/cc/computer/prereq.go       checking and achieving a prerequisite (new)
+internal/modules/cc/computer/verify.go       a step's expectation uses the existing checks
+internal/modules/cc/workflows_run.go         may-it-run, proven, the run's record
+internal/modules/cc/workflows_revise.go      feedback + run record -> proposed edits (new)
+internal/modules/cc/slots.go                 the "running a workflow" model slot (Models page, per feature)
+internal/modules/cc/migrations/              proven version; the last run's record per workflow
+internal/agent/desktop/, internal/agent/apps/  the open policy: a file by name (documents freely, programs after asking)
+web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run panel, the feedback box
+```
+
+### Testing strategy
+
+- Unit, with the fake executor and a scripted model: each prerequisite kind met, achieved and
+  unachievable; a step verified, a slow screen passing on the second look, the three model
+  choices, the risky step that isn't redone, the attempt limit; the end state reached by
+  another route; Strict refusing an app the workflow doesn't name.
+- Routes: may-it-run refusals (schedule, another member, owner away), proven set and cleared,
+  the revise route (owner only, another household 404), with tier expectations.
+- Computer suite on the real model: the two teach cases still pass; new cases for a
+  prerequisite achieved (file not open), a step whose expectation fails once, and a run that
+  must stop and ask.
+- Web: Vitest and `scripts/e2e web` for the radio, the run panel and the feedback draft;
+  screenshots and the design audit.
+
+### Boundaries
+
+- **Always:** verify by observed state; ask before redoing a risky step; keep a workflow
+  unchanged until its owner saves a draft.
+- **Ask first:** any new `/api` route (revise, the run's record); more than one model call per
+  step on the happy path.
+- **Never:** open a path the model supplied; run a program, script or shortcut without the
+  confirmation (or its owner's standing choice on that workflow step); type a password or a
+  masked value; act on recorded coordinates; mark a workflow
+  proven from the model's claim; let Creative skip risk confirmation.
+
+### Success criteria
+
+1. The bank download with the statement page not open: the run opens it (prerequisite), does
+   the steps, and reports the download verified.
+2. A step whose expectation fails because the page is slow passes on the second look with no
+   extra action.
+3. A step whose button was renamed is done by the model, verified, and healed.
+4. A "send" step whose check fails is not sent again: the run asks.
+5. An unproven workflow refuses a scheduled run and says why; after one verified owner run it
+   accepts it. Editing a step makes it unproven again; renaming doesn't.
+6. After a failed watched run, "it picked the wrong account at step 4" produces a draft that
+   changes step 4 or adds a note; nothing is stored until Save.
+7. Strict: a run that could only finish in an app the workflow doesn't name asks instead.
+7a. "Open my budget spreadsheet" by voice opens the one matching document; "run my backup
+   script" asks first, then runs it; a path given by the model is refused.
+8. The two existing teach cases pass unchanged on qwen3.5-9b.
+
+### Costs and risks
+
+| | |
+|---|---|
+| Runs are slower | A step with a screen expectation costs one more model call. Address, text, download and file checks cost none. Principle 1 accepts this. |
+| A wrong expectation stops a good run | The model may carry on when the result is there in another form; the watched first run is where wrong expectations get corrected. |
+| Small models plan poorly | Running a workflow has its own entry in the Models page's per-feature section, so the owner picks the model for it (auto: what a computer task uses). The suite gates on qwen3.5-9b; what a smaller model does is reported, not promised. qwen3-4b already picks the wrong tool for taught workflows. |
+| The run's record holds screen text | It is kept per workflow for the owner only, replaced by the next run, and never holds a masked value. |
+
+### Open questions
+
+None blocking. Decided in review (2026-11-13): documents open freely and a program after a
+confirmation, by voice too
+([decision](../decisions/2026-11-13-programs-open-after-a-confirmation.md));
+the extra model call per screen-checked step is accepted; running a workflow gets its own
+per-feature model slot
+([decision](../decisions/2026-11-13-runs-open-documents-and-have-their-own-model-slot.md)).
+Chosen as defaults, to change if the user says so: 3 attempts per step; a
+2 second wait before the second look; the run is shown on the workflow page (the errand card
+keeps its summary); the document folders are Documents, Downloads and Desktop.
+
+## Plan: `verified-replay` (approved by the user, 2026-11-13)
+
+The user approved the plan and, for R6 to R9, said in advance that those PRs need no separate
+approval from them ("i don't think you need my approval on any of those"; R8 and R9 "as long
+as you have the proper authorization/authentication on them"). Each of those PRs still states
+its access rule at the top and carries its tier expectations.
+
+### Shape
+
+- **One loop, grown in place.** `Replay` keeps its outer shape (bind params, open the run,
+  resume after a confirmation or a question, budget of rounds and minutes). Each task adds one
+  phase to it, so the two teach cases pass after every task.
+- **A step's check is the existing verifier.** `Loop.Verify` already checks an address, text, a
+  download, a file or a screen sentence for the end of a run; a step's `expect` is the same
+  `SuccessCheck`, so step checks need no new checker.
+- **The model's choices are tools it already has.** On a failed check the model round gets the
+  step, its goal, what was expected and what is seen, and answers as a computer task round
+  does: actions, done, or a question. "Redo", "another way" and "carry on" are those three.
+- **State per workflow:** the version last proven, and the last run's record (per prerequisite
+  and step: state, expected, seen). One migration each, in the task that first needs it.
+- **Model:** runs read a new slot, `workflows.run_model` (auto: what a computer task picks).
+
+### Tasks (in order; each is one PR)
+
+- [ ] **R1 — a model slot for running.** `workflows.run_model` in `slots.go`, read by `Replay`;
+  its entry in the Models page's per-feature section.
+  - Acceptance: choosing a label there changes the model a run uses; auto is today's.
+  - Verify: unit test on the pick; Vitest for the entry; screenshots and the design audit.
+- [ ] **R2 — every step is checked.** After a step acts, its `expect` is verified. A failed
+  check waits 2 s and looks again. Still failing, the run asks, showing the step, what was
+  expected and what it sees (the model's choices come in R3).
+  - Acceptance: criterion 2; a failed check never reports the step done; a step with no
+    expectation behaves as today; criterion 8.
+  - Verify: unit tests with the fake executor (verified, slow screen, failing); the two teach
+    cases on qwen3.5-9b; a new suite case with a slow page.
+- [ ] **R3 — the model decides on a failed check; Strict or Creative.** The model round: redo,
+  another way, or carry on. A risky step is not redone without asking. Three attempts per step,
+  then ask. Strict bounds the round to the apps and sites the workflow names; the radio on the
+  workflow page.
+  - Acceptance: criteria 3, 4 and 7.
+  - Verify: unit tests for each choice, the risky step and the limit; Strict refusing another
+    app; a suite case with a renamed button and one with a "send" step; Vitest, screenshots.
+- [ ] **R4 — the end state.** The goal's end state is verified with the success check; not
+  reached, the model works toward it within the run's budget, then asks.
+  - Acceptance: a run whose steps all "worked" but whose result is missing is not done.
+  - Verify: unit tests; a suite case where the download never lands.
+- [ ] **R5 — prerequisites: app, page, signed in, other.** Each is checked and an unmet one
+  achieved before step 1; signed out asks the user and continues on their word.
+  - Acceptance: criterion 1; a signed-out site stops before step 1 without typing anything.
+  - Verify: unit tests per kind (met, achieved, unachievable); a suite case with the page closed.
+- [ ] **R6 — open a file by name.** The agent's open policy takes a file's name: the node finds
+  it in Documents, Downloads and Desktop, opens a document on a single match, and a program,
+  script or shortcut after a confirmation. `desktop_open` by voice, and the file prerequisite.
+  A step that runs a program is learnt as "Ask me first", which its owner can turn off.
+  - Acceptance: criterion 7a; a file prerequisite with one match opens, with two asks which.
+  - Verify: agent tests on fake folders (one, none, several, a script, a path refused); the
+    open-policy guard tests updated, not weakened; a voice pipeline scenario.
+  - Changes `internal/agent/CLAUDE.md` invariant 9 (approved in advance, 2026-11-13).
+- [ ] **R7 — proven, and who may start an unproven run.** The proven version (migration); an
+  unproven workflow refuses a schedule, another member, or its owner away from the computer,
+  and pauses before its first risky step; a verified run proves it; which edits unprove it;
+  the state on the workflow page.
+  - Acceptance: criterion 5.
+  - Verify: unit and route tests for each refusal and each edit kind; Vitest; screenshots.
+  - Adds a membership and presence check to starting a run (approved in advance, 2026-11-13).
+- [ ] **R8 — the run on the workflow page.** The last run's record (migration), a route to
+  read it, and the panel: each prerequisite and step with its state, what was expected and, on
+  a failure, what was seen; live while a run goes.
+  - Acceptance: a failed run shows where it failed and what it saw; another member can't read it.
+  - Verify: route tests with tier expectations; Vitest; `scripts/e2e web`; screenshots, audit.
+  - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
+- [ ] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
+  sends the text and the run's record to the learning model and answers proposed edits; the
+  draft with the changed fields marked, saved or discarded like Relearn's.
+  - Acceptance: criterion 6.
+  - Verify: route tests (owner only, another household 404, nothing stored); a golden of the
+    revise prompt; the real model on three kinds of feedback; Vitest; screenshots.
+  - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
+
+### Checkpoints
+
+1. After R4: the two teach cases and the new suite cases on qwen3.5-9b, with the time a run
+   takes before and after.
+2. After R7: the user teaches one real task (the monthly budget sheet) and runs it once, watched.
+3. After R9: the user corrects a run with the feedback box and runs it again until it is proven.
+
+### Risks
+
+| Risk | Mitigation |
+|---|---|
+| Step checks make good runs fail (a too-strict learnt sentence) | R2 lands before R3 on purpose: the suite shows how often it happens on the fixtures; the model's "carry on" in R3 and the watched run in R7 to R9 are the answer |
+| The loop change breaks resume after a confirmation | Each task keeps the teach cases and the existing resume tests green; resume gets a test per new phase |
+| Rounds budget runs out on long workflows | A screen check counts as a round; the budget is reported in checkpoint 1 and raised only with the user |
+| File search opens the wrong document | Single match only, by full name; otherwise ask |
+
 ## Later modules' questions (not yet ordered)
 
-- `verified-replay`: how far a run may go to achieve a prerequisite (open a file, yes; sign in, ask);
-  what a failed expectation does (retry, model continues, ask); whether a new
-  workflow's first run is a supervised "watch me do it back".
+- `verified-replay`, asked one at a time:
+  - **Q1 (decided 2026-11-13):** a run opens apps and files to meet a prerequisite (a file only
+    when exactly one matches, else it asks) and never signs in: signed out, it asks the user to.
+    Signing in for the user is punted.
+    [Decision](../decisions/2026-11-13-prerequisites-open-freely-never-sign-in.md).
+  - **Q2 (decided 2026-11-13):** a failed step check waits and looks again, then the model
+    decides (redo, another way, or carry on); a risky step is never redone unasked; after a
+    bounded number of attempts it asks.
+    [Decision](../decisions/2026-11-13-a-failed-step-check-goes-to-the-model.md).
+  - **Q3 (decided 2026-11-13):** a new workflow is unproven until one verified run: owner-started,
+    attended, pausing before its first risky step. The user added a revision loop: while watching,
+    the owner can write what went wrong, and the workflow is revised and run again.
+    [Decision](../decisions/2026-11-13-first-run-is-watched-with-feedback.md).
+  - **Q3a (decided 2026-11-13):** the owner's written feedback and the run's record become
+    proposed edits shown as a draft to review, as Relearn's is; then run again.
+    [Decision](../decisions/2026-11-13-watched-run-feedback-becomes-a-draft.md).
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.
 - `refine`: whether a learnt note needs the owner's approval before a run uses it.

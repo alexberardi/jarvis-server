@@ -42,7 +42,9 @@ and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-
   prerequisites from the windows open at the start.
 - [x] `capture` C3 the same in the browser extension (0.3.11), with "signed in to this site".
 - [ ] Extension 0.3.11 release: the re-signed Firefox package and the store submission (user).
-- [ ] `verified-replay`, then `narration`, `refine`.
+- [ ] `verified-replay`: spec approved 2026-11-13; plan R1–R9 in WORKFLOW-SKILLS.md approved the same day; R1 next.
+- [ ] `narration`, `refine`.
+- [ ] `narration`, `refine`.
 - [ ] **The teach cases fail on the dev box, on main too** (2026-11-12): its `background` and
   `live` labels serve `qwen3-4b`, whose errand planner picks `computer_task` over `run_workflow`,
   so no replay starts. The suite's table is for `qwen3.5-9b`.
