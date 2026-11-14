@@ -238,7 +238,9 @@ every phase as today (principle 8).
 2. **Prerequisites** (Q1), each checked, an unmet one achieved, in the order listed:
    - *App open:* in the window list, else launched from the catalogue.
    - *File open:* a window whose title holds the name (after `{param}`), else found by name in
-     the user's document folders and opened when exactly one matches; none or several asks.
+     the user's document folders and opened when exactly one matches; none or several asks. The
+     node opens documents only, never a program, script or shortcut, and finds the file itself:
+     the model names it and never supplies a path.
    - *Page open:* a tab on that address, else opened.
    - *Signed in:* the site's page shows a way to sign out; if not, the run asks the user to
      sign in and continues when they say so. It never types a password.
@@ -285,6 +287,7 @@ internal/modules/cc/computer/prereq.go       checking and achieving a prerequisi
 internal/modules/cc/computer/verify.go       a step's expectation uses the existing checks
 internal/modules/cc/workflows_run.go         may-it-run, proven, the run's record
 internal/modules/cc/workflows_revise.go      feedback + run record -> proposed edits (new)
+internal/modules/cc/slots.go                 the "running a workflow" model slot (Models page, per feature)
 internal/modules/cc/migrations/              proven version; the last run's record per workflow
 internal/agent/computer/                     find-and-open a file by name in the document folders (new tool)
 web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run panel, the feedback box
@@ -308,11 +311,10 @@ web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run pa
 
 - **Always:** verify by observed state; ask before redoing a risky step; keep a workflow
   unchanged until its owner saves a draft.
-- **Ask first:** the new agent tool that opens a file found by name (today the model can never
-  cause a path to be opened: this adds one narrow way, node-side, in the document folders,
-  only on a single match); any new `/api` route (revise, the run's record); more than one
-  model call per step on the happy path.
-- **Never:** type a password or a masked value; act on recorded coordinates; mark a workflow
+- **Ask first:** any new `/api` route (revise, the run's record); more than one model call per
+  step on the happy path.
+- **Never:** open a program, script or shortcut as a "file", or a path the model supplied; type
+  a password or a masked value; act on recorded coordinates; mark a workflow
   proven from the model's claim; let Creative skip risk confirmation.
 
 ### Success criteria
@@ -336,12 +338,16 @@ web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run pa
 |---|---|
 | Runs are slower | A step with a screen expectation costs one more model call. Address, text, download and file checks cost none. Principle 1 accepts this. |
 | A wrong expectation stops a good run | The model may carry on when the result is there in another form; the watched first run is where wrong expectations get corrected. |
-| Small models plan poorly | qwen3-4b already picks the wrong tool for taught workflows. The suite gates on qwen3.5-9b; what a smaller model does is reported, not promised. |
+| Small models plan poorly | Running a workflow has its own entry in the Models page's per-feature section, so the owner picks the model for it (auto: what a computer task uses). The suite gates on qwen3.5-9b; what a smaller model does is reported, not promised. qwen3-4b already picks the wrong tool for taught workflows. |
 | The run's record holds screen text | It is kept per workflow for the owner only, replaced by the next run, and never holds a masked value. |
 
 ### Open questions
 
-None blocking. Chosen as defaults, to change if the user says so: 3 attempts per step; a
+None blocking. Decided in review (2026-11-13): a run opens documents without special approval;
+the extra model call per screen-checked step is accepted; running a workflow gets its own
+per-feature model slot
+([decision](../decisions/2026-11-13-runs-open-documents-and-have-their-own-model-slot.md)).
+Chosen as defaults, to change if the user says so: 3 attempts per step; a
 2 second wait before the second look; the run is shown on the workflow page (the errand card
 keeps its summary); the document folders are Documents, Downloads and Desktop.
 
