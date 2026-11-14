@@ -24,7 +24,7 @@ and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-
 - [x] S3 the workflow page shows and edits the skill; S4 Relearn (a draft from the kept recording,
   for the person who recorded it; nothing stored until saved).
 - [x] `capture` C1 the trace's `start` and `result` entries; C2 the desktop recorder writes them
-  (macOS, X11, Wayland share it). Live recordings on the three still to do.
+  (macOS, X11, Wayland share it). Live recording done on sway; X11 and macOS still to do.
 - [ ] `capture` C4 learning from them, C3 the same in the browser extension (needs an extension
   release).
 - [ ] `verified-replay`, then `narration`, `refine`.

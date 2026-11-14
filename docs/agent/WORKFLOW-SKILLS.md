@@ -279,7 +279,8 @@ is theirs.
   - Verify: `record_desktop_test.go` with a fake platform; live recordings on this box (Wayland),
     an X11 session and the Mac test host.
   - Built (2026-11-13), live recordings still to do. A result is read when the screen has been
-    quiet 1.5 s after a click or key, or when the next input arrives, or at stop. It names the
+    quiet 1.5 s after a click or key, or when the next input arrives, or at stop. A live recording on
+    this box (sway, 2026-11-13) held the start and a result after every click and Enter. It names the
     front window and at most 40 elements each way (role and name, 80 characters, never a value),
     from the first 1000 elements of that window's tree; all results of one recording take at
     most 256 KiB, after which only the actions are kept. Read-only check on this box: the window

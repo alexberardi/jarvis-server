@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -29,7 +30,9 @@ func TestWaylandRecordLive(t *testing.T) {
 		secs = 15
 	}
 	e := newRecEnv(t)
-	src := NewDesktopSource(e.r.Dir, screen.Native(), nil)
+	// The recorder's own debug lines (why a keyframe or an element is missing) go to the test log.
+	log := slog.New(slog.NewTextHandler(testLog{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	src := NewDesktopSource(e.r.Dir, screen.Native(), log)
 	e.r.Sources[ModeDesktop] = src
 	id, err := e.r.Start(context.Background(), ModeDesktop)
 	if err != nil {
@@ -117,4 +120,12 @@ func TestCaptureReadLive(t *testing.T) {
 		t.Fatal("no result")
 	}
 	t.Logf("result: %d bytes; %v", len(raw[1]), time.Since(again).Round(time.Millisecond))
+}
+
+// testLog writes a logger's lines to the test's log.
+type testLog struct{ t *testing.T }
+
+func (l testLog) Write(b []byte) (int, error) {
+	l.t.Log(strings.TrimSpace(string(b)))
+	return len(b), nil
 }
