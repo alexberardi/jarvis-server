@@ -18,7 +18,7 @@ import (
 var expectedTables = []string{
 	"cc_display_config", "cc_display_ack", "cc_display_assets",
 	"cc_test_install_runs",
-	"cc_test_install_events", "cc_node_package_stores", "cc_channel_links", "cc_channel_providers",
+	"cc_test_install_events", "cc_node_package_stores", "cc_channel_links", "cc_channel_providers", "cc_channel_outbox",
 	// 05 nodes
 	"cc_nodes", "cc_node_tasks", "cc_provisioning_tokens", "cc_settings_requests",
 	"cc_settings_snapshots", "cc_request_traces",

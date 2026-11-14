@@ -270,6 +270,9 @@ func (m *Module) handleNodePush(w http.ResponseWriter, r *http.Request, n *nodeC
 		id = m.pushConfirmation(ctx, hh, userID, n.ID, title, text, text, "reminder", []any{}, nil, targetType)
 	}
 	m.attentionOutcome(ctx, d, gated, id != "", id)
+	if id != "" && !(gated && d.Rung == "inbox") { // pushed, not just filed: the person is being told
+		m.channelReminder(ctx, hh, userID, category, title, text)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"sent": id != "", "inbox_item_id": nullIfBlank(id), "withheld_by": nil})
 }
 

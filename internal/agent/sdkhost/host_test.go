@@ -434,3 +434,19 @@ func TestBeforeCallTakesOverForAMusicPlay(t *testing.T) {
 	}
 	(&Host{}).BeforeCall(ctx, "spotify", "", map[string]any{"action": "play"}) // no Music: nothing
 }
+
+// A channel daemon's message waits for a whole chat turn, so it may outlast the node client's
+// 15 s; nothing else posted through cc.post may.
+func TestAChannelMessageMayTakeAsLongAsATurn(t *testing.T) {
+	for path, want := range map[string]time.Duration{
+		"/api/v0/node/channels/discord/message": channelTurnTimeout,
+		"/api/v0/node/channels/discord/command": 0,
+		"/api/v0/node/channels/discord/outbox":  0,
+		"/api/v0/node/inbox-item":               0,
+		"/api/v0/node/message":                  0,
+	} {
+		if got := postTimeout(path); got != want {
+			t.Errorf("postTimeout(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
