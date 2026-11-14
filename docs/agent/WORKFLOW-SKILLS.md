@@ -280,7 +280,11 @@ is theirs.
     an X11 session and the Mac test host.
   - Built (2026-11-13), live recordings still to do. A result is read when the screen has been
     quiet 1.5 s after a click or key, or when the next input arrives, or at stop. A live recording on
-    this box (sway, 2026-11-13) held the start and a result after every click and Enter. It names the
+    this box (sway, 2026-11-13) held the start and a result after every click and Enter. A live
+    recording on the MBP (macOS 26) found results read from another app's window (the window
+    list put it first); a result is now read from the app the action was in, and the rerun
+    showed real diffs in Finder and Firefox. Still open there: a click with no window of its own
+    (the Dock) falls back to the first listed window, which on that Mac was not the one in use. It names the
     front window and at most 40 elements each way (role and name, 80 characters, never a value),
     from the first 1000 elements of that window's tree; all results of one recording take at
     most 256 KiB, after which only the actions are kept. Read-only check on this box: the window
