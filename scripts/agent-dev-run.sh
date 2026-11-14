@@ -7,6 +7,8 @@
 #   scripts/agent-dev-run.sh --uninstall           # stop starting at login (keeps the enrollment)
 #   scripts/agent-dev-run.sh --status              # what the agent can do right now, as the agent
 #   scripts/agent-dev-run.sh --install --browser   # ... and set up browser control without asking
+#   scripts/agent-dev-run.sh --instance voice-hotkeys   # a second agent from this checkout, beside the others
+#   scripts/agent-dev-run.sh --listen voice-hotkeys     # "Hey Jarvis" goes to that one only
 #
 # Options:
 #   --server URL      jarvisd's address (only needed to enroll)
@@ -20,6 +22,15 @@
 #   --browser         set up browser control (Firefox / Chrome-family extension + native host)
 #                     without asking; --no-browser: don't offer it. Default: ask when interactive
 #                     (on first enrollment, and on --install for the installed binary).
+#   --instance NAME   (Linux) run this checkout's agent as its own node, beside any other agent:
+#                     its own enrollment (node name <host>-NAME), settings and packages in
+#                     ~/.config/jarvis-agent-dev/NAME, its own control socket, and NAME in its
+#                     status icon's menu. Foreground only. It starts with listening off (use
+#                     --listen), without browser control (the extension talks to the main agent)
+#                     and without auto-update. Enroll each one once (--server/--email).
+#   --listen NAME     turn "Hey Jarvis" on for the running instance NAME and off for every
+#                     other running agent. NAME "main" is the agent without --instance (the
+#                     installed one included); "none" turns them all off.
 #   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any (foreground runs
 #                     only; --install doesn't pass flags). Listening for "Hey Jarvis" is on by
 #                     default: the status icon's menu turns it off.
@@ -33,7 +44,7 @@
 # Set JARVIS_AGENT_SIGN_IDENTITY to pick a signing identity ("-" forces ad-hoc).
 set -euo pipefail
 
-SERVER='' EMAIL='' HOUSEHOLD='' MODE=run BROWSER=ask
+SERVER='' EMAIL='' HOUSEHOLD='' MODE=run BROWSER=ask INSTANCE='' LISTEN=''
 while [ $# -gt 0 ]; do
   case $1 in
     --server) SERVER=$2; shift 2 ;;
@@ -42,6 +53,8 @@ while [ $# -gt 0 ]; do
     --install) MODE=install; shift ;;
     --uninstall) MODE=uninstall; shift ;;
     --status) MODE=status; shift ;;
+    --instance) INSTANCE=${2:?--instance needs a name}; shift 2 ;;
+    --listen) MODE=listen LISTEN=${2:?--listen needs a name}; shift 2 ;;
     --browser) BROWSER=yes; shift ;;
     --no-browser) BROWSER=no; shift ;;
     --) shift; break ;;
@@ -66,6 +79,51 @@ AGENT_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs"
 
 case $OS in Linux|Darwin) ;; *) die "Linux and macOS only (Windows: see docs/agent/DESIGN.md)" ;; esac
+
+# --- dev instances: several agents at once, one per checkout (see --instance, --listen) ---
+# The control socket is the one-agent-per-user lock and node.json is the node, so an instance
+# gets its own of each; everything else the agent keeps sits next to node.json.
+INST_RUN="${XDG_RUNTIME_DIR:-}/jarvis-agent-dev"
+if [ -n "$INSTANCE" ] || [ "$MODE" = listen ]; then
+  [ "$OS" = Linux ] || die "--instance and --listen are Linux only for now (macOS runs the dev agent as one launchd job)"
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || die "XDG_RUNTIME_DIR is unset: no place for the instances' sockets"
+fi
+if [ -n "$INSTANCE" ]; then
+  [ "$MODE" = run ] || die "--instance only runs in the foreground (not with --install, --uninstall, --status or --listen)"
+  # Short and plain: it is a directory name, and a socket path has ~100 bytes at most.
+  case $INSTANCE in main|none|*[!a-z0-9-]*) die "--instance: use up to 30 of a-z, 0-9 and - (not main or none)" ;; esac
+  [ ${#INSTANCE} -le 30 ] || die "--instance: use up to 30 of a-z, 0-9 and -"
+  INST_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/jarvis-agent-dev/$INSTANCE"
+  export JARVIS_AGENT_INSTANCE="$INSTANCE"
+  export JARVIS_AGENT_CONTROL_SOCKET="$INST_RUN/$INSTANCE/control.sock"
+  export JARVIS_AGENT_BROWSER_SOCKET="$INST_RUN/$INSTANCE/browser.sock"
+fi
+
+# --- listen: move the wake word to one running agent ---
+if [ "$MODE" = listen ]; then
+  [ -x "$ROOT/dist/jarvis-agent" ] || die "not built yet: run scripts/agent-dev-run.sh first"
+  main_sock="$XDG_RUNTIME_DIR/jarvis-agent/control.sock" target='' running=''
+  case $LISTEN in none) ;; main) target=$main_sock ;; *) target="$INST_RUN/$LISTEN/control.sock" ;; esac
+  for sock in "$main_sock" "$INST_RUN"/*/control.sock; do
+    [ -S "$sock" ] || continue
+    name=$(basename "$(dirname "$sock")")
+    [ "$sock" = "$main_sock" ] && name=main
+    running+=" $name"
+  done
+  # Checked before anything is turned off: a mistyped name changes nothing.
+  [ -z "$target" ] || [ -S "$target" ] || die "no agent called $LISTEN is running (running:${running:- none})"
+  for sock in "$main_sock" "$INST_RUN"/*/control.sock; do
+    [ -S "$sock" ] && [ "$sock" != "$target" ] || continue
+    name=$(basename "$(dirname "$sock")")
+    [ "$sock" = "$main_sock" ] && name=main
+    # Off first, so two never listen at once. A socket nobody answers is an agent that has gone.
+    if JARVIS_AGENT_CONTROL_SOCKET="$sock" "$ROOT/dist/jarvis-agent" voice off >/dev/null 2>&1; then say "$name: not listening"; fi
+  done
+  [ -n "$target" ] || exit 0
+  JARVIS_AGENT_CONTROL_SOCKET="$target" "$ROOT/dist/jarvis-agent" voice on >/dev/null || die "$LISTEN didn't turn listening on (is it still running?)"
+  say "$LISTEN: listening for \"Hey Jarvis\""
+  exit 0
+fi
 
 # ax_help explains a missing macOS Accessibility grant, including the stale-entry case: a grant
 # made for an earlier (differently signed) build stays switched on in Settings but doesn't
@@ -238,7 +296,13 @@ enroll=(enroll --if-needed)
 # Browser control registers the binary browsers will start: for --install that's the installed
 # copy, so it's offered after installing. A plain run lets a first enrollment ask; an explicit
 # --browser is handled below, enrolled or not.
-if [ "$MODE" = install ] || [ "$BROWSER" != ask ]; then enroll+=(--no-browser); fi
+if [ "$MODE" = install ] || [ "$BROWSER" != ask ] || [ -n "$INSTANCE" ]; then enroll+=(--no-browser); fi
+if [ -n "$INSTANCE" ]; then
+  mkdir -p "$INST_DIR"
+  enroll+=(--creds "$INST_DIR/node.json" --name "$(hostname)-$INSTANCE")
+  # Listening starts off: the microphone goes to one agent at a time (--listen).
+  [ -e "$INST_DIR/agent.json" ] || "$BIN" config --file "$INST_DIR/agent.json" set voice false >/dev/null
+fi
 "$BIN" "${enroll[@]}" || die "not enrolled; pass --server URL --email ADDR"
 if [ "$MODE" = run ] && [ "$BROWSER" = yes ]; then offer_browser "$BIN"; fi
 
@@ -264,6 +328,10 @@ if [ "$MODE" = install ]; then
 fi
 
 # --- run in the foreground ---
+if [ -n "$INSTANCE" ]; then
+  say "instance $INSTANCE (state: $INST_DIR); listening is off until: scripts/agent-dev-run.sh --listen $INSTANCE"
+  exec "$BIN" run --creds "$INST_DIR/node.json" --config "$INST_DIR/agent.json" --no-browser --no-auto-update "$@"
+fi
 if [ "$OS" = Linux ]; then
   if systemctl --user is-active --quiet jarvis-agent 2>/dev/null; then
     die "the installed agent is running; stop it first (systemctl --user stop jarvis-agent): two copies would fight over the node's session"

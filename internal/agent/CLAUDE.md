@@ -29,6 +29,8 @@ serves the unauthenticated provisioning API on :8080 for the mobile app (`provis
 ```bash
 scripts/agent-dev-run.sh --server http://<jarvisd-host>:7700 --email you@example.com   # build+enroll+run
 scripts/agent-dev-run.sh                             # later runs; --install / --uninstall / --status
+scripts/agent-dev-run.sh --instance my-feature       # Linux: this checkout's agent as its own node, beside the others
+scripts/agent-dev-run.sh --listen my-feature         # "Hey Jarvis" goes to that one only (main | none | NAME)
 
 export GOTOOLCHAIN=local                       # this box: mise exec go@1.27 -- go ...
 go test ./internal/agent/... ./cmd/jarvis-agent  # contract, tools, node, deploy guards (any OS)
