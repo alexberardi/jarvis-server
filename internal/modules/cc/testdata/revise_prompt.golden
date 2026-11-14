@@ -1,0 +1,43 @@
+The task: "Download bank statement"
+Why: Keep the records
+Done when: The statement for {month} is in Downloads
+Values: {month}
+
+Before it starts:
+- signed_in bank.example
+
+Steps:
+1. Open the bank | goal: Start at the bank | expect: the address contains bank.example
+2. Pick the account | expect: The account page is open
+3. Download the statement for {month} | expect: a file like statement*.csv in Downloads
+
+Notes:
+- The bank signs out after five minutes
+
+The last run:
+It stopped to ask. I did step 2 (Pick the account), but I couldn't confirm it worked: The account page is open: no, it shows savings.
+- before: done
+- step 1: verified
+- step 2: asked (found: it shows the savings account)
+- step 3: waiting
+- result: waiting
+
+The owner's note: "it picked the wrong account at step 2, it should be checking"
+
+Decide which ONE thing the owner's note asks for, and answer with JSON holding only that. The note decides; the last run is background. Most answers have one key besides "summary".
+
+The keys:
+- "summary": one sentence saying what you changed.
+- "steps": [{"n": <step number>, ...}] to change a step. Find the step the note is ABOUT by what the step does (a note about downloading is about the step that downloads), not the step that failed. In it give only what changes:
+    "intent": what the step does, "goal": why, "expect": what is visible on the screen once it worked,
+    "ask_first": true only when the owner wants to be asked before that step.
+- "end_state": only when the owner says the finished task came out wrong.
+- "notes": ["..."] for something to watch for that fits no step, or when the note doesn't say what to change.
+- "prerequisites": [{"kind": "app_open|file_open|page_open|signed_in|other", ...}] only for something NEW that must be true before step 1.
+Never repeat a note, a prerequisite or an end state that is already there. Never invent a step, a site or an app. Write a value that changes each run as its {name} from "Values".
+
+Examples, for a task whose steps are "1. Open the shop | 2. Search for {item} | 3. Add it to the cart | 4. Pay":
+note "it bought the wrong size, I wanted large" -> {"summary": "Step 3 now picks size large.", "steps": [{"n": 3, "intent": "Add the large size to the cart", "expect": "The cart shows the item in size large"}]}
+note "check with me before paying" -> {"summary": "Step 4 asks first.", "steps": [{"n": 4, "ask_first": true}]}
+note "my shopping list has to be open before it starts" -> {"summary": "The shopping list must be open first.", "prerequisites": [{"kind": "file_open", "file": "shopping list"}]}
+note "the site was slow" -> {"summary": "Kept as a note.", "notes": ["The site can be slow"]}

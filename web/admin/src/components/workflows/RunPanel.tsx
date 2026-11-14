@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, CheckCircle2, Circle, HelpCircle, Play, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { runWorkflow } from '@/api/workflows'
-import type { RunItem, RunItemState, RunState, TaughtWorkflow } from '@/api/workflows'
+import { reviseWorkflow, runWorkflow } from '@/api/workflows'
+import type { Revision, RunItem, RunItemState, RunState, TaughtWorkflow } from '@/api/workflows'
 import { Badge, Button, Card, CardHeader, Input, Spinner } from '@/components/ui'
+import { TextArea } from '@/components/workflows/SkillFields'
 import type { BadgeTone } from '@/components/ui'
 import { useLastRun, workflowKeys } from '@/hooks/useWorkflows'
 import { errorMessage } from '@/lib/errors'
@@ -51,7 +52,7 @@ function ItemIcon({ state, now }: { state: RunItemState; now: boolean }) {
  * and the result, what was expected of it and, where a check failed, what was found. Anyone
  * else gets nothing here (the server refuses them the record).
  */
-export default function RunPanel({ wf }: { wf: TaughtWorkflow }) {
+export default function RunPanel({ wf, onRevision }: { wf: TaughtWorkflow; onRevision: (r: Revision) => void }) {
   const qc = useQueryClient()
   const last = useLastRun(wf.id, true)
   const [params, setParams] = useState<Record<string, string>>({})
@@ -64,6 +65,12 @@ export default function RunPanel({ wf }: { wf: TaughtWorkflow }) {
       void qc.invalidateQueries({ queryKey: workflowKeys.lastRun(wf.id) })
     },
     onError: (err) => toast.error(errorMessage(err, 'Could not run it')),
+  })
+  const [note, setNote] = useState('')
+  const revise = useMutation({
+    mutationFn: () => reviseWorkflow(wf.id, note.trim()),
+    onSuccess: onRevision,
+    onError: (err) => toast.error(errorMessage(err, 'Could not work on that')),
   })
   if (last.isError) return null // not the owner's to see, or it can't be read: the page works without it
 
@@ -152,6 +159,27 @@ export default function RunPanel({ wf }: { wf: TaughtWorkflow }) {
               )
             })}
           </ol>
+          {rec.state !== 'running' && (
+            <form
+              className="space-y-3 border-t border-border pt-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (note.trim()) revise.mutate()
+              }}
+            >
+              <TextArea
+                label="What went wrong?"
+                hint="Say it as you would to a person: “it picked the wrong account at step 2”. Jarvis proposes changes for you to review; nothing changes until you save."
+                maxLength={1000}
+                value={note}
+                onChange={setNote}
+              />
+              <Button type="submit" disabled={!note.trim()} loading={revise.isPending}>
+                Suggest a fix
+              </Button>
+            </form>
+          )}
         </>
       )}
     </Card>

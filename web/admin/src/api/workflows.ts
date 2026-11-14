@@ -177,6 +177,19 @@ export interface RunRecord {
   items: RunItem[] | null
 }
 
+/** What reviseWorkflow answers: the edited workflow in PUT's shape, what changed and why. cc stores nothing. */
+export interface Revision {
+  draft: WorkflowPut
+  changes: string[] | null
+  summary?: string
+}
+
+/** reviseWorkflow asks cc to propose edits from what the owner says went wrong on the last run. */
+export async function reviseWorkflow(id: string, feedback: string): Promise<Revision> {
+  const { data } = await apiClient.post<Revision>(`${V0}/workflows/${encodeURIComponent(id)}/revise`, { feedback })
+  return data
+}
+
 /** getLastRun is the workflow's last run (null: it has never run). Only its owner may ask: 403 otherwise. */
 export async function getLastRun(id: string): Promise<RunRecord | null> {
   const { data } = await apiClient.get<{ run: RunRecord | null }>(`${V0}/workflows/${encodeURIComponent(id)}/last-run`)

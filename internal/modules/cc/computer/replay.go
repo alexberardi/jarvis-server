@@ -59,7 +59,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	// A replay's direct steps have no model to read a checkout from the page: a purchase holds
 	// for the user as recorded, without sending the step back for one.
 	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, checkoutAsked: true,
-		wfGoal: firstNonEmpty(wf.Skill.Goal.EndState, wf.Skill.Goal.Reason), sites: strictSites(wf)}
+		wfGoal: firstNonEmpty(wf.Skill.Goal.EndState, wf.Skill.Goal.Reason), sites: strictSites(wf), notes: watchFor(wf)}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
@@ -246,6 +246,17 @@ func vouches(answer string) bool {
 	return false
 }
 
+// watchFor is the workflow's notes as one line for a model round ("" when it has none).
+func watchFor(wf *Workflow) string {
+	var out []string
+	for _, n := range wf.Skill.Notes {
+		if t := oneLine(n.Text); t != "" {
+			out = append(out, strings.TrimSuffix(t, ".")+".")
+		}
+	}
+	return strings.Join(out, " ")
+}
+
 // strictSites are the sites a Strict workflow may open: its steps' and prerequisites'. Nil for a
 // Creative workflow, or one that names no site (a desktop task).
 func strictSites(wf *Workflow) []string {
@@ -367,6 +378,9 @@ func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int
 		if st.Action.Kind == "type" || st.Action.Kind == "set_value" || st.Action.Kind == "select" {
 			r.hint += fmt.Sprintf(" The value is %q.", st.Action.Text)
 		}
+	}
+	if r.notes != "" {
+		r.hint = strings.TrimSpace(r.hint + " Things to watch for in this task: " + r.notes)
 	}
 	if w := st.Window; w != nil && w.Point != nil {
 		r.hint = strings.TrimSpace(r.hint + fmt.Sprintf(" It was a click %d,%d from the top-left of the window, which was %d×%d then.",
