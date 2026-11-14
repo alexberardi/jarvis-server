@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -131,6 +132,38 @@ func pageText(content string) string {
 // The tab is named: without one the agent reads its task tab, where an earlier errand worked,
 // not the page the user is looking at.
 func (m *Module) openPageSource(ctx context.Context, nodeID string, uid int64) (computer.Source, error) {
+	return m.openPageSourceOf(ctx, nodeID, uid, sourceRunes)
+}
+
+// computerOpenPage is errands.ComputerTasks.OpenPage: the open page when one of refs means it,
+// sized to the model the task runs on (taskSourceRunes).
+func (m *Module) computerOpenPage(ctx context.Context, hh, nodeID string, uid *int64, refs ...string) (computer.Source, bool, error) {
+	if !slices.ContainsFunc(refs, meansOpenPage) {
+		return computer.Source{}, false, nil
+	}
+	var id int64
+	if uid != nil {
+		id = *uid
+	}
+	src, err := m.openPageSourceOf(ctx, nodeID, id, m.taskSourceRunes(ctx, hh))
+	return src, err == nil, err
+}
+
+// taskSourceRunes bounds the open page a computer task works from. It is in every round's
+// prompt, so a local model gets sourceRunes; the cloud slot (computer.model = cloud, a remote
+// endpoint) gets the whole article up to what the extension returns, as page reads do
+// (readPageMaxChars): 16000 characters is the top third of a long Wikipedia article.
+func (m *Module) taskSourceRunes(ctx context.Context, hh string) int {
+	if m.settings.String(ctx, computer.SettingModel, settings.Scope{HouseholdID: hh}) == computer.ModelCloud {
+		if ep, ok := m.endpoint(ctx, computer.ModelCloud); ok && ep.Remote {
+			return readPageMaxChars
+		}
+	}
+	return sourceRunes
+}
+
+// openPageSourceOf is openPageSource with at most limit characters of the page.
+func (m *Module) openPageSourceOf(ctx context.Context, nodeID string, uid int64, limit int) (computer.Source, error) {
 	tabs := m.agentRecordingCall(ctx, nodeID, toolListTabs, map[string]any{}, uid)
 	if !dispatchOK(tabs) {
 		return computer.Source{}, fmt.Errorf("couldn't list the browser's tabs: %s", agentError(tabs))
@@ -146,7 +179,7 @@ func (m *Module) openPageSource(ctx context.Context, nodeID string, uid int64) (
 	if current == nil {
 		return computer.Source{}, errors.New("there is no web page open in the browser")
 	}
-	out := m.agentRecordingCall(ctx, nodeID, toolReadPage, map[string]any{"tab_id": current, "max_chars": sourceRunes}, uid)
+	out := m.agentRecordingCall(ctx, nodeID, toolReadPage, map[string]any{"tab_id": current, "max_chars": limit}, uid)
 	if !dispatchOK(out) {
 		return computer.Source{}, fmt.Errorf("couldn't read the page open in the browser: %s", agentError(out))
 	}
@@ -157,7 +190,7 @@ func (m *Module) openPageSource(ctx context.Context, nodeID string, uid int64) (
 	if (!strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://")) || text == "" {
 		return computer.Source{}, errors.New("there is no web page open in the browser")
 	}
-	return computer.Source{URL: url, Text: truncateRunes(text, sourceRunes)}, nil
+	return computer.Source{URL: url, Text: truncateRunes(text, limit)}, nil
 }
 
 // Page reads sized to the model that reads them (browser_read_page's max_chars, when the model

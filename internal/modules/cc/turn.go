@@ -362,6 +362,7 @@ func (m *Module) toolTurn(conv *conversation, utterance string) servertools.Turn
 		Speaker: servertools.Speaker{UserID: conv.speakerID, Name: conv.speakerName, RecognitionOff: conv.recognitionOff,
 			SignedOutComputer: conv.signedOutComputer()},
 		ComputerStopped: conv.computer.stoppedHere(),
+		DesktopVoice:    conv.desktopVoice,
 	}
 }
 

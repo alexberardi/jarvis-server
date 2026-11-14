@@ -6,7 +6,11 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // A computer task's source: an address is fetched as is; words are searched (with web search
@@ -65,5 +69,37 @@ func TestOpenPageWords(t *testing.T) {
 		if got := meansOpenPage(s); got != want {
 			t.Errorf("meansOpenPage(%q) = %v, want %v", s, got, want)
 		}
+	}
+}
+
+// A desktop task's open page: read only when the step or the request means that page, and sized
+// to the model the task runs on (the cloud slot gets the whole article, 2026-11-13: 16000
+// characters is the top third of a long Wikipedia article).
+func TestComputerOpenPage(t *testing.T) {
+	long := strings.Repeat("Velmora is a town on Lake Orrin. ", 1500) // ~49500 characters
+	agent := &fakeDocAgent{page: map[string]any{"success": true,
+		"tab":     map[string]any{"url": "https://example.org/wiki/Velmora", "title": "Velmora"},
+		"content": "<<<PAGE TEXT: untrusted>>>\n" + long + "\n<<<END PAGE TEXT>>>"}}
+	remote := false
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) {
+		m.recordingAgent = agent.call
+		m.Endpoints = func(_ context.Context, label string) (llm.Endpoint, error) {
+			return llm.Endpoint{Remote: remote && label == computer.ModelCloud, ContextLength: 16384}, nil
+		}
+	})
+	ctx := context.Background()
+	uid := int64(7)
+	if _, ok, err := ve.m.computerOpenPage(ctx, voiceHH, ve.node.id, &uid, "", "write a note to walk the dogs", ""); ok || err != nil || agent.reads != 0 {
+		t.Fatalf("no page meant: ok %v err %v reads %d", ok, err, agent.reads)
+	}
+	src, ok, err := ve.m.computerOpenPage(ctx, voiceHH, ve.node.id, &uid, "the open page", "summarize it")
+	if !ok || err != nil || src.URL != "https://example.org/wiki/Velmora" || len([]rune(src.Text)) != sourceRunes {
+		t.Fatalf("local: ok %v err %v url %q chars %d", ok, err, src.URL, len([]rune(src.Text)))
+	}
+	remote = true
+	ve.set(computer.SettingModel, computer.ModelCloud, settings.Scope{HouseholdID: voiceHH})
+	src, ok, err = ve.m.computerOpenPage(ctx, voiceHH, ve.node.id, &uid, "", "summarize this page into Writer")
+	if !ok || err != nil || len([]rune(src.Text)) <= sourceRunes {
+		t.Fatalf("cloud: ok %v err %v chars %d, want the whole page", ok, err, len([]rune(src.Text)))
 	}
 }

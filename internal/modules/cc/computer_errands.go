@@ -46,7 +46,8 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	if m.autonomy != nil {
 		loop.Audit = m.autonomy
 	}
-	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}, Source: m.computerSource}
+	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}, Source: m.computerSource,
+		OpenPage: m.computerOpenPage}
 }
 
 // computerTargets are the computers a computer task may run on (computer control on), or why

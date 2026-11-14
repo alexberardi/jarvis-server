@@ -302,6 +302,30 @@ const documentRule = "DOCUMENTS: to write, summarize into, or change a document 
 	"itself, so research for a document needs no deep_research step); never a computer_task that types in the app. " +
 	"A write_document step after other steps (a search, a file read, a computer task) writes from their results.\n\n"
 
+// liveDocumentRule replaces documentRule for a request spoken at the computer (user,
+// 2026-11-13: "write a note in LibreOffice and save it" became a write_document plan card on the
+// phone; they expected to watch it happen). write_document is off that menu (liveMenu), so work
+// in an app is a desktop computer_task in the app's window, which the vision-first loop can do.
+const liveDocumentRule = "IN AN APP: the user is at the computer, watching. To write a note or a document, " +
+	"summarize into one or change one in an app (LibreOffice Writer, a notes app, a text editor), plan ONE " +
+	"computer_task step with target desktop, app the app they named (LibreOffice Writer for a document when " +
+	"they named none) and goal their whole request with every detail: what to write, the file's name, and to " +
+	"save it. When it writes from a web page, give that page as source: \"the open page\" when the user means " +
+	"the page they have open (\"this page\", \"the article\"), else its address or words to search for.\n\n"
+
+// liveMenu is menu for a request spoken at the computer: without write_document, so documents
+// are written in the app's window (liveDocumentRule). Spreadsheets keep write_spreadsheet: its
+// totals are formulas the file tool checks.
+func liveMenu(menu []MenuEntry) []MenuEntry {
+	out := make([]MenuEntry, 0, len(menu))
+	for _, e := range menu {
+		if e.Command != cmdWriteDoc {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // emailFilesRule is the line for work on an email's attachments (ELEMENT-LAYER-WORK.md C28):
 // node step args are fixed when the errand is planned, so both email steps name the same email
 // and the reply attaches the very path write_document saves to (draft_reply takes ~/Documents only).
@@ -685,12 +709,19 @@ func menuText(menu []MenuEntry) string {
 }
 
 // BuildPrompt is _build_prompt.
-func BuildPrompt(goal string, menu []MenuEntry) string {
+func BuildPrompt(goal string, menu []MenuEntry) string { return buildPrompt(goal, menu, false) }
+
+// buildPrompt is BuildPrompt; live adds liveDocumentRule (a request spoken at the computer).
+func buildPrompt(goal string, menu []MenuEntry, live bool) string {
+	rules := computerRulesFor(menu)
+	if live {
+		rules += liveDocumentRule
+	}
 	return "You are Jarvis's errand planner. Turn the user's goal into an ordered " +
 		"list of steps, choosing ONLY from the available commands below. Fill each " +
 		"step's args from that command's arg spec, using the user's own words, and " +
 		"give each step a short human-readable label.\n\n" +
-		decompositionRule + computerRulesFor(menu) +
+		decompositionRule + rules +
 		replanCheckpointRule +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
 		"User's goal: " + goal + "\n\n" +
@@ -946,10 +977,15 @@ func allowedOf(menu []MenuEntry) (allowed, risky, free map[string]bool) {
 
 // PlanErrand is plan_errand. An empty menu falls back to the static menu.
 func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry) (Plan, error) {
+	return s.planErrand(ctx, goal, menu, false)
+}
+
+// planErrand is PlanErrand; live plans a request spoken at the computer (buildPrompt).
+func (s *Service) planErrand(ctx context.Context, goal string, menu []MenuEntry, live bool) (Plan, error) {
 	if len(menu) == 0 {
 		menu = commandMenu()
 	}
-	data, err := s.runPlanner(ctx, BuildPrompt(goal, menu))
+	data, err := s.runPlanner(ctx, buildPrompt(goal, menu, live))
 	if err != nil {
 		return Plan{}, err
 	}

@@ -59,6 +59,12 @@ func cutOffGoal(goal string) bool { return cutOffRE.MatchString(goal) }
 const computerAck = "On it — I'll do that on your computer and check with you on your phone before " +
 	"anything that needs your OK. If it needs more than the browser, I'll send you the plan to review first."
 
+// liveAck is run_errand's ack for a request spoken at a computer with computer control on: work
+// in an app starts in its window at once (DraftRequest.Live). True whatever the plan turns out
+// to be: anything else still sends its plan.
+const liveAck = "On it. If it's something in an app, I'll do it on your screen now: say stop or take the mouse " +
+	"any time. Anything else, I'll send you the plan first."
+
 func (*RunErrandTool) Name() string { return "run_errand" }
 
 func (*RunErrandTool) Definition() *pyjson.Object { return servertools.LegacyDefinition("run_errand") }
@@ -97,10 +103,13 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	}
 	menu := s.FullMenu(ctx, available, turn.HouseholdID, speaker)
 	if err := s.DraftErrand(ctx, DraftRequest{HouseholdID: turn.HouseholdID, NodeID: turn.NodeID, UserID: speaker,
-		Goal: goal, Menu: menu, TurnAt: s.now()}); err != nil {
+		Goal: goal, Menu: menu, TurnAt: s.now(), Live: turn.DesktopVoice}); err != nil {
 		return errObj("task_failed", "I couldn't start planning that errand: "+err.Error()), nil
 	}
 	s.log().Info("errands: draft started", "household", turn.HouseholdID, "node", turn.NodeID, "goal", goal)
+	if turn.DesktopVoice && menuHas(menu, cmdComputer) {
+		return servertools.Obj("status", "accepted", "message", liveAck), nil
+	}
 	if t.NeedsComputer != nil && t.NeedsComputer(goal) && menuHas(menu, cmdComputer) {
 		return servertools.Obj("status", "accepted", "message", computerAck), nil
 	}

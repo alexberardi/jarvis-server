@@ -64,6 +64,10 @@ type ComputerTasks struct {
 	// Source reads the page a step works from: its address, or words to search for (nil: a
 	// step's source is ignored).
 	Source func(ctx context.Context, householdID, ref string) (computer.Source, error)
+	// OpenPage reads the page open in the browser on nodeID when one of refs (the step's
+	// source, its goal, the errand's goal) means it ("this page", "the open page"); ok false
+	// when none does (nil: never). A desktop task can't look at the browser itself.
+	OpenPage func(ctx context.Context, householdID, nodeID string, userID *int64, refs ...string) (src computer.Source, ok bool, err error)
 }
 
 // computerEntry is computer_task in the planner's menu.
@@ -108,7 +112,8 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	// A saved workflow replays (its own goal, targets and success check); anything else is the
 	// loop on the step's goal.
 	run := func(t computer.Task) computer.Outcome { return s.Computer.Loop.Run(ctx, t) }
-	if cmd == cmdRunWorkflow || truthyStr(args, ArgTaughtWorkflow) != "" {
+	replay := cmd == cmdRunWorkflow || truthyStr(args, ArgTaughtWorkflow) != ""
+	if replay {
 		wf, params, msg := s.taughtStep(ctx, rc, args)
 		if msg != "" {
 			return failed(msg)
@@ -127,13 +132,6 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		}
 		if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
 			t.Success = &computer.SuccessCheck{Screen: ok}
-		}
-		if ref := parse.PyStrip(truthyStr(args, "source")); ref != "" && s.Computer.Source != nil {
-			src, err := s.Computer.Source(ctx, rc.householdID, ref)
-			if err != nil {
-				return failed("I couldn't read the source page: " + err.Error())
-			}
-			t.Source = &src
 		}
 	}
 	// A run of this step that hasn't ended is resumed (after its confirmation or question).
@@ -159,6 +157,27 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 				return failed("A desktop task runs only on the computer you ask for it at.")
 			}
 			t.NodeID = rc.nodeID
+		}
+	}
+	if !replay {
+		// The page the task writes from, read once the computer is known: the one open in its
+		// browser when the step or the request means that page, else the address or search.
+		ref := parse.PyStrip(truthyStr(args, "source"))
+		var src computer.Source
+		var ok bool
+		var err error
+		if s.Computer.OpenPage != nil && t.Target.Kind == "desktop" && !strings.HasPrefix(ref, "http") {
+			src, ok, err = s.Computer.OpenPage(ctx, rc.householdID, t.NodeID, rc.userID, ref, t.Goal, rc.goal)
+		}
+		if !ok && err == nil && ref != "" && s.Computer.Source != nil {
+			src, err = s.Computer.Source(ctx, rc.householdID, ref)
+			ok = err == nil
+		}
+		if err != nil {
+			return failed("I couldn't read the source page: " + err.Error())
+		}
+		if ok {
+			t.Source = &src
 		}
 	}
 	w := rc.wf
