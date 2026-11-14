@@ -5,12 +5,21 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a PR cancels that PR's running jobs; main runs are never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   GO_VERSION: "1.27"
 
 jobs:
-  # Unit tests + vet + CGO_ENABLED=0 cross-compile for every release target.
-  build:
+  # go vet + CGO_ENABLED=0 cross-compile, one runner per release target.
+  vet:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux/amd64, linux/arm64, darwin/arm64, windows/amd64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,14 +29,51 @@ jobs:
       - name: Fetch native libs (all targets)
         run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64 darwin-arm64 windows-amd64
       - name: Vet + cross-compile
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
-          for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
-            GOOS=${p%/*} GOARCH=${p#*/} CGO_ENABLED=0 go vet ./...
-            GOOS=${p%/*} GOARCH=${p#*/} CGO_ENABLED=0 go build -o /dev/null ./...
-          done
+          export GOOS=${TARGET%/*} GOARCH=${TARGET#*/} CGO_ENABLED=0
+          go vet ./...
+          go build -o /dev/null ./...
+
+  # Race unit tests, split over three runners. The two named shards hold the packages that
+  # take minutes each; "rest" is the complement, so a new package is always in a shard.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [cc, cc-sub, rest]
+    runs-on: ubuntu-latest
+    env:
+      CC: /internal/modules/(cc|admin|cc/computer)$
+      CC_SUB: /internal/modules/cc/(errands|phone)$
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Fetch native libs (all targets)
+        run: scripts/fetch-sherpa-libs.sh linux-amd64 linux-arm64 darwin-arm64 windows-amd64
       # -race needs cgo; this is test-only, release builds stay CGO_ENABLED=0.
       - name: Unit tests (race)
-        run: CGO_ENABLED=1 go test -race ./...
+        shell: bash
+        run: |
+          # A pattern that matches nothing fails here (grep exits 1) instead of testing nothing.
+          case "${{ matrix.shard }}" in
+            cc)     pkgs=$(go list ./... | grep -E "$CC") ;;
+            cc-sub) pkgs=$(go list ./... | grep -E "$CC_SUB") ;;
+            rest)   pkgs=$(go list ./... | grep -vE "$CC|$CC_SUB") ;;
+          esac
+          # shellcheck disable=SC2086
+          CGO_ENABLED=1 go test -race $pkgs
+
+  # The required status check: green only when every vet target and test shard is.
+  build:
+    if: always()
+    needs: [vet, test]
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[ "${{ needs.vet.result }}" = success ] && [ "${{ needs.test.result }}" = success ]'
 
   # The admin SPA (web/admin). The Go jobs don't need it: without a build they embed the
   # placeholder page. The bundle is platform-independent, so it is built once here.
