@@ -35,6 +35,8 @@ type Sheet struct {
 	Rows    [][]any
 }
 
+var winDriveRE = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+
 // SpreadsheetName is a file name (without .xlsx) made from what the model passed: no folders,
 // no "..", nothing a file system or Excel refuses.
 func SpreadsheetName(name string) (string, error) {
@@ -42,9 +44,17 @@ func SpreadsheetName(name string) (string, error) {
 	if strings.HasSuffix(strings.ToLower(name), ".xlsx") {
 		name = name[:len(name)-len(".xlsx")]
 	}
-	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+	if strings.Contains(name, "..") {
 		return "", errors.New("the name must be a plain file name, not a path")
 	}
+	// A path the model gave anyway ("~/Documents/Jarvis/October budget") keeps its last part:
+	// the file goes in the documents folder whatever folder it named, and refusing cost the
+	// whole errand its last step (suite on Sonnet, 2026-11-13). A slash inside a name
+	// ("Budget 10/2026") becomes a dash.
+	if strings.HasPrefix(name, "~") || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) || winDriveRE.MatchString(name) {
+		name = name[strings.LastIndexAny(name, `/\`)+1:]
+	}
+	name = strings.NewReplacer("/", "-", `\`, "-").Replace(name)
 	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || strings.ContainsRune(`:*?"<>|`, r) {
 			return '-'
