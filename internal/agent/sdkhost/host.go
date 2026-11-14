@@ -74,6 +74,18 @@ var errNoCC = errors.New("not connected to command-center")
 // llmTimeout bounds a command's LLM call, which holds up its voice turn.
 const llmTimeout = 60 * time.Second
 
+// channelTurnTimeout bounds a channel daemon's message, which jarvisd holds open for the whole
+// chat turn (3 minutes there: docs/CHANNELS.md); the node client's own limit is 15 s.
+const channelTurnTimeout = 3*time.Minute + 30*time.Second
+
+// postTimeout is how long a cc.post to path may take (0: the node client's limit).
+func postTimeout(path string) time.Duration {
+	if strings.HasPrefix(path, "/api/v0/node/channels/") && strings.HasSuffix(path, "/message") {
+		return channelTurnTimeout
+	}
+	return 0
+}
+
 type params struct {
 	Prompt  string          `json:"prompt"`
 	Path    string          `json:"path"`
@@ -311,6 +323,9 @@ func (h *Host) commandCenter(ctx context.Context, method string, p params) (any,
 		body := p.JSON
 		if len(body) == 0 {
 			body = json.RawMessage("{}")
+		}
+		if d := postTimeout(pth); d > 0 {
+			cc = cc.WithTimeout(d)
 		}
 		if err := cc.Do(ctx, http.MethodPost, pth, body, &out); err != nil {
 			return nil, err
