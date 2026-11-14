@@ -461,7 +461,7 @@ func attachmentWork(goal string, steps []Step, menu []MenuEntry) []Step {
 			name := path.Base(strings.TrimSpace(strings.Split(truthyStr(st.Args, "attachments"), ",")[0]))
 			ext := strings.ToLower(path.Ext(name))
 			if ext != ".odt" && ext != ".docx" && ext != ".ods" && ext != ".xlsx" {
-				ext = ".odt"
+				ext = ".docx" // the type most people can open (user, 2026-11-13)
 				if g := strings.ToLower(goal); strings.Contains(g, "spreadsheet") || strings.Contains(g, "sheet") || strings.Contains(g, "xlsx") || strings.Contains(g, "excel") {
 					ext = ".xlsx"
 				}

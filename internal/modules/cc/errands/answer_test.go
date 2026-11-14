@@ -383,7 +383,7 @@ func TestAttachmentWork(t *testing.T) {
 	if p := truthyStr(attachmentWork("x", []Step{save, named}, menu)[1].Args, "path"); p != "Totals.ods" {
 		t.Fatalf("named path %q", p)
 	}
-	if p := truthyStr(attachmentWork("summarize the report", []Step{save, reply}, menu)[1].Args, "path"); p != "q3 hours spreadsheet.odt" {
+	if p := truthyStr(attachmentWork("summarize the report", []Step{save, reply}, menu)[1].Args, "path"); p != "q3 hours spreadsheet.docx" {
 		t.Fatalf("text path %q", p)
 	}
 }

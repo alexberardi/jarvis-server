@@ -578,3 +578,23 @@ func TestDocumentEditsWantsASummaryShorter(t *testing.T) {
 		t.Fatalf("not a summary: ops %v, %v", ops, err)
 	}
 }
+
+// A text document named without a type is a .docx, the one most people can open (user,
+// 2026-11-13), unless the request asks for LibreOffice or OpenDocument.
+func TestDefaultDocExt(t *testing.T) {
+	for _, c := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"summarize this page into a document called Velmora", "a summary", "Velmora"}, ".docx"},
+		{[]string{"write a letter to the plumber and save it as plumber"}, ".docx"},
+		{[]string{"Summarize this wiki page into a LibreOffice document called Velmora"}, ".odt"},
+		{[]string{"make it an OpenDocument file", "notes"}, ".odt"},
+		{[]string{"put it in a Writer document"}, ".odt"},
+		{[]string{"an odt called notes"}, ".odt"},
+	} {
+		if got := defaultDocExt(c.words...); got != c.want {
+			t.Errorf("%q: %s, want %s", c.words, got, c.want)
+		}
+	}
+}

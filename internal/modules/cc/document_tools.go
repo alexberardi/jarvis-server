@@ -70,11 +70,26 @@ func (*writeDocumentTool) Definition() *pyjson.Object {
 			".ods or .xlsx for spreadsheets), in their Documents folder: write an article or summary, "+
 			"change wording, add rows or formulas. Works on the file directly, without opening the app. "+
 			"The file is created when it doesn't exist and edited when it does.",
-		servertools.Obj("path", strProp("The file name, e.g. Apollo 11 summary.odt (.odt unless the user named another type), saved in "+
+		servertools.Obj("path", strProp("The file name, e.g. Apollo 11 summary.docx (.docx unless the user named another type; .odt when they asked for LibreOffice or OpenDocument), saved in "+
 			"the household's documents folder; a path only when the user named a folder, e.g. ~/Documents/Taxes/2026.xlsx"),
 			"instructions", strProp("What to write or change, with every detail the user gave (length, tone, sections, values)"),
 			"source", strProp("Optional: the web address of the page to write from, words to search for it, or \"the open page\" for the page open in the user's browser (\"this page\")"),
 			"computer", computerProp()), "path", "instructions")
+}
+
+// openDocRE: the user asked for LibreOffice's own format.
+var openDocRE = regexp.MustCompile(`(?i)\blibre\s*office\b|\bopen\s*document\b|\bodt\b|\bwriter\b`)
+
+// defaultDocExt is the type of a text document named without one: .docx, the one most people
+// and apps open (user, 2026-11-13), or .odt when the request asks for LibreOffice or
+// OpenDocument.
+func defaultDocExt(words ...string) string {
+	for _, w := range words {
+		if openDocRE.MatchString(w) {
+			return ".odt"
+		}
+	}
+	return ".docx"
 }
 
 func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
@@ -93,7 +108,8 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	if ext == "" {
 		// A name alone ("Velmora") is a text document: the house model leaves the type off, and
 		// the step failed as "I can write .odt … not Velmora" (suite on Qwen3.5-9B, 2026-11-13).
-		p, ext = p+".odt", ".odt"
+		ext = defaultDocExt(turn.Utterance, instr, p)
+		p += ext
 	}
 	sheet := ext == ".ods" || ext == ".xlsx"
 	if !sheet && ext != ".odt" && ext != ".docx" {
