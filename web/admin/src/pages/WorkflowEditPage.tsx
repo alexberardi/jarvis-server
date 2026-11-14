@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowLeft, ArrowUp, GripVertical, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Eye, GripVertical, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { relearnWorkflow, saveWorkflow } from '@/api/workflows'
 import type { ParamKind, Skill, SuccessCheck, TaughtWorkflow, WStep, WorkflowPut } from '@/api/workflows'
@@ -166,6 +166,14 @@ function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
           )
         }
       />
+
+      {wf.proven === false && !isDraft && (
+        <Banner tone="warning" icon={<Eye size={20} aria-hidden />} title="This workflow hasn’t had its first run">
+          {edit
+            ? 'Run it once from Workflows while you watch. After one run that checks out, it can run on a schedule or when someone asks for it.'
+            : 'Until whoever taught it has run it once and it checked out, only they can run it.'}
+        </Banner>
+      )}
 
       {isDraft && (
         <Banner

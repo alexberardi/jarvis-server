@@ -25,7 +25,7 @@ func (f *fakeTaught) Visible(_ context.Context, _ string, uid *int64) ([]compute
 
 // cartWorkflow opens the shop for a {month} and presses Add to cart.
 func cartWorkflow() computer.Workflow {
-	return computer.Workflow{ID: "tw_1", Name: "Bank statement", Slug: "bank_statement", Version: 1,
+	return computer.Workflow{ID: "tw_1", Name: "Bank statement", Slug: "bank_statement", Version: 1, Proven: true,
 		Triggers: []string{"download my bank statement"},
 		Params:   []computer.WorkflowParam{{Name: "month", Kind: "month"}},
 		Steps: []computer.WorkflowStep{
@@ -100,7 +100,7 @@ func TestStartReplaysTaughtWorkflow(t *testing.T) {
 	f := c.taught(cartWorkflow())
 	ctx := context.Background()
 	id, err := c.s.Start(ctx, StartRequest{HouseholdID: hh, UserID: ptr(7), Goal: "Run “Bank statement”",
-		Steps: []Step{ReplayStep(cartWorkflow(), map[string]string{"month": "May"})}})
+		Steps: []Step{ReplayStep(cartWorkflow(), map[string]string{"month": "May"}, true)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,5 +220,59 @@ func TestWorkflowPlanStartsWithoutPlanCard(t *testing.T) {
 				t.Fatalf("plan = %+v, want %s", p, c.want)
 			}
 		})
+	}
+}
+
+// An unproven workflow runs only as its owner's own, watched run. A planned or scheduled step
+// (no watched mark), or one marked watched for someone who isn't its owner, fails saying why,
+// and nothing is done on the computer.
+func TestUnprovenWorkflowNeedsItsOwnersWatchedRun(t *testing.T) {
+	unproven := cartWorkflow()
+	unproven.Proven, unproven.OwnerID = false, 7
+	for name, tc := range map[string]struct {
+		user    int64
+		watched bool
+		runs    bool
+	}{
+		"planned for the owner":       {7, false, false},
+		"watched, but not the owner":  {8, true, false},
+		"the owner's own watched run": {7, true, true},
+	} {
+		c := newComputerEnv(t)
+		c.taught(unproven)
+		id, err := c.s.Start(context.Background(), StartRequest{HouseholdID: hh, UserID: ptr(tc.user), Goal: "Run it",
+			Steps: []Step{ReplayStep(unproven, map[string]string{"month": "May"}, tc.watched)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.idle()
+		res, acted := c.wf(id).Results, len(c.comp.acted())
+		if tc.runs && (c.wf(id).State != "done" || acted == 0) {
+			t.Errorf("%s: %+v, %d batches", name, res, acted)
+		}
+		if !tc.runs && (len(res) != 1 || res[0].Error != UnprovenRefusal("Bank statement") || acted != 0) {
+			t.Errorf("%s: %+v, %d batches", name, res, acted)
+		}
+	}
+}
+
+// A plan someone asked for just now marks its workflow replays watched; a schedule's plan never
+// carries the mark, whatever the planning model wrote.
+func TestPlanMarksWatchedOnlyForALiveTurn(t *testing.T) {
+	steps := func() []Step {
+		return []Step{
+			{Command: cmdRunWorkflow, Args: mustObjArgs(`{"name": "bank statement", "__watched": "yes"}`)},
+			{Command: "get_weather", Args: mustObjArgs(`{}`)},
+		}
+	}
+	live := steps()
+	markWatched(live, true)
+	if truthyStr(live[0].Args, ArgWatched) == "" || truthyStr(live[1].Args, ArgWatched) != "" {
+		t.Fatalf("live: %v %v", live[0].Args, live[1].Args)
+	}
+	scheduled := steps()
+	markWatched(scheduled, false)
+	if truthyStr(scheduled[0].Args, ArgWatched) != "" {
+		t.Fatalf("a schedule's plan kept the model's own mark: %v", scheduled[0].Args)
 	}
 }

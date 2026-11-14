@@ -782,17 +782,18 @@ def seed_rich(cx: sqlite3.Connection, household_id: str, node_id: str, primary: 
     workflows = [
         ("tw_5eed000000000001", primary, "Download bank statement", ["download my bank statement"],
          [{"name": "month", "kind": "month", "example": "2026-09", "description": "the statement month"}],
-         bank_steps, {"download": {"name_like": "statement*.csv"}}, bank_skill, 0, "rec_5eed000000000001"),
+         bank_steps, {"download": {"name_like": "statement*.csv"}}, bank_skill, 0, "rec_5eed000000000001", 0),
         ("tw_5eed000000000002", partner, "Pay the water bill", ["pay the water bill"], [],
-         water_steps, {"text_present": ["Payment received"]}, {}, 1, None),
+         water_steps, {"text_present": ["Payment received"]}, {}, 1, None, 1),
     ]
     n = 0
-    for wid, owner, name, triggers, params, steps, success, skill, shared, rec in workflows:
+    # proven: the bank download has never run (its page says so); the water bill has.
+    for wid, owner, name, triggers, params, steps, success, skill, shared, rec, proven in workflows:
         n += cx.execute("""INSERT INTO cc_taught_workflows (id, household_id, owner_id, name, slug,
-            trigger_phrases, params, steps, success, skill, shared, recording_id, version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT DO NOTHING""",
+            trigger_phrases, params, steps, success, skill, shared, recording_id, version, created_at, updated_at, proven)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) ON CONFLICT DO NOTHING""",
                         (wid, household_id, owner, name, slugify(name), json.dumps(triggers), json.dumps(params),
-                         json.dumps(steps), json.dumps(success), json.dumps(skill), shared, rec, stamp, stamp)).rowcount
+                         json.dumps(steps), json.dumps(success), json.dumps(skill), shared, rec, stamp, stamp, proven)).rowcount
     counts["taught_workflows"] = n
     bank_trace = [
         {"seq": 1, "kind": "navigate", "url": "https://bank.example.com/login"},

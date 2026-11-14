@@ -15,6 +15,7 @@ type fakeWorkflows struct {
 	id      string
 	version int
 	heals   []Heal
+	proved  []int // the versions a run proved
 }
 
 func (f *fakeWorkflows) Heal(_ context.Context, id string, version int, heals []Heal) error {
@@ -22,10 +23,15 @@ func (f *fakeWorkflows) Heal(_ context.Context, id string, version int, heals []
 	return nil
 }
 
+func (f *fakeWorkflows) Proved(_ context.Context, id string, version int) error {
+	f.proved = append(f.proved, version)
+	return nil
+}
+
 // statementWorkflow downloads a month's statement: open the statements page for {month}, press
 // Download CSV.
 func statementWorkflow() *Workflow {
-	return &Workflow{ID: "tw_1", Name: "Bank statement", Slug: "bank_statement", Version: 3,
+	return &Workflow{ID: "tw_1", Name: "Bank statement", Slug: "bank_statement", Version: 3, Proven: true,
 		Triggers: []string{"download my bank statement"},
 		Params:   []WorkflowParam{{Name: "month", Kind: "month", Example: "September 2026"}},
 		Steps: []WorkflowStep{
@@ -792,5 +798,39 @@ func TestReplayAsksTheScreenForTheEndState(t *testing.T) {
 	out := e.replay(wf, map[string]string{"month": "October 2026"})
 	if out.State != StateDone || out.Summary != `Ran "Bank statement". Checked: Is this true now: The October 2026 statement is showing?: yes.` {
 		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// A run that checks its own result proves the workflow; one the user had to vouch for doesn't,
+// and a proven workflow isn't proved again.
+func TestReplayProvesTheWorkflow(t *testing.T) {
+	e := newEnv(t, bankPage(download))
+	wfs := &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	unproven := statementWorkflow()
+	unproven.Proven = false
+	out := e.replay(unproven, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(wfs.proved) != 1 || wfs.proved[0] != 3 || !strings.Contains(out.Summary, "It has now run once with its result checked") {
+		t.Fatalf("outcome %+v, proved %v", out, wfs.proved)
+	}
+
+	wf := statementWorkflow()
+	e = newEnv(t, bankPage(download))
+	wfs = &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	if out := e.replay(wf, map[string]string{"month": "October 2026"}); out.State != StateDone || len(wfs.proved) != 0 {
+		t.Fatalf("a proven workflow: %+v, proved %v", out, wfs.proved)
+	}
+
+	// The result can't be checked; the user says it is fine. Done, but not proven.
+	e = newEnv(t, bankPage(download))
+	wfs = &fakeWorkflows{}
+	e.loop.Workflows = wfs
+	e.script(doneAnswer)
+	wf = statementWorkflow()
+	wf.Proven, wf.Success = false, SuccessCheck{URLContains: "/downloaded"}
+	out = e.replay(wf, map[string]string{"month": "October 2026"})
+	if out = e.resume(wf, out.RunID, "continue"); out.State != StateDone || len(wfs.proved) != 0 {
+		t.Fatalf("vouched: %+v, proved %v", out, wfs.proved)
 	}
 }

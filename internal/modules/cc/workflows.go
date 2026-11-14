@@ -56,10 +56,13 @@ type TaughtWorkflow struct {
 	Success     computer.SuccessCheck `json:"success"`
 	Skill       computer.Skill        `json:"skill"`
 	Shared      bool                  `json:"shared"`
-	RecordingID string                `json:"recording_id,omitempty"`
-	Version     int                   `json:"version"`
-	CreatedAt   time.Time             `json:"created_at"`
-	UpdatedAt   time.Time             `json:"updated_at"`
+	// Proven: a run of it has finished with its result verified. Until then only its owner
+	// starts it, themselves (workflows_run.go).
+	Proven      bool      `json:"proven"`
+	RecordingID string    `json:"recording_id,omitempty"`
+	Version     int       `json:"version"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Param, WStep, StepWindow, WindowPoint and RecordedElement are the computer package's, which replays them (piece 31).
@@ -129,7 +132,7 @@ func (w *TaughtWorkflow) Validate() error {
 // --- store ---
 
 const workflowColumns = `id, household_id, owner_id, name, slug, trigger_phrases, params, steps, success, skill,
-	shared, recording_id, version, created_at, updated_at`
+	shared, recording_id, version, created_at, updated_at, proven`
 
 func scanWorkflow(sc interface{ Scan(...any) error }) (TaughtWorkflow, error) {
 	var (
@@ -138,7 +141,7 @@ func scanWorkflow(sc interface{ Scan(...any) error }) (TaughtWorkflow, error) {
 		rec                                      sql.NullString
 	)
 	if err := sc.Scan(&w.ID, &w.HouseholdID, &w.OwnerID, &w.Name, &w.Slug, &trig, &params, &steps, &succ, &skill,
-		&w.Shared, &rec, &w.Version, &ca, &ua); err != nil {
+		&w.Shared, &rec, &w.Version, &ca, &ua, &w.Proven); err != nil {
 		return TaughtWorkflow{}, err
 	}
 	for _, f := range []struct {
@@ -208,9 +211,10 @@ func (m *Module) createWorkflow(ctx context.Context, w TaughtWorkflow) (TaughtWo
 		return TaughtWorkflow{}, err
 	}
 	now := m.now().UTC().Truncate(time.Millisecond)
-	w.ID, w.Slug, w.Version, w.CreatedAt, w.UpdatedAt = "tw_"+randHex(8), slug, 1, now, now
+	// A new workflow has never run: unproven.
+	w.ID, w.Slug, w.Version, w.CreatedAt, w.UpdatedAt, w.Proven = "tw_"+randHex(8), slug, 1, now, now, false
 	_, err = m.deps.DB.Write.ExecContext(ctx, `INSERT INTO cc_taught_workflows (`+workflowColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
 		w.ID, w.HouseholdID, w.OwnerID, w.Name, w.Slug, trig, params, steps, succ, skill, w.Shared,
 		sql.NullString{String: w.RecordingID, Valid: w.RecordingID != ""}, w.Version, dbTime(now), dbTime(now))
 	return w, err
@@ -250,9 +254,36 @@ func (m *Module) listWorkflows(ctx context.Context, hh string, viewer int64) ([]
 // updateWorkflow validates and stores w's editable fields (name, triggers, params, steps,
 // success, skill, shared), re-slugs it on a rename and bumps its version. It returns the stored row.
 func (m *Module) updateWorkflow(ctx context.Context, w TaughtWorkflow) (TaughtWorkflow, error) {
+	return m.storeWorkflow(ctx, w, false)
+}
+
+// changesTheRun reports whether b does something else than a: other steps, prerequisites, result
+// (the goal's end state, the success check) or guardrails. A new name, sharing, triggers, the
+// reason and the notes don't change what a run does.
+func changesTheRun(a, b TaughtWorkflow) bool {
+	enc := func(w TaughtWorkflow) string {
+		raw, _ := json.Marshal([]any{w.Steps, w.Params, w.Success, w.Skill.Prerequisites, w.Skill.Goal.EndState,
+			w.Skill.Guardrails == computer.GuardCreative})
+		return string(raw)
+	}
+	return enc(a) != enc(b)
+}
+
+// storeWorkflow saves w's editable fields. A change to what a run does makes the workflow
+// unproven again, unless it is a heal: a run moving a step to where its element went is the
+// run's own finding, made on a run that verified.
+func (m *Module) storeWorkflow(ctx context.Context, w TaughtWorkflow, heal bool) (TaughtWorkflow, error) {
 	if err := w.Validate(); err != nil {
 		return TaughtWorkflow{}, err
 	}
+	was, err := m.getWorkflow(ctx, w.ID)
+	if err != nil {
+		return TaughtWorkflow{}, err
+	}
+	if was == nil {
+		return TaughtWorkflow{}, sql.ErrNoRows
+	}
+	proven := was.Proven && (heal || !changesTheRun(*was, w))
 	slug, err := m.uniqueWorkflowSlug(ctx, w.HouseholdID, w.Name, w.ID)
 	if err != nil {
 		return TaughtWorkflow{}, err
@@ -263,8 +294,8 @@ func (m *Module) updateWorkflow(ctx context.Context, w TaughtWorkflow) (TaughtWo
 	}
 	now := m.now().UTC().Truncate(time.Millisecond)
 	if _, err := m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_taught_workflows SET name = ?, slug = ?,
-		trigger_phrases = ?, params = ?, steps = ?, success = ?, skill = ?, shared = ?, version = version + 1, updated_at = ?
-		WHERE id = ?`, w.Name, slug, trig, params, steps, succ, skill, w.Shared, dbTime(now), w.ID); err != nil {
+		trigger_phrases = ?, params = ?, steps = ?, success = ?, skill = ?, shared = ?, proven = ?, version = version + 1, updated_at = ?
+		WHERE id = ?`, w.Name, slug, trig, params, steps, succ, skill, w.Shared, proven, dbTime(now), w.ID); err != nil {
 		return TaughtWorkflow{}, err
 	}
 	got, err := m.getWorkflow(ctx, w.ID)

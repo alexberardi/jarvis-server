@@ -154,6 +154,7 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 	if err != nil {
 		return nil, err
 	}
+	markWatched(plan.Steps, !r.TurnAt.IsZero())
 	row := &planRow{ID: hexID("pl_"), HouseholdID: r.HouseholdID, UserID: r.UserID, NodeID: r.NodeID,
 		Goal: r.Goal, Summary: plan.Summary, Steps: plan.Steps}
 	// Checkpoint 1 (autonomy PLAN §1): with autonomy on, the household's rules decide the plan.
@@ -391,4 +392,28 @@ func (s *Service) runExpireJob(ctx context.Context, job queue.Job) ([]byte, erro
 		s.expirePlanCard(ctx, p)
 	}
 	return nil, nil
+}
+
+// markWatched marks a plan's workflow replays as watched when someone asked for the plan just now
+// (a live turn), and clears the mark otherwise: a schedule's fire is nobody watching, and the mark
+// is never the planning model's to set. An unproven workflow runs only as its owner's watched
+// run (taughtStep).
+func markWatched(steps []Step, live bool) {
+	for i := range steps {
+		cmd := strings.TrimSpace(steps[i].Command)
+		if cmd != cmdRunWorkflow && !isComputerStep(cmd) {
+			continue
+		}
+		if steps[i].Args == nil {
+			if !live {
+				continue
+			}
+			steps[i].Args = pyjson.NewObject()
+		}
+		if live {
+			steps[i].Args.Set(ArgWatched, "yes")
+		} else if _, has := steps[i].Args.Get(ArgWatched); has {
+			steps[i].Args.Set(ArgWatched, "") // not the model's to set
+		}
+	}
 }

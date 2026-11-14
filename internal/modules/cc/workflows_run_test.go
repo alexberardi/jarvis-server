@@ -29,8 +29,20 @@ func withErrandQueue(t *testing.T, e *env) {
 	e.m.errands.Queue = e.m.deps.Queue
 }
 
-// seedTaught stores a workflow of hh owned by owner, with a month param.
+// seedTaught stores a workflow of hh owned by owner, with a month param, that has proved
+// itself (a run of it has verified), as most tests' workflows have.
 func seedTaught(t *testing.T, m *Module, hh string, owner int64, name string, shared bool, triggers ...string) TaughtWorkflow {
+	t.Helper()
+	w := seedUnproven(t, m, hh, owner, name, shared, triggers...)
+	if _, err := m.deps.DB.Write.ExecContext(context.Background(), `UPDATE cc_taught_workflows SET proven = 1 WHERE id = ?`, w.ID); err != nil {
+		t.Fatal(err)
+	}
+	w.Proven = true
+	return w
+}
+
+// seedUnproven is a workflow as learning leaves it: never run.
+func seedUnproven(t *testing.T, m *Module, hh string, owner int64, name string, shared bool, triggers ...string) TaughtWorkflow {
 	t.Helper()
 	w, err := m.createWorkflow(context.Background(), TaughtWorkflow{HouseholdID: hh, OwnerID: owner, Name: name, Shared: shared,
 		Triggers: triggers, Params: []Param{{Name: "month", Kind: "month", Example: "September 2026"}},
@@ -197,5 +209,84 @@ func TestWorkflowHealStore(t *testing.T) {
 	}
 	if got := names(nil); got != "Order ink" {
 		t.Errorf("the household sees %s", got)
+	}
+}
+
+// An unproven workflow is its owner's to start, themselves: another member, though it is shared
+// with them, is told why not. One verified run later anyone it is shared with may run it.
+func TestUnprovenWorkflowIsItsOwnersToRun(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	owner := bearer(ve.auth.addUser(7, voiceHH, authn.RoleMember))
+	member := bearer(ve.auth.addUser(8, voiceHH, authn.RoleMember))
+	w := seedUnproven(t, ve.m, voiceHH, 7, "Order ink", true)
+	ve.setComputerControl("on")
+	withErrandQueue(t, ve.env)
+	run := wfBase + "/" + w.ID + "/run"
+	body := map[string]any{"params": map[string]any{"month": "May"}}
+
+	got := ve.do("POST", run, body, member).want(409).json()
+	if got["code"] != "unproven" || !strings.Contains(got["detail"].(string), "hasn't had its first watched run yet") {
+		t.Fatalf("another member: %v", got)
+	}
+	started := ve.do("POST", run, body, owner).want(202).json()
+	if r := errandRows(t, ve.env)[started["errand_id"].(string)]; r[0] != "7" || !strings.Contains(r[1], "__watched") {
+		t.Fatalf("the owner's run isn't marked watched: %v", r)
+	}
+	if page := ve.do("GET", wfBase+"/"+w.ID, nil, owner).want(200).json(); page["proven"] != false {
+		t.Fatalf("a new workflow reads proven: %v", page["proven"])
+	}
+
+	store := taughtWorkflows{ve.m}
+	if err := store.Proved(context.Background(), w.ID, w.Version+1); err == nil {
+		t.Fatal("proved a version the workflow isn't at")
+	}
+	if err := store.Proved(context.Background(), w.ID, w.Version); err != nil {
+		t.Fatal(err)
+	}
+	ve.do("POST", run, body, member).want(202)
+}
+
+// What a run does decides whether a workflow is still proven: a new name, sharing or a note keeps
+// it; another step, prerequisite, end state or guardrail doesn't. A run's own heal keeps it.
+func TestEditsThatUnproveAWorkflow(t *testing.T) {
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ctx := context.Background()
+	fresh := func() TaughtWorkflow { return seedTaught(t, ve.m, voiceHH, 7, "Bank statement", false) }
+	for name, tc := range map[string]struct {
+		edit func(*TaughtWorkflow)
+		want bool
+	}{
+		"rename":    {func(w *TaughtWorkflow) { w.Name = "Statements" }, true},
+		"share":     {func(w *TaughtWorkflow) { w.Shared = true }, true},
+		"note":      {func(w *TaughtWorkflow) { w.Skill.Notes = []computer.Note{{Text: "It signs out quickly"}} }, true},
+		"reason":    {func(w *TaughtWorkflow) { w.Skill.Goal.Reason = "For the records" }, true},
+		"step":      {func(w *TaughtWorkflow) { w.Steps[0].Intent = "Open the {month} page" }, false},
+		"end state": {func(w *TaughtWorkflow) { w.Skill.Goal.EndState = "The page shows {month}" }, false},
+		"success":   {func(w *TaughtWorkflow) { w.Success.URLContains = "/other" }, false},
+		"prerequisite": {func(w *TaughtWorkflow) {
+			w.Skill.Prerequisites = []computer.Prerequisite{{Kind: computer.PrereqSignedIn, Site: "bank.example"}}
+		}, false},
+		"guardrails": {func(w *TaughtWorkflow) { w.Skill.Guardrails = computer.GuardCreative }, false},
+	} {
+		w := fresh()
+		tc.edit(&w)
+		got, err := ve.m.updateWorkflow(ctx, w)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.Proven != tc.want {
+			t.Errorf("%s: proven %v, want %v", name, got.Proven, tc.want)
+		}
+		if err := ve.m.deleteWorkflow(ctx, w.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := fresh()
+	heal := computer.Heal{Step: 0, Was: *w.Steps[0].Element, Element: computer.RecordedElement{Role: "button", Name: "Statements"}}
+	if err := (taughtWorkflows{ve.m}).Heal(ctx, w.ID, w.Version, []computer.Heal{heal}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ve.m.getWorkflow(ctx, w.ID); !got.Proven {
+		t.Error("a run's own heal unproved the workflow")
 	}
 }

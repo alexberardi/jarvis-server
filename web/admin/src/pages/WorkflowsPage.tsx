@@ -70,6 +70,7 @@ export default function WorkflowsPage() {
                     {/* Runs are recorded once replay lands (piece 31); none so far. */}
                     <span>Last run: never</span>
                     {w.shared && <Badge>Shared with the household</Badge>}
+                    {w.proven === false && <Badge tone="warning">First run needed</Badge>}
                   </span>
                 </Link>
                 <Button
