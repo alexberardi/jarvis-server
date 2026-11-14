@@ -67,6 +67,67 @@ type traceEvent struct {
 	Filename string        `json:"filename,omitempty"`
 	// ResultURL is where a click, submit or key took its tab (foldNavigations).
 	ResultURL string `json:"-"`
+	// Seq is the event's number in the recording. A result entry (kind result, no seq) names its
+	// action in Of and says what the page showed once it settled: its Title and the controls
+	// that Appeared. Parsing moves it onto its action as Result; it is never an event.
+	Seq      int64          `json:"seq,omitempty"`
+	Of       int64          `json:"of,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Appeared []traceElement `json:"appeared,omitempty"`
+	Result   *traceResult   `json:"-"`
+}
+
+// traceResult is what a browser action changed on its page (the extension's result entry).
+type traceResult struct {
+	Title    string
+	Appeared []traceElement
+}
+
+// traceStartTab is one page open when a browser recording began (the extension's start entry).
+type traceStartTab struct {
+	URL      string `json:"url,omitempty"`
+	SignedIn bool   `json:"signed_in,omitempty"`
+}
+
+// traceStart is the pages open when a browser recording began: nil for a recording from before
+// the extension kept them.
+func traceStart(raw json.RawMessage) []traceStartTab {
+	var all []struct {
+		Kind string          `json:"kind"`
+		Tabs []traceStartTab `json:"tabs"`
+	}
+	if json.Unmarshal(raw, &all) != nil {
+		return nil
+	}
+	for _, e := range all {
+		if e.Kind == "start" {
+			return e.Tabs
+		}
+	}
+	return nil
+}
+
+// browserPrerequisites is "signed in to this site" for each site the task acted on whose page,
+// open when the recording began, showed a way to sign out. A site the task itself signed in to
+// keeps that as steps instead, and one with no such sign says nothing either way.
+func browserPrerequisites(start []traceStartTab, evs []traceEvent) []computer.Prerequisite {
+	touched := map[string]bool{}
+	for _, e := range evs {
+		if u, err := url.Parse(e.URL); err == nil && u.Host != "" {
+			touched[u.Host] = true
+		}
+	}
+	var out []computer.Prerequisite
+	for _, t := range start {
+		u, err := url.Parse(t.URL)
+		if err != nil || !t.SignedIn || !touched[u.Host] {
+			continue
+		}
+		if p := (computer.Prerequisite{Kind: computer.PrereqSignedIn, Site: u.Host}); !slices.Contains(out, p) && len(out) < 10 {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type traceElement struct {
@@ -99,7 +160,19 @@ func parseTrace(raw json.RawMessage) ([]traceEvent, error) {
 	if err := json.Unmarshal(raw, &all); err != nil {
 		return nil, fmt.Errorf("the trace is not a list of events: %w", err)
 	}
+	results := map[int64]*traceResult{}
+	for _, e := range all {
+		if e.Kind == "result" && e.Of != 0 {
+			results[e.Of] = &traceResult{Title: e.Title, Appeared: e.Appeared}
+		}
+	}
 	all = slices.DeleteFunc(all, func(e traceEvent) bool { return !slices.Contains(traceKinds, e.Kind) })
+	for i := range all {
+		all[i].Of, all[i].Title, all[i].Appeared = 0, "", nil
+		if all[i].Seq != 0 {
+			all[i].Result = results[all[i].Seq]
+		}
+	}
 	var out []traceEvent
 	for _, e := range foldSubmits(foldNavigations(all)) {
 		if e.Element != nil && strings.EqualFold(e.Element.Type, "password") {
@@ -133,6 +206,9 @@ func foldSubmits(evs []traceEvent) []traceEvent {
 		if e.Kind == "submit" && ok && (out[i].TS == 0 || e.TS == 0 || e.TS-out[i].TS <= navFoldMS) {
 			if out[i].ResultURL == "" {
 				out[i].ResultURL = e.ResultURL
+			}
+			if e.Result != nil { // the page's result names the submit, its last action
+				out[i].Result = e.Result
 			}
 			continue
 		}
@@ -574,10 +650,38 @@ var desktopLearnInstructions = strings.Replace(learnInstructions, learnSuccessBr
 // learnPrompt is the user message: the narration, the numbered events, the candidates.
 func learnPrompt(evs []traceEvent, cands []paramCandidate, narration string) string {
 	lines := make([]string, len(evs))
+	instructions := learnInstructions
 	for i, e := range evs {
 		lines[i] = describeEvent(e)
+		if then := describeTraceResult(e); then != "" {
+			lines[i] += then
+			instructions = learnResultNote + learnInstructions
+		}
 	}
-	return eventsPrompt(lines, cands, narration, learnInstructions)
+	return eventsPrompt(lines, cands, narration, instructions)
+}
+
+// describeTraceResult is what a browser event's result adds to its line: the controls that
+// appeared on the page, else the page's title. "" when the recording kept none for it, or the
+// event opened another page (the line says which already).
+func describeTraceResult(e traceEvent) string {
+	r := e.Result
+	if r == nil || e.ResultURL != "" {
+		return ""
+	}
+	var names []string
+	for _, el := range r.Appeared {
+		if name := oneLine(el.Name); name != "" && len(names) < learnResultNames {
+			names = append(names, orDefault(el.Role, "element")+" "+strconv.Quote(truncateRunes(name, 60)))
+		}
+	}
+	if len(names) > 0 {
+		return " (then: new on screen: " + strings.Join(names, ", ") + ")"
+	}
+	if t := oneLine(r.Title); t != "" {
+		return " (then: the page is " + strconv.Quote(truncateRunes(t, learnMaxValue)) + ")"
+	}
+	return ""
 }
 
 // desktopLearnPrompt is learnPrompt for a desktop trace.
@@ -1424,7 +1528,14 @@ func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w Taug
 		}
 		cands := paramCandidates(evs)
 		system, prompt = learnSystemPrompt, learnPrompt(evs, cands, rec.Narration)
-		build = func(out learnOutput) (TaughtWorkflow, error) { return buildWorkflow(*rec, evs, cands, out) }
+		build = func(out learnOutput) (TaughtWorkflow, error) {
+			w, err := buildWorkflow(*rec, evs, cands, out)
+			if err != nil {
+				return w, err
+			}
+			w.Skill.Prerequisites = browserPrerequisites(traceStart(rec.Trace), evs)
+			return w, w.Skill.Validate(w.Params)
+		}
 	} else {
 		evs, err := parseDesktopTrace(rec.Trace)
 		if err != nil {

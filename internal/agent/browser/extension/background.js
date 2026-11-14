@@ -467,9 +467,21 @@ const COMMANDS = {
         ? "Jarvis Browser Control doesn't have access to websites, so it can't see what you do. In Firefox, open about:addons, then Jarvis Browser Control, Permissions, and turn on Access your data for all websites."
         : "Jarvis Browser Control doesn't have access to websites, so it can't see what you do. Open chrome://extensions, then Jarvis Browser Control, Details, and set Site access to On all sites.");
     }
-    if (!rec) rec = { id, seq: 0, tabs: new Set(), polling: new Set() };
+    const fresh = !rec;
+    if (!rec) rec = { id, seq: 0, tabs: new Set(), polling: new Set(), last: new Map() };
     const r = rec;
-    await Promise.all((await api.tabs.query({})).map((t) => recTab(r, t)));
+    const tabs = (await api.tabs.query({})).filter((t) => /^https?:/.test(t.url ?? ""));
+    const signed = await Promise.all(tabs.map((t) => recTab(r, t)));
+    // What was open when the recording began (docs/agent/WORKFLOW-SKILLS.md, capture): the
+    // pages, and whether each showed a way to sign out, which is how "signed in" is known.
+    if (fresh && tabs.length) {
+      recPost(r, null, null, { kind: "start", tabs: tabs.slice(0, REC_START_TABS).map((t, i) => {
+        const o = { url: clip(t.url, URL_MAX), title: clip(t.title ?? "", 120) };
+        if (t.active) o.active = true;
+        if (signed[i]) o.signed_in = true;
+        return o;
+      }) });
+    }
     return { ok: true, tabs: r.tabs.size };
   },
 
@@ -758,11 +770,35 @@ async function mediaCandidates(args) {
 // that document's recorder; the tab's next load (tabs.onUpdated complete) installs a new one.
 const REC_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const REC_POLL_MS = 20000;
-let rec = null; // { id, seq, tabs: tab ids with a recorder, polling: "tab:frame:token" keys }
+const REC_START_TABS = 30;
+const REC_ACTS = new Set(["click", "submit", "key"]); // the kinds a result follows
+// { id, seq, tabs: tab ids with a recorder, polling: "tab:frame:token" keys,
+//   last: "tab:frame" -> the seq of that frame's last click, submit or key }
+let rec = null;
 
 function recPost(r, tabId, frameId, e) {
+  const kind = String(e.kind);
+  const m = { type: "event", event: "record", recording_id: r.id, ts: Number(e.ts) || Date.now(), kind, url: clip(e.url ?? "", URL_MAX) };
+  if (kind === "start") {
+    // Not something the user did: no seq, so their actions keep their numbers.
+    m.tabs = e.tabs;
+    if (port) post(port, m);
+    return;
+  }
+  if (kind === "result") {
+    // What the frame's last action changed, once the page settled: named by that action's seq.
+    m.of = r.last.get(`${tabId}:${frameId}`);
+    if (!m.of) return;
+    m.title = clip(e.title ?? "", 120);
+    m.appeared = e.appeared ?? [];
+    m.disappeared = e.disappeared ?? [];
+    if (tabId != null) m.tab = tabId;
+    if (port) post(port, m);
+    return;
+  }
   r.seq++;
-  const m = { type: "event", event: "record", recording_id: r.id, seq: r.seq, ts: Number(e.ts) || Date.now(), kind: String(e.kind), url: clip(e.url, URL_MAX) };
+  m.seq = r.seq;
+  if (REC_ACTS.has(kind)) r.last.set(`${tabId}:${frameId}`, r.seq);
   if (tabId != null) m.tab = tabId;
   if (e.key) m.key = String(e.key);
   if (e.mime) m.mime = clip(e.mime, 100);
@@ -772,9 +808,10 @@ function recPost(r, tabId, frameId, e) {
   if (port) post(port, m);
 }
 
-// recTab installs the recorder in every frame of t and polls each new one.
+// recTab installs the recorder in every frame of t and polls each new one. It reports whether
+// the page shows a way to sign out.
 async function recTab(r, t) {
-  if (rec !== r || !/^https?:/.test(t.url ?? "")) return;
+  if (rec !== r || !/^https?:/.test(t.url ?? "")) return false;
   let res;
   try {
     res = await inject(t, { func: recInstall, args: [r.id], allFrames: true });
@@ -782,10 +819,11 @@ async function recTab(r, t) {
     // A page the browser doesn't let extensions script: say so, or the trace would hold only
     // its navigations.
     if (rec === r) recPost(r, t.id, null, { kind: "cannot_watch", url: t.url });
-    return;
+    return false;
   }
   r.tabs.add(t.id);
   for (const f of res) if (f?.result?.token) recPollFrame(r, t.id, f.frameId, f.result.token);
+  return res.some((f) => f?.result?.signed_in);
 }
 
 async function recPollFrame(r, tabId, frameId, token) {
@@ -1490,10 +1528,21 @@ function actDo(gen, n, op, value, keys, submit) {
 // labelled as a card, CVV, SSN or PIN: those events say masked: true instead. Only the user's own
 // (trusted) events count. The queue lives in this extension's isolated world (__jarvisRec), out
 // of the page's reach, until recPoll collects it.
+//
+// After a click, a submit or a key, once the user has done nothing more for RESULT_SETTLE_MS, the
+// frame queues a result: the page's address and title and the controls (role and name, never a
+// value) that appeared and disappeared since the last look. An action followed at once by another
+// gets none; the next result covers both. A page that navigates away takes its pending result
+// with it: the address the action led to is already in the trace.
 function recInstall(rid) {
   const old = globalThis.__jarvisRec;
-  if (old && old.rid === rid) return { token: old.token };
+  if (old && old.rid === rid) return { token: old.token, signed_in: old.signedIn };
   if (old) old.off();
+  const RESULT_SETTLE_MS = 1500;
+  const RESULT_ELEMENTS = 40; // most controls a result names each way
+  const RESULT_SCAN = 1000; // controls looked at; a page with more can't say what disappeared
+  const RESULT_NAME_MAX = 80;
+  const SIGN_OUT = /\b(sign|log)[ -]?out\b|\blogoff\b/i;
   const NAME_MAX = 120;
   const REC_VALUE_MAX = 500;
   const SEL_MAX = 200;
@@ -1597,6 +1646,26 @@ function recInstall(rid) {
     return n;
   };
 
+  // look counts the visible named controls: "role\nname" -> how many, in page order.
+  const look = () => {
+    const count = new Map();
+    let n = 0;
+    for (const el of document.querySelectorAll(INTERACTIVE)) {
+      if (++n > RESULT_SCAN) break;
+      if (typeof el.checkVisibility === "function" && !el.checkVisibility({ visibilityProperty: true })) continue;
+      const role = roleOf(el);
+      const name = cut(nameOf(el), RESULT_NAME_MAX);
+      if (!role || !name) continue;
+      const k = role + "\n" + name;
+      count.set(k, (count.get(k) ?? 0) + 1);
+    }
+    return { count, full: n > RESULT_SCAN };
+  };
+  const unkey = (k) => ({ role: k.slice(0, k.indexOf("\n")), name: k.slice(k.indexOf("\n") + 1) });
+  let seen = look();
+  const signedIn = [...seen.count.keys()].some((k) => SIGN_OUT.test(k.slice(k.indexOf("\n") + 1)));
+  let settle = null; // the timer of the result owed to the last action
+
   const queue = [];
   let waiter = null;
   let typing = null; // { el, timer }: the field being typed in
@@ -1618,6 +1687,25 @@ function recInstall(rid) {
       }
     }
     queue.push(e);
+    wake();
+    if (kind === "click" || kind === "submit" || kind === "key") {
+      clearTimeout(settle);
+      settle = setTimeout(result, RESULT_SETTLE_MS);
+    }
+  };
+  const result = () => {
+    settle = null;
+    if (queue.length >= QUEUE_MAX) return;
+    const now = look();
+    const appeared = [];
+    const disappeared = [];
+    for (const [k, n] of now.count) if (n > (seen.count.get(k) ?? 0) && appeared.length < RESULT_ELEMENTS) appeared.push(unkey(k));
+    // A look that hit the scan cap can't say what is gone: it may only be past the cap.
+    if (!now.full && !seen.full) {
+      for (const [k, n] of seen.count) if ((now.count.get(k) ?? 0) < n && disappeared.length < RESULT_ELEMENTS) disappeared.push(unkey(k));
+    }
+    seen = now;
+    queue.push({ kind: "result", ts: Date.now(), url: location.href, title: cut(clean(document.title), 120), appeared, disappeared });
     wake();
   };
   const flushTyping = () => {
@@ -1671,6 +1759,7 @@ function recInstall(rid) {
 
   const state = {
     rid,
+    signedIn,
     token: Math.random().toString(36).slice(2) + Date.now().toString(36),
     // poll returns the queued events, waiting up to waitMs for one; alive is false once stopped.
     poll(waitMs) {
@@ -1689,6 +1778,10 @@ function recInstall(rid) {
     // off removes the listeners and returns the events not yet collected.
     off() {
       flushTyping();
+      if (settle) {
+        clearTimeout(settle);
+        result(); // the recording ends before the wait did: what the last action changed so far
+      }
       for (const [type, fn] of listeners) removeEventListener(type, fn, true);
       if (globalThis.__jarvisRec === state) delete globalThis.__jarvisRec;
       const events = queue.splice(0);
@@ -1697,7 +1790,7 @@ function recInstall(rid) {
     },
   };
   globalThis.__jarvisRec = state;
-  return { token: state.token };
+  return { token: state.token, signed_in: signedIn };
 }
 
 // recPoll collects this frame's recorded events (recInstall's poll).
