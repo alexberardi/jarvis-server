@@ -148,9 +148,11 @@ func (s *Store) Delete(ctx context.Context, hh, provider string, userID int64) e
 	return err
 }
 
-// Proactive lists a user's links that opted in to messages Jarvis starts (reminders).
-func (s *Store) Proactive(ctx context.Context, userID int64) ([]Link, error) {
-	rows, err := s.DB.Read.QueryContext(ctx, `SELECT `+linkCols+` FROM cc_channel_links WHERE user_id = ? AND proactive = 1`, userID)
+// Proactive lists a user's links in a household that opted in to messages Jarvis starts
+// (reminders).
+func (s *Store) Proactive(ctx context.Context, hh string, userID int64) ([]Link, error) {
+	rows, err := s.DB.Read.QueryContext(ctx, `SELECT `+linkCols+` FROM cc_channel_links
+		WHERE household_id = ? AND user_id = ? AND proactive = 1 ORDER BY provider`, hh, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +199,62 @@ func (s *Store) Providers(ctx context.Context, hh string) ([]Provider, error) {
 
 // Online reports whether p's daemon called in within OnlineFor.
 func (s *Store) Online(p Provider) bool { return s.now().Sub(p.LastSeen) < OnlineFor }
+
+// OutboxKeep is how long a message waits for its provider's daemon before it is dropped.
+const OutboxKeep = 24 * time.Hour
+
+// outboxBatch is the most messages one Outbox call hands over.
+const outboxBatch = 20
+
+// Outgoing is a message jarvisd wants said unasked: a reminder, to an account on a provider.
+type Outgoing struct {
+	ID         string
+	ExternalID string
+	Text       string
+}
+
+// Enqueue queues text for an account on a provider; id is the caller's (a uuid).
+func (s *Store) Enqueue(ctx context.Context, id, hh, provider, externalID, text string) error {
+	_, err := s.DB.Write.ExecContext(ctx, `INSERT INTO cc_channel_outbox (id, household_id, provider, external_user_id, text, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, id, hh, provider, externalID, text, s.now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// Outbox drops the messages a provider's daemon says it sent (ack) and the ones older than
+// OutboxKeep, and returns the oldest still waiting. A message stays until acknowledged, so one
+// the daemon took and failed to send is handed over again.
+func (s *Store) Outbox(ctx context.Context, hh, provider string, ack []string) ([]Outgoing, error) {
+	for _, id := range ack {
+		if _, err := s.DB.Write.ExecContext(ctx, `DELETE FROM cc_channel_outbox WHERE id = ? AND household_id = ? AND provider = ?`,
+			id, hh, provider); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.DB.Write.ExecContext(ctx, `DELETE FROM cc_channel_outbox WHERE created_at < ?`,
+		s.now().Add(-OutboxKeep).UTC().Format(time.RFC3339)); err != nil {
+		return nil, err
+	}
+	// Only for an account still linked and still opted in: unlinking or opting out stops what
+	// was already queued.
+	rows, err := s.DB.Read.QueryContext(ctx, `SELECT o.id, o.external_user_id, o.text FROM cc_channel_outbox o
+		WHERE o.household_id = ? AND o.provider = ? AND EXISTS (SELECT 1 FROM cc_channel_links l
+			WHERE l.household_id = o.household_id AND l.provider = o.provider
+			AND l.external_user_id = o.external_user_id AND l.proactive = 1)
+		ORDER BY o.created_at, o.id LIMIT ?`, hh, provider, outboxBatch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Outgoing{}
+	for rows.Next() {
+		var o Outgoing
+		if err := rows.Scan(&o.ID, &o.ExternalID, &o.Text); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
 
 func notNoRows(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
