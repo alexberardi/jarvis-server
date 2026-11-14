@@ -14,6 +14,15 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 - [x] Pilot on a Surface Pro 6: reboot, automatic kiosk login, Jabra voice, finger touch, full-screen speech waveform and PIN exit confirmed. Other screen-equipped devices are untested.
 - [ ] Real external Chromecast routing, phone sender applications and subscription website compatibility sign-off. See [touch display operation](agent/touch-display.md).
 
+### Channels (2026-11-13)
+
+Talk to Jarvis from a chat service (Discord first) through a package: a generic channels contract
+in core, `IJarvisDaemon` in the SDK, agents and daemons on desktop nodes. Replaces the shape of
+#649. Spec and questions: [CHANNELS.md](CHANNELS.md).
+
+- [ ] Spec and intent confirmed; plan written for agents on desktop nodes (A1, A2) and `IJarvisDaemon` (D1–D3). Nothing built.
+- [ ] Then: `channels-core` plan, the Discord and Slack packages, the mobile card.
+
 ### Workflow skills (2026-11-12)
 
 A taught workflow learns a structured skill (goal, prerequisites, step goals and expectations)
