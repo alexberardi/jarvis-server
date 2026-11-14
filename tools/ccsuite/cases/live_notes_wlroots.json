@@ -1,0 +1,15 @@
+{
+  "name": "live_notes_wlroots",
+  "about": "The notes case asked by voice at the computer (via voice: a voice turn of the agent node itself). Spoken there, work in an app starts in its window at once: no plan card is posted, and this case has no answer for one, so a plan card fails it by timing out. docs/decisions/2026-11-13-voice-at-the-computer-works-in-the-app.md.",
+  "phase": "desktop-wlroots",
+  "status": "pending",
+  "via": "voice",
+  "say": "In the Jarvis Test Notes app, make a new note titled Groceries with milk, eggs and bread in it, and save it.",
+  "target": "desktop",
+  "setup": {"login": [], "notes_layout": "default"},
+  "answers": [{"when": "confirm", "tap": "approve"}],
+  "checks": [
+    {"kind": "note_exists", "title": "Groceries", "body": "eggs"}
+  ],
+  "max_minutes": 10
+}

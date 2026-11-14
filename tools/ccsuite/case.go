@@ -23,7 +23,13 @@ type Case struct {
 	Status string `json:"status"`
 	// Say is the chat message, from the seeded user to the agent node. {{sites}} is the fixture
 	// sites' base URL, {{layout}} "?layout=moved" when setup.layout is moved (else empty).
-	Say        string   `json:"say"`
+	Say string `json:"say"`
+	// Via is how Say reaches Jarvis: "" or chat (the app's chat, aimed at the agent node), or
+	// voice: a voice turn of the agent node itself, as if spoken at that computer, with Say as
+	// what speech-to-text heard. Spoken at the computer, work in an app starts in its window at
+	// once, with no plan card (decisions/2026-11-13-voice-at-the-computer-works-in-the-app.md):
+	// a voice case gives no answer for a plan card, so one posted fails it by timing out.
+	Via        string   `json:"via,omitempty"`
 	Target     string   `json:"target"` // browser or desktop
 	Setup      Setup    `json:"setup"`
 	Answers    []Answer `json:"answers"`
@@ -127,6 +133,8 @@ func (c *Case) Validate() error {
 		return fmt.Errorf("status %q: pending or required", c.Status)
 	case strings.TrimSpace(c.Say) == "":
 		return errors.New("say is empty")
+	case !oneOf(c.Via, "", "chat", "voice"):
+		return fmt.Errorf("via %q: chat or voice", c.Via)
 	case !oneOf(c.Target, "browser", "desktop"):
 		return fmt.Errorf("target %q: browser or desktop", c.Target)
 	case c.MaxMinutes <= 0 || c.MaxMinutes > 60:
@@ -138,8 +146,8 @@ func (c *Case) Validate() error {
 	case !oneOf(c.Setup.NotesLayout, "", "default", "moved", "pointer"):
 		return fmt.Errorf("setup.notes_layout %q: default, moved or pointer", c.Setup.NotesLayout)
 	}
-	if o := c.Setup.Open; o != "" && (!strings.HasPrefix(o, "/") || c.Target != "browser") {
-		return fmt.Errorf("setup.open %q: a path from /, with target browser", o)
+	if _, browser := c.needs(); c.Setup.Open != "" && (!strings.HasPrefix(c.Setup.Open, "/") || !browser) {
+		return fmt.Errorf("setup.open %q: a path from /, in a phase with a browser", c.Setup.Open)
 	}
 	if in := c.Interrupt; in != nil {
 		switch {

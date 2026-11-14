@@ -309,7 +309,11 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	chatDone := make(chan struct{})
 	go func() {
 		defer close(chatDone)
-		texts, err := e.chat(cctx, node, c.Message(e.Sites))
+		say := e.chat
+		if c.Via == "voice" {
+			say = e.voice
+		}
+		texts, err := say(cctx, node, c.Message(e.Sites))
 		mu.Lock()
 		replies, chatErr = texts, err
 		mu.Unlock()
@@ -599,6 +603,67 @@ func (e *Env) gather(ctx context.Context, cards []Card) (State, error) {
 		st.Pushes = p.Pushes
 	}
 	return st, nil
+}
+
+// voice says message as a voice turn of the agent node itself (the node's own credentials:
+// /conversation/start, /voice/command, /conversation/end), as if spoken at that computer with
+// message as what speech-to-text heard, and returns Jarvis's reply. The turn offers no client
+// tools: what it starts runs on the real agent over MQTT, as an errand's steps do.
+func (e *Env) voice(ctx context.Context, node, message string) ([]string, error) {
+	var creds struct {
+		NodeID  string `json:"node_id"`
+		NodeKey string `json:"node_key"`
+	}
+	b, err := os.ReadFile(e.creds)
+	if err == nil {
+		err = json.Unmarshal(b, &creds)
+	}
+	if err != nil || creds.NodeID != node || creds.NodeKey == "" {
+		return nil, fmt.Errorf("voice: the agent's credentials for node %s aren't readable (%v)", node, err)
+	}
+	post := func(path string, body map[string]any, out any) error {
+		b, _ := json.Marshal(body)
+		req, err := http.NewRequestWithContext(ctx, "POST", e.Sbx["SBX_CC"]+path, bytes.NewReader(b))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", creds.NodeID+":"+creds.NodeKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		rb, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s: %d %s", path, resp.StatusCode, strings.TrimSpace(string(rb[:min(len(rb), 300)])))
+		}
+		if out == nil {
+			return nil
+		}
+		return json.Unmarshal(rb, out)
+	}
+	cid := fmt.Sprintf("ccsuite-voice-%d", time.Now().UnixNano())
+	if err := post("/api/v0/conversation/start", map[string]any{"conversation_id": cid,
+		"node_context": map[string]any{"timezone": "UTC"}, "available_commands": []any{}, "client_tools": []any{}}, nil); err != nil {
+		return nil, err
+	}
+	defer post("/api/v0/conversation/end", map[string]any{"conversation_id": cid}, nil) //nolint:errcheck // the turn is over either way
+	var turn struct {
+		StopReason       string            `json:"stop_reason"`
+		AssistantMessage *string           `json:"assistant_message"`
+		ToolCalls        []json.RawMessage `json:"tool_calls"`
+	}
+	if err := post("/api/v0/voice/command", map[string]any{"voice_command": message, "conversation_id": cid}, &turn); err != nil {
+		return nil, err
+	}
+	if len(turn.ToolCalls) > 0 {
+		return nil, fmt.Errorf("voice: the turn asked the node for %d tool call(s); it offered none", len(turn.ToolCalls))
+	}
+	if turn.AssistantMessage == nil || strings.TrimSpace(*turn.AssistantMessage) == "" {
+		return nil, fmt.Errorf("voice: no reply (stop_reason %s)", turn.StopReason)
+	}
+	return []string{*turn.AssistantMessage}, nil
 }
 
 // chat sends message as the app's chat does (POST /api/v0/mobile/chat, server-sent events) to

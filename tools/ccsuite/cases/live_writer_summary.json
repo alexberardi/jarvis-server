@@ -1,0 +1,20 @@
+{
+  "name": "live_writer_summary",
+  "about": "T1 asked by voice at the computer: summarize the page open in the browser into LibreOffice, in Writer's own window (a desktop computer task: typed, then saved through the Save dialog), with no plan card. The page is ccsites /wiki/Velmora, a made-up town, open in a tab; the task is given its text (a desktop task can't look at the browser). Scored from the saved .odt in ~/Documents. Found live 2026-11-13: the wrong tab read, the Save dialog hidden by the main window, a long typed text cut off or sent back.",
+  "phase": "browser",
+  "status": "pending",
+  "via": "voice",
+  "say": "Summarize this wiki page into LibreOffice and save it as Velmora.",
+  "target": "desktop",
+  "setup": {"login": [], "open": "/wiki/Velmora"},
+  "answers": [{"when": "confirm", "tap": "approve"}],
+  "checks": [
+    {
+      "kind": "document_has",
+      "file": "Velmora*.odt",
+      "contains": ["Velmora", "Lake Orrin", "1287"],
+      "max_words": 350
+    }
+  ],
+  "max_minutes": 10
+}

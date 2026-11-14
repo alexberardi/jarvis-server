@@ -89,6 +89,12 @@ A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
   deletes the workflow and the recording at its end, so each run teaches its own (two would make
   the replay ask which one, and a replay heals the one it ran). The learn job's model calls are in
   the run's `demonstrate.jsonl`, the saved workflow in `taught.json`.
+- `via` is how `say` reaches Jarvis: the app's chat aimed at the agent node (the default), or
+  `"voice"`: a voice turn of the agent node itself (`/conversation/start`, `/voice/command` with
+  the node's own key and `say` as what speech-to-text heard), as if spoken at that computer.
+  Spoken there, work in an app starts in its window at once
+  ([decision](../decisions/2026-11-13-voice-at-the-computer-works-in-the-app.md)): a voice case
+  gives no `plan` answer, so a plan card posted by a regression fails it by timing out.
 - `setup.block`: hosts (e.g. `127.0.0.1`, the fixture sites) the household blocks for computer
   tasks during the case: a household rule of cc's (`cc_tool_rules`, effect `block`), written
   straight into the sandbox's database (there is no rules API yet). Every case replaces the
