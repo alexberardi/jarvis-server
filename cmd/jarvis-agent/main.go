@@ -214,6 +214,8 @@ func main() {
 		err = adoptPythonCmd(ctx, os.Args[2:])
 	case "dictation":
 		err = dictationCmd(ctx, os.Args[2:])
+	case "voice":
+		err = voiceCmd(os.Args[2:], os.Stdout, controlDial)
 	case "computer":
 		if len(os.Args) > 2 && os.Args[2] == "snapshot" {
 			err = computerSnapshotCmd(ctx, os.Args[3:])
@@ -289,6 +291,7 @@ func usage(w io.Writer) {
            code or your Jarvis Automation sign-in), browser extension, permissions, voice,
            remove (the status icon's "Set up / Settings…") [--no-open] [--no-start]
   stop     stop the running agent until the next login or start (the menu's Quit does the same)
+  voice on | off   listen for "Hey Jarvis", or not (the menu's toggle)
   computer stop | status   stop what Jarvis is doing with this computer (a computer task, a
            recording; the menu's "Stop Jarvis" does the same), or say what it is doing
   computer on | off        let Jarvis use this computer, or not (the menu's "Computer control";

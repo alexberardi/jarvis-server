@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/control"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/settings"
 	"github.com/alexberardi/jarvis-server/internal/agent/voice"
@@ -219,4 +223,18 @@ func saveVoice(path string, on bool) error {
 		}
 	}
 	return settings.Update(path, func(s *settings.Settings) error { s.Voice = &on; return nil })
+}
+
+// voiceCmd is `jarvis-agent voice on|off`: turn listening for the wake word on or off in the
+// running agent, as the status icon's toggle does.
+func voiceCmd(args []string, w io.Writer, dial control.Dialer) error {
+	cmds := map[string]string{"on": control.VoiceOn, "off": control.VoiceOff}
+	if len(args) != 1 || cmds[args[0]] == "" {
+		return errors.New("usage: jarvis-agent voice on|off")
+	}
+	if err := control.Send(dial, cmds[args[0]]); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Listening for \"Hey Jarvis\" is %s.\n", args[0])
+	return nil
 }

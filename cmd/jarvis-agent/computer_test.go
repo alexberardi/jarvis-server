@@ -378,3 +378,37 @@ func TestComputerUsageNamesAll(t *testing.T) {
 		}
 	}
 }
+
+// `jarvis-agent voice on|off` flips the running agent's wake-word switch over the control
+// socket (how agent-dev-run.sh --listen moves "Hey Jarvis" between dev instances).
+func TestVoiceCmd(t *testing.T) {
+	dir, err := os.MkdirTemp("", "jvc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "c.sock")
+	ln, err := browser.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sw := newVoiceSwitch(false, slog.New(slog.DiscardHandler))
+	sw.available = true
+	a := &computer.Activity{}
+	ctx, cancel := context.WithCancel(context.Background())
+	wait := serveControl(ctx, ln, slog.New(slog.DiscardHandler), &runningPill{}, func() {}, func() *voiceSwitch { return sw },
+		func() error { return nil }, a, computer.NewSwitch(false, a), nil)
+	defer func() { cancel(); wait() }()
+	dial := func() (net.Conn, error) { return browser.Dial(path) }
+
+	var b bytes.Buffer
+	if err := voiceCmd([]string{"on"}, &b, dial); err != nil || !sw.On() {
+		t.Fatalf("voice on: err %v, on %v", err, sw.On())
+	}
+	if err := voiceCmd([]string{"off"}, &b, dial); err != nil || sw.On() {
+		t.Fatalf("voice off: err %v, on %v", err, sw.On())
+	}
+	if err := voiceCmd([]string{"loud"}, &b, dial); err == nil {
+		t.Fatal("voice loud: want a usage error")
+	}
+}

@@ -154,6 +154,35 @@ first, keep household traffic ahead of test work, and do not start a competing
 model to make a check pass. Follow the pipeline skill for text/voice scenarios;
 the sandbox's `llm.jsonl` records model calls.
 
+### Several desktop agents at once (Linux)
+
+Only one `jarvis-agent` normally runs per OS user: its control socket is the lock, and a
+second enrollment from the same computer and user retires the first node on the server. To
+run a worktree's agent beside the installed one and other worktrees', give it an instance
+name (a-z, 0-9, `-`; use the feature or branch):
+
+```bash
+scripts/agent-dev-run.sh --instance <feature> --server http://<jarvisd>:7700 --email <account>  # once: enroll
+scripts/agent-dev-run.sh --instance <feature>     # afterwards: build this checkout and run it
+scripts/agent-dev-run.sh --listen <feature>       # "Hey Jarvis" goes to that agent only
+scripts/agent-dev-run.sh --listen main            # back to the agent without --instance; `none`: all off
+```
+
+- An instance is its own node (`<host>-<feature>`, its own device id) with its enrollment,
+  `agent.json` and packages in `~/.config/jarvis-agent-dev/<feature>/` and its sockets in
+  `$XDG_RUNTIME_DIR/jarvis-agent-dev/<feature>/`. Its status icon's menu names it.
+- It starts with listening off, so the microphone has one listener at a time: switch with
+  `--listen`, which turns every other running agent off first (`jarvis-agent voice on|off`
+  over each control socket). Never run two with listening on.
+- Foreground only; no browser control (the extension stays with the main agent) and no
+  auto-update. macOS is not supported yet. Global hotkeys with several agents are untested.
+- Do not run a plain `scripts/agent-dev-run.sh` (no `--instance`) from a worktree while
+  the user's agent runs, and do not move the wake word (`--listen`) away from the agent
+  the user is talking to unless they asked. For checks that need no microphone or
+  desktop, prefer `scripts/sandbox node-sim`.
+- When done, stop the instance (Ctrl-C), remove its node in the admin's Nodes page if it
+  was enrolled against a real server, and delete `~/.config/jarvis-agent-dev/<feature>/`.
+
 Detailed lanes and artifacts:
 
 | Harness | Guide |

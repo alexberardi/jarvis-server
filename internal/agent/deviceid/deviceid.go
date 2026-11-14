@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"os/user"
 	"strings"
 )
@@ -20,6 +21,11 @@ import (
 // salt is the HMAC key. Changing it changes every computer's id, so the next re-enrolment of
 // each would leave its old node behind once: never change it.
 const salt = "jarvis-agent device id v1"
+
+// InstanceEnv names a dev instance (scripts/agent-dev-run.sh --instance): a second agent of the
+// same OS user, running beside the main one. It counts as its own device, so enrolling it
+// doesn't retire the other agents' nodes. Unset for every installed agent.
+const InstanceEnv = "JARVIS_AGENT_INSTANCE"
 
 // sources are the OS lookups, replaced in tests.
 type sources struct {
@@ -55,6 +61,9 @@ func (s sources) get() string {
 	uid = strings.TrimSpace(uid)
 	if mid == "" || uid == "" {
 		return ""
+	}
+	if inst := os.Getenv(InstanceEnv); inst != "" {
+		uid += "\x00" + inst
 	}
 	return derive(mid, uid)
 }

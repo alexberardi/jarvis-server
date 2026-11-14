@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/computer"
+	"github.com/alexberardi/jarvis-server/internal/agent/deviceid"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/island"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
@@ -107,6 +109,10 @@ func (ic *trayIcon) state() tray.State {
 		s.Waiting, s.Status = true, tray.WaitingFor(ic.configURL)
 	case !s.Voice && ic.sw.lastErr() != "":
 		s.Status = "Running, couldn't start listening"
+	}
+	// A dev instance (scripts/agent-dev-run.sh --instance) names itself, to tell the icons apart.
+	if n := os.Getenv(deviceid.InstanceEnv); n != "" {
+		s.Status += " (" + n + ")"
 	}
 	if u := ic.update.Load(); u != nil {
 		s.Update = *u

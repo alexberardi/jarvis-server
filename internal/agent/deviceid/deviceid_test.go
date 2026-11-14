@@ -75,3 +75,22 @@ func TestThisComputer(t *testing.T) {
 		t.Fatalf("Get() = %q", id)
 	}
 }
+
+// A dev instance (scripts/agent-dev-run.sh --instance) is its own device: enrolling it must not
+// retire the main agent's node or another instance's, and re-enrolling it replaces only its own.
+func TestInstanceIsItsOwnDevice(t *testing.T) {
+	s := fixed("4c4c4544004a3510804bb2c04f4d3133", "1000")
+	main := s.get()
+	t.Setenv(InstanceEnv, "voice-hotkeys")
+	a := s.get()
+	if !hex64.MatchString(a) || a == main {
+		t.Fatalf("instance id %q, main %q", a, main)
+	}
+	if b := s.get(); b != a {
+		t.Fatal("an instance's id is not stable")
+	}
+	t.Setenv(InstanceEnv, "other")
+	if b := s.get(); b == a {
+		t.Fatal("two instances share an id")
+	}
+}
