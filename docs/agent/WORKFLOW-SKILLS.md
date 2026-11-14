@@ -220,8 +220,11 @@ is theirs.
     when exactly one matches, else it asks) and never signs in: signed out, it asks the user to.
     Signing in for the user is punted.
     [Decision](../decisions/2026-11-13-prerequisites-open-freely-never-sign-in.md).
-  - Q2 (asked): what a failed step expectation does (retry, the model continues, ask).
-  - Q3: whether a new workflow's first run is a supervised "watch me do it back".
+  - **Q2 (decided 2026-11-13):** a failed step check waits and looks again, then the model
+    decides (redo, another way, or carry on); a risky step is never redone unasked; after a
+    bounded number of attempts it asks.
+    [Decision](../decisions/2026-11-13-a-failed-step-check-goes-to-the-model.md).
+  - Q3 (asked): whether a new workflow's first run is a supervised "watch me do it back".
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.
 - `refine`: whether a learnt note needs the owner's approval before a run uses it.
