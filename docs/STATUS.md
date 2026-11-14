@@ -23,8 +23,10 @@ and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-
   (inference path). Runs don't read the skill yet.
 - [x] S3 the workflow page shows and edits the skill; S4 Relearn (a draft from the kept recording,
   for the person who recorded it; nothing stored until saved).
-- [ ] `capture` C1–C4 (the recorder keeps the starting state and each action's result; C3 needs an
-  extension release).
+- [x] `capture` C1 the trace's `start` and `result` entries; C2 the desktop recorder writes them
+  (macOS, X11, Wayland share it). Live recordings on the three still to do.
+- [ ] `capture` C4 learning from them, C3 the same in the browser extension (needs an extension
+  release).
 - [ ] `verified-replay`, then `narration`, `refine`.
 - [ ] **The teach cases fail on the dev box, on main too** (2026-11-12): its `background` and
   `live` labels serve `qwen3-4b`, whose errand planner picks `computer_task` over `run_workflow`,

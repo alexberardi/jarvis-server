@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // Desktop recording (plan P3 piece 36): the platform's listen-only tap (record_darwin.go;
@@ -36,6 +38,24 @@ const KeyframeEvery = 2 * time.Second
 const (
 	deskQueue     = 512         // raw events waiting for the worker; more are dropped
 	deskScrollGap = time.Second // scrolls closer than this are one scroll event
+)
+
+// What a recording keeps beyond the user's actions (docs/agent/WORKFLOW-SKILLS.md, capture):
+// a start event with the windows open when it began, and after each click or key a result
+// event with what that action changed, read once the screen has been quiet for resultSettle or
+// when the next input arrives, whichever is first. A result is a diff of the front window's
+// elements (role and name, never a value), capped, so a trace stays far under MaxTraceBytes.
+const (
+	KindStart  = "start"
+	KindResult = "result"
+
+	resultSettle   = 1500 * time.Millisecond
+	resultElements = 40        // most elements a result names each way
+	resultNameMax  = 80        // runes of an element's name or a window's title
+	resultBudget   = 256 << 10 // bytes of results one recording keeps; past it, only the actions
+	startWindows   = 30
+	captureTree    = 1000 // elements read from the front window
+	captureTimeout = 3 * time.Second
 )
 
 var deskWorkerAwait = 5 * time.Second // how long Stop waits for the queue to drain (tests shorten it)
@@ -84,6 +104,12 @@ type DeskPlatform struct {
 	KeyframeEvery time.Duration
 	// Window is the focused window, kept on each event (nil: none kept).
 	Window func() *EventWindow
+	// Windows lists the windows on screen, front to back, and Elements reads a process's
+	// accessibility tree (computer control's own Windows.List and AX.Snapshot). With Windows the
+	// recording keeps a start event and each action's result; without Elements a result holds
+	// only the front window.
+	Windows  func(ctx context.Context) ([]DesktopWindow, error)
+	Elements func(ctx context.Context, pid, max int) (computeruse.Snapshot, error)
 	// Context is asked at each start: "" when elements can be looked up, "none" when they
 	// can't (no accessibility bus): every event then says so, nothing can be masked, and the
 	// start warns that typed text is kept (Warning).
@@ -143,6 +169,28 @@ type DesktopEvent struct {
 	Context string `json:"context,omitempty"`
 	// KeyframePoint: the event has a keyframe with its point marked, here.
 	KeyframePoint *KeyframePoint `json:"keyframe_point,omitempty"`
+	// Windows (kind start, which has no seq): the windows open when the recording began, front
+	// first.
+	Windows []StartWindow `json:"windows,omitempty"`
+	// Of (kind result, which has no seq of its own): the seq of the click or key this is the
+	// result of. Window is the front window afterwards; Appeared and Disappeared are the
+	// elements of the front window that came and went.
+	Of          int64           `json:"of,omitempty"`
+	Appeared    []ResultElement `json:"appeared,omitempty"`
+	Disappeared []ResultElement `json:"disappeared,omitempty"`
+}
+
+// StartWindow is one window open when a recording began.
+type StartWindow struct {
+	App     string `json:"app,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Focused bool   `json:"focused,omitempty"`
+}
+
+// ResultElement is an element an action made appear or disappear.
+type ResultElement struct {
+	Role string `json:"role,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // DesktopElement is the element an event happened on.
@@ -163,7 +211,8 @@ type DesktopSource struct {
 	Platform DeskPlatform
 	Log      *slog.Logger
 
-	now func() time.Time // tests replace it
+	now   func() time.Time                     // tests replace it
+	after func(time.Duration) <-chan time.Time // the settle wait; tests replace it (nil: time.After)
 
 	mu      sync.Mutex
 	cur     *deskSession
@@ -236,13 +285,34 @@ func (s *DesktopSource) Start(_ context.Context, id string, emit func(json.RawMe
 	if ses.rec.context == ContextNone {
 		s.warning = noContextWarning
 	}
+	after := s.after
+	if after == nil {
+		after = time.After
+	}
 	go func() {
 		defer close(ses.worker)
-		for in := range ses.ch {
-			if !ses.rec.isAbandoned() {
-				ses.rec.handle(in)
+		ses.rec.begin()
+		var quiet <-chan time.Time // fires when the last action has had resultSettle to settle
+		for {
+			select {
+			case in, ok := <-ses.ch:
+				if !ok {
+					return
+				}
+				if !ses.rec.isAbandoned() {
+					ses.rec.handle(in)
+				}
+				ses.pending.Add(-1)
+				quiet = nil
+				if ses.rec.owed != 0 {
+					quiet = after(resultSettle)
+				}
+			case <-quiet:
+				quiet = nil
+				if !ses.rec.isAbandoned() {
+					ses.rec.result()
+				}
 			}
-			ses.pending.Add(-1)
 		}
 	}()
 	s.cur = ses
@@ -305,9 +375,12 @@ type deskRecorder struct {
 	typing   *deskTyping
 	scroll   *DesktopEvent
 	scrolled time.Time
-	context  string    // DeskPlatform.Context's answer at the start
-	at       time.Time // the input being handled: keyframes are throttled on its time
-	quiet    bool      // flushing for a click that takes the keyframe itself
+	context  string                 // DeskPlatform.Context's answer at the start
+	at       time.Time              // the input being handled: keyframes are throttled on its time
+	owed     int64                  // the click or key whose result hasn't been read yet (0: none)
+	seen     map[ResultElement]bool // the front window's elements at the last read
+	results  int                    // bytes of results emitted so far
+	quiet    bool                   // flushing for a click that takes the keyframe itself
 
 	kmu       sync.Mutex
 	kf        []Keyframe
@@ -324,11 +397,117 @@ type deskTyping struct {
 	at     time.Time
 }
 
+// begin emits the start event and reads the front window, which the first result is a diff from.
+func (d *deskRecorder) begin() {
+	if d.p.Windows == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), captureTimeout)
+	defer cancel()
+	ws, err := d.p.Windows(ctx)
+	if err != nil {
+		d.log.Debug("desktop recording: no window list", "err", err)
+		return
+	}
+	e := DesktopEvent{RecordingID: d.id, Kind: KindStart, TS: d.now().UnixMilli()}
+	for _, w := range ws {
+		if w.Layer != 0 || len(e.Windows) == startWindows {
+			continue
+		}
+		e.Windows = append(e.Windows, StartWindow{App: w.App, Title: clip(w.Title), Focused: len(e.Windows) == 0})
+	}
+	if raw, err := json.Marshal(e); err == nil {
+		d.emit(raw)
+	}
+	_, d.seen, _ = d.front(ctx, ws)
+}
+
+// front is the front window of ws and its elements, in tree order (nil without Elements, or
+// when the app has no tree to read).
+func (d *deskRecorder) front(ctx context.Context, ws []DesktopWindow) (*DesktopWindow, map[ResultElement]bool, []ResultElement) {
+	i := slices.IndexFunc(ws, func(w DesktopWindow) bool { return w.Layer == 0 })
+	if i < 0 {
+		return nil, nil, nil
+	}
+	if d.p.Elements == nil {
+		return &ws[i], nil, nil
+	}
+	snap, err := d.p.Elements(ctx, ws[i].PID, captureTree)
+	if err != nil {
+		d.log.Debug("desktop recording: no tree for the result", "app", ws[i].App, "err", err)
+		return &ws[i], nil, nil
+	}
+	set, order := map[ResultElement]bool{}, []ResultElement(nil)
+	for _, el := range snap.Elements {
+		k := ResultElement{Role: el.Role, Name: clip(el.Name)}
+		if k.Name == "" || set[k] {
+			continue // an unnamed element says nothing a run could look for
+		}
+		set[k] = true
+		order = append(order, k)
+	}
+	return &ws[i], set, order
+}
+
+// result emits what the owed action changed: the front window now, and the elements that
+// appeared and disappeared since the last read. Past resultBudget nothing more is kept.
+func (d *deskRecorder) result() {
+	of := d.owed
+	d.owed = 0
+	if of == 0 || d.p.Windows == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), captureTimeout)
+	defer cancel()
+	ws, err := d.p.Windows(ctx)
+	if err != nil {
+		return
+	}
+	win, set, order := d.front(ctx, ws)
+	if win == nil {
+		return
+	}
+	e := DesktopEvent{RecordingID: d.id, Kind: KindResult, TS: d.now().UnixMilli(), Of: of, App: win.App,
+		Window: &EventWindow{Class: win.App, Title: clip(win.Title)}}
+	if set != nil && d.seen != nil {
+		for _, k := range order {
+			if !d.seen[k] && len(e.Appeared) < resultElements {
+				e.Appeared = append(e.Appeared, k)
+			}
+		}
+		for k := range d.seen {
+			if !set[k] {
+				e.Disappeared = append(e.Disappeared, k)
+			}
+		}
+		slices.SortFunc(e.Disappeared, func(a, b ResultElement) int {
+			return cmp.Or(cmp.Compare(a.Role, b.Role), cmp.Compare(a.Name, b.Name))
+		})
+		e.Disappeared = e.Disappeared[:min(len(e.Disappeared), resultElements)]
+	}
+	d.seen = set
+	raw, err := json.Marshal(e)
+	if err != nil || d.results+len(raw) > resultBudget {
+		return
+	}
+	d.results += len(raw)
+	d.emit(raw)
+}
+
+// clip shortens a name or title to resultNameMax runes.
+func clip(s string) string {
+	if r := []rune(s); len(r) > resultNameMax {
+		return string(r[:resultNameMax])
+	}
+	return s
+}
+
 func (d *deskRecorder) handle(in DeskInput) {
 	if in.At.IsZero() {
 		in.At = d.now()
 	}
 	d.at = in.At
+	d.result() // the action before this input has had as long as it gets
 	switch in.Kind {
 	case InClick:
 		// With marked keyframes the click takes the keyframe of the moment typing ended.
@@ -515,6 +694,9 @@ func (d *deskRecorder) sendAt(e DesktopEvent, pt *Point) {
 		return
 	}
 	d.emit(raw)
+	if e.Kind == InClick || e.Kind == InKey {
+		d.owed = e.Seq
+	}
 }
 
 // keyframe takes event seq's keyframe unless the last one is too recent (on the inputs'
@@ -583,7 +765,10 @@ func (d *deskRecorder) isAbandoned() bool {
 	return d.abandoned
 }
 
-func (d *deskRecorder) finish() { d.flush() }
+func (d *deskRecorder) finish() {
+	d.flush()
+	d.result()
+}
 
 func (d *deskRecorder) keyframes() []Keyframe {
 	d.kmu.Lock()

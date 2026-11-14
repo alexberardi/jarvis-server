@@ -21,7 +21,7 @@ import (
 // AT-SPI (Hyprland and sway; other compositors refuse at start), else X11 (RECORD and AT-SPI).
 func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Source {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		return newWaylandSource(dir, wlSystem{
+		return withCapture(newWaylandSource(dir, wlSystem{
 			Windows:   &dictate.LinuxWindows{X: dictate.OSExec{}},
 			Devices:   func() ([]evdev.Device, error) { return evdev.Devices(evdev.SysRoot, evdev.DevRoot) },
 			Open:      evdev.Open,
@@ -30,9 +30,16 @@ func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Sourc
 			Focused:   atspi.Focused,
 			ElementAt: atspi.ElementAtWindow,
 			Shot:      shooter(shots),
-		}, log)
+		}, log))
 	}
-	return newX11Source(dir, &x11.Display{}, x11Access{ElementAt: atspi.ElementAt, Focused: atspi.Focused}, keyframer(shots), log)
+	return withCapture(newX11Source(dir, &x11.Display{}, x11Access{ElementAt: atspi.ElementAt, Focused: atspi.Focused}, keyframer(shots), log))
+}
+
+// withCapture gives a recording computer control's window list and AT-SPI tree, for its start
+// event and each action's result.
+func withCapture(s *DesktopSource) *DesktopSource {
+	s.Platform.Windows, s.Platform.Elements = NativeWindows().List, atspi.Snapshot
+	return s
 }
 
 // shooter is a Wayland keyframe's capture: the focused monitor (nil without a capturer).

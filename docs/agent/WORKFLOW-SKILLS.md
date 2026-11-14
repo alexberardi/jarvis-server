@@ -263,9 +263,12 @@ is theirs.
 - [x] **S4 — Relearn.** A route that returns a draft from the stored recording, and the button.
   - Acceptance: criterion 1b.
   - Verify: route tests (kept, expired, another household 404), Vitest.
-- [ ] **C1 — trace format.** `start` and `result` kinds, caps, tolerant parsing on the server.
+- [x] **C1 — trace format.** `start` and `result` kinds, caps, tolerant parsing on the server.
   - Acceptance: a trace with them learns as before; one without them still learns.
   - Verify: parse tests both ways.
+  - Built with C2. `start` and `result` carry no `seq` (a result names its action in `of`), so
+    the actions keep their numbers and their keyframes. The server already dropped kinds it
+    doesn't know; the step count and the Recordings page now leave these two out as well.
 - [ ] **C2 — desktop capture.** Starting windows and the result diff after each action settles.
   The three platforms share one recorder (`record_desktop.go`, a `DeskPlatform` table of
   functions per OS), and computer control already has what capture needs on each: the window
@@ -275,6 +278,13 @@ is theirs.
   - Acceptance: a recording on this box holds a `start` and a `result` per action, under the cap.
   - Verify: `record_desktop_test.go` with a fake platform; live recordings on this box (Wayland),
     an X11 session and the Mac test host.
+  - Built (2026-11-13), live recordings still to do. A result is read when the screen has been
+    quiet 1.5 s after a click or key, or when the next input arrives, or at stop. It names the
+    front window and at most 40 elements each way (role and name, 80 characters, never a value),
+    from the first 1000 elements of that window's tree; all results of one recording take at
+    most 256 KiB, after which only the actions are kept. Read-only check on this box: the window
+    list and trees are read in about 20 ms; an app off the accessibility bus (a terminal) gives
+    a result with the window only.
 - [ ] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
   limited to what the steps touch, `{param}` where the recorded name is one.
   - Acceptance: criteria 1 (captured path) and 1a.
@@ -300,7 +310,7 @@ is theirs.
 | Risk | Mitigation |
 |---|---|
 | The local model's answer grows past its budget or loses accuracy | Goldens on the real model before S2 merges; a second call if needed |
-| Result diffs blow the trace cap on busy pages | Cap per result and in total; drop oldest diffs, never events |
+| Result diffs blow the trace cap on busy pages | Cap per result and in total; past the total, later results are dropped (the trace is written as it goes), never events |
 | "Settled" is wrong (slow pages, animations) | The result is taken at quiet or just before the next action, whichever is first; the learner treats a result as evidence, and the owner can edit |
 | The extension update waits on Chrome's review of the new version | C3 is last; browser recordings use inference until it is out |
 | Skill parts shown but not yet used by runs | Nothing here is released before `verified-replay` |
