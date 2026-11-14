@@ -155,11 +155,15 @@ asked when its plan is written.
 
 Each task is one PR. `channels-core` and the packages are planned after D3.
 
-- [ ] **A1 — a desktop node has the SDK backends.** The desktop profile builds an `sdkhost.Host`
+- [x] **A1 — a desktop node has the SDK backends.** The desktop profile builds an `sdkhost.Host`
   with what it has (alerts and the command-centre client; no timers or audio, whose calls answer
   with the SDK's safe default as a nil part does today) and its sidecar starts with `--backends`.
   - Acceptance: on a desktop, a package's `cc_post` and inbox post reach jarvisd as the node.
   - Verify: `internal/agent/sidecar` tests on the desktop profile; `scripts/sandbox node-sim`.
+  - Built: the desktop serves the families that go to command-center (`llm`, `cc`, `inbox`,
+    `signals`) and `alerts`; the sidecar registers only the families its node serves
+    (`--backends=…`), so timers and volume keep the SDK's defaults there. Not yet run against a
+    real jarvisd from a desktop agent: that check is done with A2.
 - [ ] **A2 — a desktop node runs its packages' agents.** The scheduler drops `TestsOnly`;
   `AgentHealth` is wired as on a Pi.
   - Acceptance: the `watcher` test package's agent runs on its schedule on a desktop and a Forge

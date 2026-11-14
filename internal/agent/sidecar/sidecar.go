@@ -54,6 +54,13 @@ type Host interface {
 	Answer(ctx context.Context, method string, params json.RawMessage) (any, error)
 }
 
+// Subset is a Host that serves only some backend families ("llm", "cc", "timer", "audio",
+// "alerts", "inbox", "signals", "invoker"): the child registers those and the rest keep the
+// SDK's defaults (sdkhost.Host on a desktop, which has no timers or volume). None: all of them.
+type Subset interface {
+	Backends() []string
+}
+
 // Takeover is a Host that takes over the speaker for a music command (sdkhost.Host on a Pi):
 // BeforeCall runs before every call, with the command's declared takes_over_playback_binary
 // ("" when it declares none), and stops the other players when the call is a "play".
@@ -147,7 +154,11 @@ func StartWith(ctx context.Context, python, commandsDir string, log *slog.Logger
 	// Not CommandContext: the child lives as long as the Sidecar, and Close ends it.
 	args := []string{"-u", script, commandsDir}
 	if o.Host != nil {
-		args = append(args, "--backends")
+		flag := "--backends"
+		if s, ok := o.Host.(Subset); ok && len(s.Backends()) > 0 {
+			flag += "=" + strings.Join(s.Backends(), ",")
+		}
+		args = append(args, flag)
 	}
 	cmd := exec.Command(python, args...)
 	// UTF-8 both ways whatever the platform's locale (Windows' Python would speak cp1252).

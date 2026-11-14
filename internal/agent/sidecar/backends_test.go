@@ -135,7 +135,7 @@ func TestSidecarBackendFailuresAreSafeDefaults(t *testing.T) {
 	}
 }
 
-// Without a host (the desktop agent) no backend is registered: the helpers answer their
+// Without a host (the spike's --sidecar-commands) no backend is registered: the helpers answer their
 // defaults without asking the agent.
 func TestSidecarWithoutHostRegistersNoBackends(t *testing.T) {
 	py := python(t)
@@ -167,4 +167,36 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.w.Write(p)
+}
+
+// subsetHost serves only some backend families (a desktop: no timers, no volume).
+type subsetHost struct {
+	*fakeHost
+	only []string
+}
+
+func (h subsetHost) Backends() []string { return h.only }
+
+// A host that serves some families registers only those in the child: the others keep the
+// SDK's defaults without asking the agent, as with no host at all.
+func TestSidecarRegistersOnlyTheHostsBackends(t *testing.T) {
+	py := python(t)
+	ctx := context.Background()
+	h := subsetHost{&fakeHost{answers: map[string]any{"llm.chat_text": "hi", "alerts.count": 2, "inbox.post": "ok"}},
+		[]string{"llm", "cc", "inbox", "signals", "alerts"}}
+	sc, err := StartWith(ctx, py, "testdata/backends", slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Host: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	out, _ := sc.Call(ctx, "failing", nil, node.Request{})
+	node.TakeSignals(out)
+	if out["success"] != true || out["llm"] != "hi" || out["count"] != 2.0 || out["inbox"] != "ok" || out["timer"] != nil {
+		t.Fatalf("call = %v", out)
+	}
+	for _, c := range h.calls {
+		if strings.HasPrefix(c, "timer.") {
+			t.Fatalf("the agent was asked %s, a family it doesn't serve", c)
+		}
+	}
 }

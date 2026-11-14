@@ -66,7 +66,7 @@ func newPiHost(ctx context.Context, stateDir string, mic *voice.Mic, log *slog.L
 	return h
 }
 
-// nodeAlerts is the node's alert queue: the Pi host's, or on a desktop (no host) one of its own.
+// nodeAlerts is the node's alert queue: the host's (a Pi's or a desktop's), or without one its own.
 // Reminders, the packages' agents (a test install's on a desktop), the announcer and
 // check_alerts all use it, so a desktop's alerts are said and "what's up" reads them, as on a Pi.
 func nodeAlerts(h *sdkhost.Host) *sdkhost.Alerts {
