@@ -42,12 +42,26 @@ and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-
   prerequisites from the windows open at the start.
 - [x] `capture` C3 the same in the browser extension (0.3.11), with "signed in to this site".
 - [ ] Extension 0.3.11 release: the re-signed Firefox package and the store submission (user).
-- [ ] `verified-replay`: spec approved 2026-11-13; plan R1–R9 in WORKFLOW-SKILLS.md approved the same day; R1 next.
+- [x] `verified-replay` R1–R9 (2026-11-14): a run makes sure of its prerequisites, checks every
+  step, lets the model put a failed check right (never a risky step), and confirms the result;
+  Strict or Creative per workflow; a new workflow is unproven until a run checks out and only
+  its owner starts it; the workflow page runs it and follows the run; "What went wrong?" turns
+  into a draft to review; `desktop_open` opens a file by name (a program only after a yes);
+  runs have their own model setting.
+- [ ] `verified-replay`, open for the user:
+  - The three checkpoints (teach a real task and watch its first run; correct a run with the
+    feedback box until it is proven).
+  - A run's question can't be answered from the web: `POST /api/v0/callbacks` isn't on the admin
+    gateway, so it is answered in the mobile app. Exposing it is a new gateway route.
+  - Opening a file by voice works about 2 times in 3 on qwen3.5-9b without the tool's
+    description saying so; saying so costs the window commands (numbers in WORKFLOW-SKILLS.md, R6).
+  - "At the computer" isn't checked for a browser run; Creative lifts only the site bound; the
+    model doesn't yet work toward an unmet "other" prerequisite; no new suite cases (the fixture
+    sites have no slow page, send step, sign-out or missing download).
 - [ ] `narration`, `refine`.
-- [ ] `narration`, `refine`.
-- [ ] **The teach cases fail on the dev box, on main too** (2026-11-12): its `background` and
-  `live` labels serve `qwen3-4b`, whose errand planner picks `computer_task` over `run_workflow`,
-  so no replay starts. The suite's table is for `qwen3.5-9b`.
+- [ ] **A small model doesn't start a taught workflow from a request** (2026-11-12): on
+  `qwen3-4b` the errand planner picks `computer_task` over `run_workflow`. The suite's table is
+  for `qwen3.5-9b`; runs have their own model setting on the Models page.
 
 ### Before the official release (user 2026-10-12): next step
 
