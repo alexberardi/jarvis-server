@@ -522,3 +522,25 @@ func TestReplayDesktopOpensEachApp(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 }
+
+// A run's model is workflows.run_model, whatever computer.model says; its auto never means cloud.
+func TestReplayPicksTheRunModel(t *testing.T) {
+	for _, tc := range []struct{ run, computer, want string }{
+		{"", ModelCloud, ""}, // auto is the local pick, not computer tasks' cloud
+		{ModelBackground, ModelCloud, ""},
+		{ModelCloud, ModelBackground, "No cloud model is set up"},
+	} {
+		e := newEnv(t, bankPage(Element{Ref: "e4", Role: "button", Name: "Download  csv"}))
+		e.setts[SettingModel] = tc.computer
+		if tc.run != "" {
+			e.setts[SettingRunModel] = tc.run
+		}
+		out := e.replay(statementWorkflow(), map[string]string{"month": "October 2026"})
+		if tc.want != "" && (out.State != StateFailed || out.Summary != tc.want) {
+			t.Errorf("run %q, computer %q: outcome %+v, want failed %q", tc.run, tc.computer, out, tc.want)
+		}
+		if tc.want == "" && out.State != StateDone {
+			t.Errorf("run %q, computer %q: outcome %+v, want done", tc.run, tc.computer, out)
+		}
+	}
+}

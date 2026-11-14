@@ -119,6 +119,14 @@ const UNSORTED: Feature[] = [
     notice: (p) => `Page contents and screenshots of your browser are sent to ${p} while a task runs.`,
   },
   {
+    key: 'workflows.run_model',
+    service: 'cc',
+    title: 'Running a workflow',
+    auto: 'background',
+    vision: true,
+    notice: (p) => `Page contents and screenshots are sent to ${p} while a workflow you taught runs.`,
+  },
+  {
     key: 'ocr.model',
     service: 'ocr',
     title: 'Documents and images',

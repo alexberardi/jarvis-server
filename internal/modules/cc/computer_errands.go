@@ -79,6 +79,10 @@ func computerDefinitions() []settings.Definition {
 		llm.SlotSetting(computer.SettingModel, "computer",
 			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider)."),
+		llm.SlotSetting(computer.SettingRunModel, "workflows",
+			"Which model runs a workflow you taught: auto (the largest local vision model), live, background or cloud "+
+				"(the optional cloud slot: page contents and screenshots go to its provider). Learning a workflow "+
+				"has its own setting."),
 		{Key: computer.SettingAutoApproveCents, Category: "computer", Type: settings.Int, Default: int64(0),
 			Description: "Spend limit in cents: a computer task's checkout at most this much is approved without " +
 				"asking (the progress card says so). 0 = always ask.",
