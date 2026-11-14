@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -122,4 +123,94 @@ func TestTheCommandsSidecarDescribesADaemonsSettings(t *testing.T) {
 		len(agents[0].Secrets) != 1 || agents[0].Secrets[0].Key != "BRIDGE_TOKEN" {
 		t.Fatalf("agents = %+v", agents)
 	}
+}
+
+// channelHost plays jarvisd for a chat channel's daemon: the answers the channel routes give
+// (cc: channel_turns.go), and what the daemon sent to get them.
+type channelHost struct {
+	mu     sync.Mutex
+	bodies map[string][]json.RawMessage
+	report chan json.RawMessage
+}
+
+func (h *channelHost) Answer(_ context.Context, method string, raw json.RawMessage) (any, error) {
+	var p struct {
+		Path string          `json:"path"`
+		JSON json.RawMessage `json:"json"`
+	}
+	_ = json.Unmarshal(raw, &p)
+	if method != "cc.post" {
+		return nil, nil
+	}
+	h.mu.Lock()
+	h.bodies[p.Path] = append(h.bodies[p.Path], p.JSON)
+	h.mu.Unlock()
+	switch p.Path {
+	case "/api/v0/node/channels/testchat/message":
+		switch {
+		case strings.Contains(string(p.JSON), "ext-2"):
+			return map[string]any{"linked": false}, nil
+		case strings.Contains(string(p.JSON), "break"):
+			return map[string]any{"linked": true, "failed": "The model is not running."}, nil
+		}
+		return map[string]any{"linked": true, "reply": "Hello yourself."}, nil
+	case "/api/v0/node/channels/testchat/command":
+		return map[string]any{"text": "Linked.", "private": true}, nil
+	case "/api/v0/node/channels/testchat/outbox":
+		return map[string]any{"messages": []map[string]any{{"id": "r1", "external_user_id": "ext-1", "text": "Bins out"}}}, nil
+	case "/api/v0/node/report":
+		h.report <- p.JSON
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+// A daemon written with the SDK's Channel reaches the channel routes through the agent's pipe
+// with the bodies those routes read, and understands their answers. The host here stands in
+// for jarvisd; the routes themselves are tested in cc.
+func TestAChannelDaemonTalksToJarvisThroughTheAgent(t *testing.T) {
+	h := &channelHost{bodies: map[string][]json.RawMessage{}, report: make(chan json.RawMessage, 1)}
+	startTestDaemon(t, "channel", h)
+	var got map[string]any
+	if err := json.Unmarshal(<-h.report, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"reply":    []any{true, "Hello yourself.", false},
+		"stranger": []any{false, ""},
+		"failed":   []any{true, "The model is not running.", true},
+		"command":  []any{"Linked.", true},
+		"outbox":   []any{[]any{"r1", "ext-1", "Bins out"}},
+	}
+	if g, w := mustJSON(t, got), mustJSON(t, want); g != w {
+		t.Fatalf("the daemon understood\n %s\nwant\n %s", g, w)
+	}
+	sent := func(route string, i int) map[string]any {
+		t.Helper()
+		var m map[string]any
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if err := json.Unmarshal(h.bodies["/api/v0/node/channels/testchat/"+route][i], &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	// "cG5nLWJ5dGVz" is base64 of the photo's bytes.
+	if g, w := mustJSON(t, sent("message", 0)), `{"external_user_id":"ext-1","images":[{"data":"cG5nLWJ5dGVz","mime":"image/png"}],"place":"dm:1","text":"hello"}`; g != w {
+		t.Fatalf("message body = %s", g)
+	}
+	if g, w := mustJSON(t, sent("command", 0)), `{"args":{"code":"ABCD2345"},"external_user_id":"ext-1","name":"link","place":"dm:1"}`; g != w {
+		t.Fatalf("command body = %s", g)
+	}
+	if g, w := mustJSON(t, sent("outbox", 0)), `{"ack":["r0"]}`; g != w {
+		t.Fatalf("outbox body = %s", g)
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
