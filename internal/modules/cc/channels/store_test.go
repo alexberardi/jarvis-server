@@ -3,6 +3,7 @@ package channels_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,12 +74,12 @@ func TestStoreLinkLifecycle(t *testing.T) {
 		t.Fatal("prefs set for a user with no link")
 	}
 
-	pro, _ := s.Proactive(ctx, 8)
+	pro, _ := s.Proactive(ctx, "hh", 8)
 	if len(pro) != 1 {
 		t.Fatalf("proactive %v", pro)
 	}
 	_ = s.Delete(ctx, "hh", "discord", 8)
-	if pro, _ := s.Proactive(ctx, 8); len(pro) != 0 {
+	if pro, _ := s.Proactive(ctx, "hh", 8); len(pro) != 0 {
 		t.Fatal("link survived delete")
 	}
 }
@@ -167,5 +168,61 @@ func TestCodes(t *testing.T) {
 	live := c.New("hh", "discord", 10, "n1")
 	if _, ok, err := c.Redeem(live, "hh", "discord", "guesser"); ok || err != channels.ErrTooManyGuesses {
 		t.Fatalf("guesser got through: %v %v", ok, err)
+	}
+}
+
+// A queued message is handed to its provider's daemon until the daemon says it sent it, only
+// while the account is linked and opted in, and for a day at most.
+func TestOutbox(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	now := time.Date(2026, 11, 14, 5, 0, 0, 0, time.UTC)
+	s.Now = func() time.Time { return now }
+	_ = s.Put(ctx, channels.Link{HouseholdID: "hh", Provider: "discord", ExternalID: "d1", UserID: 7, NodeID: "n1", Proactive: true})
+	_ = s.Enqueue(ctx, "m1", "hh", "discord", "d1", "Reminder: bins")
+	now = now.Add(time.Second)
+	_ = s.Enqueue(ctx, "m2", "hh", "discord", "d1", "Reminder: call the vet")
+	_ = s.Enqueue(ctx, "m3", "hh", "slack", "U1", "not linked on slack")
+	ids := func(ack ...string) string {
+		t.Helper()
+		out, err := s.Outbox(ctx, "hh", "discord", ack)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, o := range out {
+			got = append(got, o.ID+"="+o.Text)
+		}
+		return strings.Join(got, "; ")
+	}
+	if got := ids(); got != "m1=Reminder: bins; m2=Reminder: call the vet" {
+		t.Fatalf("first ask: %q", got)
+	}
+	if got := ids(); !strings.HasPrefix(got, "m1=") {
+		t.Fatalf("an unacknowledged message was not handed over again: %q", got)
+	}
+	if got := ids("m1", "no-such-id"); got != "m2=Reminder: call the vet" {
+		t.Fatalf("after ack: %q", got)
+	}
+	if out, _ := s.Outbox(ctx, "hh", "slack", nil); len(out) != 0 {
+		t.Fatalf("a message for an account that isn't linked: %v", out)
+	}
+	if out, _ := s.Outbox(ctx, "other", "discord", []string{"m2"}); len(out) != 0 || ids() == "" {
+		t.Fatal("another household read or acknowledged this one's message")
+	}
+
+	// Opting out stops what is queued; opting back in within the day lets it through.
+	off, on := false, true
+	_, _ = s.SetPrefs(ctx, "hh", "discord", 7, channels.Prefs{Proactive: &off})
+	if got := ids(); got != "" {
+		t.Fatalf("handed over after opting out: %q", got)
+	}
+	_, _ = s.SetPrefs(ctx, "hh", "discord", 7, channels.Prefs{Proactive: &on})
+	if got := ids(); got == "" {
+		t.Fatal("not handed over after opting back in")
+	}
+	now = now.Add(channels.OutboxKeep + time.Minute)
+	if got := ids(); got != "" {
+		t.Fatalf("a day-old message was still handed over: %q", got)
 	}
 }

@@ -73,7 +73,7 @@ func TestChannelLinkFlowOverTheApp(t *testing.T) {
 	ce.do("PUT", base+"/discord/me", map[string]any{"proactive": true}, bearer("tok-8")).want(404) // no link of their own
 	ce.do("PUT", base+"/slack/me", map[string]any{"proactive": true}, tok).want(404)               // nor theirs on another service
 
-	if pro, _ := ce.m.channelStore.Proactive(ctx, 7); len(pro) != 1 {
+	if pro, _ := ce.m.channelStore.Proactive(ctx, voiceHH, 7); len(pro) != 1 {
 		t.Fatalf("opted-in links %v", pro)
 	}
 	ce.do("DELETE", base+"/discord/me", nil, tok).want(200)

@@ -105,9 +105,35 @@ func TestChannelDaemonTurns(t *testing.T) {
 		t.Fatalf("bad image: %v", bad)
 	}
 
-	// Nothing to send unasked yet.
+	// Reminders: a node's pushed reminder for this user is queued for the channel because they
+	// opted in ("notify on" above); the daemon takes it, and it goes once acknowledged. An alert
+	// is not a reminder, and a reminder for someone who hasn't opted in is not queued.
+	push := func(category string, user int) {
+		t.Helper()
+		ce.do("POST", "/api/v0/node/push-notification", map[string]any{"title": "Reminder", "body": "take the bins out",
+			"category": category, "user_id": user}, node).want(200)
+	}
+	push("alert", 7)
+	push("reminder", 8)
 	if out := post("outbox", nil); len(out["messages"].([]any)) != 0 {
+		t.Fatalf("outbox before any reminder for an opted-in user: %v", out)
+	}
+	push("reminder", 7)
+	out := post("outbox", nil)["messages"].([]any)
+	if len(out) != 1 {
 		t.Fatalf("outbox: %v", out)
+	}
+	m := out[0].(map[string]any)
+	if m["external_user_id"] != "alex#1" || m["text"] != "Reminder: take the bins out" {
+		t.Fatalf("reminder: %v", m)
+	}
+	if left := post("outbox", map[string]any{"ack": []any{m["id"]}})["messages"].([]any); len(left) != 0 {
+		t.Fatalf("after the ack: %v", left)
+	}
+	cmd("alex#1", "notify", map[string]any{"state": "off"})
+	push("reminder", 7)
+	if out := post("outbox", nil); len(out["messages"].([]any)) != 0 {
+		t.Fatalf("a reminder after opting out: %v", out)
 	}
 }
 

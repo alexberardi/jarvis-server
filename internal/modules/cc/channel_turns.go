@@ -298,13 +298,57 @@ func (m *Module) handleChannelCommand(w http.ResponseWriter, r *http.Request, n 
 }
 
 // handleChannelOutbox is the daemon asking what to send unasked, every few seconds; the call
-// is also its sign of life (channelCall). Reminders arrive with K4: until then there is nothing.
+// is also its sign of life (channelCall). The body's "ack" names the messages of the answer
+// before that it sent; the answer is the ones still waiting: {"messages": [{"id",
+// "external_user_id", "text"}]}.
 func (m *Module) handleChannelOutbox(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
-	if _, ok := m.channelCall(w, r, n); !ok {
+	provider, ok := m.channelCall(w, r, n)
+	if !ok {
 		return
 	}
-	if _, _, ok := readBody(w, r, true); !ok {
+	b, _, ok := readBody(w, r, true)
+	if !ok {
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"messages": []any{}})
+	ack, _ := b.strList("ack")
+	if !b.done(w) {
+		return
+	}
+	out, err := m.channelStore.Outbox(r.Context(), n.HouseholdID, provider, ack)
+	if err != nil {
+		m.internalError(w, err)
+		return
+	}
+	msgs := []any{}
+	for _, o := range out {
+		msgs = append(msgs, map[string]any{"id": o.ID, "external_user_id": o.ExternalID, "text": o.Text})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+// channelReminder queues a reminder, alarm or timer a node pushed for a user on every channel
+// they opted into (off by default). It is the one thing Jarvis says on a channel unasked.
+func (m *Module) channelReminder(ctx context.Context, hh string, userID *int64, category, title, text string) {
+	if userID == nil {
+		return
+	}
+	switch category {
+	case "reminder", "alarm", "timer":
+	default:
+		return
+	}
+	links, err := m.channelStore.Proactive(ctx, hh, *userID)
+	if err != nil {
+		m.deps.Log.Warn("channels: a reminder's links not read", "err", err)
+		return
+	}
+	msg := text
+	if title != "" && title != text {
+		msg = title + ": " + text
+	}
+	for _, l := range links {
+		if err := m.channelStore.Enqueue(ctx, uuid4(), hh, l.Provider, l.ExternalID, msg); err != nil {
+			m.deps.Log.Warn("channels: a reminder not queued", "provider", l.Provider, "err", err)
+		}
+	}
 }
