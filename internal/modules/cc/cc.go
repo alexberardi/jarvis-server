@@ -237,6 +237,7 @@ type Module struct {
 	// Chat-service channels (channels_wire.go).
 	channelStore *channels.Store
 	channelCodes *channels.Codes
+	channelConvs channelConversations // channel_turns.go
 
 	// tasks tracks fire-and-forget goroutines so shutdown waits for them (tasks.go, Wait).
 	tasks taskGroup
@@ -457,6 +458,7 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 	// Chat-service channels: the app's routes (docs/CHANNELS.md).
 	m.channelsSetup()
 	m.registerChannels(mux)
+	m.registerChannelNode(mux)
 
 	// Updates (node_updates.py).
 	mux.HandleFunc("GET "+v0+"/releases/latest", m.handleLatestRelease)
