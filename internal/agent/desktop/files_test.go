@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -68,11 +69,15 @@ func TestRunProgramByNameAsksFirst(t *testing.T) {
 		"Downloads/report.csv":   0o755, // a document marked executable is not just a document
 		"Desktop/setup.AppImage": 0o644,
 	})
-	for name, question := range map[string]string{
+	cases := map[string]string{
 		"backup":         "Run backup.sh from Documents?",
-		"report.csv":     "Run report.csv from Downloads?",
 		"setup.AppImage": "Run setup.AppImage from Desktop?",
-	} {
+	}
+	if runtime.GOOS != "windows" {
+		// Windows has no executable mark: there a .csv only ever opens in its app.
+		cases["report.csv"] = "Run report.csv from Downloads?"
+	}
+	for name, question := range cases {
 		b.opened = nil
 		out := openTarget(t, ts, name)
 		if out["status"] != "awaiting_confirmation" || !strings.HasSuffix(out["question"].(string), question[4:]) || len(b.opened) != 0 {
