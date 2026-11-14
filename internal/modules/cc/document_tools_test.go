@@ -270,10 +270,11 @@ func TestWriteDocumentOpenPage(t *testing.T) {
 	}
 }
 
-// No web page open in the browser: the step fails saying so, and writes nothing. No tab in
-// front at all is the same.
+// No web page open in the browser: the step fails saying so, and writes nothing. Only the
+// Jarvis page open is the same: it is the chat, never the page meant (a single other tab that
+// isn't in front is read: TestPickOpenTab).
 func TestWriteDocumentOpenPageMissing(t *testing.T) {
-	none := &fakeDocAgent{tabs: []any{map[string]any{"tab_id": "chrome:3", "current": false}}, page: map[string]any{"success": true}}
+	none := &fakeDocAgent{tabs: []any{map[string]any{"tab_id": "chrome:3", "current": true, "jarvis_page": true}}, page: map[string]any{"success": true}}
 	vn := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = none.call })
 	vn.setComputerControl("on")
 	tn := vn.recTurn(7)

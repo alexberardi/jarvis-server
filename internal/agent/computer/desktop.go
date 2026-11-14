@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
@@ -775,6 +776,41 @@ func (t *Tools) focusedApp(ctx context.Context) (names []string, rec *ax.Recorde
 	return names, rec
 }
 
+// typeLines types text, its line breaks as the key dictation would use in the app with the
+// focus (dictate.LineBreakKey: Enter in an editor, Shift+Enter in a chat, spaces in a terminal
+// or when the app can't be told). The keyboards refuse a line break as a control character
+// (2026-11-13: a multi-paragraph summary failed to type and was retried as one paragraph).
+func (t *Tools) typeLines(ctx context.Context, in input.Input, text string) error {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	text = strings.ReplaceAll(text, "\t", " ")
+	if !strings.Contains(text, "\n") {
+		return in.Type(ctx, text)
+	}
+	names, _ := t.focusedApp(ctx)
+	var keys []string
+	switch dictate.LineBreakKey(names) {
+	case dictate.KeyEnter:
+		keys = []string{"enter"}
+	case dictate.KeyShiftEnter:
+		keys = []string{"shift", "enter"}
+	default:
+		return in.Type(ctx, strings.Join(strings.Fields(text), " "))
+	}
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			if err := in.Keys(ctx, keys); err != nil {
+				return err
+			}
+		}
+		if line != "" {
+			if err := in.Type(ctx, line); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // doDesktop runs one checked action. text is clipboard_read's.
 func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Run, pts [][2]int) (text, code string, err error) {
 	d := t.Desktop
@@ -837,7 +873,7 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 			}
 			break
 		}
-		if err := in.Type(ctx, action.Text); err != nil {
+		if err := t.typeLines(ctx, in, action.Text); err != nil {
 			return inErr(err)
 		}
 	case "press":

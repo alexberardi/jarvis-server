@@ -73,6 +73,11 @@ func lineBreakKey(apps []string) Key {
 	return KeyShiftEnter
 }
 
+// LineBreakKey is lineBreakKey for computer tasks' typing (computer.Tools): the same rule, so
+// a task's multi-line text gets paragraphs in an editor and never sends a chat message or runs
+// a command.
+func LineBreakKey(apps []string) Key { return lineBreakKey(apps) }
+
 // appKeys are an app name's forms to match: the whole, and its last dotted part, each
 // lower-cased to letters and digits ("com.mitchellh.ghostty" → "commitchellhghostty", "ghostty";
 // "WINWORD.EXE" → "winwordexe", "winword").

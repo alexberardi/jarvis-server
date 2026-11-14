@@ -53,6 +53,11 @@ const (
 	maxScreenshots = 2 // screenshots sent per model call
 	fewElements    = 5 // a snapshot with fewer elements gets a screenshot too
 	maxTokens      = 1024
+	// writeMaxTokens is the budget of a task that writes from a source (a summary typed into a
+	// document is up to MaxText characters inside the JSON), and of the second try after an
+	// answer was cut off. Found live 2026-11-13: a typed summary was cut at 1024 tokens, the
+	// cut JSON couldn't be read, and the task failed in its first round.
+	writeMaxTokens = 4096
 	// verifyRounds is the extra budget after a done whose check failed: this many more rounds to
 	// fix it and say done again.
 	verifyRounds = 5
@@ -664,8 +669,12 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		{Role: "user", Content: &llm.Content{Parts: parts}},
 	}
 	var lastErr error
+	budget := maxTokens
+	if t.Source != nil {
+		budget = writeMaxTokens
+	}
 	for attempt := 0; attempt < 2; attempt++ {
-		temp, mt, think := 0.0, maxTokens, 0
+		temp, mt, think := 0.0, budget, 0
 		resp, err := l.LLM.Chat(ctx, llm.ChatRequest{
 			Label: r.pick.Label, Priority: llm.PriorityBackground, Temperature: &temp, MaxTokens: &mt,
 			ReasoningBudget: &think, Messages: msgs,
@@ -678,9 +687,17 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 			return reply, nil
 		}
 		lastErr = err
+		why := "I couldn't read that: " + err.Error()
+		if resp.FinishReason == "length" {
+			// Cut off, not malformed: room for the whole answer on the second try.
+			why, budget = "Your answer was cut off before it ended", writeMaxTokens
+		}
+		if strings.Contains(err.Error(), "text is longer than") {
+			why += ": put longer text in several type actions, in order, each within the limit"
+		}
 		msgs = append(msgs,
 			llm.Message{Role: "assistant", Content: llm.TextContent(resp.Content)},
-			llm.Message{Role: "user", Content: llm.TextContent("I couldn't read that: " + err.Error() +
+			llm.Message{Role: "user", Content: llm.TextContent(why +
 				". Answer with exactly one JSON object in one of the four shapes.")})
 	}
 	return Reply{}, fmt.Errorf("The model's answers couldn't be read (%v).", lastErr)

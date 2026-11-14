@@ -103,3 +103,48 @@ func TestComputerOpenPage(t *testing.T) {
 		t.Fatalf("cloud: ok %v err %v chars %d, want the whole page", ok, err, len([]rune(src.Text)))
 	}
 }
+
+// "The page I have open" is never the Jarvis page (the tab in front when the user asks or
+// approves in the chat; 2026-11-13: Settings was summarized as the Wikipedia article), a page
+// the request names wins, and several candidates with nothing to tell them apart is an error.
+func TestPickOpenTab(t *testing.T) {
+	tab := func(id, url, title string, flags ...string) any {
+		m := map[string]any{"tab_id": id, "url": url, "title": title}
+		for _, f := range flags {
+			m[f] = true
+		}
+		return m
+	}
+	jarvis := tab("j", "http://127.0.0.1:18710/settings", "Jarvis Automation", "current", "active", "jarvis_page")
+	wiki := tab("w", "https://en.wikipedia.org/wiki/First_English_Civil_War", "First English Civil War - Wikipedia")
+	news := tab("n", "https://news.example/today", "Today's news")
+	for _, c := range []struct {
+		name string
+		tabs []any
+		refs []string
+		want any
+	}{
+		{"the Jarvis page is in front: the page named", []any{jarvis, wiki, news}, []string{"Summarize the Wikipedia page into LibreOffice"}, "w"},
+		{"the Jarvis page is in front: the only other page", []any{jarvis, wiki}, []string{"summarize this page"}, "w"},
+		{"the current tab", []any{wiki, tab("n", "https://news.example/today", "Today's news", "current", "active")}, []string{"summarize this page"}, "n"},
+		{"a named page beats the current tab", []any{wiki, tab("n", "https://news.example/today", "Today's news", "current", "active")}, []string{"the wikipedia article"}, "w"},
+		{"by title", []any{jarvis, wiki, news}, []string{"summarize the civil war page"}, "w"},
+		{"an active tab of another window", []any{jarvis, wiki, tab("n", "https://news.example/today", "Today's news", "active")}, []string{"this page"}, "n"},
+		{"can't tell", []any{jarvis, wiki, news}, []string{"summarize this page"}, nil},
+		{"only the Jarvis page", []any{jarvis}, []string{"this page"}, nil},
+		{"not a web page", []any{tab("x", "chrome://settings", "Settings", "current")}, []string{"this page"}, nil},
+	} {
+		got, err := pickOpenTab(c.tabs, c.refs)
+		if got != c.want || (c.want == nil) != (err != nil) {
+			t.Errorf("%s: %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+	if _, err := pickOpenTab([]any{jarvis, wiki, news}, []string{"this page"}); err == nil || !strings.Contains(err.Error(), "first english civil war") {
+		t.Errorf("the error doesn't list the pages: %v", err)
+	}
+	for _, s := range []string{"the Wikipedia page that is currently open in the browser", "the page currently open in the browser"} {
+		if !meansOpenPage(s) {
+			t.Errorf("meansOpenPage(%q) = false", s)
+		}
+	}
+}

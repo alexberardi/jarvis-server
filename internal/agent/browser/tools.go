@@ -546,8 +546,15 @@ func (t *Tools) listTabs(ctx context.Context, args map[string]any) (map[string]a
 		rewriteTabs(res, b.Key)
 		list, _ := res["tabs"].([]any)
 		for _, e := range list {
-			if m, ok := e.(map[string]any); ok && len(bs) > 1 {
-				m["browser"] = b.Browser
+			if m, ok := e.(map[string]any); ok {
+				if len(bs) > 1 {
+					m["browser"] = b.Browser
+				}
+				// A tab of this agent's own server is the chat the user talks to Jarvis in,
+				// never "the page I have open" (2026-11-13: it was summarized as the article).
+				if u, _ := m["url"].(string); t.Origins.Known() && t.Origins.MatchURL(u) {
+					m["jarvis_page"] = true
+				}
 			}
 			tabs = append(tabs, e)
 		}

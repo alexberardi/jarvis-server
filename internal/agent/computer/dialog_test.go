@@ -1,6 +1,11 @@
 package computer
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/agent/ax"
+)
 
 // A task follows its app's own dialog: LibreOffice's Save dialog is a window of Writer's
 // process under another app name ("soffice"). Found live 2026-11-13: every look picked and
@@ -29,5 +34,32 @@ func TestFindWindowFollowsTheAppsFocusedDialog(t *testing.T) {
 	b := DesktopWindow{ID: "5", App: "soffice", W: 500, H: 500, Focused: true}
 	if w, _ := findWindow([]DesktopWindow{b, a}, "notes"); w.ID != "4" {
 		t.Fatalf("pid 0: %+v", w)
+	}
+}
+
+// A task's multi-line text: line breaks are keys chosen by the app with the focus, as in
+// dictation (the keyboards refuse a line break in text; 2026-11-13: a multi-paragraph summary
+// failed with "text has a control character").
+func TestTypeKeepsLineBreaksByApp(t *testing.T) {
+	for _, c := range []struct {
+		app  string
+		want []string
+	}{
+		{"org.gnome.TextEditor", []string{"type Title", "keys enter", "keys enter", "type Body one.", "keys enter", "type Body two."}},
+		{"Slack", []string{"type Title", "keys shift+enter", "keys shift+enter", "type Body one.", "keys shift+enter", "type Body two."}},
+	} {
+		f := newDesktop(t)
+		w := DesktopWindow{ID: "21", App: c.app, PID: 601, Title: "x", X: 100, Y: 200, W: 400, H: 300, Focused: true}
+		f.wins.ws = []DesktopWindow{w}
+		f.ax.focused = &ax.Recorded{Role: "AXTextArea", Name: "Body", PID: w.PID, App: c.app}
+		f.observe(t, c.app)
+		before := len(f.in.posted())
+		res := f.act(t, c.app, map[string]any{"kind": "type", "intent": "x", "text": "Title\r\n\nBody one.\nBody two."})
+		if res["success"] != true {
+			t.Fatalf("%s: %v", c.app, res)
+		}
+		if got := f.in.posted()[before:]; !slices.Equal(got, c.want) {
+			t.Errorf("%s: %q", c.app, got)
+		}
 	}
 }

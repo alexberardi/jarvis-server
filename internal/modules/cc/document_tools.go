@@ -137,7 +137,7 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 	// name as search words, or nothing), unless it gave an address or earlier steps are the material.
 	if meansOpenPage(ref) || (!strings.HasPrefix(ref, "http") && turn.Prior == "" && len(turn.PriorFiles) == 0 &&
 		(meansOpenPage(turn.Utterance) || meansOpenPage(instr))) {
-		src, err := m.openPageSource(ctx, nodeID, turn.Speaker.UserID)
+		src, err := m.openPageSource(ctx, nodeID, turn.Speaker.UserID, ref, turn.Utterance, instr)
 		if err != nil {
 			return recordingRefusal("source_failed", "I couldn't read the source: "+err.Error()), nil
 		}

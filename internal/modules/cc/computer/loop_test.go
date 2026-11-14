@@ -25,6 +25,8 @@ type scriptLLM struct {
 	mu      sync.Mutex
 	answers []string
 	reqs    []llm.ChatRequest
+	// cut: the answers (by call index) that end with finish_reason length.
+	cut map[int]bool
 }
 
 func (s *scriptLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -36,7 +38,11 @@ func (s *scriptLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatRespo
 	}
 	a := s.answers[0]
 	s.answers = s.answers[1:]
-	return &llm.ChatResponse{Content: a}, nil
+	resp := &llm.ChatResponse{Content: a}
+	if s.cut[len(s.reqs)-1] {
+		resp.FinishReason = "length"
+	}
+	return resp, nil
 }
 
 // fakeExec serves the same page (or a queue of pages) and records what it was asked.
@@ -963,5 +969,45 @@ func TestPromptHasToday(t *testing.T) {
 	}
 	if txt := userText(e.llm.reqs[0]); !strings.Contains(txt, "Today is Thursday, November 12, 2026.") {
 		t.Fatalf("no date in the prompt:\n%s", txt)
+	}
+}
+
+// A task that writes from a source has room for a long typed text, and an answer cut off at the
+// budget is asked for again with more (2026-11-13: a typed summary was cut at 1024 tokens, the
+// cut JSON couldn't be read, and the task failed in its first round). Text over a type action's
+// limit is told how to split.
+func TestWritingTasksHaveRoom(t *testing.T) {
+	e := newEnv(t)
+	e.llm.cut = map[int]bool{0: true}
+	e.script(`{"thought": "type it", "actions": [{"kind": "type", "intent": "Type", "text": "The war beg`, doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	if a, b := *e.llm.reqs[0].MaxTokens, *e.llm.reqs[1].MaxTokens; a != maxTokens || b != writeMaxTokens {
+		t.Fatalf("budgets %d then %d", a, b)
+	}
+	if msg := *e.llm.reqs[1].Messages[3].Content.Text; !strings.Contains(msg, "cut off") {
+		t.Fatalf("retry says %q", msg)
+	}
+
+	e = newEnv(t)
+	e.script(doneAnswer)
+	tk := task()
+	tk.Source = &Source{URL: "https://example.org/wiki/Velmora", Text: "Velmora is a town."}
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone || *e.llm.reqs[0].MaxTokens != writeMaxTokens {
+		t.Fatalf("with a source: %+v, budget %d", out, *e.llm.reqs[0].MaxTokens)
+	}
+	if p := e.llm.reqs[0].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "at most 2000 characters") {
+		t.Fatalf("the prompt doesn't give the type limit:\n%s", p)
+	}
+
+	e = newEnv(t)
+	long := strings.Repeat("a", computeruse.MaxText+1)
+	e.script(`{"thought": "t", "actions": [{"kind": "type", "intent": "Type", "text": "`+long+`"}]}`, doneAnswer)
+	if out := e.run(); out.State != StateDone {
+		t.Fatalf("too long: %+v", out)
+	}
+	if msg := *e.llm.reqs[1].Messages[3].Content.Text; !strings.Contains(msg, "several type actions") {
+		t.Fatalf("retry says %q", msg)
 	}
 }
