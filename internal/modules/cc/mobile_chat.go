@@ -310,12 +310,19 @@ func (m *Module) chatDeviceAgents(ctx context.Context, hh string) *pyjson.Object
 // json is Python's json.dumps (", " / ": " separators, ASCII-escaped).
 type sseWriter struct {
 	silent bool // shared orchestration for an unattended routine, with no SSE client
-	w      io.Writer
-	rc     *http.ResponseController
-	dead   bool
+	// collect, when set, receives each event instead of an SSE client (ChatText: a channel's
+	// turn). The fake word-by-word replay is skipped, since no one is watching it.
+	collect func(*pyjson.Object)
+	w       io.Writer
+	rc      *http.ResponseController
+	dead    bool
 }
 
 func (s *sseWriter) send(ev *pyjson.Object) {
+	if s.collect != nil {
+		s.collect(ev)
+		return
+	}
 	if s.dead || s.silent {
 		return
 	}
@@ -594,7 +601,7 @@ func stripToolData(s string) string {
 // the last with its trailing space), pausing chatWordPause after each when there are more
 // than 3 words.
 func (m *Module) replayWords(ctx context.Context, sse *sseWriter, answer string) {
-	if answer == "" || sse.silent {
+	if answer == "" || sse.silent || sse.collect != nil {
 		return
 	}
 	words := strings.Split(answer, " ")
