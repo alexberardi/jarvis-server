@@ -270,6 +270,8 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 			}
 		}
 	}
+	// What the task opens and leaves open (Writer, its Save dialog) isn't the next run's.
+	defer e.CloseLeftoverApps()
 	if c.Setup.Open != "" {
 		closeTab, err := e.OpenTab(cctx, c.Setup.Open)
 		if err != nil {

@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,6 +73,37 @@ type desktop struct {
 	notes   *proc
 	notesSt string          // the notes app's state file (not on the Mac: Notes.app has none)
 	macSeen map[string]bool // mac: the notes there before the case, so the checks see only new ones
+}
+
+// leftoverApps are apps a task may open in the session and leave open (process names): a Writer
+// left with its Save dialog up covered the notes app in the next case, which then failed 0/3
+// (cloud, 2026-11-13).
+var leftoverApps = map[string]bool{"soffice.bin": true, "oosplash": true, "soffice": true}
+
+// CloseLeftoverApps ends the leftoverApps running in the suite's own session (Linux: those
+// whose XDG_RUNTIME_DIR is the session's, so never the user's own LibreOffice), after a run.
+func (e *Env) CloseLeftoverApps() {
+	d := e.desk
+	if d == nil || d.rt == "" || runtime.GOOS != "linux" {
+		return
+	}
+	dirs, _ := filepath.Glob("/proc/[0-9]*")
+	for _, dir := range dirs {
+		comm, err := os.ReadFile(filepath.Join(dir, "comm"))
+		if err != nil || !leftoverApps[strings.TrimSpace(string(comm))] {
+			continue
+		}
+		env, err := os.ReadFile(filepath.Join(dir, "environ"))
+		if err != nil || !slices.Contains(strings.Split(string(env), "\x00"), "XDG_RUNTIME_DIR="+d.rt) {
+			continue
+		}
+		if pid, err := strconv.Atoi(filepath.Base(dir)); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill() //nolint:errcheck // gone already is fine
+			}
+			e.logf("closed a leftover %s (pid %d)", strings.TrimSpace(string(comm)), pid)
+		}
+	}
 }
 
 // sessionAlive is whether the session is still there; the Mac's is the user's own, which the
