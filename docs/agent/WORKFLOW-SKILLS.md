@@ -361,7 +361,12 @@ Chosen as defaults, to change if the user says so: 3 attempts per step; a
 2 second wait before the second look; the run is shown on the workflow page (the errand card
 keeps its summary); the document folders are Documents, Downloads and Desktop.
 
-## Plan: `verified-replay` (awaiting the user's review)
+## Plan: `verified-replay` (approved by the user, 2026-11-13)
+
+The user approved the plan and, for R6 to R9, said in advance that those PRs need no separate
+approval from them ("i don't think you need my approval on any of those"; R8 and R9 "as long
+as you have the proper authorization/authentication on them"). Each of those PRs still states
+its access rule at the top and carries its tier expectations.
 
 ### Shape
 
@@ -413,27 +418,27 @@ keeps its summary); the document folders are Documents, Downloads and Desktop.
   - Acceptance: criterion 7a; a file prerequisite with one match opens, with two asks which.
   - Verify: agent tests on fake folders (one, none, several, a script, a path refused); the
     open-policy guard tests updated, not weakened; a voice pipeline scenario.
-  - **Held for review:** it changes `internal/agent/CLAUDE.md` invariant 9.
+  - Changes `internal/agent/CLAUDE.md` invariant 9 (approved in advance, 2026-11-13).
 - [ ] **R7 — proven, and who may start an unproven run.** The proven version (migration); an
   unproven workflow refuses a schedule, another member, or its owner away from the computer,
   and pauses before its first risky step; a verified run proves it; which edits unprove it;
   the state on the workflow page.
   - Acceptance: criterion 5.
   - Verify: unit and route tests for each refusal and each edit kind; Vitest; screenshots.
-  - **Held for review:** it adds a membership and presence check to starting a run.
+  - Adds a membership and presence check to starting a run (approved in advance, 2026-11-13).
 - [ ] **R8 — the run on the workflow page.** The last run's record (migration), a route to
   read it, and the panel: each prerequisite and step with its state, what was expected and, on
   a failure, what was seen; live while a run goes.
   - Acceptance: a failed run shows where it failed and what it saw; another member can't read it.
   - Verify: route tests with tier expectations; Vitest; `scripts/e2e web`; screenshots, audit.
-  - **Held for review:** a new `/api` route.
+  - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
 - [ ] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
   sends the text and the run's record to the learning model and answers proposed edits; the
   draft with the changed fields marked, saved or discarded like Relearn's.
   - Acceptance: criterion 6.
   - Verify: route tests (owner only, another household 404, nothing stored); a golden of the
     revise prompt; the real model on three kinds of feedback; Vitest; screenshots.
-  - **Held for review:** a new `/api` route.
+  - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
 
 ### Checkpoints
 
