@@ -182,7 +182,7 @@ jobs:
       - name: Install jarvis-command-sdk and the node's commands (sidecar tests)
         run: >-
           python -m pip install
-          "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/e7d3b908a1f577a2b36d26bb4d2bab92e9c9f2bd.tar.gz"
+          "jarvis-command-sdk @ https://github.com/alexberardi/jarvis-command-sdk/archive/5d5d74a6feffb730bd588df5a840fd9a03475b55.tar.gz"
           "jarvis-node-setup @ https://github.com/alexberardi/jarvis-node-setup/archive/550f3a95bbfb5864cb602329b182f8c88d281949.tar.gz"
       # sqlcipher3 and cryptography, as the Python node's venv has them: the Go Pi node's adoption
       # of a Python node reads its encrypted database with them (pinode TestAdoptPythonNode).
