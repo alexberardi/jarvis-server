@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -516,6 +517,12 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
 }
 
+// continuedText: a type action this long followed by another is one long text typed in parts (a
+// type action holds computeruse.MaxText), not a title and a body meant for two fields. Found
+// live 2026-11-13: a summary typed in two parts was sent back four rounds running as "both type
+// into the same field", and nothing was ever typed.
+const continuedText = computeruse.MaxText / 2
+
 // blindSecondType finds a pair of type actions into the same focus: nothing between them (a
 // click, a press, keys, an element's own set) moves it, so both texts land in one field.
 func blindSecondType(actions []computeruse.Action) (a, b *computeruse.Action) {
@@ -527,7 +534,7 @@ func blindSecondType(actions []computeruse.Action) (a, b *computeruse.Action) {
 				last = nil // typed into a named element: the focus is explicit
 				continue
 			}
-			if last != nil {
+			if last != nil && utf8.RuneCountInString(last.Text) < continuedText {
 				return last, &actions[i]
 			}
 			last = &actions[i]

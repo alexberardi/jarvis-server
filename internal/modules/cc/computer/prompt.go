@@ -98,7 +98,7 @@ func renderPrompt(in promptInput) string {
 	if src := in.Source; src != nil {
 		// A desktop task can't read the browser: the page it works from comes with the task (C25).
 		fmt.Fprintf(&b, "\nSource: %s (the text the task works from; write from this text, not from memory. "+
-			"A type action holds at most %d characters: longer text goes in several type actions, in order; "+
+			"A type action holds at most %d characters: keep a summary within one; only text that must be longer goes in several type actions, in order, each as full as it can be; "+
 			"line breaks in its text start new paragraphs)\n", defang(src.URL), computeruse.MaxText)
 		b.WriteString(PageBegin + "\n" + renderText(src.Text) + "\n" + PageEnd + "\n")
 	}

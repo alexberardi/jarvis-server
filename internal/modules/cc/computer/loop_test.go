@@ -1011,3 +1011,21 @@ func TestWritingTasksHaveRoom(t *testing.T) {
 		t.Fatalf("retry says %q", msg)
 	}
 }
+
+// Two type actions with nothing moving the focus are a title and a body meant for two fields,
+// unless the first is a long text: then they are one text typed in parts (2026-11-13: a summary
+// in two parts was sent back four rounds running and never typed).
+func TestBlindSecondTypeLetsALongTextContinue(t *testing.T) {
+	ty := func(n int) computeruse.Action {
+		return computeruse.Action{Kind: "type", Intent: "Type", Text: strings.Repeat("a", n)}
+	}
+	if a, b := blindSecondType([]computeruse.Action{ty(12), ty(200)}); a == nil || b == nil {
+		t.Fatal("a title then a body weren't caught")
+	}
+	if a, _ := blindSecondType([]computeruse.Action{ty(1900), ty(700)}); a != nil {
+		t.Fatal("a long text typed in two parts was sent back")
+	}
+	if a, _ := blindSecondType([]computeruse.Action{ty(1900), ty(1900), ty(300)}); a != nil {
+		t.Fatal("three parts were sent back")
+	}
+}
