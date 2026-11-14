@@ -279,9 +279,13 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
     daemon's request crosses the agent as one line of at most 16 MiB). The agent gives a
     `message` post three and a half minutes. Not yet done: a turn through a real sidecar daemon
     against a sandbox jarvisd, which waits for the SDK helper (S1).
-- [ ] **K4 — reminders.** The outbox, filled from the node push handler for users who opted in
+- [x] **K4 — reminders.** The outbox, filled from the node push handler for users who opted in
   (off by default), following the push as #649 did (a withheld reminder is not sent).
   - Verify: route tests; nothing queued without opt-in.
+  - Built (in review): `cc_channel_outbox`; a node's pushed reminder, alarm or timer for a user
+    is queued for each channel they opted into; the daemon's `outbox` call acknowledges what it
+    sent and gets what waits. A message is handed over only while its account is linked and
+    opted in, and is dropped after a day.
 - [ ] **S1 — the SDK's channel helper** (`jarvis_command_sdk.channel`, 0.18.0): async calls for
   the three routes that run the blocking `cc_post` in a thread, and the dataclasses a package
   maps its service's events to. Then the Pantry is redeployed (`--no-cache`) so the Forge has it.
