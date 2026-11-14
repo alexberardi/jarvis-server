@@ -38,6 +38,10 @@ type Workflow struct {
 	Success  SuccessCheck
 	Skill    Skill
 	Version  int
+	// OwnerID is who taught it; Proven whether a run of it has verified (an unproven one only
+	// its owner starts, themselves).
+	OwnerID int64
+	Proven  bool
 }
 
 // WorkflowParam is a value the workflow asks for at replay ("which month?").
@@ -108,6 +112,8 @@ type WorkflowStore interface {
 	// Heal stores heals in workflow id, as long as it is still at version (an edit since wins),
 	// and bumps its version.
 	Heal(ctx context.Context, id string, version int, heals []Heal) error
+	// Proved records that a run of workflow id at version finished with its result verified.
+	Proved(ctx context.Context, id string, version int) error
 }
 
 // target is the step's computer target.

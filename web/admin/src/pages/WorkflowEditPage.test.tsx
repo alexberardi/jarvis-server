@@ -362,4 +362,19 @@ describe('WorkflowEditPage', () => {
     expect(screen.getByText('Creative.')).toBeInTheDocument()
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
   })
+
+  it('says a new workflow needs its first run, to its owner and to others', async () => {
+    api.getWorkflow.mockResolvedValue(bank({ proven: false }))
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.getByText('This workflow hasn’t had its first run')).toBeInTheDocument()
+    expect(screen.getByText(/Run it once from Workflows while you watch/)).toBeInTheDocument()
+  })
+
+  it('says nothing about a first run once the workflow has proved itself', async () => {
+    api.getWorkflow.mockResolvedValue(bank({ proven: true }))
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.queryByText('This workflow hasn’t had its first run')).not.toBeInTheDocument()
+  })
 })

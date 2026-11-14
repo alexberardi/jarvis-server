@@ -78,17 +78,31 @@ func (t taughtWorkflows) Heal(ctx context.Context, id string, version int, heals
 		el := h.Element
 		w.Steps[h.Step].Element = &el
 	}
-	got, err := t.m.updateWorkflow(ctx, *w)
+	got, err := t.m.storeWorkflow(ctx, *w, true)
 	if err == nil {
 		t.m.deps.Log.Info("cc: workflow healed", "workflow", id, "steps", len(heals), "version", got.Version)
 	}
 	return err
 }
 
+// Proved marks workflow id proven, as long as it is still at version: an edit since the run
+// started is another workflow, and waits for its own run.
+func (t taughtWorkflows) Proved(ctx context.Context, id string, version int) error {
+	res, err := t.m.deps.DB.Write.ExecContext(ctx, `UPDATE cc_taught_workflows SET proven = 1 WHERE id = ? AND version = ?`, id, version)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errors.New("the workflow changed since the run started")
+	}
+	t.m.deps.Log.Info("cc: workflow proven", "workflow", id, "version", version)
+	return nil
+}
+
 // replay is the workflow as the replay runs it.
 func (w TaughtWorkflow) replay() computer.Workflow {
 	return computer.Workflow{ID: w.ID, Name: w.Name, Slug: w.Slug, Triggers: w.Triggers, Params: w.Params,
-		Steps: w.Steps, Success: w.Success, Skill: w.Skill, Version: w.Version}
+		Steps: w.Steps, Success: w.Success, Skill: w.Skill, Version: w.Version, OwnerID: w.OwnerID, Proven: w.Proven}
 }
 
 // replayRefusal is why a replay can't start: a message for the user, and the HTTP status the
@@ -106,6 +120,11 @@ func (m *Module) startReplay(ctx context.Context, hh string, uid *int64, nodeID 
 		return "", &replayRefusal{"missing_params", fmt.Sprintf("Which %s should I run “%s” for?", strings.Join(miss, " and "), wf.Name),
 			http.StatusBadRequest}
 	}
+	// An unproven workflow's first run is its owner's to start and watch.
+	watched := uid != nil && *uid == wf.OwnerID
+	if !wf.Proven && !watched {
+		return "", &replayRefusal{"unproven", errands.UnprovenRefusal(wf.Name), http.StatusConflict}
+	}
 	if ids, off := m.computerTargets(ctx, hh); len(ids) == 0 {
 		return "", &replayRefusal{"computer_control_off", firstNonEmptyStr(off, "There's no computer with computer control on."), http.StatusConflict}
 	}
@@ -122,7 +141,7 @@ func (m *Module) startReplay(ctx context.Context, hh string, uid *int64, nodeID 
 		goal += " (" + strings.Join(vals, ", ") + ")"
 	}
 	id, err := s.Start(ctx, errands.StartRequest{HouseholdID: hh, UserID: uid, NodeID: nodeID, Goal: goal,
-		Steps: []errands.Step{errands.ReplayStep(wf, params)}})
+		Steps: []errands.Step{errands.ReplayStep(wf, params, watched)}})
 	switch {
 	case errors.Is(err, errands.ErrDisabled):
 		return "", &replayRefusal{"errands_disabled", "Errands are turned off for this household.", http.StatusConflict}

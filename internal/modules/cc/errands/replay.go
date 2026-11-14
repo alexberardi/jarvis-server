@@ -26,7 +26,16 @@ const (
 	// ArgTaughtWorkflow and ArgParams are a computer_task step's replay arguments.
 	ArgTaughtWorkflow = "taught_workflow_id"
 	ArgParams         = "params"
+	// ArgWatched marks a replay its workflow's owner started themselves (ReplayStep): the only
+	// kind an unproven workflow runs as. A planned or scheduled step doesn't carry it.
+	ArgWatched = "__watched"
 )
+
+// UnprovenRefusal is why a workflow that has never had a verified run won't start this way.
+func UnprovenRefusal(name string) string {
+	return fmt.Sprintf("“%s” hasn't had its first watched run yet. Whoever taught it opens it in Workflows and presses "+
+		"Run once; after a run that checks out, it can run on a schedule or by request.", name)
+}
 
 // TaughtWorkflows are the household's saved workflows.
 type TaughtWorkflows interface {
@@ -106,6 +115,11 @@ func (s *Service) taughtStep(ctx context.Context, rc *runCtx, args *pyjson.Objec
 			return nil, nil, fmt.Sprintf("More than one saved workflow matches %q: %s.", name, workflowNames(m))
 		}
 	}
+	// An unproven workflow runs only as its owner's own, watched run: not from a plan or a
+	// schedule, whoever's it is.
+	if !wf.Proven && !(truthyStr(args, ArgWatched) != "" && rc.userID != nil && *rc.userID == wf.OwnerID) {
+		return nil, nil, UnprovenRefusal(wf.Name)
+	}
 	params := ParamValues(argValue(args, ArgParams))
 	if miss := wf.Missing(params); len(miss) > 0 {
 		return nil, nil, fmt.Sprintf("I need the %s to run %q.", strings.Join(miss, " and "), wf.Name)
@@ -182,9 +196,14 @@ func scalarText(v any) string {
 }
 
 // ReplayStep is the computer_task step that replays a saved workflow with params.
-func ReplayStep(wf computer.Workflow, params map[string]string) Step {
+// watched: its owner started this run themselves (the Run button, their own request), which is
+// what an unproven workflow needs.
+func ReplayStep(wf computer.Workflow, params map[string]string, watched bool) Step {
 	args := pyjson.NewObject()
 	args.Set(ArgTaughtWorkflow, wf.ID)
+	if watched {
+		args.Set(ArgWatched, "yes")
+	}
 	p := pyjson.NewObject()
 	for _, prm := range wf.Params {
 		if v, ok := params[prm.Name]; ok {

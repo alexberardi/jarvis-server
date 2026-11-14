@@ -103,6 +103,8 @@ export interface TaughtWorkflow {
   success: SuccessCheck
   skill?: Skill
   shared: boolean
+  /** A run of it has finished with its result checked. Until then only its owner starts it. */
+  proven?: boolean
   recording_id?: string
   version: number
   created_at: string

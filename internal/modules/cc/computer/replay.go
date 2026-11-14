@@ -500,6 +500,17 @@ func (l *Loop) replayDone(ctx context.Context, r *round, wf *Workflow, steps []W
 		}
 		did += note
 	}
+	if !vouched && !wf.Proven && l.Workflows != nil {
+		// The run checked its own result: the workflow has proved itself. The user's word alone
+		// doesn't count: the next run is still theirs to watch.
+		version := wf.Version
+		if len(heals) > 0 {
+			version++ // the heal just stored it again
+		}
+		if err := l.Workflows.Proved(ctx, wf.ID, version); err == nil {
+			did += " It has now run once with its result checked, so it can run on a schedule or by request."
+		}
+	}
 	if vouched {
 		return Outcome{State: StateDone, Summary: did + " You confirmed the result; I couldn't check it myself: " +
 			strings.TrimSuffix(res.Why, ".") + ".", Verify: &check, Healed: heals}

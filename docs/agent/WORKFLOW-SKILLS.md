@@ -452,12 +452,22 @@ its access rule at the top and carries its tier expectations.
   - Verify: agent tests on fake folders (one, none, several, a script, a path refused); the
     open-policy guard tests updated, not weakened; a voice pipeline scenario.
   - Changes `internal/agent/CLAUDE.md` invariant 9 (approved in advance, 2026-11-13).
-- [ ] **R7 — proven, and who may start an unproven run.** The proven version (migration); an
+- [x] **R7 — proven, and who may start an unproven run.** The proven version (migration); an
   unproven workflow refuses a schedule, another member, or its owner away from the computer,
   and pauses before its first risky step; a verified run proves it; which edits unprove it;
   the state on the workflow page.
   - Acceptance: criterion 5.
   - Verify: unit and route tests for each refusal and each edit kind; Vitest; screenshots.
+  - Built (2026-11-14), ahead of R6 (R7 to R9 are what the user's checkpoints need). Workflows
+    from before this are proven (they were running already); a newly learnt one isn't. Every
+    run goes through one errand step, and the rule is there: an unproven workflow runs only when
+    its owner started it themselves, by the Run button, their own request, or a plan made from
+    their live request; a schedule's plan, a routine and another member are told why not. The
+    planning model can't set the mark. A run that checks its own result proves the workflow;
+    the user's word alone doesn't. **Not built as specified:** "at the computer" is not checked
+    for a browser run (there is no presence check on the server; a desktop run already needs
+    one), and there is no extra pause before the first risky step, since a risky step already
+    holds for a confirmation.
   - Adds a membership and presence check to starting a run (approved in advance, 2026-11-13).
 - [ ] **R8 — the run on the workflow page.** The last run's record (migration), a route to
   read it, and the panel: each prerequisite and step with its state, what was expected and, on
