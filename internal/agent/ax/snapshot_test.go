@@ -318,3 +318,39 @@ func code(err error) string {
 	}
 	return ""
 }
+
+// Peek reads the same tree without keeping refs or moving the generation, and a name is a label
+// only: an AXLink or a cell named by its AXValue has no name, and no value comes back.
+func TestPeekKeepsNoRefsAndReadsLabelsOnly(t *testing.T) {
+	tr := &tree{}
+	build := func() axNode {
+		return tr.n("AXWindow", nil,
+			tr.n("AXButton", map[string]string{"AXTitle": "OK"}),
+			tr.n("AXCell", map[string]string{"AXValue": "1,234.56"}),
+			tr.n("AXLink", map[string]string{"AXValue": "Help"}),
+			tr.n("AXTextField", map[string]string{"AXTitle": "Search", "AXValue": "milk"}),
+		)
+	}
+	var table refTable
+	s, err := table.snapshot(context.Background(), build(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	els, err := peek(context.Background(), build(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range els {
+		got = append(got, e.Role+":"+e.Name+":"+e.Value)
+	}
+	if want := "AXButton:OK: AXCell:: AXLink:: AXTextField:Search:"; strings.Join(got, " ") != want {
+		t.Fatalf("peek = %v, want %s", got, want)
+	}
+	if table.gen != s.Gen || len(table.nodes) != 4 {
+		t.Fatalf("peek moved the table: gen %d (was %d), %d refs", table.gen, s.Gen, len(table.nodes))
+	}
+	if _, err := table.element(s.Gen, "a1"); err != nil {
+		t.Fatalf("the earlier snapshot's ref is stale after a peek: %v", err)
+	}
+}

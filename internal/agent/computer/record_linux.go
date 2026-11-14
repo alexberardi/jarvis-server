@@ -35,10 +35,10 @@ func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Sourc
 	return withCapture(newX11Source(dir, &x11.Display{}, x11Access{ElementAt: atspi.ElementAt, Focused: atspi.Focused}, keyframer(shots), log))
 }
 
-// withCapture gives a recording computer control's window list and AT-SPI tree, for its start
-// event and each action's result.
+// withCapture gives a recording computer control's window list and what AT-SPI shows on screen
+// (read without refs), for its start event and each action's result.
 func withCapture(s *DesktopSource) *DesktopSource {
-	s.Platform.Windows, s.Platform.Elements = NativeWindows().List, atspi.Snapshot
+	s.Platform.Windows, s.Platform.Elements = NativeWindows().List, atspi.Peek
 	return s
 }
 

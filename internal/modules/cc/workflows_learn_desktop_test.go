@@ -386,4 +386,16 @@ func TestCaptureEventsAreNotSteps(t *testing.T) {
 	if err != nil || len(recs) != 1 || recs[0].Steps != 3 {
 		t.Fatalf("steps = %+v (%v), want 3", recs, err)
 	}
+	// A trace holding something that isn't an event still lists: only objects have a kind.
+	if _, err := e.m.createRecording(ctx, Recording{HouseholdID: "hh-1", OwnerID: 1, NodeID: "n", Mode: "desktop",
+		Trace: json.RawMessage(`["stray", 3, null, {"kind":"click"}, {"kind":"result","of":1}]`)}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err = e.m.listRecordings(ctx, "hh-1", 1)
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("a trace with a bare string breaks the list: %d recordings, %v", len(recs), err)
+	}
+	if n := max(recs[0].Steps, recs[1].Steps); n != 4 {
+		t.Fatalf("the odd trace counts %d steps, want 4 (everything in it but the result)", n)
+	}
 }

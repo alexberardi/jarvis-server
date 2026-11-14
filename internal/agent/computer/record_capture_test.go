@@ -19,16 +19,23 @@ type fakeScreen struct {
 	windows []DesktopWindow
 	tree    []computeruse.SnapElement
 	treeErr error
-	pid     int // whose tree to give (0: the first window's)
+	pid     int      // whose tree to give (0: the first window's)
+	calls   []string // what the recorder asked, in order
 }
 
 func (f *fakeScreen) wire(p *DeskPlatform) {
 	p.Windows = func(context.Context) ([]DesktopWindow, error) { return f.windows, nil }
-	p.Elements = func(_ context.Context, pid, _ int) (computeruse.Snapshot, error) {
+	p.Elements = func(_ context.Context, pid, _ int) ([]computeruse.SnapElement, error) {
+		f.calls = append(f.calls, "tree")
 		if want := cmp.Or(f.pid, f.windows[0].PID); pid != want {
-			return computeruse.Snapshot{}, fmt.Errorf("asked for pid %d, not %d", pid, want)
+			return nil, fmt.Errorf("asked for pid %d, not %d", pid, want)
 		}
-		return computeruse.Snapshot{Elements: f.tree}, f.treeErr
+		return f.tree, f.treeErr
+	}
+	at := p.ElementAt
+	p.ElementAt = func(x, y float64) (*ax.Recorded, error) {
+		f.calls = append(f.calls, "element")
+		return at(x, y)
 	}
 }
 
@@ -133,6 +140,69 @@ func TestResultIsFromTheActedOnApp(t *testing.T) {
 	}
 }
 
+// A click's own element is looked up before any tree is read: the click has already landed, and
+// a read ahead of it would find the screen after it. A click followed at once by another gets
+// no result of its own; the next one covers both.
+func TestQuickClicksAreNotDelayedByAResult(t *testing.T) {
+	e, scr := captureEnv(t)
+	e.rec.begin()
+	e.desk.at[[2]float64{10, 10}] = newNoteBtn
+	e.rec.handle(DeskInput{Kind: InClick, X: 10, Y: 10, At: e.desk.tick(time.Second)})
+	scr.calls = nil
+	scr.tree = els("button:New Note", "list:Notes", "text:Title")
+	e.rec.handle(DeskInput{Kind: InClick, X: 10, Y: 10, At: e.desk.tick(50 * time.Millisecond)})
+	if got := strings.Join(scr.calls, " "); got != "element" {
+		t.Fatalf("the second click asked %q; want only its own element", got)
+	}
+	e.rec.finish()
+	evs := e.events(t)[1:]
+	if got := summary(evs); got != "click New Note; click New Note; result" {
+		t.Fatalf("events: %s", got)
+	}
+	if got, want := resultLine(evs[2]), `of 2 in "All Notes" +[text:Title] -[]`; got != want {
+		t.Fatalf("result: %s, want %s", got, want)
+	}
+}
+
+// A second element with the same role and name counts as appeared, and one of two going counts
+// as disappeared.
+func TestResultCountsSameNamedElements(t *testing.T) {
+	e, scr := captureEnv(t)
+	scr.tree = els("button:Delete", "button:Save")
+	e.rec.begin()
+	e.rec.handle(DeskInput{Kind: InClick, NoPoint: true, At: e.desk.tick(time.Second)})
+	scr.tree = els("button:Delete", "button:Save", "button:Delete")
+	e.rec.result()
+	e.rec.handle(DeskInput{Kind: InClick, NoPoint: true, At: e.desk.tick(time.Second)})
+	scr.tree = els("button:Delete", "button:Save")
+	e.rec.result()
+	evs := e.events(t)
+	if got, want := resultLine(evs[2]), `of 1 in "All Notes" +[button:Delete] -[]`; got != want {
+		t.Fatalf("a second Delete: %s, want %s", got, want)
+	}
+	if got, want := resultLine(evs[4]), `of 2 in "All Notes" +[] -[button:Delete]`; got != want {
+		t.Fatalf("one Delete gone: %s, want %s", got, want)
+	}
+}
+
+// A read that hit the cap can't say what disappeared: it may only have moved past the cap.
+func TestCappedReadReportsNothingGone(t *testing.T) {
+	e, scr := captureEnv(t)
+	var rows []string
+	for i := range captureTree {
+		rows = append(rows, fmt.Sprintf("cell:row %d", i))
+	}
+	scr.tree = els(rows...)
+	e.rec.begin()
+	e.rec.handle(DeskInput{Kind: InClick, NoPoint: true, At: e.desk.tick(time.Second)})
+	scr.tree = els(append([]string{"cell:inserted"}, rows[:captureTree-1]...)...)
+	e.rec.finish()
+	evs := e.events(t)
+	if got, want := resultLine(evs[len(evs)-1]), `of 1 in "All Notes" +[cell:inserted] -[]`; got != want {
+		t.Fatalf("result: %s, want %s", got, want)
+	}
+}
+
 // Without a tree (an app off the accessibility bus) the result still says which window is in front.
 func TestResultWithoutATree(t *testing.T) {
 	e, scr := captureEnv(t)
@@ -161,6 +231,7 @@ func TestResultsAreCapped(t *testing.T) {
 		}
 		scr.tree = els(tree...)
 		e.rec.handle(DeskInput{Kind: InClick, NoPoint: true, At: e.desk.tick(time.Second)})
+		e.rec.result() // as the settle wait does
 	}
 	e.rec.finish()
 	total, got := 0, 0

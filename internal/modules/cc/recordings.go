@@ -109,10 +109,13 @@ func (m *Module) createRecording(ctx context.Context, rec Recording) (Recording,
 	return rec, err
 }
 
-// recordingColumns without the trace (lists), and with it (one recording).
+// recordingColumns without the trace (lists), and with it (one recording). The step count reads
+// a kind only from an object: json_extract on a bare string in the array is "malformed JSON",
+// which would fail the whole list.
 const recordingColumns = `id, household_id, owner_id, node_id, mode, narration, keyframes, created_at, expires_at,
 	CASE json_type(trace) WHEN 'array' THEN (SELECT count(*) FROM json_each(trace)
-		WHERE coalesce(json_extract(value, '$.kind'), '') NOT IN ('start', 'result')) ELSE 0 END`
+		WHERE CASE json_each.type WHEN 'object' THEN coalesce(json_extract(json_each.value, '$.kind'), '') ELSE '' END
+			NOT IN ('start', 'result')) ELSE 0 END`
 
 func scanRecording(sc interface{ Scan(...any) error }, trace bool) (Recording, error) {
 	var (

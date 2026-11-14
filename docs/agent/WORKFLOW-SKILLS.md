@@ -278,18 +278,23 @@ is theirs.
   - Acceptance: a recording on this box holds a `start` and a `result` per action, under the cap.
   - Verify: `record_desktop_test.go` with a fake platform; live recordings on this box (Wayland),
     an X11 session and the Mac test host.
-  - Built (2026-11-13), live recordings still to do. A result is read when the screen has been
-    quiet 1.5 s after a click or key, or when the next input arrives, or at stop. A live recording on
-    this box (sway, 2026-11-13) held the start and a result after every click and Enter. A live
-    recording on the MBP (macOS 26) found results read from another app's window (the window
-    list put it first); a result is now read from the app the action was in, and the rerun
-    showed real diffs in Finder and Firefox. Still open there: a click with no window of its own
-    (the Dock) falls back to the first listed window, which on that Mac was not the one in use. It names the
-    front window and at most 40 elements each way (role and name, 80 characters, never a value),
-    from the first 1000 elements of that window's tree; all results of one recording take at
-    most 256 KiB, after which only the actions are kept. Read-only check on this box: the window
-    list and trees are read in about 20 ms; an app off the accessibility bus (a terminal) gives
-    a result with the window only.
+  - Built (2026-11-13). A result is read when there has been no input for 1.5 s after a click or
+    key, or after typing or a scroll that comes sooner, or at stop. A click or key followed at
+    once by another gets none (the next result covers both): the new action's own element and
+    keyframe are read first, never behind a tree read. It names the window of the app the action
+    was in and at most 40 elements each way (role and label, 80 characters), from the first 1000
+    elements on screen in that window; all results of one recording take at most 256 KiB, after
+    which only the actions are kept.
+  - The tree is read with `ax.Peek` / `atspi.Peek`, not a snapshot: no refs are kept and the ref
+    generation doesn't move, so computer control and voice can act by ref while a recording is
+    on. A name is a label only (on macOS never an `AXValue`, so a cell's contents stay out), and
+    on Linux only what is showing is read. Elements are counted, so a second "Delete" shows as
+    appeared; a read that hit the cap reports nothing as disappeared.
+  - Live: sway on this box (start, and a result after every click and Enter); the MBP (macOS 26),
+    where the first run found results read from another app's window, since fixed and rerun; X11
+    only in a headless server with no window manager, which lists no windows. Those runs were
+    before the review fixes above. Still open on the Mac: a click with no window of its own (the
+    Dock) falls back to the first listed window, which there was not the one in use.
 - [ ] **C4 — learn from the capture.** Expectations from `result`, prerequisites from `start`
   limited to what the steps touch, `{param}` where the recorded name is one.
   - Acceptance: criteria 1 (captured path) and 1a.

@@ -39,7 +39,7 @@ var (
 func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Source {
 	return &DesktopSource{Dir: dir, Tap: macTap, Log: log,
 		Platform: DeskPlatform{ElementAt: ax.RecordedAt, Focused: ax.FocusedElement, Keyframe: keyframer(shots),
-			Windows: macWindows{}.List, Elements: ax.Snapshot}}
+			Windows: macWindows{}.List, Elements: ax.Peek}}
 }
 
 const (
