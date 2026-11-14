@@ -118,5 +118,64 @@
     }
    }
   ]
+ },
+ {
+  "name": "desktop: open a file by its name",
+  "tools": "../toolsets/desktop.json",
+  "home": "none",
+  "turns": [
+   {
+    "say": "open my holiday plans file on my computer",
+    "expect": {
+     "tool": "desktop_open",
+     "args_match": {
+      "target": "(?i)holiday"
+     },
+     "not_call": {
+      "tool": "desktop_open",
+      "args_match": {
+       "target": "[/\\\\\\\\]|^~"
+      }
+     }
+    }
+   }
+  ],
+  "tags": [
+   "known-bug"
+  ],
+  "note": "qwen3.5-9b 2026-11-14: 4/6. desktop_open's description does not mention files: saying so made it 6/6 but cost the window commands (move to a workspace 9/9 -> 4/10)."
+ },
+ {
+  "name": "desktop: run a script by its name, and ask the confirmation the tool returns",
+  "tools": "../toolsets/desktop.json",
+  "home": "none",
+  "results": {
+   "desktop_open": {
+    "success": false,
+    "done": false,
+    "status": "awaiting_confirmation",
+    "confirmation_id": "confirm-1",
+    "question": "Run backup.sh from Documents?",
+    "next": "Nothing has been done yet. Ask the user exactly this question (use request_validation with the options [\"Yes\", \"Cancel\"]), then call desktop_confirm with this confirmation_id and the user's own words. Never answer it yourself."
+   }
+  },
+  "turns": [
+   {
+    "say": "run my backup script on my computer",
+    "expect": {
+     "tool": "desktop_open",
+     "args_match": {
+      "target": "(?i)backup"
+     },
+     "not_tool": [
+      "desktop_confirm"
+     ]
+    }
+   }
+  ],
+  "tags": [
+   "known-bug"
+  ],
+  "note": "qwen3.5-9b 2026-11-14: 4/6. desktop_open's description does not mention files: saying so made it 6/6 but cost the window commands (move to a workspace 9/9 -> 4/10)."
  }
 ]
