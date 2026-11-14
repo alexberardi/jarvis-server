@@ -1,6 +1,7 @@
 package computer
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/ax"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
@@ -17,13 +19,14 @@ type fakeScreen struct {
 	windows []DesktopWindow
 	tree    []computeruse.SnapElement
 	treeErr error
+	pid     int // whose tree to give (0: the first window's)
 }
 
 func (f *fakeScreen) wire(p *DeskPlatform) {
 	p.Windows = func(context.Context) ([]DesktopWindow, error) { return f.windows, nil }
 	p.Elements = func(_ context.Context, pid, _ int) (computeruse.Snapshot, error) {
-		if pid != f.windows[0].PID {
-			return computeruse.Snapshot{}, fmt.Errorf("asked for pid %d, not the front window's", pid)
+		if want := cmp.Or(f.pid, f.windows[0].PID); pid != want {
+			return computeruse.Snapshot{}, fmt.Errorf("asked for pid %d, not %d", pid, want)
 		}
 		return computeruse.Snapshot{Elements: f.tree}, f.treeErr
 	}
@@ -53,9 +56,9 @@ func captureEnv(t *testing.T) (*deskEnv, *fakeScreen) {
 	e := newDeskEnv(t)
 	scr := &fakeScreen{
 		windows: []DesktopWindow{
-			{App: "Notes", PID: 42, Title: "All Notes"},
-			{App: "Dock", PID: 1, Title: "Dock", Layer: 20},
-			{App: "Files", PID: 43, Title: "budget-2026-09.xlsx"},
+			{App: "Notes", PID: 42, Title: "All Notes", W: 800, H: 600},
+			{App: "Dock", PID: 1, Title: "Dock", Layer: 20, W: 800, H: 60},
+			{App: "Files", PID: 43, Title: "budget-2026-09.xlsx", W: 800, H: 600},
 		},
 		tree: els("button:New Note", "list:Notes", "button:"),
 	}
@@ -105,6 +108,28 @@ func TestResultFollowsEachAction(t *testing.T) {
 	}
 	if got, want := resultLine(evs[4]), `of 3 in "New Note" +[button:Done] -[]`; got != want {
 		t.Fatalf("key's result: %s, want %s", got, want)
+	}
+}
+
+// A result is read from the app the action was in, whatever the window list puts first (a
+// Mac listed another app's window ahead of the one in use).
+func TestResultIsFromTheActedOnApp(t *testing.T) {
+	e, scr := captureEnv(t)
+	e.rec.begin()
+	files := &ax.Recorded{Role: "AXCell", Name: "budget", PID: 43, App: "com.apple.finder"}
+	e.desk.at[[2]float64{5, 5}] = files
+	scr.pid = 43
+	scr.tree = els("cell:budget", "button:Open")
+	e.rec.handle(DeskInput{Kind: InClick, X: 5, Y: 5, At: e.desk.tick(time.Second)})
+	e.rec.finish()
+	evs := e.events(t)
+	last := evs[len(evs)-1]
+	if last.Kind != KindResult || last.App != "Files" || last.Window.Title != "budget-2026-09.xlsx" {
+		t.Fatalf("result read from %+v, want the Files window", last)
+	}
+	// The window before was another app's: its elements aren't reported as gone.
+	if got, want := resultLine(last), `of 1 in "budget-2026-09.xlsx" +[cell:budget button:Open] -[]`; got != want {
+		t.Fatalf("result: %s, want %s", got, want)
 	}
 }
 
@@ -167,7 +192,7 @@ func TestResultsAreCapped(t *testing.T) {
 // The worker reads the result once the screen has been quiet, without waiting for more input.
 func TestResultAfterTheSettleWait(t *testing.T) {
 	desk := newFakeDesk()
-	scr := &fakeScreen{windows: []DesktopWindow{{App: "Notes", PID: 42, Title: "All Notes"}}, tree: els("button:New Note")}
+	scr := &fakeScreen{windows: []DesktopWindow{{App: "Notes", PID: 42, Title: "All Notes", W: 800, H: 600}}, tree: els("button:New Note")}
 	p := desk.platform()
 	scr.wire(&p)
 	var send func(DeskInput)

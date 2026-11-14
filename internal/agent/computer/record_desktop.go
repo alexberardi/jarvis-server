@@ -378,6 +378,8 @@ type deskRecorder struct {
 	context  string                 // DeskPlatform.Context's answer at the start
 	at       time.Time              // the input being handled: keyframes are throttled on its time
 	owed     int64                  // the click or key whose result hasn't been read yet (0: none)
+	pid      int                    // the process the last click or key was in (0: not known)
+	seenPID  int                    // the process whose window seen was read from
 	seen     map[ResultElement]bool // the front window's elements at the last read
 	results  int                    // bytes of results emitted so far
 	quiet    bool                   // flushing for a click that takes the keyframe itself
@@ -411,23 +413,39 @@ func (d *deskRecorder) begin() {
 	}
 	e := DesktopEvent{RecordingID: d.id, Kind: KindStart, TS: d.now().UnixMilli()}
 	for _, w := range ws {
-		if w.Layer != 0 || len(e.Windows) == startWindows {
+		if !w.normal() || len(e.Windows) == startWindows {
 			continue
 		}
-		e.Windows = append(e.Windows, StartWindow{App: w.App, Title: clip(w.Title), Focused: len(e.Windows) == 0})
+		e.Windows = append(e.Windows, StartWindow{App: w.App, Title: clip(w.Title)})
+	}
+	if f, ok := findWindow(ws, ""); ok {
+		for i, w := range e.Windows {
+			if w.App == f.App && w.Title == clip(f.Title) {
+				e.Windows[i].Focused = true
+				break
+			}
+		}
 	}
 	if raw, err := json.Marshal(e); err == nil {
 		d.emit(raw)
 	}
-	_, d.seen, _ = d.front(ctx, ws)
+	if win, set, _ := d.front(ctx, ws); win != nil {
+		d.seen, d.seenPID = set, win.PID
+	}
 }
 
-// front is the front window of ws and its elements, in tree order (nil without Elements, or
-// when the app has no tree to read).
+// front is the window a result is read from and its elements, in tree order (nil without
+// Elements, or when the app has no tree to read): the front window of the app the last action
+// was in, else the focused window. The acted-on app comes first because the window list's
+// order isn't the focus everywhere (a Mac listed another app's window ahead of the one in use).
 func (d *deskRecorder) front(ctx context.Context, ws []DesktopWindow) (*DesktopWindow, map[ResultElement]bool, []ResultElement) {
-	i := slices.IndexFunc(ws, func(w DesktopWindow) bool { return w.Layer == 0 })
+	i := slices.IndexFunc(ws, func(w DesktopWindow) bool { return d.pid != 0 && w.PID == d.pid && w.normal() })
 	if i < 0 {
-		return nil, nil, nil
+		f, ok := findWindow(ws, "")
+		if !ok {
+			return nil, nil, nil
+		}
+		i = slices.IndexFunc(ws, func(w DesktopWindow) bool { return w.ID == f.ID && w.PID == f.PID && w.Title == f.Title })
 	}
 	if d.p.Elements == nil {
 		return &ws[i], nil, nil
@@ -469,6 +487,11 @@ func (d *deskRecorder) result() {
 	}
 	e := DesktopEvent{RecordingID: d.id, Kind: KindResult, TS: d.now().UnixMilli(), Of: of, App: win.App,
 		Window: &EventWindow{Class: win.App, Title: clip(win.Title)}}
+	if set != nil && d.seenPID != win.PID {
+		// Another app's window than the last read: everything in it is new, and what the other
+		// window held says nothing about this action.
+		d.seen = map[ResultElement]bool{}
+	}
 	if set != nil && d.seen != nil {
 		for _, k := range order {
 			if !d.seen[k] && len(e.Appeared) < resultElements {
@@ -485,7 +508,7 @@ func (d *deskRecorder) result() {
 		})
 		e.Disappeared = e.Disappeared[:min(len(e.Disappeared), resultElements)]
 	}
-	d.seen = set
+	d.seen, d.seenPID = set, win.PID
 	raw, err := json.Marshal(e)
 	if err != nil || d.results+len(raw) > resultBudget {
 		return
@@ -624,6 +647,12 @@ func (d *deskRecorder) event(kind string, el *ax.Recorded, at time.Time) Desktop
 // eventIn is an event on el in window win (nil: none kept).
 func (d *deskRecorder) eventIn(kind string, el *ax.Recorded, win *EventWindow, at time.Time) DesktopEvent {
 	e := DesktopEvent{RecordingID: d.id, Kind: kind, TS: at.UnixMilli(), Window: win, Context: d.context}
+	if kind == InClick || kind == InKey {
+		d.pid = 0
+		if el != nil {
+			d.pid = el.PID
+		}
+	}
 	if el != nil {
 		e.App = el.App
 		if el.NoContext {
