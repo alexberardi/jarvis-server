@@ -170,6 +170,7 @@ var passRoutes = []passRoute{
 	ccUserRoute("POST /api/cc/api/v0/workflows/{id}/run"),
 	ccUserRoute("POST /api/cc/api/v0/workflows/{id}/relearn"),
 	ccUserRoute("GET /api/cc/api/v0/workflows/{id}/last-run"),
+	ccUserRoute("POST /api/cc/api/v0/workflows/{id}/revise"),
 	ccUserRoute("GET /api/cc/api/v0/recordings"),
 	ccUserRoute("GET /api/cc/api/v0/recordings/{id}"),
 	ccUserRoute("DELETE /api/cc/api/v0/recordings/{id}"),

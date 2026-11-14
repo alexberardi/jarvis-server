@@ -267,6 +267,7 @@ type round struct {
 	recovering string
 	said       bool
 	wfGoal     string
+	notes      string // the workflow's "things to watch for", for a replay's model rounds
 	sites      []string
 	// resume: the run was paused (the user used the computer); its next batch resumes it.
 	resume bool

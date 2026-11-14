@@ -35,8 +35,9 @@ const TARGETS = [
 export default function WorkflowEditPage() {
   const { id = '' } = useParams()
   const wf = useWorkflow(id)
-  // A relearnt draft fills the form over the stored workflow; it is only stored by Save.
-  const [draft, setDraft] = useState<WorkflowPut | null>(null)
+  // A draft (relearnt from the recording, or proposed from the owner's note on a run) fills the
+  // form over the stored workflow; it is only stored by Save.
+  const [draft, setDraft] = useState<PageDraft | null>(null)
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <Link
@@ -62,9 +63,9 @@ export default function WorkflowEditPage() {
       ) : (
         <Editor
           key={`${wf.data.id}:${wf.data.updated_at}:${draft ? 'draft' : ''}`}
-          wf={draft ? { ...wf.data, ...draft } : wf.data}
+          wf={draft ? { ...wf.data, ...draft.put } : wf.data}
           storedName={wf.data.name}
-          isDraft={!!draft}
+          draft={draft}
           onDraft={setDraft}
         />
       )}
@@ -77,11 +78,20 @@ let added = 0
 interface EditorProps {
   wf: TaughtWorkflow
   storedName: string
-  isDraft: boolean
-  onDraft: (d: WorkflowPut | null) => void
+  draft: PageDraft | null
+  onDraft: (d: PageDraft | null) => void
 }
 
-function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
+/** A draft over the stored workflow, and where it came from: the page says so, and what changed. */
+export interface PageDraft {
+  put: WorkflowPut
+  from: 'recording' | 'note'
+  changes?: string[]
+  summary?: string
+}
+
+function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
+  const isDraft = !!draft
   const qc = useQueryClient()
   const edit = wf.editable
   const [name, setName] = useState(wf.name)
@@ -111,7 +121,7 @@ function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
 
   const relearn = useMutation({
     mutationFn: () => relearnWorkflow(wf.id),
-    onSuccess: onDraft,
+    onSuccess: (put) => onDraft({ put, from: 'recording' }),
     onError: (err) => toast.error(errorMessage(err, 'Could not learn the workflow again')),
   })
 
@@ -180,14 +190,26 @@ function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
         <Banner
           tone="primary"
           role="status"
-          title="This is a fresh draft from your recording"
+          title={draft.from === 'note' ? 'Proposed changes from your note' : 'This is a fresh draft from your recording'}
           actions={<Button onClick={() => onDraft(null)}>Discard draft</Button>}
         >
-          Your workflow is unchanged until you save. Discard the draft to go back to it.
+          {draft.from === 'note' && (
+            <>
+              {draft.summary && <p>{draft.summary}</p>}
+              {!!draft.changes?.length && (
+                <ul className="list-disc pl-5" aria-label="What changed">
+                  {draft.changes.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+          <p>Your workflow is unchanged until you save. Discard the draft to go back to it.</p>
         </Banner>
       )}
 
-      {edit && !isDraft && <RunPanel wf={wf} />}
+      {edit && !isDraft && <RunPanel wf={wf} onRevision={(r) => onDraft({ put: r.draft, from: 'note', changes: r.changes ?? [], summary: r.summary })} />}
 
       <Card as="section" aria-labelledby="wf-about" className="space-y-4">
         <h2 id="wf-about" className="sr-only">

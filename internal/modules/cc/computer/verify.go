@@ -37,6 +37,9 @@ type FileCheck struct {
 	Contains []string `json:"contains,omitempty"`
 }
 
+// Empty reports a check that checks nothing.
+func (c *SuccessCheck) Empty() bool { return c == nil || c.empty() }
+
 // concrete reports whether c checks something on the page or the disk itself: the address, the
 // text, a download or a file.
 func (c *SuccessCheck) concrete() bool {

@@ -482,12 +482,23 @@ its access rule at the top and carries its tier expectations.
     while it waits). **Not built:** answering a question from the page: the card points to the
     Inbox, where the run's card has Continue. `scripts/e2e web` has no spec for the panel.
   - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
-- [ ] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
+- [x] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
   sends the text and the run's record to the learning model and answers proposed edits; the
   draft with the changed fields marked, saved or discarded like Relearn's.
   - Acceptance: criterion 6.
   - Verify: route tests (owner only, another household 404, nothing stored); a golden of the
     revise prompt; the real model on three kinds of feedback; Vitest; screenshots.
+  - Built (2026-11-14). `POST /api/v0/workflows/{id}/revise` is for whoever taught the
+    workflow only (a household admin 403, another household 404) and stores nothing: it answers
+    the edited workflow in PUT's shape, what changed and a sentence why. The model may change a
+    step's wording, goal and expectation, mark a step "ask me first", change the end state, add
+    a note or a prerequisite. It can't add, drop or reorder steps or change what a step does on
+    the computer, and it can't replace an expectation the recording proved (an address, a
+    download). An answer that changes nothing keeps the owner's words as a note. The run's
+    model rounds are now given the workflow's notes. On qwen3.5-9b, of six notes tried: four
+    mapped to the right edit (the step named, the step described, "ask me before it downloads",
+    a prerequisite), two changed nothing and became notes. The first prompt was poor (it copied
+    the example's "ask first" and fixed on the failed step); examples in the prompt fixed that.
   - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
 
 ### Checkpoints

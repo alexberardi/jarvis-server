@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TaughtWorkflow, WorkflowPut } from '@/api/workflows'
 import WorkflowEditPage from './WorkflowEditPage'
 
-const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn(), getLastRun: vi.fn(), runWorkflow: vi.fn() }))
+const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn(), getLastRun: vi.fn(), runWorkflow: vi.fn(), reviseWorkflow: vi.fn() }))
 vi.mock('@/api/workflows', async (orig) => ({ ...(await orig<typeof import('@/api/workflows')>()), ...api }))
 
 const bank = (over: Partial<TaughtWorkflow> = {}): TaughtWorkflow => ({
@@ -429,5 +429,40 @@ describe('WorkflowEditPage', () => {
     renderPage()
     await screen.findAllByTestId('step')
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Run it' })).not.toBeInTheDocument())
+  })
+
+  it('turns what the owner says went wrong into a draft to review, storing nothing', async () => {
+    api.getLastRun.mockResolvedValue({
+      run_id: 'cr_1',
+      state: 'failed',
+      summary: 'Step 2 (Go to statements) failed.',
+      started_at: '2026-11-14T08:00:00Z',
+      updated_at: '2026-11-14T08:00:20Z',
+      items: [{ kind: 'step', text: 'Go to statements', state: 'failed', seen: 'a sign-in form' }],
+    })
+    const changed = bank().steps.map((st, i) => (i === 1 ? { ...st, intent: 'Go to the statements of the checking account' } : st))
+    api.reviseWorkflow.mockResolvedValue({
+      draft: { name: 'Download bank statement', triggers: ['get my bank statement'], params: bank().params, steps: changed, success: bank().success, shared: false, skill: {} },
+      changes: ['Step 2: what it does'],
+      summary: 'Step 2 now names the checking account.',
+    })
+    renderPage()
+    await screen.findAllByTestId('step')
+    const fix = await screen.findByRole('button', { name: 'Suggest a fix' })
+    expect(fix).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('What went wrong?'), { target: { value: ' it opened savings, not checking ' } })
+    await act(async () => {
+      fireEvent.click(fix)
+    })
+    expect(api.reviseWorkflow).toHaveBeenCalledWith('tw_1', 'it opened savings, not checking')
+    expect(await screen.findByText('Proposed changes from your note')).toBeInTheDocument()
+    expect(screen.getByText('Step 2 now names the checking account.')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'What changed' })).getByText('Step 2: what it does')).toBeInTheDocument()
+    expect(sentence(1)).toContain('Statements')
+    expect(api.saveWorkflow).not.toHaveBeenCalled()
+
+    const body = await save()
+    expect(body.steps[1].intent).toBe('Go to the statements of the checking account')
+    expect(screen.queryByText('Proposed changes from your note')).not.toBeInTheDocument()
   })
 })
