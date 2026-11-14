@@ -22,7 +22,7 @@ import {
 } from '@/lib/workflows'
 import type { Candidate, DraftStep } from '@/lib/workflows'
 import Sentence from '@/components/workflows/Sentence'
-import { GoalCard, NotesCard, PrerequisitesCard, TextArea } from '@/components/workflows/SkillFields'
+import { GoalCard, GuardrailsCard, NotesCard, PrerequisitesCard, TextArea } from '@/components/workflows/SkillFields'
 
 const KINDS: ParamKind[] = ['text', 'date', 'month', 'number', 'file']
 const TARGETS = [
@@ -431,6 +431,7 @@ function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
       </Card>
 
       <NotesCard skill={skill} edit={edit} onChange={setSkill} />
+      <GuardrailsCard skill={skill} edit={edit} onChange={setSkill} />
 
       {edit && (
         <div className="flex flex-wrap items-center justify-end gap-3">

@@ -3,6 +3,8 @@ package computer
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,7 +52,8 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	run.Model = pick.Model
 	// A replay's direct steps have no model to read a checkout from the page: a purchase holds
 	// for the user as recorded, without sending the step back for one.
-	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, checkoutAsked: true}
+	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, checkoutAsked: true,
+		wfGoal: firstNonEmpty(wf.Skill.Goal.EndState, wf.Skill.Goal.Reason), sites: strictSites(wf)}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
@@ -109,7 +112,9 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 			// The step ran in an earlier call and its check failed. The user's word that it is
 			// fine stands for the check; with none, look again. It is never run a second time.
 			r.heal = heldHeal(run.History, i+1)
-			if r.task.Answer == "" {
+			if !vouches(r.task.Answer) {
+				// No word that it is fine (no answer, or an instruction): look again, and let
+				// the model act on what the user said.
 				if out, done := l.checkStep(ctx, r, st, i); done {
 					return l.end(ctx, run, out)
 				}
@@ -145,11 +150,19 @@ const stepSettle = 2 * time.Second
 // entryCheck is the history entry of a step that ran but whose check failed.
 const entryCheck = "check"
 
+// stepAttempts is how many times a replay checks one step, with the model acting in between,
+// before it asks.
+const stepAttempts = 3
+
 // checkStep verifies what step i should have caused (its expectation), by a fresh look, never by
-// the action's own success. A check that fails is made once more after stepSettle. Still failing,
-// the run asks: it says the step ran, what it expected and what it found, and records that the
-// step is waiting on its check so a resumed run doesn't do it again. A step with no expectation
-// is done when its action succeeded.
+// the action's own success. A check that fails is made once more after stepSettle (a slow page).
+// Still failing, the model looks with the step's goal and what the check found, and either does
+// what is still needed (the check is then made again), says the result is there in another form
+// (the run carries on), or asks. A risky step is never left to the model: redoing a send or a
+// payment that did go through is worse than a question. After stepAttempts checks the run asks,
+// saying the step ran, what it expected and what it found, and records that the step waits on
+// its check so a resumed run doesn't do it again. A step with no expectation is done when its
+// action succeeded.
 func (l *Loop) checkStep(ctx context.Context, r *round, st WorkflowStep, i int) (Outcome, bool) {
 	c := st.Expect
 	if c != nil && !r.pick.Vision && c.Screen != "" {
@@ -167,21 +180,95 @@ func (l *Loop) checkStep(ctx context.Context, r *round, st WorkflowStep, i int) 
 		b.Screen = "After the last action, is this true: " + oneLine(c.Screen) + "?"
 		c = &b
 	}
-	res := l.Verify(ctx, r.run.ID, st.target(), r.pick, c)
-	if !res.OK {
-		l.sleep(ctx, stepSettle)
-		res = l.Verify(ctx, r.run.ID, st.target(), r.pick, c)
+	waiting := func(why string) {
+		r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: entryCheck, Intent: st.Intent,
+			Result: "unverified: " + why, WStep: i + 1, Healed: r.heal})
 	}
-	if res.OK {
-		return Outcome{}, false
+	for attempt := 1; ; attempt++ {
+		res := l.Verify(ctx, r.run.ID, st.target(), r.pick, c)
+		if !res.OK {
+			l.sleep(ctx, stepSettle)
+			res = l.Verify(ctx, r.run.ID, st.target(), r.pick, c)
+		}
+		if res.OK {
+			return Outcome{}, false
+		}
+		why := strings.TrimSuffix(res.Why, ".")
+		if st.Risk != "" || attempt >= stepAttempts {
+			waiting(why)
+			return Outcome{State: StateAsk, Reason: ReasonUnclear, Ask: fmt.Sprintf(
+				"I did step %d (%s), but I couldn't confirm it worked: %s. Look at the computer: if it's as it "+
+					"should be, tap Continue. If not, put it right yourself and tap Continue, or tell me what to do.",
+				i+1, oneLine(st.Intent), why)}, true
+		}
+		r.recovering, r.said = why, false
+		out, done := l.replayRound(ctx, r, st, i)
+		r.recovering = ""
+		if done {
+			waiting(why) // a question or a confirmation: the step still waits on its check
+			return out, true
+		}
+		if r.said {
+			waiting(why + "; carried on: the model found the step's result there in another form")
+			return Outcome{}, false
+		}
 	}
-	why := strings.TrimSuffix(res.Why, ".")
-	r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: entryCheck, Intent: st.Intent,
-		Result: "unverified: " + why, WStep: i + 1, Healed: r.heal})
-	return Outcome{State: StateAsk, Reason: ReasonUnclear, Ask: fmt.Sprintf(
-		"I did step %d (%s), but I couldn't confirm it worked: %s. Look at the computer: if it's as it "+
-			"should be, tap Continue. If not, put it right yourself and tap Continue, or tell me what to do.",
-		i+1, oneLine(st.Intent), why)}, true
+}
+
+// vouches reports whether the user's answer to a failed check says it is fine as it is, rather
+// than telling the run what to do.
+func vouches(answer string) bool {
+	switch strings.ToLower(strings.Trim(strings.TrimSpace(answer), ".!")) {
+	case "continue", "yes", "ok", "okay", "done", "it's fine", "its fine", "fine", "looks good", "carry on", "go on":
+		return true
+	}
+	return false
+}
+
+// strictSites are the sites a Strict workflow may open: its steps' and prerequisites'. Nil for a
+// Creative workflow, or one that names no site (a desktop task).
+func strictSites(wf *Workflow) []string {
+	if wf.Skill.Guardrails == GuardCreative {
+		return nil
+	}
+	var out []string
+	add := func(host string) {
+		if host = strings.ToLower(strings.TrimSpace(host)); host != "" && !slices.Contains(out, host) {
+			out = append(out, host)
+		}
+	}
+	hostOf := func(raw string) string {
+		if u, err := url.Parse(raw); err == nil {
+			return u.Host
+		}
+		return ""
+	}
+	for _, st := range wf.Steps {
+		add(st.Site)
+		add(hostOf(st.Action.URL))
+	}
+	for _, p := range wf.Skill.Prerequisites {
+		add(p.Site)
+		add(hostOf(p.URL))
+	}
+	return out
+}
+
+// offSite is the host a navigation would open outside sites ("" when it stays inside, or sites
+// is nil). A subdomain of a listed site, or the site a listed subdomain belongs to, is inside:
+// a bank's sign-in often lives on another host of the same name.
+func offSite(sites []string, raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || len(sites) == 0 {
+		return ""
+	}
+	host := strings.ToLower(u.Host)
+	for _, s := range sites {
+		if host == s || strings.HasSuffix(host, "."+s) || strings.HasSuffix(s, "."+host) {
+			return ""
+		}
+	}
+	return host
 }
 
 // awaitingCheck reports whether step wstep ran and is waiting on its failed check.
@@ -241,6 +328,18 @@ func (l *Loop) replayStep(ctx context.Context, r *round, st WorkflowStep, i int)
 func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int) (Outcome, bool) {
 	r.run.Rounds++
 	r.task.Goal = fmt.Sprintf("%s (step %d of a saved task: do only this step, then say done)", oneLine(st.Intent), i+1)
+	if r.recovering != "" {
+		// The step ran; its check failed. The model judges by what is on the screen now.
+		r.task.Goal = fmt.Sprintf("%s (step %d of a saved task). I already did this step, but its check failed: %s. "+
+			"Look at the screen. If what the step is for is already there, say done and do nothing. "+
+			"Otherwise do only what is still needed for this step, then say done.", oneLine(st.Intent), i+1, r.recovering)
+		if g := oneLine(st.Goal); g != "" {
+			r.task.Goal += " The step is for: " + g + "."
+		}
+		if r.wfGoal != "" {
+			r.task.Goal += " The whole task is done when: " + oneLine(r.wfGoal) + "."
+		}
+	}
 	r.task.Success = nil
 	if e := st.Element; e != nil && (e.Name != "" || e.Role != "") {
 		r.hint = fmt.Sprintf("this step was recorded on %s %q; it may have moved or been renamed.", firstNonEmpty(e.Role, "element"), e.Name)
@@ -269,6 +368,7 @@ func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int
 	r.feedback = ""
 	switch {
 	case reply.Done:
+		r.said = true
 		return Outcome{}, false
 	case reply.Ask != "":
 		if reply.Reason == ReasonPageInstructions {
@@ -284,6 +384,15 @@ func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int
 	}
 	if len(actions) == 0 {
 		return unsure("I couldn't find where to do it")
+	}
+	for _, a := range actions {
+		if host := offSite(r.sites, a.URL); a.Kind == "navigate" && host != "" {
+			// Strict: only the sites the workflow names. Leaving them is the user's call.
+			return Outcome{State: StateAsk, Reason: ReasonUnclear, Ask: fmt.Sprintf(
+				"To do step %d (%s) I would have to open %s, and this workflow only uses %s. Do the step on the "+
+					"computer and tap Continue, or set the workflow to Creative to let me use other sites.",
+				i+1, oneLine(st.Intent), host, joinAnd(r.sites))}, true
+		}
 	}
 	if rec := st.Element; rec != nil {
 		for _, a := range actions {

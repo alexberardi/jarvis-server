@@ -261,6 +261,13 @@ type round struct {
 	looked   bool   // this Run call has observed once
 	wstep    int    // a replay's step (1-based) the round's actions belong to
 	heal     *RecordedElement
+	// A replay's recovery round (a step ran but its check failed): what the check found; said
+	// reports that the model answered done; wfGoal is what the workflow is for; sites are the
+	// only sites a Strict workflow's model rounds may open (nil: any).
+	recovering string
+	said       bool
+	wfGoal     string
+	sites      []string
 	// resume: the run was paused (the user used the computer); its next batch resumes it.
 	resume bool
 	// clipboard is what the last batch read from the clipboard, for the next prompt only.

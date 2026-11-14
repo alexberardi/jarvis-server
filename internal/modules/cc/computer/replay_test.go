@@ -589,32 +589,111 @@ func TestReplaySlowPagePassesOnTheSecondLook(t *testing.T) {
 	}
 }
 
-// A step whose check still fails is not reported done: the run asks, saying what it expected and
-// found. On the user's word it carries on, and the step is never run a second time.
-func TestReplayAsksWhenAStepCantBeConfirmed(t *testing.T) {
+// A risky step whose check fails is never left to the model (it may have gone through): the run
+// asks, saying what it expected and found. On the user's word it carries on, and the step is
+// never run a second time.
+func TestReplayAsksAboutARiskyStepItCantConfirm(t *testing.T) {
 	elsewhere := Observation{URL: "https://bank.example.com/login", Title: "Sign in", Gen: 1}
 	e := newEnv(t, bankPage(download), elsewhere)
 	e.sleeps()
 	wf := checkedWorkflow()
+	wf.Steps[0].Risk = "sharing"
 	out := e.replay(wf, map[string]string{"month": "October 2026"})
 	if out.State != StateAsk || !strings.Contains(out.Ask, "I did step 1 (Open the statements for October 2026), but I couldn't confirm it worked") ||
 		!strings.Contains(out.Ask, `the address is https://bank.example.com/login, not one with "bank.example.com/statements"`) {
 		t.Fatalf("outcome %+v", out)
 	}
-	if len(e.exec.batches) != 1 {
-		t.Fatalf("%d batches before the question, want only step 1's", len(e.exec.batches))
+	if len(e.exec.batches) != 1 || len(e.llm.reqs) != 0 {
+		t.Fatalf("%d batches, %d model calls before the question; want step 1's batch and no model", len(e.exec.batches), len(e.llm.reqs))
 	}
 
 	// The user puts it right and says so.
 	e.exec.pages = []Observation{bankPage(download)}
 	tk := task()
-	tk.Goal, tk.Target, tk.RunID, tk.Answer = "", computeruse.Target{}, out.RunID, "continue"
+	tk.Goal, tk.Target, tk.RunID, tk.Answer = "", computeruse.Target{}, out.RunID, "Continue"
 	out = e.loop.Replay(context.Background(), tk, wf, map[string]string{"month": "October 2026"})
 	if out.State != StateDone {
 		t.Fatalf("after continue: %+v", out)
 	}
 	if n := len(e.exec.batches); n != 2 || e.exec.batches[0].Actions[0].Kind != "navigate" || e.exec.batches[1].Actions[0].Kind != "press" {
 		t.Fatalf("batches %+v: step 1 must not run again", e.exec.batches)
+	}
+}
+
+// A failed check goes to the model with what the check found. It may do what is still needed:
+// the check is then made again.
+func TestReplayModelPutsAFailedStepRight(t *testing.T) {
+	elsewhere := Observation{URL: "https://bank.example.com/login", Title: "Sign in", Gen: 1,
+		Elements: []Element{{Ref: "e7", Role: "link", Name: "Statements"}}}
+	// Opening the window; step 1's two failed looks; the model's look; then the right page.
+	e := newEnv(t, bankPage(download), elsewhere, elsewhere, elsewhere, bankPage(download))
+	e.sleeps()
+	e.script(actions(press("e7", "Open the statements")))
+	out := e.replay(checkedWorkflow(), map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(e.llm.reqs) != 1 {
+		t.Fatalf("outcome %+v, %d model calls", out, len(e.llm.reqs))
+	}
+	txt := userText(e.llm.reqs[0])
+	for _, want := range []string{"I already did this step, but its check failed: the address is https://bank.example.com/login",
+		"If what the step is for is already there, say done and do nothing"} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, txt)
+		}
+	}
+	if n := len(e.exec.batches); n != 3 || e.exec.batches[1].Actions[0].Ref != "e7" {
+		t.Fatalf("batches %+v", e.exec.batches)
+	}
+}
+
+// The model may find the step's result there in another form: the run carries on without acting.
+func TestReplayModelCarriesOn(t *testing.T) {
+	other := Observation{URL: "https://bank.example.com/documents", Title: "Documents", Gen: 1, Elements: []Element{download, {Ref: "e6", Role: "link", Name: "Sign out"}}}
+	e := newEnv(t, other)
+	e.sleeps()
+	e.script(doneAnswer)
+	wf := checkedWorkflow()
+	wf.Success = SuccessCheck{TextPresent: []string{"Sign out"}}
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(e.llm.reqs) != 1 || len(e.exec.batches) != 2 {
+		t.Fatalf("outcome %+v, %d model calls, %d batches", out, len(e.llm.reqs), len(e.exec.batches))
+	}
+}
+
+// After three checks of one step, with the model acting in between, the run asks.
+func TestReplayAsksAfterThreeChecks(t *testing.T) {
+	elsewhere := Observation{URL: "https://bank.example.com/login", Title: "Sign in", Gen: 1,
+		Elements: []Element{{Ref: "e7", Role: "link", Name: "Statements"}}}
+	e := newEnv(t, bankPage(download), elsewhere)
+	waits := e.sleeps()
+	e.script(actions(press("e7", "Open the statements")), actions(press("e7", "Open the statements")))
+	out := e.replay(checkedWorkflow(), map[string]string{"month": "October 2026"})
+	if out.State != StateAsk || !strings.Contains(out.Ask, "I did step 1") || len(e.llm.reqs) != 2 || len(*waits) != stepAttempts {
+		t.Fatalf("outcome %+v, %d model calls, waits %v", out, len(e.llm.reqs), *waits)
+	}
+}
+
+// Strict: a model round may not open a site the workflow doesn't name; Creative may.
+func TestReplayStrictStaysOnTheWorkflowsSites(t *testing.T) {
+	gone := bankPage() // the button is gone: step 2 goes to the model
+	for _, tc := range []struct{ guard, wantAsk string }{
+		{"", "I would have to open files.example.org, and this workflow only uses bank.example.com"},
+		{GuardCreative, ""},
+	} {
+		e := newEnv(t, gone)
+		e.script(actions(`{"kind": "navigate", "url": "https://files.example.org/statement.csv", "intent": "Get the file elsewhere"}`))
+		wf := statementWorkflow()
+		wf.Skill.Guardrails = tc.guard
+		out := e.replay(wf, map[string]string{"month": "October 2026"})
+		if tc.wantAsk != "" && (out.State != StateAsk || !strings.Contains(out.Ask, tc.wantAsk) || len(e.exec.batches) != 1) {
+			t.Errorf("strict: outcome %+v, %d batches", out, len(e.exec.batches))
+		}
+		if tc.wantAsk == "" && (out.State == StateAsk && strings.Contains(out.Ask, "only uses")) {
+			t.Errorf("creative was held to the workflow's sites: %+v", out)
+		}
+	}
+	// A subdomain of a named site is inside.
+	if h := offSite([]string{"bank.example.com"}, "https://login.bank.example.com/"); h != "" {
+		t.Errorf("a subdomain counted as leaving: %q", h)
 	}
 }
 
