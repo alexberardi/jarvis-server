@@ -76,9 +76,9 @@ func TestRequestsInstallUninstallRevert(t *testing.T) {
 
 	want := map[string]map[string]any{
 		"/api/v0/nodes/n1/package-install/r1/results": {"success": true, "details": map[string]any{"package_name": "get_weather_meteo",
-			"version": "1.0.0", "components": 2.0, "skipped_components": []any{"agent:weather_context"}}},
+			"version": "1.0.0", "components": 2.0}},
 		"/api/v0/nodes/n1/package-install/r2/results": {"success": true, "details": map[string]any{"package_name": "get_weather_meteo",
-			"version": "2.0.0", "components": 2.0, "skipped_components": []any{"agent:weather_context"}}},
+			"version": "2.0.0", "components": 2.0}},
 		"/api/v0/nodes/n1/package-revert/r3/results":    {"success": true, "details": map[string]any{"package_name": "get_weather_meteo", "version": "1.0.0"}},
 		"/api/v0/nodes/n1/package-uninstall/r4/results": {"success": true, "details": map[string]any{"package_name": "get_weather_meteo"}},
 		"/api/v0/nodes/n1/package-uninstall/r5/results": {"success": false, "error": "get_weather_meteo isn't installed on this computer"},

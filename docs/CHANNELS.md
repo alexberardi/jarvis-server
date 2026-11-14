@@ -162,13 +162,16 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
   - Verify: `internal/agent/sidecar` tests on the desktop profile; `scripts/sandbox node-sim`.
   - Built: the desktop serves the families that go to command-center (`llm`, `cc`, `inbox`,
     `signals`) and `alerts`; the sidecar registers only the families its node serves
-    (`--backends=…`), so timers and volume keep the SDK's defaults there. Not yet run against a
-    real jarvisd from a desktop agent: that check is done with A2.
-- [ ] **A2 — a desktop node runs its packages' agents.** The scheduler drops `TestsOnly`;
+    (`--backends=…`), so timers and volume keep the SDK's defaults there.
+- [x] **A2 — a desktop node runs its packages' agents.** The scheduler drops `TestsOnly`;
   `AgentHealth` is wired as on a Pi.
   - Acceptance: the `watcher` test package's agent runs on its schedule on a desktop and a Forge
     test install still runs.
   - Verify: `pkgagents` tests (injected clock); a live install on the dev box.
+  - Built: every node's sidecar loads agents (`packages.NodeTypes`) and one scheduler runs them;
+    `TestsOnly` is gone. A package with only an agent now installs on a computer. Tested with a
+    real sidecar and a fake command-center on both backend sets (the agent's inbox post arrives
+    as the node). Not yet run from an installed desktop agent against a real jarvisd.
 - [ ] **D1 — `IJarvisDaemon` in the SDK** (jarvis-command-sdk): the class, its Forge hints, the
   manifest's `daemons/<name>/daemon.py` convention, an SDK release.
   - Verify: the SDK's own tests.

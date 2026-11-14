@@ -1325,25 +1325,20 @@ func (f *toolFlags) addCommon(ctx context.Context, log *slog.Logger, st *nodeset
 				log.Warn("packages: not loaded", "err", err)
 			}
 		}
+		// The packages' background agents (comfyui_jobs) on their schedules, on a Pi and a
+		// computer alike: their alerts in the node's queue (said, and read by "what's up"); one
+		// that keeps failing marks its package failed in the app. A Forge test install's run too.
+		f.agents = &pkgagents.Scheduler{Sidecar: live, Alerts: f.alerts, Log: log}
+		f.pkgs.AgentHealth = f.agents.Failing
+		go f.agents.Run(ctx)
 		if f.pi && f.host != nil {
 			// The first start installs the built-ins (a download): the node comes up meanwhile,
 			// and their tools join the next turn's list.
 			f.pkgs.Builtins = packages.PiBuiltins(os.Getenv("JARVIS_AGENT_NODE_COMMANDS"))
 			// apt packages and post_install ops through install-pi.sh's root wrappers.
 			f.pkgs.System = packages.NewSystem(log)
-			// The packages' background agents (comfyui_jobs) on their schedules, their alerts
-			// in the Pi's queue; one that keeps failing marks its package failed in the app.
-			agents := &pkgagents.Scheduler{Sidecar: live, Alerts: f.alerts, Log: log}
-			f.pkgs.AgentHealth = agents.Failing
-			f.agents = agents
-			go agents.Run(ctx)
 			go boot()
 		} else {
-			// A desktop runs no package's agents, but a test install's do run, so the Forge
-			// can test one here: its alerts are said and "what's up" reads them, as on a Pi, and
-			// its runs are test events.
-			f.agents = &pkgagents.Scheduler{Sidecar: live, Alerts: f.alerts, Log: log, TestsOnly: true}
-			go f.agents.Run(ctx)
 			boot()
 		}
 	}

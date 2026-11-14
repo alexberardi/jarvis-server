@@ -1,4 +1,4 @@
-// Package pkgagents runs the installed packages' background agents on a Pi (an IJarvisAgent in
+// Package pkgagents runs the installed packages' background agents on a node (an IJarvisAgent in
 // a package's agents/<name>/agent.py: comfyui's comfyui_jobs, which delivers finished videos
 // to the inbox). It is N:services/agent_scheduler_service.py with the agents in the sidecar:
 // this side owns the schedule and the alert queue, the sidecar runs each agent (agent_run),
@@ -44,9 +44,6 @@ type Scheduler struct {
 	Sidecar Sidecar
 	Alerts  *sdkhost.Alerts
 	Log     *slog.Logger
-	// TestsOnly runs only test installs' agents (a desktop: its installed packages' agents
-	// don't run there). Their alerts aren't queued without Alerts; the run's test event has them.
-	TestsOnly bool
 	// Now and After are the clock (nil: time.Now, time.After); tests drive their own.
 	Now   func() time.Time
 	After func(time.Duration) <-chan time.Time
@@ -151,9 +148,6 @@ func (s *Scheduler) due() []sidecar.AgentDef {
 	var out []sidecar.AgentDef
 	for _, a := range agents {
 		test := strings.HasPrefix(a.Package, TestPrefix)
-		if s.TestsOnly && !test {
-			continue
-		}
 		present[a.Name] = true
 		st := s.state[a.Name]
 		// A test agent runs at once when it loads, and again when a reinstall loads it anew.
