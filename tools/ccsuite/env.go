@@ -22,6 +22,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -265,6 +266,14 @@ func (e *Env) sandbox(ctx context.Context) error {
 			if m := tapLine.FindStringSubmatch(string(b)); m != nil {
 				e.Label, e.Model = m[1], strings.TrimSpace(m[2])
 			}
+		}
+		// The sandbox reaches the shared model under its label, so cc can't tell from the
+		// name how it gives click coordinates (Qwen3.5: thousandths); the suite knows the name.
+		if a := computeruse.AdapterFor(e.Model); a.Name != computeruse.Pixels.Name {
+			if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.coordinates", map[string]any{"value": a.Name}, nil); err != nil {
+				return fmt.Errorf("computer.coordinates: %w", err)
+			}
+			e.logf("coordinates: %s (%s)", a.Name, e.Model)
 		}
 	}
 	var hhs []struct {

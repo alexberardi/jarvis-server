@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1117,5 +1118,64 @@ func TestStuckTaskGivesUp(t *testing.T) {
 	}
 	if n := len(e.llm.reqs); n != stuckGiveUp+1 || len(e.exec.batches) != stuckAfter {
 		t.Fatalf("calls %d, batches %d", n, len(e.exec.batches))
+	}
+}
+
+// A desktop dialog's button whose press does nothing is confirmed with Enter instead, once,
+// before the model is told it is stuck (user, 2026-11-13).
+func TestStuckDialogButtonGetsEnter(t *testing.T) {
+	obs := Observation{Title: "Save", App: "soffice", Elements: []Element{
+		{Ref: "a2", Role: "button", Name: "Save"}, {Ref: "a3", Role: "textbox", Value: "Velmora"}, {Ref: "a13", Role: "togglebutton", Name: "Documents"}}}
+	press := []computeruse.Action{{Kind: "press", Ref: "a2", Intent: "Save the document"}}
+	enter, ok := enterInstead("desktop", obs, press)
+	if !ok || len(enter) != 1 || enter[0].Kind != "keypress" || !slices.Equal(enter[0].Keys, []string{"enter"}) ||
+		!strings.HasPrefix(enter[0].Intent, "Save the document (with Enter") {
+		t.Fatalf("enter %+v %v", enter, ok)
+	}
+	if err := computeruse.ValidateBatch(enter); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		target  string
+		actions []computeruse.Action
+	}{
+		"a browser page":    {"browser", press},
+		"a text field":      {"desktop", []computeruse.Action{{Kind: "press", Ref: "a3", Intent: "x"}}},
+		"a toggle":          {"desktop", []computeruse.Action{{Kind: "press", Ref: "a13", Intent: "x"}}},
+		"more than a press": {"desktop", append([]computeruse.Action{{Kind: "type", Text: "Velmora", Intent: "x"}}, press...)},
+	} {
+		if _, ok := enterInstead(c.target, obs, c.actions); ok {
+			t.Errorf("%s got Enter", name)
+		}
+	}
+
+	// In the loop: the press runs twice, the third round runs Enter in its place.
+	e := newEnv(t, obs)
+	tk := task()
+	tk.Target = computeruse.Target{Kind: "desktop", App: "LibreOffice Writer"}
+	reply := `{"thought": "save", "actions": [{"kind": "press", "ref": "a2", "intent": "Save the document"}]}`
+	e.script(reply, reply, reply, reply)
+	e.loop.Run(context.Background(), tk) // however it ends: what ran is the point
+	if b := e.exec.batches; len(b) < 3 || b[2].Actions[0].Kind != "keypress" || b[1].Actions[0].Kind != "press" {
+		t.Fatalf("batches %+v", b)
+	}
+}
+
+// computer.coordinates overrides the adapter the model's name gives: a Qwen served under a
+// label by another server answers in thousandths, which the name "live" doesn't say.
+func TestCoordinatesSetting(t *testing.T) {
+	e := newEnv(t)
+	pick := Pick{Model: "live", Adapter: computeruse.Pixels}
+	sc := settings.Scope{HouseholdID: "hh-1"}
+	if a := e.loop.adapter(context.Background(), sc, pick); a.Name != "pixels" {
+		t.Fatalf("auto: %s", a.Name)
+	}
+	e.setts[SettingCoordinates] = "norm1000"
+	if a := e.loop.adapter(context.Background(), sc, pick); a.Name != "norm1000" {
+		t.Fatalf("set: %s", a.Name)
+	}
+	e.setts[SettingCoordinates] = "auto"
+	if a := e.loop.adapter(context.Background(), sc, Pick{Adapter: computeruse.Norm1000}); a.Name != "norm1000" {
+		t.Fatalf("auto keeps the model's: %s", a.Name)
 	}
 }

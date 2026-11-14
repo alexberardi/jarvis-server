@@ -31,6 +31,11 @@ const (
 	// SettingRunModel is the model a taught workflow's run uses (the Models page's "Running a
 	// workflow"); auto: the pick computer.model's auto makes, never cloud.
 	SettingRunModel = "workflows.run_model"
+	// SettingCoordinates is how the model's click coordinates are read: auto (by the model's
+	// name: Qwen3.5 and 3.8 answer in thousandths of the screenshot, others in pixels), or
+	// pixels, norm1000 or unit for a model whose name the server can't see (one served by
+	// another server under a label) or that answers differently.
+	SettingCoordinates = "computer.coordinates"
 	// SettingAutoApproveCents is the spend limit: a checkout at most this many cents is approved
 	// without asking (0 = off). The errand step reads it (piece 11).
 	SettingAutoApproveCents = "computer.auto_approve_cents"
@@ -305,6 +310,8 @@ type round struct {
 	// lastActs and sameActs are the same for the actions alone, whatever the screen showed.
 	lastActs string
 	sameActs int
+	// enterTried: this stuck batch's button was already confirmed with Enter instead, once.
+	enterTried bool
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
@@ -388,6 +395,7 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
 	run.Model = pick.Model
+	pick.Adapter = l.adapter(ctx, sc, pick)
 	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
@@ -552,8 +560,19 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{State: StateFailed, Summary: fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.",
 			lowerFirst(firstIntent(actions)))}, true
 	case r.sameBatch >= stuckAfter, r.sameActs >= stuckAnyScreen:
+		// A button in a desktop dialog whose press does nothing is confirmed with Enter instead,
+		// once: the dialog's default button takes it (user, 2026-11-13; the house model pressed
+		// the Save dialog's Save through the accessibility tree round after round, where a
+		// larger model presses Enter by itself).
+		if enter, ok := enterInstead(r.task.Target.Kind, obs, actions); ok && !r.enterTried {
+			r.enterTried = true
+			return l.decideAndAct(ctx, r, obs, enter, reply.Checkout)
+		}
 		r.feedback = stuckFeedback(r.task.Target.Kind, r.sameActs+1)
 		return Outcome{}, false
+	}
+	if r.sameActs == 0 {
+		r.enterTried = false
 	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
 }
@@ -566,6 +585,22 @@ const (
 	stuckAnyScreen = 4
 	stuckGiveUp    = 7
 )
+
+// enterInstead is the Enter keypress that stands in for a stuck batch: a single press of a
+// button of a desktop window, which Enter (the dialog's default button) usually is.
+func enterInstead(target string, obs Observation, actions []computeruse.Action) ([]computeruse.Action, bool) {
+	if target != "desktop" || len(actions) != 1 || actions[0].Kind != "press" || actions[0].Ref == "" {
+		return nil, false
+	}
+	for _, e := range obs.Elements {
+		if e.Ref == actions[0].Ref && strings.Contains(strings.ToLower(e.Role), "button") && !strings.Contains(strings.ToLower(e.Role), "toggle") {
+			intent := []rune(actions[0].Intent + " (with Enter: pressing the button did nothing)")
+			return []computeruse.Action{{Kind: "keypress", Keys: []string{"enter"},
+				Intent: string(intent[:min(len(intent), computeruse.MaxIntent)])}}, true
+		}
+	}
+	return nil, false
+}
 
 // firstIntent is what a batch was trying to do, for the user: its first action's intent.
 func firstIntent(actions []computeruse.Action) string {
@@ -1242,6 +1277,14 @@ func (l *Loop) int(ctx context.Context, key string, sc settings.Scope, def int) 
 		}
 	}
 	return def
+}
+
+// adapter is pick's coordinate adapter unless the household set one (SettingCoordinates).
+func (l *Loop) adapter(ctx context.Context, sc settings.Scope, pick Pick) computeruse.Adapter {
+	if a, ok := computeruse.AdapterNamed(l.str(ctx, SettingCoordinates, sc, "auto")); ok {
+		return a
+	}
+	return pick.Adapter
 }
 
 func (l *Loop) str(ctx context.Context, key string, sc settings.Scope, def string) string {

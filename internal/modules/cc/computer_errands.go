@@ -84,6 +84,19 @@ func computerDefinitions() []settings.Definition {
 			"Which model runs a workflow you taught: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider). Learning a workflow "+
 				"has its own setting."),
+		{Key: computer.SettingCoordinates, Category: "computer", Type: settings.String, Default: "auto",
+			Options: []any{"auto", "pixels", "norm1000", "unit"},
+			Description: "How the model's click coordinates are read: auto (by the model's name: Qwen3.5 and 3.8 answer in " +
+				"thousandths of the screenshot, others in pixels), or pixels, norm1000 or unit for a model served under " +
+				"another name or one that answers differently.",
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != "auto" {
+					if _, ok := computeruse.AdapterNamed(s); !ok {
+						return errors.New("must be auto, pixels, norm1000 or unit")
+					}
+				}
+				return nil
+			}},
 		{Key: computer.SettingAutoApproveCents, Category: "computer", Type: settings.Int, Default: int64(0),
 			Description: "Spend limit in cents: a computer task's checkout at most this much is approved without " +
 				"asking (the progress card says so). 0 = always ask.",
