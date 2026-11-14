@@ -479,8 +479,10 @@ its access rule at the top and carries its tier expectations.
     `GET /api/v0/workflows/{id}/last-run` is the owner's alone: a member the workflow is shared
     with and a household admin get 403, anyone who can't see the workflow 404. The page's "Run
     it" card takes the run's values, starts it, and follows it (every 2 s while it goes, 5 s
-    while it waits). **Not built:** answering a question from the page: the card points to the
-    Inbox, where the run's card has Continue. `scripts/e2e web` has no spec for the panel.
+    while it waits). **Not built:** answering a question from the page. The web Inbox can't act on a
+    card either (`POST /api/v0/callbacks` isn't on the admin gateway), so a run's question is
+    answered on its card in the mobile app; the panel says so. Answering on the page needs that
+    route exposed to the web app, which is the user's call. `scripts/e2e web` has no spec for the panel.
   - A new `/api` route: owner only, another household 404, tier expectations in the PR (approved in advance, 2026-11-13).
 - [x] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
   sends the text and the run's record to the learning model and answers proposed edits; the

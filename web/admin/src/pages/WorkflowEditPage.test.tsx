@@ -400,6 +400,8 @@ describe('WorkflowEditPage', () => {
     expect(items).toHaveLength(4)
     expect(screen.getByText('Waiting for you')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('I did step 2, but I couldn’t confirm it worked')
+    // The web Inbox can't act on a card: the panel says where the question can be answered.
+    expect(screen.getByRole('status')).toHaveTextContent('Answer on the run’s card in the Jarvis app on your phone')
     expect(items[1]).toHaveTextContent('Step 1: Open the bank (done and checked)')
     expect(items[2]).toHaveTextContent('Step 2: Go to statements (needs you)')
     expect(items[2]).toHaveTextContent('Expected: The page lists the months')
