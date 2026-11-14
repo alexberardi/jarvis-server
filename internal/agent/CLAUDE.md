@@ -390,8 +390,9 @@ the agent (+~4.5 MB), the price of one verification path.
     typed. A failure's `error` says "Nothing was typed: …" and what to tell the user
     (`dictate.FailureText`), and the island shows it (`FailureNote`): small models have
     claimed success over a bare error. Text: `dictate.Sanitize` (≤ 2000 characters,
-    line breaks → spaces, control/format characters dropped), on stdin never argv, never in a
-    log (`node.RedactedArgs`) or a result. Enter only as the `submit` step; keys from the closed
+    line breaks: Enter in editors, Shift+Enter elsewhere, spaces in terminals or when the focused app is
+    unknown, chosen from the focused window, never by the model; control/format characters dropped), on stdin never argv, never in a
+    log (`node.RedactedArgs`) or a result. Enter as a send only as the `submit` step; keys from the closed
     `dictate.Keys` set. A confirmation (`--confirm-dictation`, default `submit`) is single use, replaced by a newer
     one, and cancels on no, unclear or timeout (`Confirmer.Now`/`Timeout` are injected in
     tests). **Never type or press keys in a desktop someone is using in tests:** use fakes, or a
