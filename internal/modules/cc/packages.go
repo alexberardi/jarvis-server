@@ -136,6 +136,9 @@ const (
 	// pantryStoreRemovedCode: the package's store was removed from the list, so it has no
 	// updates (decisions 5, 11).
 	pantryStoreRemovedCode = "pantry_store_removed"
+	// daemonHostConflictCode: the package has a daemon that already runs on another node of
+	// the household (docs/CHANNELS.md, D3).
+	daemonHostConflictCode = "daemon_host_conflict"
 )
 
 // pantryErr is a Pantry store refusal: writeErr answers it with its code.
@@ -307,6 +310,34 @@ func (m *Module) installStore(ctx context.Context, householdID, nodeID, name, pi
 	return from, nil
 }
 
+// daemonElsewhere refuses an install of a package whose daemon already runs on another active
+// node of the household: a daemon holds one connection (a chat bot's), and two would both
+// answer. jarvisd learns that a package has a daemon from the first install's result, so two
+// first installs started together are not caught.
+func (m *Module) daemonElsewhere(ctx context.Context, householdID, nodeID, name string) error {
+	var host string
+	err := m.deps.DB.Read.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(n.room, ''), n.node_id)
+		FROM cc_node_package_stores s JOIN cc_nodes n ON n.node_id = s.node_id
+		WHERE s.command_name = ? AND s.has_daemon = 1 AND s.node_id != ? AND n.household_id = ? AND n.is_active = 1
+		ORDER BY s.installed_at LIMIT 1`, name, nodeID, householdID).Scan(&host)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	return &pantryErr{http.StatusConflict, name + " keeps a connection open, so it runs on one node, and it is already on " +
+		host + ". Uninstall it there to move it here.", daemonHostConflictCode}
+}
+
+// hasDaemon reports whether a node's install result names daemons (its details' "daemons").
+func hasDaemon(results sql.NullString) bool {
+	var d struct {
+		Daemons []string `json:"daemons"`
+	}
+	return results.Valid && json.Unmarshal([]byte(results.String), &d) == nil && len(d.Daemons) > 0
+}
+
 // recordPackageStore keeps where a node's package came from when its install or uninstall
 // completes, in the transaction that completes it.
 func recordPackageStore(ctx context.Context, tx *sql.Tx, op pkgOp, p *pkgRequest) error {
@@ -316,9 +347,10 @@ func recordPackageStore(ctx context.Context, tx *sql.Tx, op pkgOp, p *pkgRequest
 	switch {
 	case op == opInstall && p.storeID.Valid:
 		_, err := tx.ExecContext(ctx, `INSERT INTO cc_node_package_stores (node_id, command_name, pantry_store_id,
-			installed_at) VALUES (?, ?, ?, ?) ON CONFLICT (node_id, command_name) DO UPDATE SET
-			pantry_store_id = excluded.pantry_store_id, installed_at = excluded.installed_at`,
-			p.nodeID, p.commandName, p.storeID.String, p.completedAt.String)
+			installed_at, has_daemon) VALUES (?, ?, ?, ?, ?) ON CONFLICT (node_id, command_name) DO UPDATE SET
+			pantry_store_id = excluded.pantry_store_id, installed_at = excluded.installed_at,
+			has_daemon = excluded.has_daemon`,
+			p.nodeID, p.commandName, p.storeID.String, p.completedAt.String, hasDaemon(p.resultsJSON))
 		return err
 	case op == opUninstall:
 		_, err := tx.ExecContext(ctx, `DELETE FROM cc_node_package_stores WHERE node_id = ? AND command_name = ?`,
@@ -899,6 +931,10 @@ func (m *Module) createPkg(w http.ResponseWriter, r *http.Request, auth provAuth
 	}
 	if needsPantry {
 		if store, err = m.installStore(ctx, hh, nodeID, name, picked); err != nil {
+			m.writeErr(w, err)
+			return nil, PantryStore{}, false
+		}
+		if err := m.daemonElsewhere(ctx, hh, nodeID, name); err != nil {
 			m.writeErr(w, err)
 			return nil, PantryStore{}, false
 		}

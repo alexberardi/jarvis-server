@@ -399,7 +399,9 @@ func TestAPackagesDaemonIsListed(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, _ := readList(filepath.Join(m.Root, "commands.json"))
-	if details["skipped_components"] != nil || len(list) != 1 || !reflect.DeepEqual(list[0].Daemons, []string{"daemons/link/daemon.py"}) {
+	// The result names the daemon: jarvisd keeps it on one node of the household.
+	if details["skipped_components"] != nil || !reflect.DeepEqual(details["daemons"], []string{"link"}) ||
+		len(list) != 1 || !reflect.DeepEqual(list[0].Daemons, []string{"daemons/link/daemon.py"}) {
 		t.Fatalf("details %v, list %+v", details, list)
 	}
 	ds := m.Daemons()
