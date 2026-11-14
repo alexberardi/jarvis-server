@@ -45,8 +45,8 @@ jobs:
         shard: [cc, cc-sub, rest]
     runs-on: ubuntu-latest
     env:
-      CC: /internal/modules/(cc|admin|cc/computer)$
-      CC_SUB: /internal/modules/cc/(errands|phone)$
+      SHARD_CC: /internal/modules/(cc|admin|cc/computer)$
+      SHARD_CC_SUB: /internal/modules/cc/(errands|phone)$
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -60,9 +60,9 @@ jobs:
         run: |
           # A pattern that matches nothing fails here (grep exits 1) instead of testing nothing.
           case "${{ matrix.shard }}" in
-            cc)     pkgs=$(go list ./... | grep -E "$CC") ;;
-            cc-sub) pkgs=$(go list ./... | grep -E "$CC_SUB") ;;
-            rest)   pkgs=$(go list ./... | grep -vE "$CC|$CC_SUB") ;;
+            cc)     pkgs=$(go list ./... | grep -E "$SHARD_CC") ;;
+            cc-sub) pkgs=$(go list ./... | grep -E "$SHARD_CC_SUB") ;;
+            rest)   pkgs=$(go list ./... | grep -vE "$SHARD_CC|$SHARD_CC_SUB") ;;
           esac
           # shellcheck disable=SC2086
           CGO_ENABLED=1 go test -race $pkgs
