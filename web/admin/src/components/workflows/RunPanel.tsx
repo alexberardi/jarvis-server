@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, CheckCircle2, Circle, HelpCircle, Play, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -121,13 +120,7 @@ export default function RunPanel({ wf, onRevision }: { wf: TaughtWorkflow; onRev
           {rec.ask && rec.state === 'waiting' && (
             <div role="status" className="space-y-2 rounded-control bg-warning-soft p-3 text-small text-text">
               <p>{rec.ask}</p>
-              <p>
-                Answer on its card in your{' '}
-                <Link to="/inbox" className="font-medium underline underline-offset-2">
-                  Inbox
-                </Link>
-                .
-              </p>
+              <p>Answer on the run’s card in the Jarvis app on your phone: this page can’t answer it yet.</p>
             </div>
           )}
           {rec.summary && rec.state !== 'waiting' && <p className="text-small text-text">{rec.summary}</p>}
