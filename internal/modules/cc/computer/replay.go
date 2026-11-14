@@ -68,6 +68,12 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 			return l.end(ctx, run, Outcome{State: StateFailed, Summary: "I couldn't see the computer: " + err.Error()})
 		}
 	}
+	if next == 0 && run.Pending == nil {
+		// What was true when the task was recorded, made sure of before the first step.
+		if out, done := l.prerequisites(ctx, r, wf, params); done {
+			return l.end(ctx, run, out)
+		}
+	}
 	if held := run.Pending; held != nil && next < len(steps) {
 		run.Pending = nil
 		if l.stopRequested(ctx, run) {

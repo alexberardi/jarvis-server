@@ -49,10 +49,17 @@ type fakeExec struct {
 	onAct    func()
 	files    map[string]FileInfo // "list ~/Downloads", "read report.csv"; missing: not found
 	fileArgs []Files
+	// observeErr fails a look (nil: none do).
+	observeErr func(Observe) error
 }
 
 func (f *fakeExec) Observe(_ context.Context, o Observe) (Observation, error) {
 	f.observes = append(f.observes, o)
+	if f.observeErr != nil {
+		if err := f.observeErr(o); err != nil {
+			return Observation{}, err
+		}
+	}
 	p := f.pages[0]
 	if len(f.pages) > 1 {
 		f.pages = f.pages[1:]
