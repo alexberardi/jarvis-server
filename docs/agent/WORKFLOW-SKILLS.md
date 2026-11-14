@@ -224,7 +224,11 @@ is theirs.
     decides (redo, another way, or carry on); a risky step is never redone unasked; after a
     bounded number of attempts it asks.
     [Decision](../decisions/2026-11-13-a-failed-step-check-goes-to-the-model.md).
-  - Q3 (asked): whether a new workflow's first run is a supervised "watch me do it back".
+  - **Q3 (decided 2026-11-13):** a new workflow is unproven until one verified run: owner-started,
+    attended, pausing before its first risky step. The user added a revision loop: while watching,
+    the owner can write what went wrong, and the workflow is revised and run again.
+    [Decision](../decisions/2026-11-13-first-run-is-watched-with-feedback.md).
+  - Q3a (asked): what the owner's written feedback does.
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.
 - `refine`: whether a learnt note needs the owner's approval before a run uses it.
