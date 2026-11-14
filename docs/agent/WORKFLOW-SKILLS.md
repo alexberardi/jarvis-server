@@ -228,7 +228,9 @@ is theirs.
     attended, pausing before its first risky step. The user added a revision loop: while watching,
     the owner can write what went wrong, and the workflow is revised and run again.
     [Decision](../decisions/2026-11-13-first-run-is-watched-with-feedback.md).
-  - Q3a (asked): what the owner's written feedback does.
+  - **Q3a (decided 2026-11-13):** the owner's written feedback and the run's record become
+    proposed edits shown as a draft to review, as Relearn's is; then run again.
+    [Decision](../decisions/2026-11-13-watched-run-feedback-becomes-a-draft.md).
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.
 - `refine`: whether a learnt note needs the owner's approval before a run uses it.
