@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TaughtWorkflow, WorkflowPut } from '@/api/workflows'
 import WorkflowEditPage from './WorkflowEditPage'
 
-const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn() }))
+const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn() }))
 vi.mock('@/api/workflows', async (orig) => ({ ...(await orig<typeof import('@/api/workflows')>()), ...api }))
 
 const bank = (over: Partial<TaughtWorkflow> = {}): TaughtWorkflow => ({
@@ -298,5 +298,51 @@ describe('WorkflowEditPage', () => {
     expect(steps()[1]).toHaveTextContent('Get to the list Then the address contains bank.example.com/statements.')
     expect(screen.queryByLabelText('Why you do this')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add a prerequisite' })).not.toBeInTheDocument()
+  })
+
+  it('relearns into a draft that changes nothing until it is saved', async () => {
+    api.getWorkflow.mockResolvedValue(bank({ recording_id: 'rec_1' }))
+    const draft: WorkflowPut = {
+      name: 'Get the statement',
+      triggers: ['get my bank statement'],
+      params: [],
+      steps: bank().steps.slice(0, 2),
+      success: { download: { name_like: 'statement*.csv' } },
+      shared: false,
+      skill: { goal: { end_state: 'The statement is in Downloads' } },
+    }
+    api.relearnWorkflow.mockResolvedValue(draft)
+    renderPage()
+    await screen.findAllByTestId('step')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Relearn' }))
+    })
+    expect(api.relearnWorkflow).toHaveBeenCalledWith('tw_1')
+    expect(await screen.findByText('This is a fresh draft from your recording')).toBeInTheDocument()
+    expect(steps()).toHaveLength(2)
+    expect(screen.getByLabelText('Name')).toHaveValue('Get the statement')
+    expect(screen.getByLabelText("It's done when")).toHaveValue('The statement is in Downloads')
+    expect(api.saveWorkflow).not.toHaveBeenCalled()
+
+    // Discarding goes back to the stored workflow.
+    fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+    expect(steps()).toHaveLength(5)
+    expect(screen.getByLabelText('Name')).toHaveValue('Download bank statement')
+
+    // Saving the draft stores it and the notice goes.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Relearn' }))
+    })
+    const body = await save()
+    expect(body.name).toBe('Get the statement')
+    expect(body.steps).toHaveLength(2)
+    expect(screen.queryByText('This is a fresh draft from your recording')).not.toBeInTheDocument()
+  })
+
+  it('says so when the recording is gone', async () => {
+    renderPage()
+    await screen.findAllByTestId('step')
+    expect(screen.getByText('Its recording is no longer kept, so it can’t be learnt again.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Relearn' })).not.toBeInTheDocument()
   })
 })

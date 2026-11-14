@@ -93,6 +93,7 @@ var wantTiers = map[string]tier{
 	"PUT /api/cc/api/v0/workflows/{id}":                       tierUser,
 	"DELETE /api/cc/api/v0/workflows/{id}":                    tierUser,
 	"POST /api/cc/api/v0/workflows/{id}/run":                  tierUser,
+	"POST /api/cc/api/v0/workflows/{id}/relearn":              tierUser,
 	"GET /api/cc/api/v0/recordings":                           tierUser,
 	"GET /api/cc/api/v0/recordings/{id}":                      tierUser,
 	"DELETE /api/cc/api/v0/recordings/{id}":                   tierUser,

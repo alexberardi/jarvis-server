@@ -140,6 +140,12 @@ export async function saveWorkflow(id: string, body: WorkflowPut): Promise<Taugh
   return data
 }
 
+/** relearnWorkflow learns it again from its recording and answers the draft; cc stores nothing until it is saved. */
+export async function relearnWorkflow(id: string): Promise<WorkflowPut> {
+  const { data } = await apiClient.post<WorkflowPut>(`${V0}/workflows/${encodeURIComponent(id)}/relearn`, {})
+  return data
+}
+
 /** runWorkflow asks cc to replay it now, in an errand whose card shows how it goes (piece 31). */
 export async function runWorkflow(id: string): Promise<void> {
   await apiClient.post(`${V0}/workflows/${encodeURIComponent(id)}/run`, {})

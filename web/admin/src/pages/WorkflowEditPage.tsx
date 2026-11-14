@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowLeft, ArrowUp, GripVertical, Plus, ShieldAlert, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, GripVertical, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { saveWorkflow } from '@/api/workflows'
-import type { ParamKind, Skill, SuccessCheck, TaughtWorkflow, WStep } from '@/api/workflows'
-import { Badge, Button, Card, CardHeader, ErrorState, Input, PageHeader, Select, Skeleton, Switch } from '@/components/ui'
+import { relearnWorkflow, saveWorkflow } from '@/api/workflows'
+import type { ParamKind, Skill, SuccessCheck, TaughtWorkflow, WStep, WorkflowPut } from '@/api/workflows'
+import { Badge, Banner, Button, Card, CardHeader, ErrorState, Input, PageHeader, Select, Skeleton, Switch } from '@/components/ui'
 import { useWorkflow, workflowKeys } from '@/hooks/useWorkflows'
 import { errorMessage, errorStatus } from '@/lib/errors'
 import { cn } from '@/lib/utils'
@@ -34,6 +34,8 @@ const TARGETS = [
 export default function WorkflowEditPage() {
   const { id = '' } = useParams()
   const wf = useWorkflow(id)
+  // A relearnt draft fills the form over the stored workflow; it is only stored by Save.
+  const [draft, setDraft] = useState<WorkflowPut | null>(null)
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <Link
@@ -57,7 +59,13 @@ export default function WorkflowEditPage() {
           <Skeleton className="h-64 w-full rounded-card" />
         </div>
       ) : (
-        <Editor key={`${wf.data.id}:${wf.data.updated_at}`} wf={wf.data} />
+        <Editor
+          key={`${wf.data.id}:${wf.data.updated_at}:${draft ? 'draft' : ''}`}
+          wf={draft ? { ...wf.data, ...draft } : wf.data}
+          storedName={wf.data.name}
+          isDraft={!!draft}
+          onDraft={setDraft}
+        />
       )}
     </div>
   )
@@ -65,7 +73,14 @@ export default function WorkflowEditPage() {
 
 let added = 0
 
-function Editor({ wf }: { wf: TaughtWorkflow }) {
+interface EditorProps {
+  wf: TaughtWorkflow
+  storedName: string
+  isDraft: boolean
+  onDraft: (d: WorkflowPut | null) => void
+}
+
+function Editor({ wf, storedName, isDraft, onDraft }: EditorProps) {
   const qc = useQueryClient()
   const edit = wf.editable
   const [name, setName] = useState(wf.name)
@@ -86,10 +101,17 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
     mutationFn: () => saveWorkflow(wf.id, toPut({ name, triggers: wf.triggers, steps, cands, success, shared, skill })),
     onSuccess: (got) => {
       qc.setQueryData(workflowKeys.item(wf.id), got)
+      onDraft(null)
       void qc.invalidateQueries({ queryKey: ['workflows'] })
       toast.success('Saved')
     },
     onError: (err) => toast.error(errorMessage(err, 'Could not save the workflow')),
+  })
+
+  const relearn = useMutation({
+    mutationFn: () => relearnWorkflow(wf.id),
+    onSuccess: onDraft,
+    onError: (err) => toast.error(errorMessage(err, 'Could not learn the workflow again')),
   })
 
   const move = (from: number, to: number) => {
@@ -126,9 +148,35 @@ function Editor({ wf }: { wf: TaughtWorkflow }) {
     >
       <PageHeader
         className="mb-2"
-        title={<span className="[overflow-wrap:anywhere]">{wf.name}</span>}
-        description={edit ? undefined : 'Shared with you. Only the member who taught it, or a household admin, can change it.'}
+        title={<span className="[overflow-wrap:anywhere]">{storedName}</span>}
+        description={
+          !edit
+            ? 'Shared with you. Only the member who taught it, or a household admin, can change it.'
+            : !wf.recording_id
+              ? 'Its recording is no longer kept, so it can’t be learnt again.'
+              : undefined
+        }
+        actions={
+          edit &&
+          wf.recording_id &&
+          !isDraft && (
+            <Button icon={<RefreshCw size={16} aria-hidden />} loading={relearn.isPending} onClick={() => relearn.mutate()}>
+              Relearn
+            </Button>
+          )
+        }
       />
+
+      {isDraft && (
+        <Banner
+          tone="primary"
+          role="status"
+          title="This is a fresh draft from your recording"
+          actions={<Button onClick={() => onDraft(null)}>Discard draft</Button>}
+        >
+          Your workflow is unchanged until you save. Discard the draft to go back to it.
+        </Banner>
+      )}
 
       <Card as="section" aria-labelledby="wf-about" className="space-y-4">
         <h2 id="wf-about" className="sr-only">

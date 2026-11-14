@@ -248,19 +248,19 @@ is theirs.
 
 ### Tasks (in order; each is one PR)
 
-- [ ] **S1 — skill in the data model.** `computer.Workflow`/`WorkflowStep` types, migration,
+- [x] **S1 — skill in the data model.** `computer.Workflow`/`WorkflowStep` types, migration,
   `Validate` (limits, kinds, `{param}` declared), API round trip.
   - Acceptance: a workflow with a full skill saves and reloads; an old row loads empty and runs.
   - Verify: `scripts/check`; store and validation tests; the teach cases.
-- [ ] **S2 — learn the skill (inference path).** Prompt and answer gain goal, when to use, step
+- [x] **S2 — learn the skill (inference path).** Prompt and answer gain goal, when to use, step
   goals, and step expectations inferred from the next step; invented references dropped.
   - Acceptance: success criterion 1 on the `bank_download` trace, without captured results.
   - Verify: prompt goldens (browser, desktop), build tests with a scripted model.
-- [ ] **S3 — the workflow page shows and edits the skill.** Goal, prerequisites, each step's goal
+- [x] **S3 — the workflow page shows and edits the skill.** Goal, prerequisites, each step's goal
   and expectation, notes.
   - Acceptance: criteria 2 and 3.
   - Verify: Vitest, `scripts/e2e web`, `scripts/screenshots --sandbox workflow-skills`.
-- [ ] **S4 — Relearn.** A route that returns a draft from the stored recording, and the button.
+- [x] **S4 — Relearn.** A route that returns a draft from the stored recording, and the button.
   - Acceptance: criterion 1b.
   - Verify: route tests (kept, expired, another household 404), Vitest.
 - [ ] **C1 — trace format.** `start` and `result` kinds, caps, tolerant parsing on the server.
