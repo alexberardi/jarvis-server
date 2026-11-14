@@ -117,6 +117,7 @@ overriding a deliberate choice.
 | Errands | `errands.model` | background | `errands/planner.go`, `errands/runner.go` |
 | Grocery matching | `recipes.grocery.model` | background | `recipes/grocery_match.go` |
 | Learned workflows | `workflows.model` | background | `workflows_learn.go` |
+| Running a workflow | `workflows.run_model` | largest local vision model | `computer/replay.go` |
 | Memory | `memory.model` | background | `memory_jobs.go` |
 | Phone calls | `phone_calls.model` | live | `phone/turn.go`, `phone/inbound_agent.go` |
 | Recipe import | `recipes.import.model` | live | `recipes/ingest.go`, `recipes/mealplan.go`, `recipes/photo_import.go` |

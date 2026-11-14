@@ -41,7 +41,9 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 		return Outcome{RunID: t.RunID, State: StateFailed, Summary: "I couldn't start the computer task: " + err.Error()}
 	}
 	sc := settings.Scope{HouseholdID: t.HouseholdID}
-	pick, err := pickLabel(ctx, l.Models, l.str(ctx, SettingModel, sc, ModelAuto))
+	// A run has its own model setting. Its auto is computer tasks' automatic pick (the largest
+	// local vision model), not whatever computer.model is set to: auto never means cloud.
+	pick, err := pickLabel(ctx, l.Models, l.str(ctx, SettingRunModel, sc, ModelAuto))
 	if err != nil {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}

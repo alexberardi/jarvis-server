@@ -25,6 +25,9 @@ const (
 	SettingMaxRounds  = "computer.max_rounds"
 	SettingMaxMinutes = "computer.max_minutes"
 	SettingModel      = "computer.model"
+	// SettingRunModel is the model a taught workflow's run uses (the Models page's "Running a
+	// workflow"); auto: the pick computer.model's auto makes, never cloud.
+	SettingRunModel = "workflows.run_model"
 	// SettingAutoApproveCents is the spend limit: a checkout at most this many cents is approved
 	// without asking (0 = off). The errand step reads it (piece 11).
 	SettingAutoApproveCents = "computer.auto_approve_cents"
