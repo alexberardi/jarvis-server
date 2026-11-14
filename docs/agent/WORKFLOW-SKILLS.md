@@ -213,7 +213,7 @@ None: Q2–Q6 are decided. `capture`'s own questions (how long to wait for an ac
 limits, what "signed in" is read from) are settled in its plan, with the user asked where a choice
 is theirs.
 
-## Spec: `verified-replay` (awaiting the user's review)
+## Spec: `verified-replay` (approved by the user, 2026-11-13)
 
 ### Objective
 
@@ -360,6 +360,96 @@ per-feature model slot
 Chosen as defaults, to change if the user says so: 3 attempts per step; a
 2 second wait before the second look; the run is shown on the workflow page (the errand card
 keeps its summary); the document folders are Documents, Downloads and Desktop.
+
+## Plan: `verified-replay` (awaiting the user's review)
+
+### Shape
+
+- **One loop, grown in place.** `Replay` keeps its outer shape (bind params, open the run,
+  resume after a confirmation or a question, budget of rounds and minutes). Each task adds one
+  phase to it, so the two teach cases pass after every task.
+- **A step's check is the existing verifier.** `Loop.Verify` already checks an address, text, a
+  download, a file or a screen sentence for the end of a run; a step's `expect` is the same
+  `SuccessCheck`, so step checks need no new checker.
+- **The model's choices are tools it already has.** On a failed check the model round gets the
+  step, its goal, what was expected and what is seen, and answers as a computer task round
+  does: actions, done, or a question. "Redo", "another way" and "carry on" are those three.
+- **State per workflow:** the version last proven, and the last run's record (per prerequisite
+  and step: state, expected, seen). One migration each, in the task that first needs it.
+- **Model:** runs read a new slot, `workflows.run_model` (auto: what a computer task picks).
+
+### Tasks (in order; each is one PR)
+
+- [ ] **R1 — a model slot for running.** `workflows.run_model` in `slots.go`, read by `Replay`;
+  its entry in the Models page's per-feature section.
+  - Acceptance: choosing a label there changes the model a run uses; auto is today's.
+  - Verify: unit test on the pick; Vitest for the entry; screenshots and the design audit.
+- [ ] **R2 — every step is checked.** After a step acts, its `expect` is verified. A failed
+  check waits 2 s and looks again. Still failing, the run asks, showing the step, what was
+  expected and what it sees (the model's choices come in R3).
+  - Acceptance: criterion 2; a failed check never reports the step done; a step with no
+    expectation behaves as today; criterion 8.
+  - Verify: unit tests with the fake executor (verified, slow screen, failing); the two teach
+    cases on qwen3.5-9b; a new suite case with a slow page.
+- [ ] **R3 — the model decides on a failed check; Strict or Creative.** The model round: redo,
+  another way, or carry on. A risky step is not redone without asking. Three attempts per step,
+  then ask. Strict bounds the round to the apps and sites the workflow names; the radio on the
+  workflow page.
+  - Acceptance: criteria 3, 4 and 7.
+  - Verify: unit tests for each choice, the risky step and the limit; Strict refusing another
+    app; a suite case with a renamed button and one with a "send" step; Vitest, screenshots.
+- [ ] **R4 — the end state.** The goal's end state is verified with the success check; not
+  reached, the model works toward it within the run's budget, then asks.
+  - Acceptance: a run whose steps all "worked" but whose result is missing is not done.
+  - Verify: unit tests; a suite case where the download never lands.
+- [ ] **R5 — prerequisites: app, page, signed in, other.** Each is checked and an unmet one
+  achieved before step 1; signed out asks the user and continues on their word.
+  - Acceptance: criterion 1; a signed-out site stops before step 1 without typing anything.
+  - Verify: unit tests per kind (met, achieved, unachievable); a suite case with the page closed.
+- [ ] **R6 — open a file by name.** The agent's open policy takes a file's name: the node finds
+  it in Documents, Downloads and Desktop, opens a document on a single match, and a program,
+  script or shortcut after a confirmation. `desktop_open` by voice, and the file prerequisite.
+  A step that runs a program is learnt as "Ask me first", which its owner can turn off.
+  - Acceptance: criterion 7a; a file prerequisite with one match opens, with two asks which.
+  - Verify: agent tests on fake folders (one, none, several, a script, a path refused); the
+    open-policy guard tests updated, not weakened; a voice pipeline scenario.
+  - **Held for review:** it changes `internal/agent/CLAUDE.md` invariant 9.
+- [ ] **R7 — proven, and who may start an unproven run.** The proven version (migration); an
+  unproven workflow refuses a schedule, another member, or its owner away from the computer,
+  and pauses before its first risky step; a verified run proves it; which edits unprove it;
+  the state on the workflow page.
+  - Acceptance: criterion 5.
+  - Verify: unit and route tests for each refusal and each edit kind; Vitest; screenshots.
+  - **Held for review:** it adds a membership and presence check to starting a run.
+- [ ] **R8 — the run on the workflow page.** The last run's record (migration), a route to
+  read it, and the panel: each prerequisite and step with its state, what was expected and, on
+  a failure, what was seen; live while a run goes.
+  - Acceptance: a failed run shows where it failed and what it saw; another member can't read it.
+  - Verify: route tests with tier expectations; Vitest; `scripts/e2e web`; screenshots, audit.
+  - **Held for review:** a new `/api` route.
+- [ ] **R9 — revise from what the owner writes.** The "What went wrong?" box; a route that
+  sends the text and the run's record to the learning model and answers proposed edits; the
+  draft with the changed fields marked, saved or discarded like Relearn's.
+  - Acceptance: criterion 6.
+  - Verify: route tests (owner only, another household 404, nothing stored); a golden of the
+    revise prompt; the real model on three kinds of feedback; Vitest; screenshots.
+  - **Held for review:** a new `/api` route.
+
+### Checkpoints
+
+1. After R4: the two teach cases and the new suite cases on qwen3.5-9b, with the time a run
+   takes before and after.
+2. After R7: the user teaches one real task (the monthly budget sheet) and runs it once, watched.
+3. After R9: the user corrects a run with the feedback box and runs it again until it is proven.
+
+### Risks
+
+| Risk | Mitigation |
+|---|---|
+| Step checks make good runs fail (a too-strict learnt sentence) | R2 lands before R3 on purpose: the suite shows how often it happens on the fixtures; the model's "carry on" in R3 and the watched run in R7 to R9 are the answer |
+| The loop change breaks resume after a confirmation | Each task keeps the teach cases and the existing resume tests green; resume gets a test per new phase |
+| Rounds budget runs out on long workflows | A screen check counts as a round; the budget is reported in checkpoint 1 and raised only with the user |
+| File search opens the wrong document | Single match only, by full name; otherwise ask |
 
 ## Later modules' questions (not yet ordered)
 
