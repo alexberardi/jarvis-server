@@ -600,6 +600,14 @@ func TestLearnFromLinkPickedMonth(t *testing.T) {
 	if e := w.Steps[2].Element; e == nil || e.Role != "button" || e.Name != "Download CSV" || e.Selector != "#download-csv" {
 		t.Fatalf("download step %+v %+v", w.Steps[2], e)
 	}
+	// The page the link opened is checked on every run: for the run's month, not September.
+	if x := w.Steps[1].Expect; x == nil || x.URLContains != "127.0.0.1:4000/bank/statements/{month}" {
+		t.Fatalf("the link step's expectation %+v", x)
+	}
+	// The button's result is the download itself, looked for in Downloads, not a sentence.
+	if x := w.Steps[2].Expect; x == nil || x.Download == nil || x.Download.NameLike != "*.csv" || x.Screen != "" {
+		t.Fatalf("the download step's expectation %+v", x)
+	}
 	if d := w.Success.Download; d == nil || d.NameLike != "*.csv" {
 		t.Fatalf("success %+v", w.Success)
 	}

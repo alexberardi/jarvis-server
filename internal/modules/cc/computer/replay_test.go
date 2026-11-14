@@ -544,3 +544,97 @@ func TestReplayPicksTheRunModel(t *testing.T) {
 		}
 	}
 }
+
+// checkedWorkflow is statementWorkflow with what each step should cause.
+func checkedWorkflow() *Workflow {
+	wf := statementWorkflow()
+	wf.Steps[0].Expect = &SuccessCheck{URLContains: "bank.example.com/statements"}
+	wf.Steps[1].Expect = &SuccessCheck{TextPresent: []string{"Sign out"}}
+	return wf
+}
+
+// sleeps records a loop's waits instead of making them.
+func (e *tenv) sleeps() *[]time.Duration {
+	var got []time.Duration
+	e.loop.Sleep = func(_ context.Context, d time.Duration) { got = append(got, d) }
+	return &got
+}
+
+var download = Element{Ref: "e4", Role: "button", Name: "Download CSV"}
+
+// Every step's expectation is checked by a fresh look; when each holds, the run is done with no
+// model call and no waiting.
+func TestReplayChecksEveryStep(t *testing.T) {
+	e := newEnv(t, bankPage(download))
+	waits := e.sleeps()
+	out := e.replay(checkedWorkflow(), map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(e.llm.reqs) != 0 || len(*waits) != 0 || len(e.exec.batches) != 2 {
+		t.Fatalf("outcome %+v, %d model calls, waits %v, %d batches", out, len(e.llm.reqs), *waits, len(e.exec.batches))
+	}
+}
+
+// A check that fails is made once more after a wait: a slow page passes on the second look, and
+// the step is not done again.
+func TestReplaySlowPagePassesOnTheSecondLook(t *testing.T) {
+	loading := Observation{URL: "about:blank", Title: "Loading", Gen: 1}
+	// The looks: opening the window, step 1's first check (still loading), then the page.
+	e := newEnv(t, bankPage(download), loading, bankPage(download))
+	waits := e.sleeps()
+	out := e.replay(checkedWorkflow(), map[string]string{"month": "October 2026"})
+	if out.State != StateDone || len(e.exec.batches) != 2 || len(e.llm.reqs) != 0 {
+		t.Fatalf("outcome %+v, %d batches, %d model calls", out, len(e.exec.batches), len(e.llm.reqs))
+	}
+	if len(*waits) != 1 || (*waits)[0] != stepSettle {
+		t.Fatalf("waits %v, want one of %v", *waits, stepSettle)
+	}
+}
+
+// A step whose check still fails is not reported done: the run asks, saying what it expected and
+// found. On the user's word it carries on, and the step is never run a second time.
+func TestReplayAsksWhenAStepCantBeConfirmed(t *testing.T) {
+	elsewhere := Observation{URL: "https://bank.example.com/login", Title: "Sign in", Gen: 1}
+	e := newEnv(t, bankPage(download), elsewhere)
+	e.sleeps()
+	wf := checkedWorkflow()
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateAsk || !strings.Contains(out.Ask, "I did step 1 (Open the statements for October 2026), but I couldn't confirm it worked") ||
+		!strings.Contains(out.Ask, `the address is https://bank.example.com/login, not one with "bank.example.com/statements"`) {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.exec.batches) != 1 {
+		t.Fatalf("%d batches before the question, want only step 1's", len(e.exec.batches))
+	}
+
+	// The user puts it right and says so.
+	e.exec.pages = []Observation{bankPage(download)}
+	tk := task()
+	tk.Goal, tk.Target, tk.RunID, tk.Answer = "", computeruse.Target{}, out.RunID, "continue"
+	out = e.loop.Replay(context.Background(), tk, wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone {
+		t.Fatalf("after continue: %+v", out)
+	}
+	if n := len(e.exec.batches); n != 2 || e.exec.batches[0].Actions[0].Kind != "navigate" || e.exec.batches[1].Actions[0].Kind != "press" {
+		t.Fatalf("batches %+v: step 1 must not run again", e.exec.batches)
+	}
+}
+
+// A step's expectation is for the run's values, not the recorded ones.
+func TestBindExpectations(t *testing.T) {
+	wf := statementWorkflow()
+	wf.Params[0].Example = "2026-09"
+	wf.Steps[0].Goal = "Get to {month}"
+	wf.Steps[0].Expect = &SuccessCheck{URLContains: "/statements/{month}", Screen: "The page lists {month}",
+		TextPresent: []string{"Statement {month}"}, Download: &DownloadCheck{NameLike: "statement_{month}.csv"}}
+	steps, err := wf.Bind(map[string]string{"month": "2026-08"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := json.Marshal(steps[0].Expect)
+	want := `{"url_contains":"/statements/2026-08","text_present":["Statement 2026-08"],"download":{"name_like":"statement_2026-08.csv"},"screen":"The page lists 2026-08"}`
+	if string(got) != want || steps[0].Goal != "Get to 2026-08" {
+		t.Fatalf("bound %s, goal %q\nwant  %s", got, steps[0].Goal, want)
+	}
+	if wf.Steps[0].Expect.URLContains != "/statements/{month}" {
+		t.Fatal("binding changed the workflow itself")
+	}
+}

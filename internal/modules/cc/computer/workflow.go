@@ -185,6 +185,29 @@ func (w *Workflow) bind(params map[string]string, now time.Time) ([]WorkflowStep
 			st.Element = &el
 		}
 		st.Action = a
+		st.Goal = sub(st.Goal, nil)
+		if c := st.Expect; c != nil {
+			// What the step should cause, for this run's values: recorded for September, the
+			// page it opens in August is August's.
+			// shortcut: a value goes into an address as given; escape it when a param holds a space or a slash.
+			b := *c
+			b.URLContains, b.Screen = sub(c.URLContains, nil), sub(c.Screen, nil)
+			b.TextPresent = slices.Clone(c.TextPresent)
+			for j := range b.TextPresent {
+				b.TextPresent[j] = sub(b.TextPresent[j], nil)
+			}
+			if c.Download != nil {
+				d := *c.Download
+				d.NameLike = sub(d.NameLike, nil)
+				b.Download = &d
+			}
+			if c.File != nil {
+				f := *c.File
+				f.Path = sub(f.Path, nil)
+				b.File = &f
+			}
+			st.Expect = &b
+		}
 		steps[i] = st
 	}
 	return steps, nil
