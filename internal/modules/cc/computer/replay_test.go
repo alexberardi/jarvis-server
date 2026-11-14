@@ -193,11 +193,12 @@ func TestReplayNotHealedWhenCheckFails(t *testing.T) {
 	e := newEnv(t, bankPage(Element{Ref: "e9", Role: "link", Name: "Download CSV"}))
 	wfs := &fakeWorkflows{}
 	e.loop.Workflows = wfs
-	e.script(actions(press("e9", "Download the CSV")))
+	// The step's model round, then the round that works toward the missing result: nothing to do.
+	e.script(actions(press("e9", "Download the CSV")), doneAnswer)
 	wf := statementWorkflow()
 	wf.Success = SuccessCheck{URLContains: "/downloaded"}
 	out := e.replay(wf, map[string]string{"month": "October 2026"})
-	if out.State != StateFailed || !strings.Contains(out.Summary, `I ran every step of "Bank statement", but couldn't confirm it worked`) {
+	if out.State != StateAsk || !strings.Contains(out.Ask, `I ran every step of "Bank statement", but couldn't confirm it worked`) {
 		t.Fatalf("outcome %+v", out)
 	}
 	if wfs.heals != nil {
@@ -715,5 +716,81 @@ func TestBindExpectations(t *testing.T) {
 	}
 	if wf.Steps[0].Expect.URLContains != "/statements/{month}" {
 		t.Fatal("binding changed the workflow itself")
+	}
+}
+
+// Every step ran but the result isn't there: the model works toward it, and the check is made again.
+func TestReplayWorksTowardTheResult(t *testing.T) {
+	list := bankPage(download, Element{Ref: "e8", Role: "link", Name: "Open the statement"})
+	shown := Observation{URL: "https://bank.example.com/statements/2026-10/view", Title: "October statement", Gen: 2,
+		Image: &Image{MIME: "image/png", Data: []byte("png"), CaptureID: "c9", Width: 800, Height: 600}}
+	e := newEnv(t, list)
+	// The page changes when the model's press lands (the third batch: after the two steps').
+	e.exec.onAct = func() {
+		if len(e.exec.batches) == 3 {
+			e.exec.pages = []Observation{shown}
+		}
+	}
+	e.script(actions(press("e8", "Open the statement")))
+	wf := statementWorkflow()
+	wf.Success = SuccessCheck{URLContains: "/view"}
+	wf.Skill.Goal.EndState = "The {month} statement is open"
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || out.Summary != `Ran "Bank statement". Checked: the address contains "/view".` {
+		t.Fatalf("outcome %+v", out)
+	}
+	txt := userText(e.llm.reqs[0])
+	for _, want := range []string{"every step ran, but the result isn't there", "The step is for: The October 2026 statement is open."} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, txt)
+		}
+	}
+}
+
+// A result that still can't be confirmed is never reported as checked: the run asks, and on the
+// user's word it ends saying who confirmed it.
+func TestReplayAsksWhenTheResultCantBeConfirmed(t *testing.T) {
+	e := newEnv(t, bankPage(download))
+	e.script(doneAnswer)
+	wf := statementWorkflow()
+	wf.Success = SuccessCheck{URLContains: "/downloaded"}
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateAsk || !strings.Contains(out.Ask, "couldn't confirm it worked") {
+		t.Fatalf("outcome %+v", out)
+	}
+	tk := task()
+	tk.Goal, tk.Target, tk.RunID, tk.Answer = "", computeruse.Target{}, out.RunID, "continue"
+	out = e.loop.Replay(context.Background(), tk, wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || !strings.Contains(out.Summary, "You confirmed the result; I couldn't check it myself") || out.Checked != "" {
+		t.Fatalf("after continue: %+v", out)
+	}
+	if len(e.exec.batches) != 2 {
+		t.Fatalf("%d batches: no step may run again", len(e.exec.batches))
+	}
+}
+
+// A workflow's result check is for the run's values.
+func TestResultCheckIsBound(t *testing.T) {
+	wf := statementWorkflow()
+	wf.Params[0].Example = "2026-09"
+	c := SuccessCheck{Download: &DownloadCheck{NameLike: "statement_{month}.csv"}, Screen: "{month} and {other}"}
+	got := c.with(func(s string) string { return wf.BindText(s, map[string]string{"month": "2026-08"}) })
+	if got.Download.NameLike != "statement_2026-08.csv" || got.Screen != "2026-08 and {other}" || c.Download.NameLike != "statement_{month}.csv" {
+		t.Fatalf("bound %+v %+v, original %+v", got.Download, got.Screen, c.Download)
+	}
+}
+
+// With nothing observable to check, the goal's end state is asked of the screen.
+func TestReplayAsksTheScreenForTheEndState(t *testing.T) {
+	page := bankPage(download)
+	page.Image = &Image{MIME: "image/png", Data: []byte("png"), CaptureID: "c9", Width: 800, Height: 600}
+	e := newEnv(t, page)
+	e.script("yes")
+	wf := statementWorkflow()
+	wf.Success = SuccessCheck{}
+	wf.Skill.Goal.EndState = "The {month} statement is showing"
+	out := e.replay(wf, map[string]string{"month": "October 2026"})
+	if out.State != StateDone || out.Summary != `Ran "Bank statement". Checked: Is this true now: The October 2026 statement is showing?: yes.` {
+		t.Fatalf("outcome %+v", out)
 	}
 }
