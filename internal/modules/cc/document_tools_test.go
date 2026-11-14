@@ -232,6 +232,8 @@ func TestWriteDocumentOpenPage(t *testing.T) {
 		{"source says so", "summarize it into a document", `{"path": "Velmora.odt", "instructions": "a summary", "source": "the page open in my browser"}`, 1},
 		{"the request says so", "Summarize this wiki page into a LibreOffice document called Velmora", `{"path": "Velmora.odt", "instructions": "a summary", "source": "Velmora wiki page"}`, 1},
 		{"no source", "Summarize the article I have open into a document", `{"path": "Velmora.odt", "instructions": "a summary"}`, 1},
+		// A name with no type is a text document (the 9B left it off and the step was refused).
+		{"no extension", "Summarize this wiki page into a document called Velmora", `{"path": "Velmora", "instructions": "a summary"}`, 1},
 		{"an address is fetched", "Summarize this page into a document", `{"path": "Velmora.odt", "instructions": "a summary", "source": "https://a.example/velmora"}`, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {

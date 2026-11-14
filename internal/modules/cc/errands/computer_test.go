@@ -551,7 +551,10 @@ func TestProgressCardUpdates(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		intent := "Look at item " + string(rune('0'+i))
 		intents = append(intents, intent)
-		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "e3", "intent": "`+intent+`"}]}`)
+		// Two elements in turn: the same press on the same screen three rounds running would be
+		// sent back as stuck (computer.TestStuckBatchIsSentBack).
+		ref := []string{"e3", "e2"}[i%2]
+		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "`+ref+`", "intent": "`+intent+`"}]}`)
 	}
 	c.llm.say("computer", append(replies, doneReply)...)
 	var seen []Card

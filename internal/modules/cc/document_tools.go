@@ -90,6 +90,11 @@ func (t *writeDocumentTool) Execute(ctx context.Context, call servertools.Call, 
 		p = m.documentsFolder(ctx, turn.HouseholdID) + "/" + p
 	}
 	ext := strings.ToLower(path.Ext(p))
+	if ext == "" {
+		// A name alone ("Velmora") is a text document: the house model leaves the type off, and
+		// the step failed as "I can write .odt … not Velmora" (suite on Qwen3.5-9B, 2026-11-13).
+		p, ext = p+".odt", ".odt"
+	}
 	sheet := ext == ".ods" || ext == ".xlsx"
 	if !sheet && ext != ".odt" && ext != ".docx" {
 		return recordingRefusal("invalid_argument", "I can write .odt, .docx, .ods or .xlsx files, not "+path.Base(p)+"."), nil

@@ -59,6 +59,7 @@ const defaultRules = "Risky actions (pay, send, delete, sharing, install, subscr
 type promptInput struct {
 	Goal        string
 	Today       string // the day in the household's zone, "" = not said
+	Dates       string // the goal's relative dates worked out, "" = it names none
 	Success     *SuccessCheck
 	Rules       string
 	Answer      string // the user's reply to the run's last question
@@ -79,6 +80,9 @@ func renderPrompt(in promptInput) string {
 	fmt.Fprintf(&b, "Task: %s\n", oneLine(in.Goal))
 	if in.Today != "" {
 		fmt.Fprintf(&b, "Today is %s.\n", in.Today)
+	}
+	if in.Dates != "" {
+		fmt.Fprintf(&b, "Dates in the task, worked out for you (use these, don't work them out again): %s.\n", oneLine(in.Dates))
 	}
 	if s := in.Success.describe(); s != "" {
 		fmt.Fprintf(&b, "Done when: %s\n", s)

@@ -8,6 +8,7 @@ package computer
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
@@ -158,6 +159,10 @@ type Task struct {
 	// Today is the day in the household's zone ("Thursday, November 12, 2026"), so a goal's
 	// "last month" or "this Friday" means a date ("" = not said).
 	Today string
+	// Dates are the goal's relative dates worked out ("last month = October 2026 (2026-10-01
+	// to 2026-10-31)"; dates.Context.Explain), "" when it names none: the house model given
+	// only Today took "last month" for the month it was in.
+	Dates string
 	// Progress, when set, is called after every round with the run as saved (its history), so
 	// the errand's card can show what the task is doing.
 	Progress func(run *Run)
@@ -291,6 +296,11 @@ type round struct {
 	downloadsBefore map[string]bool
 	// fresh: the run began in this Run call, so downloadsBefore are all from before the task.
 	fresh bool
+	// lastBatch is the last batch acted and the screen it was decided on (batchKey), and
+	// sameBatch how many rounds in a row decided exactly it on exactly that screen: the third
+	// is sent back (stuckFeedback) instead of run.
+	lastBatch string
+	sameBatch int
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
@@ -514,7 +524,57 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 			return Outcome{}, false
 		}
 	}
+	// The same actions on the same screen, round after round, aren't working: the house model
+	// pressed one button 26 rounds running (suite on Qwen3.5-9B, 2026-11-13: Writer's Tip of
+	// the Day). The third time it is told so instead of run.
+	if key := batchKey(obs, actions); key == r.lastBatch {
+		if r.sameBatch++; r.sameBatch >= stuckAfter {
+			r.feedback = stuckFeedback(r.task.Target.Kind, r.sameBatch+1)
+			return Outcome{}, false
+		}
+	} else {
+		r.lastBatch, r.sameBatch = key, 0
+	}
 	return l.decideAndAct(ctx, r, obs, actions, reply.Checkout)
+}
+
+// stuckAfter is how many repeats of a batch on an unchanged screen run before it is sent back.
+const stuckAfter = 2
+
+// batchKey identifies a batch decided on a screen: the actions (without their intents and
+// capture ids, which vary) and what the screen showed. "" for a batch that only waits, scrolls
+// or zooms, which may rightly repeat.
+func batchKey(obs Observation, actions []computeruse.Action) string {
+	var b strings.Builder
+	acts := false
+	for _, a := range actions {
+		switch a.Kind {
+		case "wait", "scroll", "zoom", "move":
+		default:
+			acts = true
+		}
+		a.Intent, a.CaptureID = "", ""
+		j, _ := json.Marshal(a)
+		b.Write(j)
+	}
+	if !acts {
+		return ""
+	}
+	fmt.Fprintf(&b, "|%s|%s|%s|%d", obs.URL, obs.Title, obs.App, len(obs.Text))
+	for _, e := range obs.Elements {
+		fmt.Fprintf(&b, "|%s:%s:%s:%s", e.Ref, e.Role, e.Name, e.Value)
+	}
+	return b.String()
+}
+
+// stuckFeedback tells the model its repeated batch isn't working and what else to try.
+func stuckFeedback(target string, times int) string {
+	other := "another element, the keyboard (Escape closes a dialog, Enter confirms it, Tab moves on), or a different route to the same goal"
+	if target == "desktop" {
+		other = "the keyboard (Escape closes a dialog, Enter confirms it), a click on the control where the screenshot shows it, or a menu"
+	}
+	return fmt.Sprintf("you have now answered with exactly these actions %d times and the screen hasn't changed: they aren't working. "+
+		"Don't send them again. Try something different: %s. If nothing else can work, ask the user.", times, other)
 }
 
 // continuedText: a type action this long followed by another is one long text typed in parts (a
@@ -661,7 +721,7 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error) {
 	t := r.task
 	text := renderPrompt(promptInput{
-		Goal: t.Goal, Today: t.Today, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
+		Goal: t.Goal, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 		Source: t.Source,

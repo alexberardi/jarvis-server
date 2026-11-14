@@ -157,3 +157,51 @@ func TestRunErrandMarksVoiceAtTheComputerLive(t *testing.T) {
 		t.Fatalf("payloads %v", p)
 	}
 }
+
+// A document step planned for work in an app the goal names is a task in that app (suite on
+// Qwen3.5-9B, 2026-11-13: "make a note in the Notes app" was planned as write_document and
+// failed as "I can write .odt … not plain text notes").
+func TestAppWorkIsNotADocument(t *testing.T) {
+	menu := []MenuEntry{computerEntry(), {Command: cmdWriteDoc}}
+	doc := Step{Command: cmdWriteDoc, Label: "Create Groceries note", Args: servertools.Obj("path", "Groceries", "instructions", "milk, eggs, bread")}
+	goal := "In the Jarvis Test Notes app, make a new note titled Groceries with milk, eggs and bread in it, and save it."
+	got := appWorkNotDocument(goal, []Step{doc}, menu)
+	if len(got) != 1 || got[0].Command != cmdComputer || truthyStr(got[0].Args, "target") != "desktop" ||
+		truthyStr(got[0].Args, "app") != "Jarvis Test Notes" || truthyStr(got[0].Args, "goal") != goal || got[0].Label != doc.Label {
+		t.Fatalf("got %+v", got)
+	}
+	for name, c := range map[string]struct {
+		goal string
+		menu []MenuEntry
+	}{
+		"a document":           {"Summarize this page into a LibreOffice document called Velmora", menu},
+		"an office app":        {"In the Writer app, write a letter to the plumber and save it", menu},
+		"no app named":         {"make a note titled Groceries and save it", menu},
+		"no computer on offer": {goal, []MenuEntry{{Command: cmdWriteDoc}}},
+	} {
+		if got := appWorkNotDocument(c.goal, []Step{doc}, c.menu); len(got) != 1 || got[0].Command != cmdWriteDoc {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}
+
+// A task whose goal names a relative date is given the date worked out (suite on Qwen3.5-9B,
+// 2026-11-13: told only today's date, it took "last month" for the month it was in).
+func TestComputerTaskGetsItsDatesWorkedOut(t *testing.T) {
+	c := newComputerEnv(t)
+	c.s.Now = func() time.Time { return time.Date(2026, 11, 13, 21, 0, 0, 0, time.UTC) }
+	c.llm.say("computer", doneReply)
+	c.launchRun("wf_dt", "errand", computerStep("download last month's statement"))
+	c.idle()
+	txt := c.llm.requests("computer")[0].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(txt, "last month = October 2026 (2026-10-01 to 2026-10-31)") {
+		t.Fatalf("the prompt doesn't work the date out:\n%s", txt[:min(len(txt), 600)])
+	}
+	c2 := newComputerEnv(t)
+	c2.llm.say("computer", doneReply)
+	c2.launchRun("wf_nd", "errand", computerStep("order the blue mug"))
+	c2.idle()
+	if txt := c2.llm.requests("computer")[0].Messages[1].Content.Parts[0].Text; strings.Contains(txt, "Dates in the task") {
+		t.Fatal("a goal with no dates got a dates line")
+	}
+}

@@ -541,6 +541,43 @@ func dropUnaskedRemember(goal string, steps []Step) []Step {
 	return out
 }
 
+// appJobRE finds the app a goal names as where the work happens ("in the Jarvis Test Notes app",
+// "using my notes app"); appDocRE the words that make it a document file after all.
+var (
+	appJobRE = regexp.MustCompile(`(?i)\b(?:in|into|inside|with|using|open)\s+(?:the\s+|my\s+)?((?:[\w'&.-]+\s+){0,4}?[\w'&.-]+)\s+app\b`)
+	appDocRE = regexp.MustCompile(`(?i)\b(document|spreadsheet|workbook|libreoffice|writer|calc|word|excel|\.odt|\.docx|\.ods|\.xlsx)\b`)
+)
+
+// appWorkNotDocument turns a write_document step planned for work in an app the goal names
+// into a desktop computer_task in that app: the house model plans "make a note in the Notes
+// app" as a document file, which fails ("I can write .odt … not plain text notes"; suite on
+// Qwen3.5-9B, 2026-11-13: four notes cases). Goals about a document or an office app keep the
+// file step, as does a menu without computer_task.
+func appWorkNotDocument(goal string, steps []Step, menu []MenuEntry) []Step {
+	if !menuHas(menu, cmdComputer) || appDocRE.MatchString(goal) {
+		return steps
+	}
+	m := appJobRE.FindStringSubmatch(goal)
+	if m == nil {
+		return steps
+	}
+	var out []Step
+	done := false
+	for _, st := range steps {
+		if st.Command != cmdWriteDoc {
+			out = append(out, st)
+			continue
+		}
+		if done {
+			continue // one task does the whole job in the app
+		}
+		done = true
+		out = append(out, Step{Command: cmdComputer, Label: st.Label, IsRisky: st.IsRisky,
+			Args: servertools.Obj("goal", goal, "target", "desktop", "app", strings.TrimSpace(m[1]))})
+	}
+	return out
+}
+
 // checkpointSpreadsheet ends a plan at a write_spreadsheet that follows a read_computer_file with
 // a checkpoint in its place: its rows are what the reads find, unknown until they ran, and the
 // house model plans it with none (budgetRule).
@@ -991,7 +1028,7 @@ func (s *Service) planErrand(ctx context.Context, goal string, menu []MenuEntry,
 	}
 	allowed, risky, free := allowedOf(menu)
 	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))))
+	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))))
 	return plan, err
 }
 
@@ -1031,7 +1068,7 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		fallback = "continue"
 	}
 	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))
+	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))
 	return plan, err
 }
 

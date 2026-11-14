@@ -283,8 +283,10 @@ func TestLoopStopsAtBudget(t *testing.T) {
 	t.Run("rounds", func(t *testing.T) {
 		e := newEnv(t)
 		e.setts[SettingMaxRounds] = 3
-		for range 5 {
-			e.script(actions(press("e1", "Go home")))
+		// A different element each round: the same one on the same screen would be sent back as
+		// stuck (TestStuckBatchIsSentBack) before the budget ran out.
+		for _, ref := range []string{"e1", "e2", "e3", "e1", "e2"} {
+			e.script(actions(press(ref, "Go on")))
 		}
 		out := e.run()
 		if out.State != StateFailed || out.Rounds != 3 || !strings.Contains(out.Summary, "3 rounds") {
@@ -1027,5 +1029,37 @@ func TestBlindSecondTypeLetsALongTextContinue(t *testing.T) {
 	}
 	if a, _ := blindSecondType([]computeruse.Action{ty(1900), ty(1900), ty(300)}); a != nil {
 		t.Fatal("three parts were sent back")
+	}
+}
+
+// The same actions on the same screen round after round aren't working: the third time the
+// model is told so instead of the batch running again (suite on Qwen3.5-9B, 2026-11-13: one
+// button pressed 26 rounds running). A changed screen, or waiting and scrolling, isn't stuck.
+func TestStuckBatchIsSentBack(t *testing.T) {
+	press := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e1", "intent": "Close the dialog"}]}`
+	e := newEnv(t)
+	e.script(press, press, press, doneAnswer)
+	out := e.run()
+	if out.State != StateDone || len(e.exec.batches) != 2 {
+		t.Fatalf("outcome %+v, batches %d (want the third sent back)", out, len(e.exec.batches))
+	}
+	last := e.llm.reqs[3].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(last, "exactly these actions 3 times") || !strings.Contains(last, "Try something different") {
+		t.Fatalf("the round after isn't told:\n%s", last)
+	}
+
+	obs := Observation{Title: "A", Elements: []Element{{Ref: "e1", Role: "button", Name: "Close"}}}
+	a := []computeruse.Action{{Kind: "press", Ref: "e1", Intent: "one", CaptureID: "c1"}}
+	b := []computeruse.Action{{Kind: "press", Ref: "e1", Intent: "another wording", CaptureID: "c2"}}
+	if batchKey(obs, a) != batchKey(obs, b) {
+		t.Error("the intent or capture id makes a batch different")
+	}
+	changed := obs
+	changed.Title = "B"
+	if batchKey(obs, a) == batchKey(changed, a) {
+		t.Error("a changed screen is the same batch")
+	}
+	if batchKey(obs, []computeruse.Action{{Kind: "scroll", DY: 300}, {Kind: "wait", MS: 500}}) != "" {
+		t.Error("scrolling and waiting count as stuck")
 	}
 }

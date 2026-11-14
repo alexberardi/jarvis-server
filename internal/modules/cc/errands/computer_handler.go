@@ -14,6 +14,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -121,6 +122,8 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		run = func(t computer.Task) computer.Outcome { return s.Computer.Loop.Replay(ctx, t, wf, params) }
 	} else {
 		t.Goal = parse.PyStrip(firstNonEmpty(truthyStr(args, "goal"), rc.goal))
+		// The step's goal and the user's own words: the planner may have dropped "last month".
+		t.Dates = dates.New(s.now(), rc.timezone).Explain(t.Goal + " . " + rc.goal)
 		t.Target = computeruse.Target{Kind: "browser", Site: siteOf(truthyStr(args, "site")), App: parse.PyStrip(truthyStr(args, "app"))}
 		if truthyStr(args, "target") == "desktop" {
 			t.Target.Kind = "desktop"

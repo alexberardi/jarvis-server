@@ -163,6 +163,12 @@ func TestNeedsComputer(t *testing.T) {
 		"add a row for internet to my budget spreadsheet":                                                                                               true,
 		"type hello world into the document":                                                                                                            false,
 		"remind me to update the spreadsheet":                                                                                                           false,
+		// Work in a named app, saved: a task in the app (the 9B called remember and said "saved").
+		"In the Jarvis Test Notes app, make a new note titled Groceries with milk, eggs and bread in it, and save it.": true,
+		"open my notes app, add a note about the plumber and save it":                                                  true,
+		"type hello into the notes app and save it":                                                                    false,
+		"save this recipe":        false,
+		"what's a good notes app": false,
 	} {
 		if got := needsComputer(s); got != want {
 			t.Errorf("needsComputer(%q) = %v, want %v", s, got, want)

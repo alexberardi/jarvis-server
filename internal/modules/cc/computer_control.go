@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -184,6 +185,12 @@ func needsComputer(s string) bool {
 			return true
 		}
 	}
+	// Work in an app the user names, then saved ("in the notes app, make a new note … and save
+	// it"): a task in that app, not a memory or a typed line. Suite on Qwen3.5-9B, 2026-11-13:
+	// it called remember and said the note was saved.
+	if (has("save") || has("saved")) && !has("type") && !has("dictate") && appWorkRE.MatchString(s) {
+		return true
+	}
 	for i, w := range ws {
 		next := ""
 		if i+1 < len(ws) {
@@ -222,6 +229,9 @@ func needsComputer(s string) bool {
 	}
 	return false
 }
+
+// appWorkRE finds an app named as where the work happens ("in the Jarvis Test Notes app").
+var appWorkRE = regexp.MustCompile(`(?i)\b(in|into|inside|using|open)\s+(the\s+|my\s+)?([\w'&.-]+\s+){1,5}app\b`)
 
 // documentWords and documentExts mark a request about a document or spreadsheet file.
 var (
