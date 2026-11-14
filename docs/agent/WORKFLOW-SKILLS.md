@@ -215,9 +215,13 @@ is theirs.
 
 ## Later modules' questions (not yet ordered)
 
-- `verified-replay`: how far a run may go to achieve a prerequisite (open a file, yes; sign in, ask);
-  what a failed expectation does (retry, model continues, ask); whether a new
-  workflow's first run is a supervised "watch me do it back".
+- `verified-replay`, asked one at a time:
+  - **Q1 (decided 2026-11-13):** a run opens apps and files to meet a prerequisite (a file only
+    when exactly one matches, else it asks) and never signs in: signed out, it asks the user to.
+    Signing in for the user is punted.
+    [Decision](../decisions/2026-11-13-prerequisites-open-freely-never-sign-in.md).
+  - Q2 (asked): what a failed step expectation does (retry, the model continues, ask).
+  - Q3: whether a new workflow's first run is a supervised "watch me do it back".
 - `narration`: always listening while recording or opt-in; where the audio is transcribed and
   whether it is kept.
 - `refine`: whether a learnt note needs the owner's approval before a run uses it.
