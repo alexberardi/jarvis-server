@@ -781,6 +781,10 @@ func runAgent(ctx context.Context, args []string) error {
 		duck = newPiMusic(hat.Detected, fileExists, log)
 		tf.host = newPiHost(ctx, filepath.Dir(path), mic, log)
 		tf.host.Music = duck
+	} else {
+		// A desktop's packages reach command-center (cc_post, the inbox, the LLM, signals) and
+		// the alert queue as a Pi's do; it has no timers or volume, which keep the SDK's defaults.
+		tf.host = &sdkhost.Host{Alerts: &sdkhost.Alerts{}, Log: log, Only: sdkhost.DesktopBackends}
 	}
 	// jarvisd's client once connected: approval tokens are checked with it, recordings uploaded.
 	var liveCC atomic.Pointer[node.CC]

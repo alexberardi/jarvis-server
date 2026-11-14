@@ -35,9 +35,19 @@ type Host struct {
 	// Music, when set, takes the speaker over for a music command's "play" (BeforeCall).
 	Music *music.Ducker
 	Log   *slog.Logger
+	// Only, when set, are the backend families this node serves (sidecar.Subset): a package's
+	// other calls keep the SDK's defaults instead of failing here.
+	Only []string
 
 	cc atomic.Pointer[node.CC]
 }
+
+// DesktopBackends are the families a desktop node serves: what goes to command-center and the
+// alert queue. It has no timers and no volume of its own.
+var DesktopBackends = []string{"llm", "cc", "inbox", "signals", "alerts"}
+
+// Backends is sidecar.Subset.
+func (h *Host) Backends() []string { return h.Only }
 
 // BeforeCall is the sidecar's takeover hook (sidecar.Takeover): before a music command's
 // "play" runs, the other players stop (N:utils/command_execution_service.py

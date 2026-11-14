@@ -55,8 +55,9 @@ With --backends (the Pi profile) the SDK's other node backends answer the same w
 cc.*, timer.*, audio.*, alerts.*, inbox.* and signals.* go to the Go agent, which holds the
 key, the timers, the alert queue and the speaker (docs/agent/go-pi-node.md §5.2).
 CommandInvoker runs another loaded command in this process, and the SDK's stdlib logger
-fallback writes to stderr. Without the flag (the desktop agent) none is registered, so a
-command gets the SDK's safe defaults.
+fallback writes to stderr. --backends=llm,cc,... (the desktop agent) registers only those
+families; a family that isn't registered, and every family without the flag, gets the SDK's
+safe defaults.
 
 Music commands (IJarvisMusicCommand, SDK >= 0.16.0; describe marks them "music": true) are the
 playback sources of docs/agent/PLAYBACK.md. The agent polls and controls them:
@@ -194,9 +195,10 @@ def _log_client_shim():
     return mod
 
 
-def register_backends() -> None:
-    """The Pi's SDK backends. Imported here, not at the top: a desktop venv may hold an SDK
-    older than these modules."""
+def register_backends(only=None) -> None:
+    """The node's SDK backends: all of them (a Pi), or the families in only (a desktop has no
+    timers or volume: those keep the SDK's defaults). Imported here, not at the top: a desktop
+    venv may hold an SDK older than these modules."""
     import dataclasses
     import logging
     from datetime import datetime
@@ -329,14 +331,16 @@ def register_backends() -> None:
             cmd = COMMANDS.get(name)
             return None if cmd is None else cmd.execute(request_info, **args)
 
-    set_llm_backend(AgentLLM())
-    set_cc_backend(AgentCC())
-    set_timer_backend(AgentTimer())
-    set_audio_control_backend(AgentAudio())
-    set_alert_queue_backend(AgentAlerts())
-    set_inbox_backend(AgentInbox())
-    set_signals_backend(AgentSignals())
-    set_command_invoker_backend(InProcessInvoker())
+    for family, register in (
+            ("llm", lambda: set_llm_backend(AgentLLM())), ("cc", lambda: set_cc_backend(AgentCC())),
+            ("timer", lambda: set_timer_backend(AgentTimer())),
+            ("audio", lambda: set_audio_control_backend(AgentAudio())),
+            ("alerts", lambda: set_alert_queue_backend(AgentAlerts())),
+            ("inbox", lambda: set_inbox_backend(AgentInbox())),
+            ("signals", lambda: set_signals_backend(AgentSignals())),
+            ("invoker", lambda: set_command_invoker_backend(InProcessInvoker()))):
+        if only is None or family in only:
+            register()
 
 
 def _commands_in(module) -> list:
@@ -1694,8 +1698,16 @@ DEVICE_METHODS = {"device_scan": device_scan, "device_list": device_list, "devic
 def main() -> None:
     set_backend(AgentStorage())
     register_playback_backend()
-    if "--backends" in sys.argv[2:]:
-        register_backends()
+    # --backends: every family (a Pi). --backends=cc,inbox: those (a desktop).
+    flag = next((a for a in sys.argv[2:] if a == "--backends" or a.startswith("--backends=")), None)
+    if flag is not None:
+        only = set(filter(None, flag.partition("=")[2].split(","))) or None
+        try:
+            register_backends(only)
+        except ImportError as exc:
+            if only is None:
+                raise  # a Pi's built-ins need them
+            print(f"sidecar: no SDK backends, the installed SDK is too old: {exc}", file=sys.stderr)
     _install_test_log_handler()
     commands = None
     while True:

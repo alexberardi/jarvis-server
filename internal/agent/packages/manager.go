@@ -49,7 +49,7 @@ type LiveSidecars struct {
 	Live    *sidecar.Live
 	Log     *slog.Logger
 	Storage sidecar.Storage
-	Host    sidecar.Host // the Pi's SDK backends; nil registers none
+	Host    sidecar.Host // the node's SDK backends; nil registers none
 }
 
 func (s LiveSidecars) Start(ctx context.Context, python, commandsFile string) (Sidecar, error) {

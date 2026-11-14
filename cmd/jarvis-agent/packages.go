@@ -18,7 +18,8 @@ import (
 // newPackages is the installed Pantry packages under root, served by live (DESIGN.md §6).
 // JARVIS_AGENT_UV runs that uv instead of downloading the pinned one; JARVIS_AGENT_SDK installs
 // that jarvis-command-sdk requirement instead of the pinned commit (a local checkout, say).
-// host, on a Pi, answers the built-in commands' SDK backends (pibuiltins.go).
+// host answers the packages' SDK backends: all of them on a Pi (pibuiltins.go), the
+// command-center and alert families on a desktop (sdkhost.DesktopBackends).
 func newPackages(root string, live *sidecar.Live, st sidecar.Storage, host *sdkhost.Host, log *slog.Logger) *packages.Manager {
 	hc := &http.Client{Timeout: 5 * time.Minute}
 	var h sidecar.Host // a nil *sdkhost.Host must stay a nil interface: no backends
