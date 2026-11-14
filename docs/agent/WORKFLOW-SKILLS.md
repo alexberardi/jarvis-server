@@ -430,10 +430,20 @@ its access rule at the top and carries its tier expectations.
     toward it, the check after each; then the run asks, and on the user's word ends done saying
     they confirmed it and the run couldn't. A confirmation asked in those rounds resumes there.
     No suite case where the download never lands: the fixture bank always serves the file.
-- [ ] **R5 — prerequisites: app, page, signed in, other.** Each is checked and an unmet one
+- [x] **R5 — prerequisites: app, page, signed in, other.** Each is checked and an unmet one
   achieved before step 1; signed out asks the user and continues on their word.
   - Acceptance: criterion 1; a signed-out site stops before step 1 without typing anything.
   - Verify: unit tests per kind (met, achieved, unachievable); a suite case with the page closed.
+  - Built (2026-11-14), in `computer/prereq.go`. Each prerequisite is settled once per run and
+    kept in the run's history, so a run resumed after a question doesn't ask again. *App:*
+    looking at an app opens it from the agent's catalogue. *File:* open when its app's window is
+    titled with the name (for the run's values); otherwise the run asks for it by name until R6
+    can find and open it. *Page:* opened like a step's navigation. *Signed in:* asked only on a
+    sign of being signed out (a password field or a sign-in control, and no way to sign out),
+    and only when the run's window is on that site; a page showing neither says nothing either
+    way and the run goes on. *Other:* judged on the screen by a model that can see. The model
+    does not yet work toward an unmet "other": the run asks. No suite case: the fixture bank
+    has no sign-out control and its workflow learns no prerequisite.
 - [ ] **R6 — open a file by name.** The agent's open policy takes a file's name: the node finds
   it in Documents, Downloads and Desktop, opens a document on a single match, and a program,
   script or shortcut after a confirmation. `desktop_open` by voice, and the file prerequisite.
