@@ -105,6 +105,22 @@ type Loop struct {
 	Models    Models
 	Workflows WorkflowStore // nil: a replay's healed steps aren't stored
 	Now       func() time.Time
+	// Sleep waits d or until ctx ends (nil: a timer). A replay waits before it looks a second
+	// time at a step whose check failed.
+	Sleep func(ctx context.Context, d time.Duration)
+}
+
+func (l *Loop) sleep(ctx context.Context, d time.Duration) {
+	if l.Sleep != nil {
+		l.Sleep(ctx, d)
+		return
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
 }
 
 // Task is one computer task: a new run, or the resumption of RunID (after a confirmation or a

@@ -76,6 +76,9 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 			return l.end(ctx, run, out)
 		}
 		if len(run.History) > n && r.feedback == "" {
+			if out, done := l.checkStep(ctx, r, steps[next], next); done {
+				return l.end(ctx, run, out)
+			}
 			markDone(run, steps[next], next+1, r.heal)
 			next++
 			r.task.Answer = ""
@@ -102,12 +105,26 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 					Summary: fmt.Sprintf("Step %d (%s): I couldn't open %s: %s.", i+1, oneLine(st.Intent), st.App, strings.TrimSuffix(err.Error(), "."))})
 			}
 		}
-		out, done := l.replayStep(ctx, r, st, i)
-		if done {
-			if out.State == StateFailed {
-				out.Summary = fmt.Sprintf("Step %d (%s) failed: %s", i+1, oneLine(st.Intent), out.Summary)
+		if awaitingCheck(run.History, i+1) {
+			// The step ran in an earlier call and its check failed. The user's word that it is
+			// fine stands for the check; with none, look again. It is never run a second time.
+			r.heal = heldHeal(run.History, i+1)
+			if r.task.Answer == "" {
+				if out, done := l.checkStep(ctx, r, st, i); done {
+					return l.end(ctx, run, out)
+				}
 			}
-			return l.end(ctx, run, out)
+		} else {
+			out, done := l.replayStep(ctx, r, st, i)
+			if done {
+				if out.State == StateFailed {
+					out.Summary = fmt.Sprintf("Step %d (%s) failed: %s", i+1, oneLine(st.Intent), out.Summary)
+				}
+				return l.end(ctx, run, out)
+			}
+			if out, done := l.checkStep(ctx, r, st, i); done {
+				return l.end(ctx, run, out)
+			}
 		}
 		markDone(run, st, i+1, r.heal)
 		r.task.Answer = "" // the answer was for the step that asked
@@ -119,6 +136,58 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 		}
 	}
 	return l.end(ctx, run, l.replayDone(ctx, r, wf, steps))
+}
+
+// stepSettle is how long a replay waits before it looks a second time at a step whose check
+// failed: a slow page, a window still opening.
+const stepSettle = 2 * time.Second
+
+// entryCheck is the history entry of a step that ran but whose check failed.
+const entryCheck = "check"
+
+// checkStep verifies what step i should have caused (its expectation), by a fresh look, never by
+// the action's own success. A check that fails is made once more after stepSettle. Still failing,
+// the run asks: it says the step ran, what it expected and what it found, and records that the
+// step is waiting on its check so a resumed run doesn't do it again. A step with no expectation
+// is done when its action succeeded.
+func (l *Loop) checkStep(ctx context.Context, r *round, st WorkflowStep, i int) (Outcome, bool) {
+	c := st.Expect
+	if c != nil && !r.pick.Vision && c.Screen != "" {
+		// A sentence about the screen needs a model that sees it. Without one the rest of the
+		// expectation is still checked; the workflow's own result check stays strict.
+		b := *c
+		b.Screen = ""
+		c = &b
+	}
+	if c == nil || c.empty() {
+		return Outcome{}, false
+	}
+	if c.Screen != "" {
+		b := *c
+		b.Screen = "After the last action, is this true: " + oneLine(c.Screen) + "?"
+		c = &b
+	}
+	res := l.Verify(ctx, r.run.ID, st.target(), r.pick, c)
+	if !res.OK {
+		l.sleep(ctx, stepSettle)
+		res = l.Verify(ctx, r.run.ID, st.target(), r.pick, c)
+	}
+	if res.OK {
+		return Outcome{}, false
+	}
+	why := strings.TrimSuffix(res.Why, ".")
+	r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: entryCheck, Intent: st.Intent,
+		Result: "unverified: " + why, WStep: i + 1, Healed: r.heal})
+	return Outcome{State: StateAsk, Reason: ReasonUnclear, Ask: fmt.Sprintf(
+		"I did step %d (%s), but I couldn't confirm it worked: %s. Look at the computer: if it's as it "+
+			"should be, tap Continue. If not, put it right yourself and tap Continue, or tell me what to do.",
+		i+1, oneLine(st.Intent), why)}, true
+}
+
+// awaitingCheck reports whether step wstep ran and is waiting on its failed check.
+func awaitingCheck(h []Entry, wstep int) bool {
+	n := len(h)
+	return n > 0 && h[n-1].Kind == entryCheck && h[n-1].WStep == wstep && !h[n-1].StepDone
 }
 
 // replayStep does one step: directly when it needs no element or its element is found, else in

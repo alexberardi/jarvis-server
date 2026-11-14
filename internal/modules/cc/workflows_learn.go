@@ -969,7 +969,8 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 			pages[i] = pages[i-1]
 		}
 	}
-	var start string // the page the first step was on
+	var start string       // the page the first step was on
+	built := map[int]int{} // an event's number -> the step it became
 	for _, s := range out.Steps {
 		last := -1 // the step's last event that became a step: what the step causes shows after it
 		for _, n := range stepActions(evs, stepEvents(s.EventSeqs, len(evs))) {
@@ -995,10 +996,28 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 			}
 			if addStep(&w, step, subs[n]) {
 				last = len(w.Steps) - 1
+				built[n] = last
 			}
 		}
 		if last >= 0 && w.Steps[last].Expect == nil {
 			w.Steps[last].Expect = stepExpect(s.Expect, "")
+		}
+	}
+	// A download is what the action before it caused, and it can be looked for in Downloads. That
+	// replaces a sentence about it ("the browser starts downloading"), which no screen shows.
+	for n, e := range evs {
+		if e.Kind != "download" {
+			continue
+		}
+		for k := n; k >= 1; k-- { // evs[k-1] is event k: the nearest action before the download
+			i, ok := built[k]
+			if !ok {
+				continue
+			}
+			if x := w.Steps[i].Expect; x == nil || x.URLContains == "" {
+				w.Steps[i].Expect = &computer.SuccessCheck{Download: downloadCheck(e)}
+			}
+			break
 		}
 	}
 	if s, ok := startStep(w.Steps, start); ok {
@@ -1385,6 +1404,12 @@ func substitute(s *WStep, c paramCandidate, name string) {
 	}
 	s.Intent = strings.ReplaceAll(s.Intent, c.Value, ph)
 	s.Action.Intent = s.Intent
+	// What the step causes is checked on every run: the page it opened for September is
+	// August's when the run is for August.
+	if s.Expect != nil {
+		s.Expect.URLContains = strings.ReplaceAll(s.Expect.URLContains, c.Value, ph)
+		s.Expect.Screen = strings.ReplaceAll(s.Expect.Screen, c.Value, ph)
+	}
 }
 
 // downloadExts are the file types a download's MIME type names, for one the browser didn't name.
@@ -1425,15 +1450,21 @@ func successCheck(sc computer.SuccessCheck, evs []traceEvent) computer.SuccessCh
 		if evs[i].Kind != "download" {
 			continue
 		}
-		switch name := downloadName(evs[i]); {
-		case name == "":
-			out.Download = &computer.DownloadCheck{NameLike: "*" + downloadExt(evs[i])}
-		case out.Download == nil:
-			out.Download = &computer.DownloadCheck{NameLike: digitRun.ReplaceAllString(name, "*")}
+		if downloadName(evs[i]) == "" || out.Download == nil {
+			out.Download = downloadCheck(evs[i])
 		}
 		break
 	}
 	return out
+}
+
+// downloadCheck looks for a recorded download again: its name with the numbers as * (a date, a
+// statement number), or any file of its type when the browser didn't name it.
+func downloadCheck(e traceEvent) *computer.DownloadCheck {
+	if name := downloadName(e); name != "" {
+		return &computer.DownloadCheck{NameLike: digitRun.ReplaceAllString(name, "*")}
+	}
+	return &computer.DownloadCheck{NameLike: "*" + downloadExt(e)}
 }
 
 // --- the job ---

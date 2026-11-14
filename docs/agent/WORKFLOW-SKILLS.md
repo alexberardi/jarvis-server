@@ -385,17 +385,25 @@ its access rule at the top and carries its tier expectations.
 
 ### Tasks (in order; each is one PR)
 
-- [ ] **R1 — a model slot for running.** `workflows.run_model` in `slots.go`, read by `Replay`;
+- [x] **R1 — a model slot for running.** `workflows.run_model` in `slots.go`, read by `Replay`;
   its entry in the Models page's per-feature section.
   - Acceptance: choosing a label there changes the model a run uses; auto is today's.
   - Verify: unit test on the pick; Vitest for the entry; screenshots and the design audit.
-- [ ] **R2 — every step is checked.** After a step acts, its `expect` is verified. A failed
+- [x] **R2 — every step is checked.** After a step acts, its `expect` is verified. A failed
   check waits 2 s and looks again. Still failing, the run asks, showing the step, what was
   expected and what it sees (the model's choices come in R3).
   - Acceptance: criterion 2; a failed check never reports the step done; a step with no
     expectation behaves as today; criterion 8.
   - Verify: unit tests with the fake executor (verified, slow screen, failing); the two teach
     cases on qwen3.5-9b; a new suite case with a slow page.
+  - Built (2026-11-13). On the user's word after a failed check the run carries on and never
+    does the step again. A screen sentence is skipped for a model that can't see (the rest of
+    the expectation is still checked). Found on the real model and fixed here: a learnt
+    expectation kept the recorded value ("…/statements/2026-09"), so learning writes the param
+    into it and a run binds its own; and a step that causes a download was given a sentence no
+    screen shows ("the browser begins downloading"), so it now expects the file in Downloads.
+    The suite's slow-page case is not written: the fixture sites have no delayed-content page,
+    and the path is covered by a unit test; it belongs with R3's cases.
 - [ ] **R3 — the model decides on a failed check; Strict or Creative.** The model round: redo,
   another way, or carry on. A risky step is not redone without asking. Three attempts per step,
   then ask. Strict bounds the round to the apps and sites the workflow names; the radio on the
