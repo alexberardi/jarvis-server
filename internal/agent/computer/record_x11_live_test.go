@@ -21,7 +21,9 @@ func TestX11RecordLive(t *testing.T) {
 	}
 	d := &x11.Display{}
 	e := newRecEnv(t)
-	e.r.Sources[ModeDesktop] = newX11Source(e.r.Dir, d, x11Access{}, nil, nil)
+	// With the capture wired as NewDesktopSource does: a server with no window manager lists no
+	// windows, so the trace is the actions alone.
+	e.r.Sources[ModeDesktop] = withCapture(newX11Source(e.r.Dir, d, x11Access{}, nil, nil))
 	id, err := e.r.Start(context.Background(), ModeDesktop)
 	if err != nil {
 		t.Fatal(err)

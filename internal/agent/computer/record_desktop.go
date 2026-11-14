@@ -426,7 +426,7 @@ func (d *deskRecorder) begin() {
 			}
 		}
 	}
-	if raw, err := json.Marshal(e); err == nil {
+	if raw, err := json.Marshal(e); err == nil && len(e.Windows) > 0 {
 		d.emit(raw)
 	}
 	if win, set, _ := d.front(ctx, ws); win != nil {
