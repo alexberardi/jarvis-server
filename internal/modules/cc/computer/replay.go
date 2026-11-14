@@ -140,7 +140,15 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 			t.Progress(run)
 		}
 	}
-	return l.end(ctx, run, l.replayDone(ctx, r, wf, steps))
+	if held := run.Pending; held != nil && next >= len(steps) && len(steps) > 0 {
+		// A confirmation asked while working toward the result, after the last step.
+		run.Pending = nil
+		r.wstep, r.task.Target = len(steps), steps[len(steps)-1].target()
+		if out, done := l.runApproved(ctx, r, held); done {
+			return l.end(ctx, run, out)
+		}
+	}
+	return l.end(ctx, run, l.replayDone(ctx, r, wf, steps, params))
 }
 
 // stepSettle is how long a replay waits before it looks a second time at a step whose check
@@ -413,18 +421,59 @@ func (l *Loop) replayRound(ctx context.Context, r *round, st WorkflowStep, i int
 	return Outcome{}, false
 }
 
-// replayDone checks the workflow's result, then stores the healed steps and says so.
-func (l *Loop) replayDone(ctx context.Context, r *round, wf *Workflow, steps []WorkflowStep) Outcome {
-	check := wf.Success
+// endAttempts is how many model rounds a replay spends working toward a result its steps didn't
+// produce before it asks.
+const endAttempts = 3
+
+// replayDone checks the workflow's result: its success check and the goal's end state, for this
+// run's values. When every step ran but the result isn't there, the model works toward it (the
+// recorded steps are a route, the end state is the point), and the check is made again. Still
+// missing, the run asks; only the user's word that it is fine ends it done then, and the summary
+// says the run couldn't check it. Then the healed steps are stored.
+func (l *Loop) replayDone(ctx context.Context, r *round, wf *Workflow, steps []WorkflowStep, params map[string]string) Outcome {
+	bind := func(s string) string { return wf.BindText(s, params) }
+	check := wf.Success.with(bind)
+	end := oneLine(bind(wf.Skill.Goal.EndState))
+	// The end state is asked of the screen only when nothing observable checks the result: a
+	// download, a file, an address or a text is proof, and "the statement is in Downloads" is
+	// not something a screenshot shows.
+	if end != "" && !check.concrete() && check.Screen == "" && r.pick.Vision {
+		check.Screen = "Is this true now: " + end + "?"
+	}
 	if check.empty() {
 		// C4: never done unchecked. A workflow saved without a check is checked on screen.
 		check = SuccessCheck{Screen: fmt.Sprintf("Is the task %q finished (the last step was: %s)?", wf.Name, oneLine(steps[len(steps)-1].Intent))}
 	}
-	tgt := steps[len(steps)-1].target()
+	last := steps[len(steps)-1]
+	tgt := last.target()
 	res := l.Verify(ctx, r.run.ID, tgt, r.pick, &check)
-	if !res.OK {
-		return Outcome{State: StateFailed, Summary: fmt.Sprintf("I ran every step of %q, but couldn't confirm it worked: %s.",
-			wf.Name, strings.TrimSuffix(res.Why, "."))}
+	vouched := false
+	for attempt := 1; !res.OK; attempt++ {
+		why := strings.TrimSuffix(res.Why, ".")
+		if vouches(r.task.Answer) {
+			vouched = true
+			break
+		}
+		if attempt > endAttempts {
+			return Outcome{State: StateAsk, Reason: ReasonUnclear, Ask: fmt.Sprintf(
+				"I ran every step of %q, but couldn't confirm it worked: %s. Look at the computer: if the result is "+
+					"there, tap Continue. If not, finish it yourself and tap Continue, or tell me what to do.", wf.Name, why)}
+		}
+		// The model works toward the result, as it puts a failed step right.
+		finish := WorkflowStep{Intent: "Finish " + strconvQuote(wf.Name), Target: last.Target, Site: last.Site, App: last.App,
+			Goal: firstNonEmpty(end, oneLine(bind(wf.Skill.Goal.Reason)))}
+		r.wstep, r.task.Target, r.heal, r.hint = len(steps), tgt, nil, ""
+		r.recovering, r.said = "every step ran, but the result isn't there: "+why, false
+		out, done := l.replayRound(ctx, r, finish, len(steps)-1)
+		r.recovering = ""
+		r.task.Answer = "" // what the user said was for the first of these rounds
+		if done {
+			return out
+		}
+		res = l.Verify(ctx, r.run.ID, tgt, r.pick, &check)
+		if r.said && !res.OK {
+			attempt = endAttempts // the model has nothing more to do: ask
+		}
 	}
 	did := fmt.Sprintf("Ran %q.", wf.Name)
 	heals := healsOf(r.run.History, wf.Steps)
@@ -445,9 +494,15 @@ func (l *Loop) replayDone(ctx context.Context, r *round, wf *Workflow, steps []W
 		}
 		did += note
 	}
+	if vouched {
+		return Outcome{State: StateDone, Summary: did + " You confirmed the result; I couldn't check it myself: " +
+			strings.TrimSuffix(res.Why, ".") + ".", Verify: &check, Healed: heals}
+	}
 	return Outcome{State: StateDone, Summary: did + " Checked: " + res.Checked + ".", Checked: res.Checked,
 		Verify: &check, Healed: heals}
 }
+
+func strconvQuote(s string) string { return fmt.Sprintf("%q", s) }
 
 // newApp reports a desktop step in another app than the step before it (or the first step).
 func newApp(steps []WorkflowStep, i int) bool {

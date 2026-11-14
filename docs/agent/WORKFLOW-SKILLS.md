@@ -419,10 +419,17 @@ its access rule at the top and carries its tier expectations.
     only**: reaching the result in another app or by editing a file needs the run to switch
     targets, which comes with R4's work toward the end state. No new suite case: the renamed
     button is `replay_moved_button`, and the fixture sites have no "send" step.
-- [ ] **R4 — the end state.** The goal's end state is verified with the success check; not
+- [x] **R4 — the end state.** The goal's end state is verified with the success check; not
   reached, the model works toward it within the run's budget, then asks.
   - Acceptance: a run whose steps all "worked" but whose result is missing is not done.
   - Verify: unit tests; a suite case where the download never lands.
+  - Built (2026-11-14). The result check is bound to the run's values (it kept `{month}`
+    literally before). The goal's end state is asked of the screen only when nothing observable
+    checks the result: a download, a file, an address or a text is proof, and "the statement is
+    in Downloads" is not something a screenshot shows. Result missing: up to three model rounds
+    toward it, the check after each; then the run asks, and on the user's word ends done saying
+    they confirmed it and the run couldn't. A confirmation asked in those rounds resumes there.
+    No suite case where the download never lands: the fixture bank always serves the file.
 - [ ] **R5 — prerequisites: app, page, signed in, other.** Each is checked and an unmet one
   achieved before step 1; signed out asks the user and continues on their word.
   - Acceptance: criterion 1; a signed-out site stops before step 1 without typing anything.

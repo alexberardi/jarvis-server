@@ -189,28 +189,48 @@ func (w *Workflow) bind(params map[string]string, now time.Time) ([]WorkflowStep
 		if c := st.Expect; c != nil {
 			// What the step should cause, for this run's values: recorded for September, the
 			// page it opens in August is August's.
-			// shortcut: a value goes into an address as given; escape it when a param holds a space or a slash.
-			b := *c
-			b.URLContains, b.Screen = sub(c.URLContains, nil), sub(c.Screen, nil)
-			b.TextPresent = slices.Clone(c.TextPresent)
-			for j := range b.TextPresent {
-				b.TextPresent[j] = sub(b.TextPresent[j], nil)
-			}
-			if c.Download != nil {
-				d := *c.Download
-				d.NameLike = sub(d.NameLike, nil)
-				b.Download = &d
-			}
-			if c.File != nil {
-				f := *c.File
-				f.Path = sub(f.Path, nil)
-				b.File = &f
-			}
+			b := c.with(func(s string) string { return sub(s, nil) })
 			st.Expect = &b
 		}
 		steps[i] = st
 	}
 	return steps, nil
+}
+
+// BindText is s with each declared {param} replaced by its value for this run (a goal, a check).
+func (w *Workflow) BindText(s string, params map[string]string) string {
+	now := time.Now()
+	return placeholderRe.ReplaceAllStringFunc(s, func(ph string) string {
+		name := ph[1 : len(ph)-1]
+		for _, p := range w.Params {
+			if p.Name == name {
+				return ParamValue(p, params[name], now)
+			}
+		}
+		return ph
+	})
+}
+
+// with is c with f applied to every text a param can stand in.
+// shortcut: a value goes into an address as given; escape it when a param holds a space or a slash.
+func (c SuccessCheck) with(f func(string) string) SuccessCheck {
+	b := c
+	b.URLContains, b.Screen = f(c.URLContains), f(c.Screen)
+	b.TextPresent = slices.Clone(c.TextPresent)
+	for j := range b.TextPresent {
+		b.TextPresent[j] = f(b.TextPresent[j])
+	}
+	if c.Download != nil {
+		d := *c.Download
+		d.NameLike = f(d.NameLike)
+		b.Download = &d
+	}
+	if c.File != nil {
+		x := *c.File
+		x.Path = f(x.Path)
+		b.File = &x
+	}
+	return b
 }
 
 var (
