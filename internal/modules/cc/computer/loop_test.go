@@ -6,10 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -1003,14 +1005,12 @@ func TestWritingTasksHaveRoom(t *testing.T) {
 		t.Fatalf("the prompt doesn't give the type limit:\n%s", p)
 	}
 
+	// Typed text over the limit isn't sent back at all: the loop splits it (TestLongTypeIsSplit).
 	e = newEnv(t)
 	long := strings.Repeat("a", computeruse.MaxText+1)
 	e.script(`{"thought": "t", "actions": [{"kind": "type", "intent": "Type", "text": "`+long+`"}]}`, doneAnswer)
-	if out := e.run(); out.State != StateDone {
-		t.Fatalf("too long: %+v", out)
-	}
-	if msg := *e.llm.reqs[1].Messages[3].Content.Text; !strings.Contains(msg, "several type actions") {
-		t.Fatalf("retry says %q", msg)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 || len(e.exec.batches) != 1 || len(e.exec.batches[0].Actions) != 2 {
+		t.Fatalf("too long: %+v, calls %d, batches %+v", out, len(e.llm.reqs), len(e.exec.batches))
 	}
 }
 
@@ -1061,5 +1061,44 @@ func TestStuckBatchIsSentBack(t *testing.T) {
 	}
 	if batchKey(obs, []computeruse.Action{{Kind: "scroll", DY: 300}, {Kind: "wait", MS: 500}}) != "" {
 		t.Error("scrolling and waiting count as stuck")
+	}
+}
+
+// A type action over the limit is split into several, in order, by the loop itself: its parts
+// join back to the text, each within the limit, ending at paragraph or sentence ends.
+func TestLongTypeIsSplit(t *testing.T) {
+	para := strings.Repeat("Velmora is a town on Lake Orrin. ", 40) // 1320 characters
+	text := para + "\n" + para + "\n" + para
+	r, err := parseReply(`{"thought": "type it", "actions": [{"kind": "click", "x": 5, "y": 5, "intent": "Focus"}, {"kind": "type", "intent": "Type the summary", "text": ` + strconv.Quote(text) + `}, {"kind": "keypress", "keys": ["ctrl", "s"], "intent": "Save"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var joined strings.Builder
+	types := 0
+	for _, a := range r.Actions {
+		if a.Kind == "type" {
+			types++
+			joined.WriteString(a.Text)
+			if n := utf8.RuneCountInString(a.Text); n > computeruse.MaxText || n == 0 {
+				t.Errorf("a part of %d characters", n)
+			}
+			if a.Intent != "Type the summary" {
+				t.Errorf("intent %q", a.Intent)
+			}
+		}
+	}
+	if types < 2 || joined.String() != text || r.Actions[0].Kind != "click" || r.Actions[len(r.Actions)-1].Kind != "keypress" {
+		t.Fatalf("%d type parts, order %v, text kept %v", types, len(r.Actions), joined.String() == text)
+	}
+	if got := splitText(strings.Repeat("a", 4500), 2000); len(got) != 3 || len(got[0]) != 2000 {
+		t.Errorf("no break to cut at: %d parts", len(got))
+	}
+	// The parts aren't then taken for a title and a body typed into one field.
+	if a, _ := blindSecondType(r.Actions); a != nil {
+		t.Error("the split parts were sent back as two fields")
+	}
+	// A value set on a named element isn't split: it still fails as too long.
+	if _, err := parseReply(`{"actions": [{"kind": "type", "ref": "e1", "intent": "x", "text": "` + strings.Repeat("a", computeruse.MaxText+1) + `"}]}`); err == nil {
+		t.Error("a too-long value for an element passed")
 	}
 }

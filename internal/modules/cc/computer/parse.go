@@ -93,6 +93,7 @@ func parseReply(s string) (Reply, error) {
 				}
 			}
 		}
+		r.Actions = splitLongTypes(r.Actions)
 		if err := computeruse.ValidateBatch(r.Actions); err != nil {
 			return Reply{}, fmt.Errorf(`"actions": %v`, err)
 		}
@@ -101,6 +102,58 @@ func parseReply(s string) (Reply, error) {
 		}
 	}
 	return r, nil
+}
+
+// splitLongTypes turns a type action whose text is over a type action's limit into several, in
+// order, each within it: the text is what the user asked for, and splitting it is arithmetic,
+// not the model's job. The house model, told the limit and then told again, still sent the
+// whole summary and the task failed (suite on Qwen3.5-9B, 2026-11-13); Sonnet needed a retry.
+// Parts end at a paragraph, else a sentence, else a word. A type into a named element (ref) sets
+// its value whole, so it is left to fail validation as before.
+func splitLongTypes(actions []computeruse.Action) []computeruse.Action {
+	var out []computeruse.Action
+	for _, a := range actions {
+		if a.Kind != "type" || a.Ref != "" || utf8.RuneCountInString(a.Text) <= computeruse.MaxText {
+			out = append(out, a)
+			continue
+		}
+		for _, part := range splitText(a.Text, computeruse.MaxText) {
+			p := a
+			p.Text = part
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitText cuts s into parts of at most max runes whose concatenation is s, each ending at
+// the last paragraph break in its second half, else the last sentence end, else the last space,
+// else at max.
+func splitText(s string, max int) []string {
+	r := []rune(s)
+	var parts []string
+	for len(r) > max {
+		cut := max
+		for _, ends := range []string{"\n", ".!?", " "} {
+			found := false
+			for i := max; i > max/2; i-- {
+				// A sentence ends at its mark when a space or the end follows.
+				if strings.ContainsRune(ends, r[i-1]) && (ends != ".!?" || i == len(r) || r[i] == ' ' || r[i] == '\n') {
+					cut, found = i, true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		parts = append(parts, string(r[:cut]))
+		r = r[cut:]
+	}
+	if len(r) > 0 {
+		parts = append(parts, string(r))
+	}
+	return parts
 }
 
 // droppedY is a coordinate pair whose "y" key the model dropped: "x":170,777. The bare second

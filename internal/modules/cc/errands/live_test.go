@@ -170,6 +170,17 @@ func TestAppWorkIsNotADocument(t *testing.T) {
 		truthyStr(got[0].Args, "app") != "Jarvis Test Notes" || truthyStr(got[0].Args, "goal") != goal || got[0].Label != doc.Label {
 		t.Fatalf("got %+v", got)
 	}
+	// Planned as a to-do item (or a memory): nothing in the plan works in the app, so the task does.
+	todo := Step{Command: "todo_list", Label: "Add note to Jarvis Test Notes", Args: servertools.Obj("action", "add", "tasks", "Plumber: Thursday at 10am")}
+	got = appWorkNotDocument("Add a note titled Plumber with the time Thursday at 10am in the Jarvis Test Notes app.", []Step{todo}, menu)
+	if len(got) != 1 || got[0].Command != cmdComputer || truthyStr(got[0].Args, "app") != "Jarvis Test Notes" {
+		t.Fatalf("todo plan: %+v", got)
+	}
+	// Nothing is made in the app: another command may well be how it's done.
+	play := Step{Command: "music", Args: servertools.Obj("action", "play", "query", "jazz")}
+	if got := appWorkNotDocument("play some jazz in the Spotify app", []Step{play}, menu); len(got) != 1 || got[0].Command != "music" {
+		t.Fatalf("a play request: %+v", got)
+	}
 	for name, c := range map[string]struct {
 		goal string
 		menu []MenuEntry

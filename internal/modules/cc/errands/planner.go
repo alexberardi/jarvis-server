@@ -548,18 +548,36 @@ var (
 	appDocRE = regexp.MustCompile(`(?i)\b(document|spreadsheet|workbook|libreoffice|writer|calc|word|excel|\.odt|\.docx|\.ods|\.xlsx)\b`)
 )
 
-// appWorkNotDocument turns a write_document step planned for work in an app the goal names
-// into a desktop computer_task in that app: the house model plans "make a note in the Notes
-// app" as a document file, which fails ("I can write .odt … not plain text notes"; suite on
-// Qwen3.5-9B, 2026-11-13: four notes cases). Goals about a document or an office app keep the
+// appMakeRE: the goal makes or changes something in the app it names (a note, an entry), which
+// only working in that app can do.
+var appMakeRE = regexp.MustCompile(`(?i)\b(add|adds|create|make|new|write|save|enter|fill|jot|put|edit|change|rename|delete)\b`)
+
+// appWorkNotDocument repairs a plan for work in an app the goal names ("in the Jarvis Test
+// Notes app, add a note …") that the planner gave to something else: the house model plans it
+// as a document file ("I can write .odt … not plain text notes"), a to-do item or a memory
+// (suite on Qwen3.5-9B, 2026-11-13: six notes cases over two runs). A write_document step
+// becomes a desktop computer_task in that app; a plan that makes something in the app with no
+// computer step at all becomes that one task. Goals about a document or an office app keep the
 // file step, as does a menu without computer_task.
 func appWorkNotDocument(goal string, steps []Step, menu []MenuEntry) []Step {
-	if !menuHas(menu, cmdComputer) || appDocRE.MatchString(goal) {
+	if !menuHas(menu, cmdComputer) || appDocRE.MatchString(goal) || len(steps) == 0 {
 		return steps
 	}
 	m := appJobRE.FindStringSubmatch(goal)
 	if m == nil {
 		return steps
+	}
+	task := func(st Step) Step {
+		return Step{Command: cmdComputer, Label: st.Label, IsRisky: st.IsRisky,
+			Args: servertools.Obj("goal", goal, "target", "desktop", "app", strings.TrimSpace(m[1]))}
+	}
+	computer, doc := false, false
+	for _, st := range steps {
+		computer = computer || isComputerStep(strings.TrimSpace(st.Command))
+		doc = doc || st.Command == cmdWriteDoc
+	}
+	if !computer && !doc && appMakeRE.MatchString(goal) {
+		return []Step{task(steps[0])} // nothing in the plan works in the app: the task does
 	}
 	var out []Step
 	done := false
@@ -572,8 +590,7 @@ func appWorkNotDocument(goal string, steps []Step, menu []MenuEntry) []Step {
 			continue // one task does the whole job in the app
 		}
 		done = true
-		out = append(out, Step{Command: cmdComputer, Label: st.Label, IsRisky: st.IsRisky,
-			Args: servertools.Obj("goal", goal, "target", "desktop", "app", strings.TrimSpace(m[1]))})
+		out = append(out, task(st))
 	}
 	return out
 }
