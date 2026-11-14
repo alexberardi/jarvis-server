@@ -239,8 +239,7 @@ every phase as today (principle 8).
    - *App open:* in the window list, else launched from the catalogue.
    - *File open:* a window whose title holds the name (after `{param}`), else found by name in
      the user's document folders and opened when exactly one matches; none or several asks. The
-     node opens documents only, never a program, script or shortcut, and finds the file itself:
-     the model names it and never supplies a path.
+     node finds the file itself: the model names it and never supplies a path.
    - *Page open:* a tab on that address, else opened.
    - *Signed in:* the site's page shows a way to sign out; if not, the run asks the user to
      sign in and continues when they say so. It never types a password.
@@ -260,6 +259,12 @@ every phase as today (principle 8).
 4. **End state:** the workflow's goal end state and success check are verified. Reached: done,
    saying what was checked. Not reached after every step: the model works toward it within the
    run's remaining budget, then asks.
+
+**Opening files** (in a run and by voice). A document opens without asking. A program, script
+or shortcut opens after a confirmation that names it and its folder: a risky action like paying
+or sending. A workflow step that runs one is learnt as "Ask me first", which its owner can turn
+off for that step. `desktop_open` takes a file's name the same way outside a run ("open my
+budget spreadsheet", "run my backup script").
 
 **Strict or Creative** (principle 7) bounds "another way" in phases 2 to 4. Strict: only the
 apps and sites the workflow's steps and prerequisites name. Creative: any means the node offers.
@@ -289,7 +294,7 @@ internal/modules/cc/workflows_run.go         may-it-run, proven, the run's recor
 internal/modules/cc/workflows_revise.go      feedback + run record -> proposed edits (new)
 internal/modules/cc/slots.go                 the "running a workflow" model slot (Models page, per feature)
 internal/modules/cc/migrations/              proven version; the last run's record per workflow
-internal/agent/computer/                     find-and-open a file by name in the document folders (new tool)
+internal/agent/desktop/, internal/agent/apps/  the open policy: a file by name (documents freely, programs after asking)
 web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run panel, the feedback box
 ```
 
@@ -313,8 +318,9 @@ web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run pa
   unchanged until its owner saves a draft.
 - **Ask first:** any new `/api` route (revise, the run's record); more than one model call per
   step on the happy path.
-- **Never:** open a program, script or shortcut as a "file", or a path the model supplied; type
-  a password or a masked value; act on recorded coordinates; mark a workflow
+- **Never:** open a path the model supplied; run a program, script or shortcut without the
+  confirmation (or its owner's standing choice on that workflow step); type a password or a
+  masked value; act on recorded coordinates; mark a workflow
   proven from the model's claim; let Creative skip risk confirmation.
 
 ### Success criteria
@@ -330,6 +336,8 @@ web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run pa
 6. After a failed watched run, "it picked the wrong account at step 4" produces a draft that
    changes step 4 or adds a note; nothing is stored until Save.
 7. Strict: a run that could only finish in an app the workflow doesn't name asks instead.
+7a. "Open my budget spreadsheet" by voice opens the one matching document; "run my backup
+   script" asks first, then runs it; a path given by the model is refused.
 8. The two existing teach cases pass unchanged on qwen3.5-9b.
 
 ### Costs and risks
@@ -343,7 +351,9 @@ web/admin/src/pages/WorkflowEditPage.tsx     the radio, proven state, the run pa
 
 ### Open questions
 
-None blocking. Decided in review (2026-11-13): a run opens documents without special approval;
+None blocking. Decided in review (2026-11-13): documents open freely and a program after a
+confirmation, by voice too
+([decision](../decisions/2026-11-13-programs-open-after-a-confirmation.md));
 the extra model call per screen-checked step is accepted; running a workflow gets its own
 per-feature model slot
 ([decision](../decisions/2026-11-13-runs-open-documents-and-have-their-own-model-slot.md)).
