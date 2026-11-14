@@ -199,9 +199,15 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
     daemon, not only the one whose secret changed.
   - Not verified: on a Pi, on Windows or macOS, or from an installed agent with a real package;
     the memory a daemon's process costs on a Pi Zero.
-- [ ] **D3 — one host node per daemon.** jarvisd refuses to install a package with a daemon on a
+- [x] **D3 — one host node per daemon.** jarvisd refuses to install a package with a daemon on a
   second node of the household, with a message the app shows.
   - Verify: route tests. This is a new refusal on an existing route, not a new route.
+  - Built: a node's install result names the package's daemons; jarvisd records that on the
+    node's installed package (`cc_node_package_stores.has_daemon`) and answers 409
+    `daemon_host_conflict`, naming the host, to an install of it on another active node of the
+    household. An update where it runs, another household, and a move after uninstalling are
+    allowed. Not caught: two first installs started together (jarvisd learns of the daemon from
+    the first result), and a node on an agent older than this one, whose result names none.
 
 ### Risks
 

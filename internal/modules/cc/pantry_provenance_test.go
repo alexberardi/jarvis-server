@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
@@ -202,4 +203,50 @@ func TestStoreBrowsePicksStore(t *testing.T) {
 	})
 	// No pick: the default, which names itself when it can't answer.
 	e.do("GET", base+"/weather", nil, bearer(member)).detail(404, "The Pantry store Store A has no package weather")
+}
+
+// A package with a daemon (a chat channel) runs on one node of the household: once a node's
+// install result names a daemon, installing it on another node is refused, naming the host.
+// Updating it where it is, another household's node and an uninstall-then-move are not.
+func TestADaemonPackageRunsOnOneNode(t *testing.T) {
+	e := newEnv(t, envOpts{noMQTT: true})
+	for _, hh := range []string{"hh1", "hh2"} {
+		enablePantry(t, e, hh, true)
+		setStores(t, e, hh, PantryStore{storeA, "http://a.lan:7721", "Store A"})
+	}
+	member := e.auth.addUser(1, "hh1", authn.RoleMember)
+	other := e.auth.addUser(2, "hh2", authn.RoleMember)
+	nodes := map[string]testNode{"n1": e.createNode("n1", "hh1"), "n2": e.createNode("n2", "hh1"), "n3": e.createNode("n3", "hh2")}
+	install := func(node, pkg string, as string) *resp {
+		return e.do("POST", "/api/v0/nodes/"+node+"/package-install",
+			map[string]any{"command_name": pkg, "github_repo_url": "https://example.com/r.git"}, bearer(as))
+	}
+	finish := func(op, node, rid string, details map[string]any) {
+		t.Helper()
+		e.do("GET", "/api/v0/nodes/"+node+"/package-install/"+rid+"/verify", nil, nodes[node].h()).want(200) // shared by every op
+		e.do("POST", "/api/v0/nodes/"+node+"/"+op+"/"+rid+"/results", map[string]any{"success": true, "details": details}, nodes[node].h()).want(200)
+	}
+	daemon := map[string]any{"package_name": "channel_discord", "version": "1.0.0", "components": 1, "daemons": []any{"discord"}}
+
+	// A package without a daemon installs on both nodes.
+	for _, node := range []string{"n1", "n2"} {
+		rid := install(node, "weather", member).want(201).json()["id"].(string)
+		finish("package-install", node, rid, map[string]any{"package_name": "weather", "version": "1.0.0", "components": 1})
+	}
+
+	rid := install("n1", "channel_discord", member).want(201).json()["id"].(string)
+	finish("package-install", "n1", rid, daemon)
+	r := install("n2", "channel_discord", member)
+	r.code(409, daemonHostConflictCode)
+	if d, _ := r.json()["detail"].(string); !strings.Contains(d, "already on kitchen") {
+		t.Fatalf("detail = %q", d)
+	}
+	install("n1", "channel_discord", member).want(201) // an update where it runs
+	install("n3", "channel_discord", other).want(201)  // another household's own bot
+
+	// Uninstalled from n1, it can move to n2.
+	rid = e.do("POST", "/api/v0/nodes/n1/package-uninstall", map[string]any{"command_name": "channel_discord", "component_type": ""},
+		bearer(member)).want(201).json()["id"].(string)
+	finish("package-uninstall", "n1", rid, nil)
+	install("n2", "channel_discord", member).want(201)
 }

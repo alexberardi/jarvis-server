@@ -401,6 +401,16 @@ func (m *Manager) Install(ctx context.Context, repo, ref string) (map[string]any
 	if s := man.Skipped(m.runs()...); len(s) > 0 {
 		details["skipped_components"] = s
 	}
+	// jarvisd keeps a daemon on one node of the household (docs/CHANNELS.md, D3).
+	var daemons []string
+	for _, c := range man.Components {
+		if c.Type == Daemon {
+			daemons = append(daemons, c.Name)
+		}
+	}
+	if len(daemons) > 0 {
+		details["daemons"] = daemons
+	}
 	return details, nil
 }
 
