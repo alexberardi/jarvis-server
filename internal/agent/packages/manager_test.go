@@ -381,6 +381,44 @@ func TestPiRunsPackageAgents(t *testing.T) {
 	}
 }
 
+// A package whose only component is a daemon (a chat channel) installs on a computer: it is
+// listed for the sidecar (which describes its settings), and Daemons names it for
+// pkgdaemons, with a stamp that changes when the package is updated.
+func TestAPackagesDaemonIsListed(t *testing.T) {
+	r := newRepos(t)
+	bridge := func(version string) map[string]string {
+		return map[string]string{
+			"jarvis_package.yaml":    "name: bridge\nversion: \"" + version + "\"\ncomponents:\n  - {type: daemon, name: link}\n",
+			"daemons/link/daemon.py": "",
+		}
+	}
+	repo := r.add(t, "o/bridge", "HEAD", bridge("1.0.0"))
+	m, _, _ := newTestManager(t, r)
+	details, err := m.Install(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := readList(filepath.Join(m.Root, "commands.json"))
+	if details["skipped_components"] != nil || len(list) != 1 || !reflect.DeepEqual(list[0].Daemons, []string{"daemons/link/daemon.py"}) {
+		t.Fatalf("details %v, list %+v", details, list)
+	}
+	ds := m.Daemons()
+	if len(ds) != 1 || ds[0].Package != "bridge" || ds[0].Name != "link" || ds[0].Path != "daemons/link/daemon.py" ||
+		ds[0].Root != filepath.Join(m.Root, "pkgs", "bridge") {
+		t.Fatalf("daemons = %+v", ds)
+	}
+	r.add(t, "o/bridge", "HEAD", bridge("1.1.0"))
+	if _, err := m.Install(context.Background(), repo, ""); err != nil {
+		t.Fatal(err)
+	}
+	if after := m.Daemons(); len(after) != 1 || after[0].Stamp == ds[0].Stamp {
+		t.Fatalf("after an update: %+v, before %+v", after, ds)
+	}
+	if _, err := m.Uninstall(context.Background(), "bridge"); err != nil || len(m.Daemons()) != 0 {
+		t.Fatalf("after uninstall: %v, %+v", err, m.Daemons())
+	}
+}
+
 // A device component's declared path must stay inside the package.
 func TestManifestRefusesADeviceComponentOutside(t *testing.T) {
 	_, err := ParseManifest([]byte("name: x\ncomponents:\n  - type: device_protocol\n    name: x\n    path: ../x/protocol.py\n"))

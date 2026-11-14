@@ -27,7 +27,9 @@ JSON-lines requests on stdin:
 
 A Pi's packages may also have background agents (the listing's "agents": IJarvisAgent
 modules; describe adds them as "agents": [{"name", "package", "interval_seconds",
-"run_on_startup"}]). The Go agent owns their schedule (internal/agent/pkgagents) and runs each
+"run_on_startup"}]), and daemons (the listing's "daemons": IJarvisDaemon modules), which this
+process only describes ("daemons": [{"name", "package", "description", "secrets"}]): each runs
+in a process of its own, started as `<root> --daemon <package> <path>` (run_daemon). The Go agent owns their schedule (internal/agent/pkgagents) and runs each
 with agent_run; what they post (inbox items, pushes) goes through the backends below.
 
 A Pi's packages may also have device families and managers (the listing's "families" and
@@ -104,18 +106,41 @@ from jarvis_command_sdk.storage import StorageBackend, set_backend  # noqa: E402
 _next_ask = 0
 
 
+# A daemon's process (run_daemon): several requests may wait at once, each for its own answer,
+# which a reader thread hands over. None: the serial protocol of a commands sidecar.
+_WAITERS = None
+_ASK_LOCK = threading.Lock()
+
+
 def _ask(method: str, params: dict):
-    """One reverse request to the Go agent; blocks for its answer (requests are serial)."""
+    """One reverse request to the Go agent; blocks for its answer. A commands sidecar's
+    requests are serial; a daemon's may overlap (a chat turn takes minutes while the
+    connection it holds still needs serving), so call it from a thread there."""
     global _next_ask
-    _next_ask += 1
-    PROTO.write(json.dumps({"from": "child", "id": _next_ask, "method": method, "params": params}, default=str) + "\n")
-    PROTO.flush()
-    line = sys.stdin.readline()
-    if not line:
-        raise RuntimeError("agent closed the sidecar's input")
-    msg = json.loads(line)
-    if msg.get("to") != "child" or msg.get("id") != _next_ask:
-        raise RuntimeError(f"unexpected answer to {method}: {line[:200]}")
+    if _WAITERS is None:
+        _next_ask += 1
+        PROTO.write(json.dumps({"from": "child", "id": _next_ask, "method": method, "params": params}, default=str) + "\n")
+        PROTO.flush()
+        line = sys.stdin.readline()
+        if not line:
+            raise RuntimeError("agent closed the sidecar's input")
+        msg = json.loads(line)
+        if msg.get("to") != "child" or msg.get("id") != _next_ask:
+            raise RuntimeError(f"unexpected answer to {method}: {line[:200]}")
+    else:
+        import queue
+
+        answer = queue.SimpleQueue()
+        with _ASK_LOCK:
+            if _WAITERS.get("closed"):
+                raise RuntimeError("agent closed the sidecar's input")
+            _next_ask += 1
+            _WAITERS[_next_ask] = answer
+            PROTO.write(json.dumps({"from": "child", "id": _next_ask, "method": method, "params": params}, default=str) + "\n")
+            PROTO.flush()
+        msg = answer.get()
+        if msg is None:
+            raise RuntimeError("agent closed the sidecar's input")
     if msg.get("error"):
         raise RuntimeError(msg["error"])
     return msg.get("result")
@@ -524,6 +549,10 @@ def test_events(params: dict) -> dict:
 # The installed packages' background agents by name, and the package each came from.
 AGENTS: dict = {}
 AGENT_PACKAGE: dict = {}
+# The packages' daemons, by name, for their settings only: each runs in a process of its own
+# (run_daemon), never here.
+DAEMONS: dict = {}
+DAEMON_PACKAGE: dict = {}
 
 
 def load_packages(listing: str) -> dict:
@@ -547,17 +576,7 @@ def load_packages(listing: str) -> dict:
         name, root = pkg["name"], pkg["root"]
         if name.startswith("test:"):
             TEST_ROOTS[str(pathlib.Path(root).resolve())] = name
-        top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
-        spec = importlib.machinery.ModuleSpec(top, None, is_package=True)
-        spec.submodule_search_locations = [root]
-        sys.modules[top] = importlib.util.module_from_spec(spec)
-        if root not in sys.path:
-            sys.path.append(root)
-        deps = pathlib.Path(root, ".deps")
-        if deps.is_dir():  # a test install's own Python packages: after the venv's, which win
-            import site
-
-            site.addsitedir(str(deps))
+        top = _mount(name, root)
         for rel in pkg.get("commands") or []:
             dotted = top + "." + rel[: -len(".py")].replace("/", ".")
             try:
@@ -587,6 +606,8 @@ def load_packages(listing: str) -> dict:
             _load_device_component(name, top, rel, "name", MANAGERS)
         for rel in pkg.get("agents") or []:
             _load_agent(name, top, rel)
+        for rel in pkg.get("daemons") or []:
+            _load_daemon(name, top, rel)
     return found
 
 
@@ -621,6 +642,80 @@ def _empty_init(path: pathlib.Path) -> bool:
     return all(isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) for n in body)
 
 
+def _mount(name: str, root: str) -> str:
+    """Package name at root as its own top-level package, and its root on sys.path; the
+    top-level package's name."""
+    top = "jarvis_pkgs_" + re.sub(r"\W", "_", name)
+    spec = importlib.machinery.ModuleSpec(top, None, is_package=True)
+    spec.submodule_search_locations = [root]
+    sys.modules[top] = importlib.util.module_from_spec(spec)
+    if root not in sys.path:
+        sys.path.append(root)
+    deps = pathlib.Path(root, ".deps")
+    if deps.is_dir():  # a test install's own Python packages: after the venv's, which win
+        import site
+
+        site.addsitedir(str(deps))
+    return top
+
+
+def run_daemon(root: str, package: str, rel: str) -> int:
+    """A package's daemon (daemons/<name>/daemon.py: an IJarvisDaemon), alone in this process:
+    its run() until the agent closes our input, which cancels it. The exit code: 0 stopped by
+    the agent, 3 run() returned, 1 it raised, 4 it couldn't be loaded."""
+    import asyncio
+
+    global _WAITERS
+    _WAITERS = {}
+    try:
+        from jarvis_command_sdk import IJarvisDaemon
+
+        module = importlib.import_module(_mount(package, root) + "." + rel[: -len(".py")].replace("/", "."))
+        found = [cls for _, cls in inspect.getmembers(module, inspect.isclass)
+                 if issubclass(cls, IJarvisDaemon) and cls.__module__ == module.__name__ and not inspect.isabstract(cls)]
+        if not found:
+            raise RuntimeError(f"{rel}: no IJarvisDaemon in it")
+        daemon = found[0]()
+    except BaseException:
+        print(f"sidecar: {package}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
+        return 4
+    set_current_user_id(None)
+
+    async def main():
+        loop, task = asyncio.get_running_loop(), asyncio.current_task()
+
+        def answers():
+            for line in sys.stdin:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                with _ASK_LOCK:
+                    waiter = _WAITERS.pop(msg.get("id"), None)
+                if waiter is not None:
+                    waiter.put(msg)
+            with _ASK_LOCK:  # the agent closed our input: stop
+                waiting = [w for k, w in _WAITERS.items() if k != "closed"]
+                _WAITERS.clear()
+                _WAITERS["closed"] = True
+            for waiter in waiting:
+                waiter.put(None)
+            loop.call_soon_threadsafe(task.cancel)
+
+        threading.Thread(target=answers, daemon=True).start()
+        await daemon.run()
+
+    try:
+        asyncio.run(main())
+    except asyncio.CancelledError:
+        return 0
+    except BaseException:
+        print(f"sidecar: daemon {package} failed:\n{traceback.format_exc()}", file=sys.stderr)
+        return 1
+    print(f"sidecar: daemon {package}: run() returned", file=sys.stderr)
+    return 3
+
+
 def _load_agent(package: str, top: str, rel: str) -> None:
     """A Pantry background agent (agents/<name>/agent.py: an IJarvisAgent, as
     N:utils/agent_discovery_service finds it). One that doesn't load fails its package."""
@@ -642,6 +737,38 @@ def _load_agent(package: str, top: str, rel: str) -> None:
     except BaseException as exc:
         print(f"sidecar: {package}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
         FAILED[package] = f"{rel}: {type(exc).__name__}: {exc}"
+
+
+def _load_daemon(package: str, top: str, rel: str) -> None:
+    """A package's daemon (daemons/<name>/daemon.py: an IJarvisDaemon), loaded to describe its
+    settings; it is never run here. One that doesn't load fails its package."""
+    try:
+        from jarvis_command_sdk import IJarvisDaemon
+
+        module = importlib.import_module(top + "." + rel[: -len(".py")].replace("/", "."))
+        found = [cls() for _, cls in inspect.getmembers(module, inspect.isclass)
+                 if issubclass(cls, IJarvisDaemon) and cls.__module__ == module.__name__ and not inspect.isabstract(cls)]
+        if not found:
+            FAILED[package] = f"{rel}: no IJarvisDaemon in it"
+        for daemon in found:
+            DAEMONS[daemon.name] = daemon
+            DAEMON_PACKAGE[daemon.name] = package
+    except BaseException as exc:
+        print(f"sidecar: {package}: failed to load {rel}:\n{traceback.format_exc()}", file=sys.stderr)
+        FAILED[package] = f"{rel}: {type(exc).__name__}: {exc}"
+
+
+def describe_daemons() -> list:
+    """The loaded daemons with the settings they need."""
+    out = []
+    for name in sorted(DAEMONS):
+        try:
+            description = str(DAEMONS[name].description or "")
+        except Exception:
+            description = ""
+        out.append({"name": name, "package": DAEMON_PACKAGE[name], "description": description,
+                    "secrets": _secrets_of(DAEMONS[name], name)})
+    return out
 
 
 def describe_agents() -> list:
@@ -935,8 +1062,8 @@ def describe(commands: dict) -> dict:
             print(f"sidecar: skipping {name}: {exc}", file=sys.stderr)
             if name in PACKAGE_OF:
                 FAILED[PACKAGE_OF[name]] = f"{name}: {type(exc).__name__}: {exc}"
-    agents = describe_agents()
-    return {"tools": tools, "failed": FAILED, "agents": agents, **device_families()}
+    agents, daemons = describe_agents(), describe_daemons()
+    return {"tools": tools, "failed": FAILED, "agents": agents, "daemons": daemons, **device_families()}
 
 
 def data_summaries(commands: dict, params: dict) -> dict:
@@ -1708,6 +1835,10 @@ def main() -> None:
             if only is None:
                 raise  # a Pi's built-ins need them
             print(f"sidecar: no SDK backends, the installed SDK is too old: {exc}", file=sys.stderr)
+    if "--daemon" in sys.argv[2:]:
+        # <root> --daemon <package> <path>: one daemon, no commands (run_daemon).
+        package, rel = sys.argv[sys.argv.index("--daemon") + 1:][:2]
+        sys.exit(run_daemon(sys.argv[1], package, rel))
     _install_test_log_handler()
     commands = None
     while True:

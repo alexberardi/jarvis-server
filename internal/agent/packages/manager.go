@@ -214,6 +214,39 @@ func (m *Manager) Boot(ctx context.Context) error {
 // computer's alike: device families, managers and agents.
 func (m *Manager) runs() []string { return NodeTypes }
 
+// DaemonDef is one installed package's daemon: where its package is and its file in it.
+type DaemonDef struct {
+	Package string
+	Name    string
+	Root    string
+	Path    string
+	// Stamp changes when the package is installed again (an update, a revert): the daemon is
+	// then restarted on the new code.
+	Stamp string
+}
+
+// Daemons are the installed packages' daemons (not a test install's: a Forge test runs none).
+func (m *Manager) Daemons() []DaemonDef {
+	var out []DaemonDef
+	for _, in := range m.List() {
+		stamp := in.Manifest.Version
+		if fi, err := os.Stat(in.Dir); err == nil {
+			stamp += " " + fi.ModTime().UTC().Format(time.RFC3339Nano)
+		}
+		for _, c := range in.Manifest.Components {
+			if c.Type != Daemon {
+				continue
+			}
+			p := c.Path
+			if p == "" {
+				p = fmt.Sprintf(conventional[Daemon], c.Name)
+			}
+			out = append(out, DaemonDef{Package: in.Manifest.Name, Name: c.Name, Root: in.Dir, Path: p, Stamp: stamp})
+		}
+	}
+	return out
+}
+
 func (m *Manager) builtinsStamp() string { return filepath.Join(m.Root, "builtins.txt") }
 
 // installBuiltins pip-installs the built-ins (with the SDK) unless the venv already has this
@@ -243,6 +276,7 @@ func (m *Manager) writeList() (int, error) {
 		Families []string `json:"families,omitempty"`
 		Managers []string `json:"managers,omitempty"`
 		Agents   []string `json:"agents,omitempty"`
+		Daemons  []string `json:"daemons,omitempty"`
 	}
 	list := []entry{}
 	agents := slices.Contains(m.runs(), Agent)
@@ -255,6 +289,8 @@ func (m *Manager) writeList() (int, error) {
 		if agents {
 			e.Agents = in.Manifest.Paths(Agent)
 		}
+		// Listed so the sidecar describes their settings; pkgdaemons runs them (Daemons).
+		e.Daemons = in.Manifest.Paths(Daemon)
 		list = append(list, e)
 	}
 	for _, tp := range m.tests() {

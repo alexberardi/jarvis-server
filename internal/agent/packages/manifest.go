@@ -176,6 +176,7 @@ func LoadManifest(dir string) (*Manifest, error) {
 var componentDirs = []struct{ dir, typ, entry string }{
 	{"commands", "command", "command.py"},
 	{"agents", "agent", "agent.py"},
+	{"daemons", "daemon", "daemon.py"},
 	{"device_families", "device_protocol", "protocol.py"},
 	{"device_managers", "device_manager", "manager.py"},
 	{"prompt_providers", "prompt_provider", "provider.py"},
@@ -275,12 +276,18 @@ func (m *Manifest) Commands() []Component {
 // comfyui_jobs), which a node's sidecar loads and internal/agent/pkgagents runs on its schedule.
 const Agent = "agent"
 
-// NodeTypes are the component types beyond commands a node's sidecar loads.
-var NodeTypes = []string{"device_protocol", "device_manager", Agent}
+// Daemon is the component type of a package's daemon (an IJarvisDaemon: a chat channel's
+// connection), which internal/agent/pkgdaemons keeps running in a process of its own.
+const Daemon = "daemon"
+
+// NodeTypes are the component types beyond commands a node runs: the ones its sidecar loads,
+// and daemons. The same list is kept in the SDK, the Pantry and its web app: the SDK's
+// CLAUDE.md ("Adding a component type") names every place.
+var NodeTypes = []string{"device_protocol", "device_manager", Agent, Daemon}
 
 // conventional is where a device component or an agent declared without a path is (the Pi's convention).
 var conventional = map[string]string{"device_protocol": "device_families/%s/protocol.py", "device_manager": "device_managers/%s/manager.py",
-	Agent: "agents/%s/agent.py"}
+	Agent: "agents/%s/agent.py", Daemon: "daemons/%s/daemon.py"}
 
 // Paths are the files of the components of type typ, a device component or an agent without a
 // declared path at its conventional place.
