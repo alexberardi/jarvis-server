@@ -110,7 +110,10 @@ func (e *Env) CloseLeftoverApps() {
 	}
 	// A killed LibreOffice opens on its recovery dialog next time, and a task waiting for a
 	// Writer window never sees one: the next case starts from a fresh profile and no locks.
-	os.RemoveAll(e.path("agent-home", ".config", "libreoffice")) //nolint:errcheck // absent is fine
+	// The fresh profile is one already past LibreOffice's first run: its Welcome dialog and
+	// Tip of the Day, which a computer in use doesn't show, cost a local model 15 of its 40
+	// rounds (Gemma 4 26B, 2026-11-15).
+	e.freshOfficeProfile()
 	locks, _ := filepath.Glob(e.path("agent-home", "Documents", ".~lock.*#"))
 	for _, l := range locks {
 		os.Remove(l) //nolint:errcheck // absent is fine
@@ -222,6 +225,7 @@ func (e *Env) Up(ctx context.Context) error {
 			return err
 		}
 	}
+	e.freshOfficeProfile() // the first case too starts past LibreOffice's first run
 	if err := installNotesEntry(e.path("agent-home"), e.notesLauncher()); err != nil {
 		return err
 	}
@@ -1169,3 +1173,22 @@ func (e *Env) Screenshot(ctx context.Context, path string) error {
 	}
 	return nil
 }
+
+// freshOfficeProfile replaces the agent's LibreOffice profile with officeProfile.
+func (e *Env) freshOfficeProfile() {
+	os.RemoveAll(e.path("agent-home", ".config", "libreoffice")) //nolint:errcheck // absent is fine
+	user := e.path("agent-home", ".config", "libreoffice", "4", "user")
+	if err := os.MkdirAll(user, 0o755); err == nil {
+		os.WriteFile(filepath.Join(user, "registrymodifications.xcu"), []byte(officeProfile), 0o644) //nolint:errcheck // a first-run dialog then shows, as before
+	}
+}
+
+// officeProfile is a LibreOffice profile's settings after its first run.
+const officeProfile = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Setup/Product"><prop oor:name="ooSetupLastVersion" oor:op="fuse"><value>26.8</value></prop></item>
+</oor:items>
+`

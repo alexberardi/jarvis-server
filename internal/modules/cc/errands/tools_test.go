@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,5 +209,29 @@ func TestListScheduledErrandsTool(t *testing.T) {
 	e.s.Schedules = nil
 	if got := res(tool.Execute(ctx, servertools.Call{}, turnFor(0))); got != `{"error": "unavailable", "message": "I can't check your scheduled errands right now."}` {
 		t.Fatal(got)
+	}
+}
+
+func TestRelayedGoal(t *testing.T) {
+	tool := &RunErrandTool{MeansOpenPage: func(s string) bool { return strings.Contains(s, "this wiki page") }}
+	for _, c := range []struct{ goal, said, want string }{
+		// The two Gemma 4 26B failures of 2026-11-14.
+		{"Summarize this wiki page into a LibreOffice document called Velmora: https://en.wikipedia.org/wiki/Velmora",
+			"Summarize this wiki page into a LibreOffice document called Velmora.",
+			"Summarize this wiki page into a LibreOffice document called Velmora"},
+		{"Summarize this wiki page into LibreOffice and save it as Velmora. [computer control: on.]",
+			"Summarize this wiki page into LibreOffice and save it as Velmora.",
+			"Summarize this wiki page into LibreOffice and save it as Velmora."},
+		// An address the user gave stays, as does one in a request that doesn't mean the open page.
+		{"Summarize this wiki page https://a.example/x into a document", "Summarize this wiki page https://a.example/x into a document",
+			"Summarize this wiki page https://a.example/x into a document"},
+		{"Order the watch at https://shop.example/w", "order that watch", "Order the watch at https://shop.example/w"},
+	} {
+		if got := tool.relayedGoal(c.goal, c.said); got != c.want {
+			t.Errorf("relayedGoal(%q) = %q, want %q", c.goal, got, c.want)
+		}
+	}
+	if got := (&RunErrandTool{}).relayedGoal("read https://a.example [web: x]", "read this page"); got != "read https://a.example" {
+		t.Error(got)
 	}
 }

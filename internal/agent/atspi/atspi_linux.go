@@ -402,7 +402,7 @@ func snapshotOf(ctx context.Context, pid int, max int, showing bool, title strin
 	defer refs.mu.Unlock()
 	refs.gen++
 	refs.nodes = w.nodes
-	return computeruse.Snapshot{Gen: refs.gen, Elements: w.out}, nil
+	return computeruse.Snapshot{Gen: refs.gen, Elements: w.els}, nil
 }
 
 // peek is what is on screen in the app's active window, without touching the ref table.
@@ -411,10 +411,10 @@ func peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, err
 	if err != nil {
 		return nil, err
 	}
-	for i := range w.out {
-		w.out[i].Value = "" // a reader of names has no use for what a field holds
+	for i := range w.els {
+		w.els[i].Value = "" // a reader of names has no use for what a field holds
 	}
-	return w.out, nil
+	return w.els, nil
 }
 
 // walk is one depth-first walk of the active window (else the first) of the app with this pid.
@@ -430,14 +430,36 @@ func walk(ctx context.Context, pid int, max int, showing bool, title string) (*w
 		max = DefaultMax
 	}
 	w := &walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
-	w.visit(win, 0, "", true)
-	return w, w.err
+	w.visit(win, 0, "", true, true)
+	if w.err != nil {
+		return w, w.err
+	}
+	// What is on screen comes first, then what isn't (a closed menu's items, which can still be
+	// pressed) as far as max allows. In walk order LibreOffice Writer's closed menus were all
+	// 300 elements of a task's snapshot, and none of its toolbars, its document or a dialog's
+	// controls (suite on Gemma 4 26B and Qwen3.5-9B, 2026-11-15: 40 rounds without saving).
+	kept := append(w.out, w.late[:min(len(w.late), max-len(w.out))]...)
+	w.els = make([]computeruse.SnapElement, len(kept))
+	for i, k := range kept {
+		k.el.Ref = "a" + strconv.Itoa(i+1)
+		w.els[i] = k.el
+		w.nodes[k.el.Ref] = k.e
+	}
+	return w, nil
+}
+
+// kept is an element of the walk and what acts on it; its ref is given once the order is known.
+type kept struct {
+	el computeruse.SnapElement
+	e  entry
 }
 
 type walker struct {
 	ctx   context.Context
 	max   int
-	out   []computeruse.SnapElement
+	out   []kept                    // on screen, in walk order
+	late  []kept                    // not on screen (in a subtree that isn't SHOWING), in walk order
+	els   []computeruse.SnapElement // out, then late as far as max allows, with their refs (walk)
 	nodes map[string]entry
 	err   error
 	win   *[4]int // the window's screen bounds, for Position; nil when unknown
@@ -450,7 +472,8 @@ func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
 // visit keeps o when it is a control and walks its children; near is the name of the nearest
 // named container above o, and context whether o's ancestry may give one at all: nothing hidden,
 // editable or secret above it (§2, A17 R3).
-func (w *walker) visit(o obj, depth int, near string, context bool) {
+// shown is whether everything above o is on screen.
+func (w *walker) visit(o obj, depth int, near string, context, shown bool) {
 	if err := w.ctx.Err(); err != nil {
 		w.err = err
 		return
@@ -465,12 +488,16 @@ func (w *walker) visit(o obj, depth int, near string, context bool) {
 	}
 	if !st.has(stateShowing) {
 		context = false // hidden: it and everything in it lose context (A15 F7, A17 R3)
+		shown = false
+	}
+	if !shown && len(w.late) >= w.max {
+		return // nothing on screen is inside, and there is no room for more that isn't
 	}
 	if !context {
 		near = ""
 	}
 	if role, ok := roleNames[r]; ok {
-		w.keep(o, role, r == rolePasswordText, near)
+		w.keep(o, role, r == rolePasswordText, near, shown)
 	} else if containerRoles[r] && context {
 		// Only a container on screen names its elements (A15 F7).
 		if n := strings.TrimSpace(o.name(w.ctx)); n != "" {
@@ -488,13 +515,13 @@ func (w *walker) visit(o obj, depth int, near string, context bool) {
 		if w.full() {
 			return
 		}
-		w.visit(k, depth+1, near, context)
+		w.visit(k, depth+1, near, context, shown)
 	}
 }
 
-func (w *walker) keep(o obj, role string, secure bool, near string) {
+func (w *walker) keep(o obj, role string, secure bool, near string, shown bool) {
 	ctx := w.ctx
-	el := computeruse.SnapElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: o.name(ctx), Bounds: o.bounds(ctx)}
+	el := computeruse.SnapElement{Role: role, Name: o.name(ctx), Bounds: o.bounds(ctx)}
 	if el.Bounds != nil && w.win != nil {
 		el.Position = computeruse.PositionIn(*el.Bounds, *w.win)
 	}
@@ -525,8 +552,12 @@ func (w *walker) keep(o obj, role string, secure bool, near string) {
 			el.State = append(el.State, s.name)
 		}
 	}
-	w.out = append(w.out, el)
-	w.nodes[el.Ref] = entry{o: o, role: role, name: el.Name, secure: secure}
+	k := kept{el: el, e: entry{o: o, role: role, name: el.Name, secure: secure}}
+	if shown {
+		w.out = append(w.out, k)
+	} else {
+		w.late = append(w.late, k)
+	}
 }
 
 // lookup finds ref in generation gen. It holds the lock while f acts, so a new snapshot can't

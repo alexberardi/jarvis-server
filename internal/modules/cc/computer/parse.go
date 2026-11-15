@@ -54,10 +54,11 @@ func parseReply(s string) (Reply, error) {
 	var r Reply
 	if err := json.Unmarshal([]byte(s[i:j+1]), &r); err != nil {
 		// The loop runs at temperature 0, so a retry reproduces the model's slip byte for byte
-		// (#528): the two deterministic ones seen — a dropped "y" key in a coordinate pair and
-		// an answer missing only its closing braces — are repaired instead of killing the run.
-		if json.Unmarshal([]byte(droppedY.ReplaceAllString(s[i:j+1], `$1,"y":$2`)), &r) != nil {
-			fixed, ok := closeTruncated(droppedY.ReplaceAllString(strings.TrimRight(s[i:], " \t\r\n"), `$1,"y":$2`))
+		// (#528): the deterministic ones seen — a dropped "y" key in a coordinate pair, an
+		// action closed before its "intent", and an answer missing only its closing braces —
+		// are repaired instead of killing the run.
+		if json.Unmarshal([]byte(repairSlips(s[i:j+1])), &r) != nil {
+			fixed, ok := closeTruncated(repairSlips(strings.TrimRight(s[i:], " \t\r\n")))
 			if !ok || json.Unmarshal([]byte(fixed), &r) != nil {
 				return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
 			}
@@ -154,6 +155,16 @@ func splitText(s string, max int) []string {
 		parts = append(parts, string(r))
 	}
 	return parts
+}
+
+// earlyClose is an action the model closed before its "intent":
+// {"kind":"click","x":72,"y":56}, "intent":"Click the New button"} (Gemma 4 26B on every
+// coordinate click, 2026-11-14). The intent goes back inside.
+var earlyClose = regexp.MustCompile(`\}\s*,\s*("intent"\s*:\s*"(?:[^"\\]|\\.)*")\s*\}`)
+
+// repairSlips is s with the model's known deterministic JSON slips put right.
+func repairSlips(s string) string {
+	return earlyClose.ReplaceAllString(droppedY.ReplaceAllString(s, `$1,"y":$2`), `,$1}`)
 }
 
 // droppedY is a coordinate pair whose "y" key the model dropped: "x":170,777. The bare second

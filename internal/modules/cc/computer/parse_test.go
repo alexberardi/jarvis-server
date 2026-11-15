@@ -114,3 +114,13 @@ func TestParseReplyDroppedY(t *testing.T) {
 		t.Fatalf("intact pair: %+v, %v", r.Actions, err)
 	}
 }
+
+func TestParseReplyEarlyClose(t *testing.T) {
+	r, err := parseReply("```json\n" + `{"thought": "t", "actions": [{"kind": "click", "x": 72, "y": 56}, "intent": "Click the \"New\" button"}]}` + "\n```")
+	if err != nil {
+		t.Fatalf("early-close reply: %v", err)
+	}
+	if a := r.Actions[0]; len(r.Actions) != 1 || a.X == nil || *a.X != 72 || a.Intent != `Click the "New" button` {
+		t.Fatalf("early-close reply parsed to %+v", r.Actions)
+	}
+}

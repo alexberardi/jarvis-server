@@ -410,11 +410,25 @@ func TestSnapshotShowingSkipsClosedMenus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := names(all), []string{"Paste@", "Cut@", "Bold@top-left", "Hidden tool@top-left"}; !slices.Equal(got, want) {
+	// What is on screen first, then the rest in walk order: closed menus never crowd it out.
+	if got, want := names(all), []string{"Bold@top-left", "Paste@", "Cut@", "Hidden tool@top-left"}; !slices.Equal(got, want) {
 		t.Errorf("full: %q, want %q", got, want)
 	}
-	if all.Elements[0].Bounds != nil {
-		t.Errorf("a placeholder position kept bounds %v", all.Elements[0].Bounds)
+	if all.Elements[0].Ref != "a1" || all.Elements[1].Ref != "a2" {
+		t.Errorf("refs %q %q, want a1 a2 in the order given", all.Elements[0].Ref, all.Elements[1].Ref)
+	}
+	if all.Elements[1].Bounds != nil {
+		t.Errorf("a placeholder position kept bounds %v", all.Elements[1].Bounds)
+	}
+	capped, err := Snapshot(context.Background(), os.Getpid(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := names(capped), []string{"Bold@top-left", "Paste@"}; !slices.Equal(got, want) {
+		t.Errorf("capped: %q, want %q", got, want)
+	}
+	if err := Press(capped.Gen, "a2"); err != nil {
+		t.Errorf("press a closed menu's item by its ref: %v", err)
 	}
 }
 
