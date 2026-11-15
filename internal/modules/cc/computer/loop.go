@@ -151,7 +151,10 @@ type Task struct {
 	WorkflowID  string
 	Step        int
 	Goal        string
-	Target      computeruse.Target
+	// Request is everything the user asked for when Goal is one step of it ("" = Goal is the
+	// request): a planner's step can drop "last month" or "under $300".
+	Request string
+	Target  computeruse.Target
 	// StartURL is where the task's window opens on its first look ("" = https://<site>): the web
 	// address the user gave, with its scheme, port and path.
 	StartURL string
@@ -824,7 +827,7 @@ func (l *Loop) unsaved(ctx context.Context, r *round, obs Observation) string {
 	}
 	name := strings.ToLower(said)
 	title := strings.ToLower(obs.Title)
-	dialog := title == "save" || title == "save as" || strings.HasPrefix(title, "save ")
+	dialog := saveDialog(obs.Title)
 	if !dialog && strings.Contains(title, name) {
 		return ""
 	}
@@ -868,7 +871,7 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error) {
 	t := r.task
 	text, stable := renderPromptSplit(promptInput{
-		Goal: t.Goal, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
+		Goal: t.Goal, Request: t.Request, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 		Source: t.Source,
@@ -1041,7 +1044,11 @@ const orderSystem = `You check an order for Jarvis before the user is asked to a
 // how it differs, or "" (it is, or the check itself failed: the user still approves every order).
 func (l *Loop) orderDiffers(ctx context.Context, r *round, obs Observation, co *Checkout) string {
 	var b strings.Builder
-	b.WriteString("The user asked for: " + oneLine(r.task.Goal) + "\n\nThe order about to be placed:")
+	asked := r.task.Goal
+	if r.task.Request != "" {
+		asked = r.task.Request
+	}
+	b.WriteString("The user asked for: " + oneLine(asked) + "\n\nThe order about to be placed:")
 	for _, f := range [][2]string{{"product", co.Product}, {"price", strings.TrimSpace(co.Price + " " + co.Currency)}, {"seller", co.Seller}} {
 		if f[1] != "" {
 			b.WriteString("\n- " + f[0] + ": " + oneLine(f[1]))
@@ -1495,4 +1502,10 @@ func coordinateHint(a computeruse.Adapter, shots []*Image) string {
 		return "Coordinates are 0 to 999 across and down the screenshot."
 	}
 	return fmt.Sprintf("Coordinates are pixels of the newest screenshot (%dx%d).", im.Width, im.Height)
+}
+
+// saveDialog reports whether a window titled title is an app's Save dialog.
+func saveDialog(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	return title == "save" || title == "save as" || strings.HasPrefix(title, "save ")
 }

@@ -711,7 +711,8 @@ func (s *Service) planGap(ctx context.Context, goal string, done, next []Step) s
 	if len(next) > 0 {
 		planned = stepsDumps(next)
 	}
-	data, err := s.runPlanner(ctx, "You check an errand plan for Jarvis before it runs.\n\n"+
+	think := planCheckThinkTokens
+	data, err := s.runPlannerThinking(ctx, "You check an errand plan for Jarvis before it runs.\n\n"+
 		"The user's goal: "+goal+"\n"+
 		"Steps already run: "+stepsDumps(done)+"\n"+
 		"Steps planned next: "+planned+"\n\n"+
@@ -719,7 +720,7 @@ func (s *Service) planGap(ctx context.Context, goal string, done, next []Step) s
 		"results the user asked for outright (a file to make, a message to send, a thing to buy, order or "+
 		"look up, a change to make). How a step does its work is not your concern, one step may produce "+
 		"several results, and a computer_task does everything its goal says. When in doubt, it is covered.\n\n"+
-		`Answer with a JSON object only: {"covered": true} or {"covered": false, "missing": "<the result no step produces, in a few words>"}.`)
+		`Answer with a JSON object only: {"covered": true} or {"covered": false, "missing": "<the result no step produces, in a few words>"}.`, &think)
 	if err != nil {
 		return ""
 	}
@@ -940,13 +941,22 @@ func stripFences(text string) string {
 // thinking left to the label: LD8), parsed to a JSON object. Planning failures wrap ErrPlan;
 // an LLM error is returned as-is (infra).
 func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object, error) {
+	return s.runPlannerThinking(ctx, prompt, nil)
+}
+
+// planCheckThinkTokens is the plan check's thinking allowance: a yes/no answer left to think as
+// long as it liked ran into the planner's time limit on every call and was asked again without.
+const planCheckThinkTokens = 512
+
+// runPlannerThinking is runPlanner with a set thinking allowance (nil = left to the label).
+func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *int) (*pyjson.Object, error) {
 	if s.LLM == nil {
 		return nil, errors.New("errands: no LLM")
 	}
 	temp, maxTok := 0.0, s.plannerMaxTokens(ctx)
 	start := time.Now()
 	req := llm.ChatRequest{
-		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok,
+		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: think,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
 	}
 	// The thinking attempt gets a wall-clock cap as well as max_tokens: the background label

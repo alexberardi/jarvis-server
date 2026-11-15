@@ -3,6 +3,7 @@ package computer
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -58,6 +59,7 @@ const defaultRules = "Risky actions (pay, send, delete, sharing, install, subscr
 // promptInput is what one round's prompt is made of.
 type promptInput struct {
 	Goal        string
+	Request     string // what the user asked for in all, when Goal is one step of it
 	Today       string // the day in the household's zone, "" = not said
 	Dates       string // the goal's relative dates worked out, "" = it names none
 	Success     *SuccessCheck
@@ -87,6 +89,9 @@ func renderPromptSplit(in promptInput) (string, int) {
 	var b strings.Builder
 	stable := 0
 	fmt.Fprintf(&b, "Task: %s\n", oneLine(in.Goal))
+	if req := oneLine(in.Request); req != "" && req != oneLine(in.Goal) {
+		fmt.Fprintf(&b, "This is one step of what the user asked for: %q. Do only this step, but keep to the details of what they asked (which month, which item, how many, what limit).\n", req)
+	}
 	if in.Today != "" {
 		fmt.Fprintf(&b, "Today is %s.\n", in.Today)
 	}
@@ -131,6 +136,10 @@ func renderPromptSplit(in promptInput) (string, int) {
 			ref = " " + e.Ref
 		}
 		fmt.Fprintf(&b, "- round %d: %s%s %q: %s\n", e.Round, e.Kind, ref, e.Intent, e.Result)
+	}
+	if in.Desktop && len(h) > 0 && justSaved(h[len(h)-1]) && !saveDialog(in.Obs.Title) {
+		b.WriteString("Your save keypress went through. A save that works usually shows nothing new on screen: " +
+			"if what the task asked for is in place, say done with a \"verify\" now. Don't save again or retype anything.\n")
 	}
 	if in.Feedback != "" {
 		fmt.Fprintf(&b, "Last turn: %s\n", oneLine(in.Feedback))
@@ -318,3 +327,11 @@ func orDash(s string) string {
 	}
 	return s
 }
+
+// justSaved reports whether e is a save shortcut that ran: on a desktop the model can't see
+// that it worked, and kept saving and retyping until the note was ruined.
+func justSaved(e Entry) bool {
+	return e.Kind == "keypress" && e.Result == "ok" && saveIntentRE.MatchString(e.Intent)
+}
+
+var saveIntentRE = regexp.MustCompile(`(?i)\bsav(e|ing)\b`)
