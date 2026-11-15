@@ -267,12 +267,9 @@ func bus(ctx context.Context) (*dbus.Conn, error) {
 	if a11y.c != nil && a11y.c.Connected() {
 		return a11y.c, nil
 	}
-	addr := os.Getenv("AT_SPI_BUS_ADDRESS")
-	if addr == "" {
-		var err error
-		if addr, err = busAddress(ctx); err != nil {
-			return nil, err
-		}
+	addr, err := address(ctx)
+	if err != nil {
+		return nil, err
 	}
 	c, err := dbus.Connect(addr)
 	if err != nil {
@@ -280,6 +277,14 @@ func bus(ctx context.Context) (*dbus.Conn, error) {
 	}
 	a11y.c = c
 	return c, nil
+}
+
+// address is the accessibility bus's address: the environment's, else the session bus's.
+func address(ctx context.Context) (string, error) {
+	if addr := os.Getenv("AT_SPI_BUS_ADDRESS"); addr != "" {
+		return addr, nil
+	}
+	return busAddress(ctx)
 }
 
 // busAddress asks the session bus's org.a11y.Bus (at-spi-bus-launcher) for the bus address.

@@ -96,6 +96,9 @@ type DeskInput struct {
 type DeskPlatform struct {
 	ElementAt func(x, y float64) (*ax.Recorded, error)
 	Focused   func() (*ax.Recorded, error)
+	// Landed is what a click at since landed on where its point isn't known (sway): the
+	// element that took the focus then. nil: such a click has no element.
+	Landed func(since time.Time) (*ax.Recorded, error)
 	// Keyframe is a JPEG of the screen; nil: no keyframes.
 	Keyframe func(ctx context.Context) ([]byte, error)
 	// Frame, when set, takes the keyframes instead (Wayland): the screen with pt marked (a
@@ -576,6 +579,8 @@ func (d *deskRecorder) handle(in DeskInput) {
 		if !in.NoPoint {
 			el = d.lookup(d.p.ElementAt, in.X, in.Y)
 			pt = &Point{in.X, in.Y}
+		} else if d.p.Landed != nil {
+			el = d.lookup(func(float64, float64) (*ax.Recorded, error) { return d.p.Landed(in.At) }, 0, 0)
 		}
 		e := d.event(InClick, el, in.At)
 		if pt != nil {
@@ -611,6 +616,11 @@ func (d *deskRecorder) handle(in DeskInput) {
 }
 
 func (d *deskRecorder) key(in DeskInput) {
+	// A chord with Super is the window manager's (switch workspace, move a window), not a
+	// step of the task: replayed, it would do whatever that key means on that day's desktop.
+	if strings.Contains(in.Key, "super+") {
+		return
+	}
 	switch {
 	case in.Key == KeyEnter || in.Key == KeyTab || in.Key == KeyEscape || strings.Contains(in.Key, "+"):
 		var el *ax.Recorded

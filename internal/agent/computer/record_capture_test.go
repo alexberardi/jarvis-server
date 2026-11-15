@@ -324,3 +324,32 @@ func TestResultAfterTheSettleWait(t *testing.T) {
 	default:
 	}
 }
+
+// A click whose point isn't known (sway) is named by what took the focus at or after it, and
+// a chord with Super, the window manager's, is no step of the task.
+func TestPointlessClickIsNamedByWhatItLandedOn(t *testing.T) {
+	e, _ := captureEnv(t)
+	var asked time.Time
+	e.rec.p.Landed = func(since time.Time) (*ax.Recorded, error) {
+		asked = since
+		return &ax.Recorded{App: "calc", Role: "cell", Name: "October row, Amount column"}, nil
+	}
+	e.rec.begin()
+	at := e.desk.tick(time.Second)
+	e.rec.handle(DeskInput{Kind: InClick, NoPoint: true, At: at})
+	e.press("super+]")
+	e.press("shift+super+q")
+	e.rec.finish()
+	var got []string
+	for _, ev := range e.events(t) {
+		if ev.Kind == InClick || ev.Kind == InKey {
+			got = append(got, ev.Kind+" "+ev.Key)
+			if ev.Kind == InClick && (ev.Element == nil || ev.Element.Role != "cell" || ev.Element.Name != "October row, Amount column") {
+				t.Errorf("the click's element = %+v", ev.Element)
+			}
+		}
+	}
+	if len(got) != 1 || !asked.Equal(at) {
+		t.Fatalf("actions = %q (want the click alone), asked since %v, want %v", got, asked, at)
+	}
+}

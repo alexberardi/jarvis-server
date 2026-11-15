@@ -56,6 +56,10 @@ type wlSystem struct {
 	Access    func(context.Context) atspi.State
 	Focused   func(pid int) (*computeruse.Element, error)
 	ElementAt func(pid, x, y int) (*computeruse.Element, error)
+	// Landings listens, for one recording, for what takes the focus in each app
+	// (atspi.Listen): landed is the element that did in a process since a moment, waiting a
+	// little for it. It names a click where the compositor doesn't say where the pointer is.
+	Landings func(context.Context) (landed func(pid int, since time.Time) *computeruse.Element, stop func(), err error)
 	// Shot captures the screen for a keyframe (the focused monitor); nil: no keyframes.
 	Shot func(context.Context) (screen.Shot, error)
 }
@@ -73,6 +77,9 @@ func newWaylandSource(dir string, sys wlSystem, log *slog.Logger) *DesktopSource
 	if sys.ElementAt != nil {
 		plat.ElementAt = p.elementAt
 	}
+	if sys.Landings != nil {
+		plat.Landed = p.landedOn
+	}
 	if sys.Shot != nil {
 		plat.Frame = p.frame
 	}
@@ -86,6 +93,8 @@ type wlPlatform struct {
 
 	mu     sync.Mutex
 	logged map[string]bool // apps whose AT-SPI failure this recording logged
+
+	landed func(pid int, since time.Time) *computeruse.Element // this recording's; nil: none
 
 	// The last cursor position asked for (a scroll's ticks reuse it); only the tap's
 	// callback uses them, under its lock.
@@ -147,7 +156,26 @@ func (p *wlPlatform) tap(send func(DeskInput)) (func(), error) {
 	case err != nil:
 		return nil, fmt.Errorf("desktop recording: %w", err)
 	}
-	return stop, nil
+	if p.sys.Landings == nil {
+		return stop, nil
+	}
+	ctx, cancel = wlCtx()
+	landed, unlisten, err := p.sys.Landings(ctx)
+	cancel()
+	if err != nil {
+		p.log.Info("desktop recording: not listening for what clicks land on", "err", err)
+		return stop, nil
+	}
+	p.mu.Lock()
+	p.landed = landed
+	p.mu.Unlock()
+	return func() {
+		stop()
+		p.mu.Lock()
+		p.landed = nil
+		p.mu.Unlock()
+		unlisten()
+	}, nil
 }
 
 // place puts a click or scroll where the cursor is, asked at once (the window under it may
@@ -193,6 +221,21 @@ func (p *wlPlatform) elementAt(x, y float64) (*ax.Recorded, error) {
 	return p.element(w, in, func() (*computeruse.Element, error) {
 		return p.sys.ElementAt(w.PID, int(x)-w.X, int(y)-w.Y)
 	}), nil
+}
+
+// landedOn is what a click at since landed on, for one whose point isn't known: the element
+// that took the focus in the focused window's app (the click focused the window under it).
+func (p *wlPlatform) landedOn(since time.Time) (*ax.Recorded, error) {
+	ctx, cancel := wlCtx()
+	w, err := p.sys.Windows.FocusedWindow(ctx)
+	cancel()
+	if err != nil || w == nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	landed := p.landed
+	p.mu.Unlock()
+	return p.element(w, landed != nil, func() (*computeruse.Element, error) { return landed(w.PID, since), nil }), nil
 }
 
 // element is window w's app with the element find gives (its role and name; Secure for a

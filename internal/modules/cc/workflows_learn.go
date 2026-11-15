@@ -583,16 +583,21 @@ func paramCandidates(evs []traceEvent) []paramCandidate {
 }
 
 // desktopParamCandidates are paramCandidates for a desktop trace: the dates, months, file
-// names and amounts in typed values (never masked ones). There are no URLs on a desktop.
+// names and amounts in typed values (never masked ones) and in the names of what was clicked
+// (the cell in the October row). There are no URLs on a desktop.
 func desktopParamCandidates(evs []desktopEvent) []paramCandidate {
 	var out []paramCandidate
 	for i, e := range evs {
-		if e.Kind != "input" || e.Masked {
+		text, from := e.Value, "typed"
+		switch {
+		case e.Kind == "click" && e.Element != nil:
+			text, from = e.Element.Name, "clicked"
+		case e.Kind != "input" || e.Masked:
 			continue
 		}
 		var found []paramCandidate
-		for _, c := range scanCandidates(e.Value) {
-			c.Event, c.From = i+1, "typed"
+		for _, c := range scanCandidates(text) {
+			c.Event, c.From = i+1, from
 			if !slices.ContainsFunc(found, func(o paramCandidate) bool { return o.Kind == c.Kind && o.Value == c.Value }) {
 				found = append(found, c)
 			}
@@ -1023,7 +1028,9 @@ func buildWorkflow(rec Recording, evs []traceEvent, cands []paramCandidate, out 
 	if s, ok := startStep(w.Steps, start); ok {
 		w.Steps = append([]WStep{s}, w.Steps...)
 	}
-	return finishDraft(w, successCheck(out.Success, evs))
+	sc := successCheck(out.Success, evs)
+	paramTexts(&w, &sc, subs)
+	return finishDraft(w, sc)
 }
 
 // startStep is the step that opens start, the page a recording's first step was on, when the
@@ -1090,6 +1097,7 @@ func buildDesktopWorkflow(rec Recording, evs []desktopEvent, cands []paramCandid
 	// No URL or download on a desktop: the model's text or screen check, if any.
 	sc := successCheck(out.Success, nil)
 	sc.URLContains = ""
+	paramTexts(&w, &sc, subs)
 	return finishDraft(w, sc)
 }
 
@@ -1409,6 +1417,49 @@ func substitute(s *WStep, c paramCandidate, name string) {
 	if s.Expect != nil {
 		s.Expect.URLContains = strings.ReplaceAll(s.Expect.URLContains, c.Value, ph)
 		s.Expect.Screen = strings.ReplaceAll(s.Expect.Screen, c.Value, ph)
+	}
+}
+
+// paramTextMin is the shortest recorded value replaced in the model's sentences: a shorter
+// one ("5") is as likely to be part of the sentence as the value.
+const paramTextMin = 3
+
+// paramTexts writes each param as {name} where the model's sentences hold its recorded value
+// as a word: what a step is for and causes, the end state and the success check. A run binds
+// them, so it looks for this run's amount, not the recorded one.
+func paramTexts(w *TaughtWorkflow, sc *computer.SuccessCheck, subs map[int][]paramSub) {
+	type pair struct{ value, ph string }
+	var pairs []pair
+	for _, ss := range subs {
+		for _, sb := range ss {
+			p := pair{sb.c.Value, "{" + sb.name + "}"}
+			if len([]rune(p.value)) >= paramTextMin && !slices.Contains(pairs, p) {
+				pairs = append(pairs, p)
+			}
+		}
+	}
+	// The longest first: "2026-09.csv" before the "2026-09" inside it.
+	slices.SortFunc(pairs, func(a, b pair) int {
+		return cmp.Or(cmp.Compare(len(b.value), len(a.value)), cmp.Compare(a.value, b.value))
+	})
+	bind := func(s *string) {
+		for _, p := range pairs {
+			if strings.Contains(*s, p.value) {
+				re := regexp.MustCompile(`(^|[^\pL\pN{])` + regexp.QuoteMeta(p.value) + `($|[^\pL\pN}])`)
+				*s = re.ReplaceAllString(*s, "${1}"+strings.ReplaceAll(p.ph, "$", "$$")+"${2}")
+			}
+		}
+	}
+	bind(&w.Skill.Goal.EndState)
+	for i := range w.Steps {
+		bind(&w.Steps[i].Goal)
+		if x := w.Steps[i].Expect; x != nil {
+			bind(&x.Screen)
+		}
+	}
+	bind(&sc.Screen)
+	for i := range sc.TextPresent {
+		bind(&sc.TextPresent[i])
 	}
 }
 

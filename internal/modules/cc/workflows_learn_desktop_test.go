@@ -490,3 +490,45 @@ func TestLearnFromCapturedRecording(t *testing.T) {
 		t.Fatalf("the model wasn't shown the results:\n%s", p)
 	}
 }
+
+// TestLearnDesktopClickedParam: what a clicked element is named seeds the candidates (the cell
+// in the October row), the param replaces it in the step, and the model's sentences hold the
+// params where they held the recorded values, so a run checks for its own.
+func TestLearnDesktopClickedParam(t *testing.T) {
+	evs := []desktopEvent{
+		{Kind: "click", App: "calc", Element: &desktopElement{Role: "cell", Name: "October row, Amount column"}},
+		{Kind: "input", App: "calc", Value: "1450.00"},
+	}
+	cands := desktopParamCandidates(evs)
+	if g := mustJSON(t, cands); !strings.Contains(g, `"Value":"October"`) || !strings.Contains(g, `"From":"clicked"`) {
+		t.Fatalf("candidates %s", g)
+	}
+	out, err := parseLearnOutput(`{"name": "Enter the month's budget", "goal": {"end_state": "The October row shows 1450.00"}, "steps": [
+		{"intent": "Select the amount for October", "goal": "Pick October's cell", "event_seqs": [1]},
+		{"intent": "Type 1450.00", "expect": "The cell shows 1450.00 (not 11450.00)", "event_seqs": [2]}],
+		"params": [{"name": "month", "kind": "month", "example": "October", "from_seqs": [1]},
+			{"name": "amount", "kind": "number", "example": "1450.00", "from_seqs": [2]}],
+		"success": {"text_present": ["1450.00"]}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := buildDesktopWorkflow(Recording{ID: "r", HouseholdID: cbHH, OwnerID: 5}, evs, cands, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Steps) != 2 || len(w.Params) != 2 {
+		t.Fatalf("workflow %s", mustJSON(t, w))
+	}
+	for got, want := range map[string]string{
+		w.Steps[0].Intent:        "Select the amount for {month}",
+		w.Steps[0].Element.Name:  "{month} row, Amount column",
+		w.Steps[0].Goal:          "Pick {month}'s cell",
+		w.Steps[1].Expect.Screen: "The cell shows {amount} (not 11450.00)",
+		w.Skill.Goal.EndState:    "The {month} row shows {amount}",
+		w.Success.TextPresent[0]: "{amount}",
+	} {
+		if got != want {
+			t.Errorf("%q, want %q", got, want)
+		}
+	}
+}

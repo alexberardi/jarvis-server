@@ -4,6 +4,9 @@
 #
 #   scripts/appclick-live           run TestLiveLibreOffice on Writer, then Calc, each in a fresh
 #                                   session; logs stay in the printed dirs
+#   scripts/appclick-live landed    run internal/agent/atspi's TestLiveLanded instead: a real
+#                                   pointer click on a cell of a small budget sheet in Calc,
+#                                   named by the accessibility events (desktop recording on sway)
 #
 # Isolation, as scripts/desktop-shot: `env -i` so nothing of the user's session leaks in, its own
 # XDG_RUNTIME_DIR under /tmp (a fresh Wayland socket), HOME, session bus (dbus-run-session) and
@@ -50,7 +53,7 @@ if [ "${1:-}" = __session ]; then
 
   # The accessibility bus, switched on before LibreOffice starts: an app decides whether to join
   # it at startup.
-  /usr/lib/at-spi-bus-launcher --launch-immediately >"$OUT/atspi.log" 2>&1 &
+  "$A11Y/at-spi-bus-launcher" --launch-immediately >"$OUT/atspi.log" 2>&1 &
   pids+=($!)
   for _ in $(seq 50); do
     gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
@@ -59,15 +62,26 @@ if [ "${1:-}" = __session ]; then
   done
   # The registry, started here: in a bare session its D-Bus activation goes through systemd,
   # which isn't there ("Could not activate remote peer 'org.a11y.atspi.Registry': unit failed").
-  /usr/lib/at-spi2-registryd >"$OUT/registryd.log" 2>&1 &
+  "$A11Y/at-spi2-registryd" >"$OUT/registryd.log" 2>&1 &
   pids+=($!)
 
+  doc=()
+  if [ "$MODE" = landed ]; then
+    # A spreadsheet, not the CSV: opening a CSV stops at the import dialog.
+    printf 'Month,Amount\nSeptember,\nOctober,\nNovember,\n' >"$OUT/budget.csv"
+    soffice --headless --convert-to ods --outdir "$OUT" "-env:UserInstallation=file://$OUT/lo-profile" "$OUT/budget.csv" >"$OUT/convert.log" 2>&1
+    doc=("$OUT/budget.ods")
+  fi
   SAL_USE_VCLPLUGIN=gtk3 GDK_BACKEND=wayland soffice "--$APP" --norestore --nologo \
-    --nofirststartwizard "-env:UserInstallation=file://$OUT/lo-profile" >"$OUT/soffice.log" 2>&1 &
+    --nofirststartwizard "-env:UserInstallation=file://$OUT/lo-profile" "${doc[@]}" >"$OUT/soffice.log" 2>&1 &
   pids+=($!)
+  if [ "$MODE" = landed ]; then # the test looks for the sheet's window once
+    for _ in $(seq 120); do swaymsg -t get_tree 2>/dev/null | grep -q '"name": "budget' && break; sleep 0.5; done
+    sleep 2
+  fi
 
   set +e
-  JARVIS_APPCLICK_LIVE=1 JARVIS_APPCLICK_APP=$APP "$OUT/appclick.test" -test.run '^TestLiveLibreOffice$' -test.v -test.count=1 2>&1 | tee "$OUT/test.log"
+  JARVIS_LANDED_LIVE=$MODE JARVIS_APPCLICK_LIVE=1 JARVIS_APPCLICK_APP=$APP "$OUT/appclick.test" -test.run "$RUN" -test.v -test.count=1 2>&1 | tee "$OUT/test.log"
   rc=${PIPESTATUS[0]}
   set -e
   exit "$rc"
@@ -81,15 +95,24 @@ elif [ -x "$CACHE/sway-$SWAY_VER/bin/sway" ]; then
 else
   say "no sway: install it, or run scripts/desktop-shot deps"; exit 2
 fi
-for c in soffice dbus-run-session gdbus /usr/lib/at-spi-bus-launcher /usr/lib/at-spi2-registryd; do
+A11Y=/usr/lib # Arch; Debian and Ubuntu keep the accessibility daemons in /usr/libexec
+[ -x "$A11Y/at-spi-bus-launcher" ] || A11Y=/usr/libexec
+for c in soffice dbus-run-session gdbus "$A11Y/at-spi-bus-launcher" "$A11Y/at-spi2-registryd"; do
   command -v "$c" >/dev/null || [ -x "$c" ] || { say "missing $c"; exit 2; }
 done
 
+MODE=${1:-} PKG=./internal/agent/appclick RUN='^TestLiveLibreOffice$' APPS='writer calc'
+case $MODE in
+  '') ;;
+  landed) PKG=./internal/agent/atspi RUN='^TestLiveLanded$' APPS=calc ;;
+  *) say "unknown mode $MODE (landed, or none)"; exit 2 ;;
+esac
+
 BUILD=$(mktemp -d /tmp/jac-build.XXXXXX)
-(cd "$ROOT" && CGO_ENABLED=0 mise exec go@1.27 -- go test -c -o "$BUILD/appclick.test" ./internal/agent/appclick)
+(cd "$ROOT" && CGO_ENABLED=0 mise exec go@1.27 -- go test -c -o "$BUILD/appclick.test" "$PKG")
 
 status=0
-for APP in writer calc; do
+for APP in $APPS; do
   OUT=$(mktemp -d /tmp/jac.XXXXXX) # short: Unix socket paths are limited
   RT=$OUT/run
   mkdir -m 700 "$RT" "$OUT/home"
@@ -99,7 +122,7 @@ for APP in writer calc; do
   env -i "PATH=$(dirname "$SWAY"):/usr/local/bin:/usr/bin:/bin" "HOME=$OUT/home" "TMPDIR=/tmp" \
     "XDG_RUNTIME_DIR=$RT" "XDG_CONFIG_HOME=$OUT/home/.config" "XDG_CACHE_HOME=$OUT/home/.cache" \
     XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland "JARVIS_APPCLICK_ISOLATED=$RT" \
-    "SWAY=$SWAY" "OUT=$OUT" "APP=$APP" \
+    "SWAY=$SWAY" "OUT=$OUT" "APP=$APP" "MODE=$MODE" "RUN=$RUN" "A11Y=$A11Y" \
     timeout 180 dbus-run-session -- bash "$0" __session
   rc=$?
   set -e

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/atspi"
 	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
@@ -14,6 +15,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
 	"github.com/alexberardi/jarvis-server/internal/agent/vkbd"
 	"github.com/alexberardi/jarvis-server/internal/agent/x11"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
 // NewDesktopSource is the recorder's desktop mode on Linux, with keyframes of the screen from
@@ -29,10 +31,25 @@ func NewDesktopSource(dir string, shots screen.Capturer, log *slog.Logger) Sourc
 			Access:    atspi.Enable,
 			Focused:   atspi.Focused,
 			ElementAt: atspi.ElementAtWindow,
+			Landings:  landings,
 			Shot:      shooter(shots),
 		}, log))
 	}
 	return withCapture(newX11Source(dir, &x11.Display{}, x11Access{ElementAt: atspi.ElementAt, Focused: atspi.Focused}, keyframer(shots), log))
+}
+
+// landedWait is how long a click waits for the app to say what took the focus. The click's
+// event and keyframe wait with it.
+const landedWait = 300 * time.Millisecond
+
+func landings(ctx context.Context) (func(pid int, since time.Time) *computeruse.Element, func(), error) {
+	l, err := atspi.Listen(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return func(pid int, since time.Time) *computeruse.Element {
+		return l.After(context.Background(), pid, since, landedWait)
+	}, l.Close, nil
 }
 
 // withCapture gives a recording computer control's window list and what AT-SPI shows on screen
