@@ -12,7 +12,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/vptr"
 )
 
-// TestLiveLanded clicks a spreadsheet cell with a real pointer in the isolated headless
+// TestLiveLanded clicks a cell of a spreadsheet whose window isn't the focused one with a real pointer in the isolated headless
 // desktop of `scripts/appclick-live landed` and expects Landings to name the cell and its row and column.
 func TestLiveLanded(t *testing.T) {
 	if os.Getenv("JARVIS_LANDED_LIVE") == "" {
@@ -54,7 +54,13 @@ func TestLiveLanded(t *testing.T) {
 		t.Fatalf("no budget window in sway's tree")
 	}
 
-	top, err := activeWindow(ctx, win.PID)
+	// The sheet isn't the focused window (a document opened after it is): the click focuses
+	// its window on the way to the cell, as a click into another app's window does.
+	c, err := bus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, err := findApp(ctx, c, win.PID)
 	if err != nil {
 		t.Fatal(err)
 	}

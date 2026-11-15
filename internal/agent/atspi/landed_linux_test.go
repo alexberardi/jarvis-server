@@ -23,7 +23,7 @@ func TestLandingsNote(t *testing.T) {
 	}
 	wake := l.wake
 	l.note(sig("StateChanged", "/a/entry", "focused", int32(1), int32(0), any0), at)
-	if got := l.last[":1.7"]; got.ref.Path != "/a/entry" || !got.at.Equal(at) {
+	if got := l.last[":1.7"]; got.focus.Path != "/a/entry" || !got.focusAt.Equal(at) {
 		t.Fatalf("focused: %+v", got)
 	}
 	select {
@@ -33,10 +33,15 @@ func TestLandingsNote(t *testing.T) {
 	}
 	cell := dbus.MakeVariant(objRef{Name: ":1.7", Path: "/a/table/cell"})
 	l.note(sig("ActiveDescendantChanged", "/a/table", "", int32(5), int32(0), cell), at.Add(time.Second))
-	if got := l.last[":1.7"]; got.ref.Path != "/a/table/cell" {
+	// The sheet gaining the focus after its cell became the active one doesn't hide the cell.
+	l.note(sig("StateChanged", "/a/table", "focused", int32(1), int32(0), any0), at.Add(time.Second))
+	if got := l.last[":1.7"]; got.active.Path != "/a/table/cell" || got.focus.Path != "/a/table" {
 		t.Fatalf("active descendant: %+v", got)
 	}
 	l.pids[":1.7"] = 42
+	if ref, ok := l.find(t.Context(), 42, at); !ok || ref.Path != "/a/table/cell" {
+		t.Fatalf("find = %+v, %v, want the cell over the sheet", ref, ok)
+	}
 	if _, ok := l.find(t.Context(), 42, at.Add(2*time.Second)); ok {
 		t.Fatal("found a landing from before the click")
 	}

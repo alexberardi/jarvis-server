@@ -77,6 +77,9 @@ if [ "${1:-}" = __session ]; then
   pids+=($!)
   if [ "$MODE" = landed ]; then # the test looks for the sheet's window once
     for _ in $(seq 120); do swaymsg -t get_tree 2>/dev/null | grep -q '"name": "budget' && break; sleep 0.5; done
+    # A second document takes the focus, so the click lands in a window that isn't focused.
+    soffice --writer --norestore --nologo "-env:UserInstallation=file://$OUT/lo-profile" >>"$OUT/soffice.log" 2>&1 &
+    for _ in $(seq 120); do swaymsg -t get_tree 2>/dev/null | grep -q '"name": "Untitled 1' && break; sleep 0.5; done
     sleep 2
   fi
 

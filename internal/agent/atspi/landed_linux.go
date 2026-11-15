@@ -19,7 +19,13 @@ const (
 	landedLabel = 40
 	// landedLabelCells is how many cells of a row are read for its label.
 	landedLabelCells = 3
+	// landedSettle is how long After waits for a later event once one came: a click into
+	// another window focuses the window, then the sheet, then makes the cell the active one.
+	landedSettle = 80 * time.Millisecond
 )
+
+// Window-level roles (atspi-constants.h): what a click focuses on its way to an element.
+var landedWindowRoles = map[uint32]bool{16: true, 23: true, 69: true, 75: true} // dialog, frame, window, application
 
 // landedEvents are the events that say where a click landed: the element that took the
 // keyboard focus, or the cell (list row, tree item) a table made its active one.
@@ -37,9 +43,22 @@ type Landings struct {
 	wake chan struct{} // closed at each event
 }
 
+// landing is an app's latest events: the element that gained the focus, and the child a
+// container (a sheet, a list) made its active one, which says more than the container's focus.
 type landing struct {
-	ref objRef
-	at  time.Time
+	focus, active     objRef
+	focusAt, activeAt time.Time
+}
+
+// since is the landing's most telling element at or after t.
+func (ln landing) since(t time.Time) (objRef, bool) {
+	if !ln.active.null() && !ln.activeAt.Before(t) {
+		return ln.active, true
+	}
+	if !ln.focus.null() && !ln.focusAt.Before(t) {
+		return ln.focus, true
+	}
+	return objRef{}, false
 }
 
 // Listen starts listening on its own connection to the accessibility bus; Close ends it.
@@ -80,7 +99,7 @@ func (l *Landings) Close() { l.c.Close() }
 
 // note keeps a signal's element as its app's latest landing.
 func (l *Landings) note(s *dbus.Signal, at time.Time) {
-	ref := objRef{Name: s.Sender, Path: s.Path}
+	ref, active := objRef{Name: s.Sender, Path: s.Path}, false
 	switch {
 	case strings.HasSuffix(s.Name, ".StateChanged"):
 		// (detail, on, _, …): only gaining the focus.
@@ -89,36 +108,48 @@ func (l *Landings) note(s *dbus.Signal, at time.Time) {
 		}
 	case strings.HasSuffix(s.Name, ".ActiveDescendantChanged"):
 		// (_, _, _, the child, …)
-		if len(s.Body) < 4 || dbus.Store([]any{s.Body[3]}, &ref) != nil || ref.null() {
+		if active = true; len(s.Body) < 4 || dbus.Store([]any{s.Body[3]}, &ref) != nil || ref.null() {
 			return
 		}
 	default:
 		return
 	}
 	l.mu.Lock()
-	l.last[s.Sender] = landing{ref, at}
+	ln := l.last[s.Sender]
+	if active {
+		ln.active, ln.activeAt = ref, at
+	} else {
+		ln.focus, ln.focusAt = ref, at
+	}
+	l.last[s.Sender] = ln
 	close(l.wake)
 	l.wake = make(chan struct{})
 	l.mu.Unlock()
 }
 
 // After is the element that took the focus in the app with this pid at or after since, waited
-// for up to wait; nil when none did.
+// for up to wait, and a little longer for a later one once one came; nil when none did, or
+// only the window itself.
 func (l *Landings) After(ctx context.Context, pid int, since time.Time, wait time.Duration) *computeruse.Element {
 	t := time.NewTimer(wait)
 	defer t.Stop()
+	var found objRef
 	for {
 		l.mu.Lock()
 		ref, ok := l.find(ctx, pid, since)
 		wake := l.wake
 		l.mu.Unlock()
-		if ok {
-			return landedElement(ctx, obj{l.c, ref})
+		if ok && ref != found {
+			found = ref
+			t.Reset(landedSettle)
 		}
 		select {
 		case <-wake:
 		case <-t.C:
-			return nil
+			if found.null() {
+				return nil
+			}
+			return landedElement(ctx, obj{l.c, found})
 		case <-ctx.Done():
 			return nil
 		}
@@ -127,7 +158,7 @@ func (l *Landings) After(ctx context.Context, pid int, since time.Time, wait tim
 
 func (l *Landings) find(ctx context.Context, pid int, since time.Time) (objRef, bool) {
 	for name, ln := range l.last {
-		if ln.at.Before(since) {
+		if _, ok := ln.since(since); !ok {
 			continue
 		}
 		p, ok := l.pids[name]
@@ -142,8 +173,8 @@ func (l *Landings) find(ctx context.Context, pid int, since time.Time) (objRef, 
 			p = int(u)
 			l.pids[name] = p
 		}
-		if p == pid {
-			return ln.ref, true
+		if ref, ok := ln.since(since); ok && p == pid {
+			return ref, true
 		}
 	}
 	return objRef{}, false
@@ -154,7 +185,7 @@ func (l *Landings) find(ctx context.Context, pid int, since time.Time) (objRef, 
 // address (B3) is left out: a run for November would be told "B3" and "November" at once.
 func landedElement(ctx context.Context, o obj) *computeruse.Element {
 	r, err := o.role(ctx)
-	if err != nil {
+	if err != nil || landedWindowRoles[r] {
 		return nil
 	}
 	el := &computeruse.Element{Role: roleNames[r], Name: o.name(ctx), Secure: r == rolePasswordText}
