@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -530,5 +531,55 @@ func TestLearnDesktopClickedParam(t *testing.T) {
 		if got != want {
 			t.Errorf("%q, want %q", got, want)
 		}
+	}
+}
+
+// TestOpenedDocument: a recording that begins by finding a document in the file manager and
+// double-clicking it keeps the events from the document on and learns "this file is open";
+// one that did something else first, or began with the document open, is left as it is.
+func TestOpenedDocument(t *testing.T) {
+	win := func(class, title string) *desktopWindow { return &desktopWindow{Class: class, Title: title} }
+	calc := "budget.ods — LibreOffice Calc"
+	evs := []desktopEvent{
+		{Kind: "input", Value: "files"}, // the launcher
+		{Kind: "key", App: "org.gnome.Nautilus", Key: "Enter", Window: win("org.gnome.Nautilus", "Home")},
+		{Kind: "click", App: "org.gnome.Nautilus", TS: 1000, Window: win("org.gnome.Nautilus", "Documents"),
+			Element: &desktopElement{Role: "cell", Name: "budget.ods. File"}},
+		// The double click's second half, recorded in the window that had just appeared.
+		{Kind: "click", App: "libreoffice-startcenter", TS: 1300, Window: win("libreoffice-startcenter", calc)},
+		{Kind: "click", App: "libreoffice-calc", TS: 9000, Window: win("libreoffice-calc", calc),
+			Element: &desktopElement{Role: "cell", Name: "October row, Amount column"}},
+		{Kind: "input", App: "libreoffice-calc", Value: "1450", Window: win("libreoffice-calc", calc)},
+	}
+	rest, p := openedDocument(nil, evs)
+	if p == nil || *p != (computer.Prerequisite{Kind: computer.PrereqFileOpen, File: "budget.ods", App: "libreoffice-calc"}) {
+		t.Fatalf("prerequisite = %+v", p)
+	}
+	if len(rest) != 2 || rest[0].Element.Name != "October row, Amount column" {
+		t.Fatalf("kept %s", mustJSON(t, rest))
+	}
+
+	// A single click opened it: the click is in the file manager and its result is the document.
+	single := []desktopEvent{evs[2], evs[4], evs[5]}
+	single[0].Result = &desktopResult{App: "soffice", Title: calc}
+	if rest, p := openedDocument(nil, single); p == nil || len(rest) != 2 {
+		t.Fatalf("single click: %+v, kept %d", p, len(rest))
+	}
+	// A slow second click in the document is a step of the task.
+	slow := slices.Clone(evs)
+	slow[3].TS = 5000
+	if rest, p := openedDocument(nil, slow); p == nil || len(rest) != 3 {
+		t.Fatalf("a later click in the document: %+v, kept %d", p, len(rest))
+	}
+	// Already open at the start, or other work came first: nothing changes.
+	if rest, p := openedDocument([]desktopStartWindow{{App: "soffice", Title: calc}}, evs); p != nil || len(rest) != len(evs) {
+		t.Fatalf("open at the start: %+v", p)
+	}
+	other := append([]desktopEvent{{Kind: "click", App: "firefox", Window: win("firefox", "Bank")}}, evs...)
+	if rest, p := openedDocument(nil, other); p != nil || len(rest) != len(other) {
+		t.Fatalf("work in another app first: %+v", p)
+	}
+	if rest, p := openedDocument(nil, evs[:4]); p != nil || len(rest) != 4 {
+		t.Fatalf("nothing after the document opened: %+v", p)
 	}
 }

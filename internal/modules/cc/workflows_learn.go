@@ -779,6 +779,62 @@ func desktopPrerequisites(start []desktopStartWindow, evs []desktopEvent, params
 	return out
 }
 
+// fileManagers are the apps a person finds a document in: what they did there is how they got
+// to the file that day, not a step of the task.
+var fileManagers = []string{"nautilus", "dolphin", "thunar", "nemo", "pcmanfm", "caja", "finder", "explorer"}
+
+func inFileManager(app string) bool {
+	app = strings.ToLower(app)
+	return app == "" || slices.ContainsFunc(fileManagers, func(f string) bool { return strings.Contains(app, f) })
+}
+
+// openDoubleClick is the longest gap between the two clicks that open a file: the second
+// lands as the document's window appears and is recorded in it.
+const openDoubleClick = 700 * time.Millisecond
+
+// openedDocument finds a recording that began by finding a document in the file manager and
+// opening it: every event before the first one in a window titled with a document's name was
+// in a file manager (or no app: the launcher). Those events are how the user got to the file
+// that day, in whatever folder the file manager stood; a run opens the file by its name
+// instead. It returns the events from the document on and "this file is open" in the app the
+// task went on in; evs and nil when the recording didn't begin that way, or the document was
+// already open at the start (desktopPrerequisites has it then).
+func openedDocument(start []desktopStartWindow, evs []desktopEvent) ([]desktopEvent, *computer.Prerequisite) {
+	title := func(e desktopEvent) string {
+		if e.Window != nil && fileInTitle.MatchString(e.Window.Title) {
+			return e.Window.Title
+		}
+		if e.Result != nil && fileInTitle.MatchString(e.Result.Title) {
+			return e.Result.Title
+		}
+		return ""
+	}
+	for i, e := range evs {
+		t := title(e)
+		if t == "" {
+			if !inFileManager(e.App) {
+				return evs, nil
+			}
+			continue
+		}
+		file := fileInTitle.FindString(t)
+		if slices.ContainsFunc(start, func(w desktopStartWindow) bool { return strings.Contains(w.Title, file) }) {
+			return evs, nil
+		}
+		cut := i
+		// The click that opened it: still in the file manager with the document in its result,
+		// or a double click's second half, recorded in the window that had just appeared.
+		if e.Kind == "click" && (inFileManager(e.App) || (i > 0 && evs[i-1].Kind == "click" && e.TS-evs[i-1].TS <= openDoubleClick.Milliseconds())) {
+			cut = i + 1
+		}
+		if cut >= len(evs) {
+			return evs, nil
+		}
+		return evs[cut:], &computer.Prerequisite{Kind: computer.PrereqFileOpen, File: file, App: evs[cut].App}
+	}
+	return evs, nil
+}
+
 func eventsPrompt(lines []string, cands []paramCandidate, narration, instructions string) string {
 	var b strings.Builder
 	if n := oneLine(narration); n != "" {
@@ -1630,6 +1686,7 @@ func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w Taug
 			return w, "", err
 		}
 		note = m.nameClicksBySight(ctx, *rec, evs)
+		evs, opened := openedDocument(desktopStart(rec.Trace), evs)
 		cands := desktopParamCandidates(evs)
 		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
 		build = func(out learnOutput) (TaughtWorkflow, error) {
@@ -1638,6 +1695,9 @@ func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w Taug
 				return w, err
 			}
 			w.Skill.Prerequisites = desktopPrerequisites(desktopStart(rec.Trace), evs, w.Params)
+			if opened != nil {
+				w.Skill.Prerequisites = append(w.Skill.Prerequisites, *opened)
+			}
 			return w, w.Skill.Validate(w.Params)
 		}
 	}

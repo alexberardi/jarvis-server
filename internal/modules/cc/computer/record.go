@@ -66,7 +66,9 @@ func buildRecord(wf *Workflow, steps []WorkflowStep, params map[string]string, r
 		switch out.State {
 		case StateDone:
 			rec.State, rec.Summary = RecordDone, out.Summary
-		case StateAsk, StateNeedsApproval, StatePaused:
+		case StatePaused: // the mouse or keyboard was used: nothing is waiting to be approved
+			rec.State, rec.Ask = RecordWaiting, firstNonEmpty(out.Ask, out.Summary)
+		case StateAsk, StateNeedsApproval:
 			rec.State, rec.Ask = RecordWaiting, firstNonEmpty(out.Ask, "Waiting for you to approve the next action.")
 		case StateStopped:
 			rec.State, rec.Summary = RecordStopped, out.Summary
