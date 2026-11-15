@@ -23,9 +23,12 @@ in core, `IJarvisDaemon` in the SDK, agents and daemons on desktop nodes. Replac
 - [x] Agents on desktop nodes (A1, A2) and package daemons (D1 the SDK's `IJarvisDaemon`, D2 the
   agent's supervisor); the `daemon` component in the Pantry and its web app, deployed.
 - [x] D3 one host node per daemon.
-- [ ] `channels-core` (K1–K5), the SDK helper, the Discord and Slack packages, the mobile card:
-  planned in CHANNELS.md, awaiting the user's review. Not yet run for real: a daemon on a Pi,
-  Windows or macOS, or from an installed agent.
+- [x] `channels-core` K1–K4 (links, the app's routes, the daemon's routes, the reminder outbox)
+  and the SDK's `Channel` helper (0.18.0, pinned here).
+- [ ] The Discord and Slack packages are built (jarvis-channel-discord, jarvis-channel-slack)
+  and tested against stand-ins only: neither has connected to its service or run under an
+  installed agent. Open: that live test, the Pantry redeploy and submissions, the mobile card
+  (M1), voice clips (K5), closing #649. Not yet run for real: a daemon on a Pi, Windows or macOS.
 
 ### Workflow skills (2026-11-12)
 

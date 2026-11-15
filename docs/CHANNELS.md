@@ -272,32 +272,45 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
   - New node routes: **held for the user's review**.
   - Verify: #649's bridge tests moved to the route; a turn through a real sidecar daemon and a
     sandbox jarvisd with the scripted model.
-  - Built (in review): `message`, `command` and `outbox` (empty until K4) under
+  - Built: `message`, `command` and `outbox` (empty until K4) under
     `/api/v0/node/channels/{provider}/`, each call marking the provider alive on that node. A
     message answers `{linked, reply}` or `{linked, failed}` (what to tell the sender); photos
     come as the mobile chat's `images` and are shrunk here, in a body of at most 15 MiB (a
     daemon's request crosses the agent as one line of at most 16 MiB). The agent gives a
-    `message` post three and a half minutes. Not yet done: a turn through a real sidecar daemon
-    against a sandbox jarvisd, which waits for the SDK helper (S1).
+    `message` post three and a half minutes. A real daemon process written with the SDK's
+    `Channel` is tested through the agent's pipe against a stand-in for jarvisd
+    (`TestAChannelDaemonTalksToJarvisThroughTheAgent`). Not yet done: that daemon against a
+    running jarvisd.
 - [x] **K4 — reminders.** The outbox, filled from the node push handler for users who opted in
   (off by default), following the push as #649 did (a withheld reminder is not sent).
   - Verify: route tests; nothing queued without opt-in.
-  - Built (in review): `cc_channel_outbox`; a node's pushed reminder, alarm or timer for a user
+  - Built: `cc_channel_outbox`; a node's pushed reminder, alarm or timer for a user
     is queued for each channel they opted into; the daemon's `outbox` call acknowledges what it
     sent and gets what waits. A message is handed over only while its account is linked and
     opted in, and is dropped after a day.
-- [ ] **S1 — the SDK's channel helper** (`jarvis_command_sdk.channel`, 0.18.0): async calls for
+- [x] **S1 — the SDK's channel helper** (`jarvis_command_sdk.channel`, 0.18.0): async calls for
   the three routes that run the blocking `cc_post` in a thread, and the dataclasses a package
   maps its service's events to. Then the Pantry is redeployed (`--no-cache`) so the Forge has it.
   - Verify: the SDK's tests with a fake backend.
+  - Built: `Channel`, `split_reply` and the dataclasses (jarvis-command-sdk#22); nodes install
+    0.18.0. Still owed: the Pantry redeploy.
 - [ ] **P1 — `jarvis-channel-discord`.** A daemon on `discord.py`: direct messages and one
   channel (threads), slash commands mapped to core's, photos, the typing indicator, replies split
   at Discord's limit. Its token and channel are its settings. Submitted to the Pantry.
   - Verify: against the user's test bot, from a desktop node and the lab Pi.
+  - Built, not yet verified or submitted: github.com/alexberardi/jarvis-channel-discord, tested
+    against stand-ins only. Each thread of the channel is its own conversation (#649 kept one
+    per person for the channel). An account sees the typing indicator and the "seen" reaction
+    only once Jarvis has answered it, so a stranger sees nothing. Left out until K5: voice
+    clips and the `voice` command.
 - [ ] **P2 — `jarvis-channel-slack`.** The same over Socket Mode.
   - Acceptance: **no change to jarvisd, the agent or the SDK was needed.** If one is, the
     contract was wrong and is fixed before Slack is called done.
   - Verify: against the user's Slack workspace.
+  - Built, not yet verified or submitted: github.com/alexberardi/jarvis-channel-slack, tested
+    against stand-ins only. The acceptance held: nothing in jarvisd, the agent or the SDK
+    changed for it. The developer toolkit did need the `daemon` component type, for either
+    package's CI (jarvis-developer-toolkit#4).
 - [ ] **M1 — the mobile card** (jarvis-node-mobile, batched into one PR): the channels list with
   link code, preferences and unlink (the member half of #158), and a `daemon` settings entry
   worded as a daemon, not an agent with an interval.
