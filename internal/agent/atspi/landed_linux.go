@@ -220,17 +220,95 @@ func cellLabels(ctx context.Context, o obj) string {
 		}
 		return string(s)
 	}
-	var parts []string
-	for c := int32(0); c < min(col, landedLabelCells); c++ {
-		if s := cell(row, c); s != "" {
-			parts = append(parts, s+" row")
-			break
-		}
+	rowLabel, colLabel := "", ""
+	for c := int32(0); c < min(col, landedLabelCells) && rowLabel == ""; c++ {
+		rowLabel = cell(row, c)
 	}
 	if row > 0 {
-		if s := cell(0, col); s != "" {
-			parts = append(parts, s+" column")
-		}
+		colLabel = cell(0, col)
+	}
+	return cellName(rowLabel, colLabel)
+}
+
+// cellName names a table cell by its labels, the same in a recording and in a snapshot, so a
+// run finds the cell a recording named.
+func cellName(rowLabel, colLabel string) string {
+	var parts []string
+	if rowLabel != "" {
+		parts = append(parts, rowLabel+" row")
+	}
+	if colLabel != "" {
+		parts = append(parts, colLabel+" column")
 	}
 	return strings.Join(parts, ", ")
+}
+
+// Limits of a sheet's labelled cells in a snapshot: how many rows and columns are read for
+// labels, how many empty ones in a row end the reading, and how many cells are kept.
+const (
+	sheetRows, sheetCols = 100, 26
+	sheetEmptyRun        = 5
+	sheetCells           = 300
+)
+
+// sheetCell is a labelled cell of a sheet: where it is, and its name by cellName.
+type sheetCell struct {
+	o    obj
+	name string
+}
+
+// sheetLabelled are the cells of a spreadsheet's sheet that have a row label and a column header,
+// named as a recording names the one a click landed on. A sheet's cells are virtual (millions,
+// none listed), so a snapshot would otherwise hold only the start of its first row.
+// shortcut: labels are the first sheetRows x sheetCols cells' texts, a header in row 1 and a label in the first landedLabelCells columns; read the used range when sheets with their table elsewhere matter.
+func sheetLabelled(ctx context.Context, t obj) []sheetCell {
+	at := func(r, c int32) (obj, bool) {
+		var ref objRef
+		if t.call(ctx, ifTable+".GetAccessibleAt", r, c).Store(&ref) != nil || ref.null() {
+			return obj{}, false
+		}
+		return obj{t.c, ref}, true
+	}
+	text := func(r, c int32) string {
+		o, ok := at(r, c)
+		if !ok {
+			return ""
+		}
+		s := []rune(strings.Join(strings.Fields(o.text(ctx)), " "))
+		if len(s) > landedLabel {
+			s = s[:landedLabel]
+		}
+		return string(s)
+	}
+	var heads []string // by column
+	for c, empty := int32(0), 0; c < sheetCols && empty < sheetEmptyRun; c++ {
+		h := text(0, c)
+		if empty++; h != "" {
+			empty = 0
+		}
+		heads = append(heads, h)
+	}
+	var out []sheetCell
+	for r, empty := int32(1), 0; r < sheetRows && empty < sheetEmptyRun && ctx.Err() == nil; r++ {
+		label, from := "", int32(0)
+		for c := int32(0); c < landedLabelCells && label == ""; c++ {
+			label, from = text(r, c), c
+		}
+		if empty++; label == "" {
+			continue
+		}
+		empty = 0
+		for c := from + 1; int(c) < len(heads); c++ {
+			if heads[c] == "" {
+				continue
+			}
+			if o, ok := at(r, c); ok {
+				out = append(out, sheetCell{o, cellName(label, heads[c])})
+			}
+			if len(out) == sheetCells {
+				return out
+			}
+		}
+	}
+	return out
 }

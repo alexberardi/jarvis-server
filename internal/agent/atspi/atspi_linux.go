@@ -49,6 +49,10 @@ const (
 	roleRadioMenuItem = 45
 	roleSlider        = 51
 	roleSpinButton    = 52
+	roleMenu          = 33
+	roleMenuBar       = 34
+	roleTable         = 55
+	roleToolBar       = 63
 	roleTableCell     = 56
 	roleText          = 61
 	roleToggleButton  = 62
@@ -103,16 +107,17 @@ var toggleRoles = map[string]bool{
 
 // AtspiStateType bits (atspi-constants.h). GetState returns them as 32-bit words.
 const (
-	stateActive    = 1
-	stateChecked   = 4
-	stateEnabled   = 8
-	stateExpanded  = 10
-	stateFocused   = 12
-	stateSelected  = 23
-	stateSensitive = 24
-	stateShowing   = 25
-	stateEditable  = 7
-	stateRequired  = 33
+	stateActive             = 1
+	stateChecked            = 4
+	stateEnabled            = 8
+	stateExpanded           = 10
+	stateFocused            = 12
+	stateManagesDescendants = 31
+	stateSelected           = 23
+	stateSensitive          = 24
+	stateShowing            = 25
+	stateEditable           = 7
+	stateRequired           = 33
 )
 
 type states []uint32
@@ -398,6 +403,11 @@ func walk(ctx context.Context, pid int, max int, showing bool) (*walker, error) 
 		max = DefaultMax
 	}
 	w := &walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
+	// A spreadsheet's labelled cells come first: an office app's closed menus alone fill a
+	// snapshot before the walk reaches the document.
+	if sheet, ok := findSheet(ctx, win); ok {
+		w.sheet(sheet, "")
+	}
 	w.visit(win, 0, "", true)
 	return w, w.err
 }
@@ -411,6 +421,67 @@ type walker struct {
 	win   *[4]int // the window's screen bounds, for Position; nil when unknown
 	// showing: only what is on screen (SnapshotShowing); a subtree that isn't is skipped whole.
 	showing bool
+	sheets  map[objRef]bool // the sheets whose labelled cells are kept already
+}
+
+// sheetSearch is how many objects findSheet looks at.
+const sheetSearch = 300
+
+// findSheet is the spreadsheet's sheet showing in win, looked for outside its menus and
+// toolbars (hundreds of objects that never hold a document).
+func findSheet(ctx context.Context, win obj) (obj, bool) {
+	budget := sheetSearch
+	var find func(o obj, depth int) (obj, bool)
+	find = func(o obj, depth int) (obj, bool) {
+		if budget--; budget < 0 || depth > maxDepth || ctx.Err() != nil {
+			return obj{}, false
+		}
+		r, err := o.role(ctx)
+		if err != nil || r == roleMenuBar || r == roleMenu || r == roleToolBar {
+			return obj{}, false
+		}
+		st := o.state(ctx)
+		if !st.has(stateShowing) {
+			return obj{}, false
+		}
+		if r == roleTable { // a sheet, or a table whose cells hold no sheet
+			return o, st.has(stateManagesDescendants)
+		}
+		kids, _ := o.children(ctx)
+		for _, k := range kids {
+			if f, ok := find(k, depth+1); ok {
+				return f, true
+			}
+		}
+		return obj{}, false
+	}
+	return find(win, 0)
+}
+
+// sheet keeps a spreadsheet sheet's labelled cells, once: named by their row and column, as a
+// recording names the one a click landed on.
+func (w *walker) sheet(t obj, near string) {
+	if w.sheets[t.ref] {
+		return
+	}
+	if w.sheets == nil {
+		w.sheets = map[objRef]bool{}
+	}
+	w.sheets[t.ref] = true
+	for _, c := range sheetLabelled(w.ctx, t) {
+		if w.full() {
+			return
+		}
+		w.keep(c.o, "cell", false, near)
+		el := &w.out[len(w.out)-1]
+		el.Name = c.name
+		if !w.showing {
+			el.Value = clip(c.o.text(w.ctx))
+		}
+		e := w.nodes[el.Ref]
+		e.name = c.name
+		w.nodes[el.Ref] = e
+	}
 }
 
 func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
@@ -457,6 +528,10 @@ func (w *walker) visit(o obj, depth int, near string, context bool) {
 			return
 		}
 		w.visit(k, depth+1, near, context)
+	}
+	// A spreadsheet's sheet lists none of its cells: the ones with labels are kept by them.
+	if r == roleTable && st.has(stateManagesDescendants) {
+		w.sheet(o, near)
 	}
 }
 
@@ -512,8 +587,16 @@ func (t *refTable) lookup(gen int, ref string, f func(entry) error) error {
 	return f(e)
 }
 
+// press does the element's action; a cell, which has none, takes the focus instead (a
+// spreadsheet makes it the active cell, as a click on it does).
 func press(gen int, ref string) error {
-	return refs.lookup(gen, ref, func(e entry) error { return e.o.do(ifAction+".DoAction", int32(0)) })
+	return refs.lookup(gen, ref, func(e entry) error {
+		err := e.o.do(ifAction+".DoAction", int32(0))
+		if err != nil && e.role == "cell" {
+			return e.o.do(ifComponent + ".GrabFocus")
+		}
+		return err
+	})
 }
 
 func setValue(gen int, ref, text string) error {

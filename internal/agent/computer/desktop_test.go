@@ -594,8 +594,15 @@ func TestNotAttendedRefused(t *testing.T) {
 func TestDesktopPausedAndResumed(t *testing.T) {
 	f := newDesktop(t)
 	f.observe(t, "Notes")
-	// The user grabs the mouse.
+	// The hand that started the task here is still coming off the mouse: that isn't a pause.
 	f.clock.Advance(time.Second)
+	f.mon.set(f.clock.Now())
+	f.tl.guard().poll(context.Background())
+	if err := f.tl.guard().Check(); err != nil {
+		t.Fatalf("input %v after the start paused the task: %v", time.Second, err)
+	}
+	// Later, the user grabs the mouse.
+	f.clock.Advance(guardGrace)
 	f.mon.set(f.clock.Now())
 	f.tl.guard().poll(context.Background())
 	res := f.act(t, "Notes", map[string]any{"kind": "keypress", "intent": "save", "keys": []string{"cmd", "s"}})

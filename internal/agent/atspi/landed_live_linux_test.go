@@ -112,4 +112,27 @@ func TestLiveLanded(t *testing.T) {
 	if want := "October row, Amount column"; el.Name != want {
 		t.Errorf("name = %q, want %q", el.Name, want)
 	}
+
+	// A run finds another month's cell by the same kind of name in a snapshot (the sheet lists
+	// none of its cells itself), and pressing it makes it the active cell.
+	snap, err := Snapshot(ctx, win.PID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := ""
+	for _, e := range snap.Elements {
+		if e.Role == "cell" && e.Name == "November row, Amount column" {
+			ref = e.Ref
+		}
+	}
+	if ref == "" {
+		t.Fatalf("no November cell among the snapshot's %d elements", len(snap.Elements))
+	}
+	since = time.Now()
+	if err := Press(snap.Gen, ref); err != nil {
+		t.Fatal(err)
+	}
+	if el := l.After(ctx, win.PID, since, 5*time.Second); el == nil || el.Name != "November row, Amount column" {
+		t.Errorf("after pressing November's cell the active one is %+v", el)
+	}
 }

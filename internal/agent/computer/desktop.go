@@ -142,7 +142,7 @@ func (t *Tools) guard() *Guard {
 	t.desk.mu.Lock()
 	defer t.desk.mu.Unlock()
 	if t.desk.guard == nil {
-		t.desk.guard = &Guard{Input: t.Desktop.Input, Monitor: t.Desktop.Monitor, Activity: t.Activity, Now: t.Desktop.Now}
+		t.desk.guard = &Guard{Input: t.Desktop.Input, Monitor: t.Desktop.Monitor, Activity: t.Activity, Now: t.Desktop.Now, Grace: guardGrace}
 	}
 	return t.desk.guard
 }

@@ -243,11 +243,7 @@ func reset() {
 const (
 	roleApplication = 75
 	roleDialog      = 16
-	roleToolBar     = 63
-	roleMenu        = 33
-	roleMenuBar     = 34
 	stateShowingT   = 25
-	roleTable       = 55
 	roleLabel       = 29
 	rolePanel       = 39
 )

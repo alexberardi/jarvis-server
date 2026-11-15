@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -20,6 +21,12 @@ type InputMonitor = input.Monitor
 
 const (
 	guardEvery = 100 * time.Millisecond
+	// guardGrace is how long after a task starts or resumes the user's input isn't taken as
+	// their hand on the computer: they started it here with a click or a key (Run on the
+	// workflow's page, Resume in the menu), and the hand is still coming off the mouse. The
+	// task looks before it acts, so its first action is rarely inside the grace, and input
+	// that goes on past it pauses the task as before.
+	guardGrace = 2 * time.Second
 	// guardSettle is how long after one of our injections its events may still show as HID
 	// activity (macOS 26 counts our private-source events in the HID state, stamped late).
 	guardSettle = 500 * time.Millisecond
@@ -48,6 +55,9 @@ type Guard struct {
 	Activity *Activity
 	Now      func() time.Time // nil: time.Now
 	Every    time.Duration    // 0: 100 ms
+	// Grace is how long after Begin (a start or a resume) input isn't taken as the user's hand
+	// on the computer (guardGrace on a real desktop; 0: none). The pointer check has none.
+	Grace time.Duration
 
 	mu      sync.Mutex
 	paused  bool
@@ -74,7 +84,7 @@ func (g *Guard) Begin(ctx context.Context) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.paused, g.reason = false, ""
-	g.base = g.now()
+	g.base = g.now().Add(g.Grace)
 	// The windows are kept: an injection just before now may still be stamped after it.
 	start, end := g.Input.Injecting()
 	if !start.IsZero() {
@@ -136,6 +146,7 @@ func (g *Guard) poll(ctx context.Context) {
 		return
 	}
 	if g.look(ctx) {
+		slog.Info("computer: paused, the user is using the computer", "reason", g.Reason())
 		g.Activity.Pause() // not under g.mu: its indicators run in it
 	}
 }
