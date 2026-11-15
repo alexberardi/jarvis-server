@@ -77,6 +77,15 @@ func computerDefinitions() []settings.Definition {
 			Description: "Most rounds (look, decide, act) one computer task may take before it gives up."},
 		{Key: computer.SettingMaxMinutes, Category: "computer", Type: settings.Int, Default: int64(20), Validate: positive,
 			Description: "Most minutes one computer task may run before it gives up."},
+		{Key: computer.SettingThinkTokens, Category: "computer", Type: settings.Int, Default: int64(0),
+			Validate: func(v any) error {
+				if n, _ := v.(int64); n < 0 || n > 8192 {
+					return errors.New("must be between 0 and 8192")
+				}
+				return nil
+			},
+			Description: "Most tokens the model may think before each round of a computer task (0 = it answers at once). " +
+				"Thinking makes each round slower and can make a local model more careful."},
 		llm.SlotSetting(computer.SettingModel, "computer",
 			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider)."),

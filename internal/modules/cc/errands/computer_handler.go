@@ -318,8 +318,8 @@ func (s *Service) withinSpendLimit(ctx context.Context, hh string, out computer.
 		return 0, false
 	}
 	price, ok := priceCents(out.Checkout.Price)
-	if !ok || price > limit {
-		return 0, false
+	if !ok || price > limit || out.Checkout.Warning != "" {
+		return 0, false // an order that may not be the one asked for is never approved unasked
 	}
 	for _, p := range out.Pending {
 		if p.Category != computeruse.CatPay {
@@ -407,6 +407,9 @@ func ComputerConfirmCard(co *computer.Checkout, pending []computer.PendingAction
 			if l[1] != "" {
 				lines = append(lines, l[0]+": "+l[1])
 			}
+		}
+		if co.Warning != "" {
+			lines = append(lines, "", "⚠️ This may not be what you asked for: "+co.Warning+".")
 		}
 		checkout = map[string]any{"product": co.Product, "price": co.Price, "currency": co.Currency,
 			"seller": co.Seller, "ship_to": co.ShipTo, "card": co.Card}

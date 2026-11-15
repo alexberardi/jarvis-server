@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -687,6 +688,47 @@ func closeJSON(s string) (string, bool) {
 	return string(b), true
 }
 
+// firstJSON is the first whole JSON value s starts with, when more follows it: Gemma 4 26B
+// closed a replan's step early and left "]}" after the object, the answer couldn't be read, and
+// the errand ended without its spreadsheet step (2026-11-15).
+func firstJSON(s string) (string, bool) {
+	var raw json.RawMessage
+	if err := json.NewDecoder(strings.NewReader(s)).Decode(&raw); err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+// planGap asks the planner's model whether a plan delivers everything goal asks for: done are
+// the steps already run, next the ones planned (none: the errand would end here). It is what the
+// plan leaves out, in a few words, or "" (covered, or the check itself failed: a plan is never
+// held up by its check). A plan that ends at a checkpoint is decided later and isn't checked.
+func (s *Service) planGap(ctx context.Context, goal string, done, next []Step) string {
+	if n := len(next); n > 0 && next[n-1].Command == cmdReplan {
+		return ""
+	}
+	planned := "none: the errand would end here"
+	if len(next) > 0 {
+		planned = stepsDumps(next)
+	}
+	data, err := s.runPlanner(ctx, "You check an errand plan for Jarvis before it runs.\n\n"+
+		"The user's goal: "+goal+"\n"+
+		"Steps already run: "+stepsDumps(done)+"\n"+
+		"Steps planned next: "+planned+"\n\n"+
+		"Does every result the user asked for have a step, run or planned, that produces it? Judge only "+
+		"results the user asked for outright (a file to make, a message to send, a thing to buy, order or "+
+		"look up, a change to make). How a step does its work is not your concern, one step may produce "+
+		"several results, and a computer_task does everything its goal says. When in doubt, it is covered.\n\n"+
+		`Answer with a JSON object only: {"covered": true} or {"covered": false, "missing": "<the result no step produces, in a few words>"}.`)
+	if err != nil {
+		return ""
+	}
+	if v, _ := data.Get("covered"); v != false {
+		return ""
+	}
+	return parse.PyStrip(truthyStr(data, "missing"))
+}
+
 // splitComputerSteps makes a computer task whose goal names more than one web address (another
 // host or path; a query or a trailing slash is the same one) one task per address, in order, each
 // starting at its own: the house model wrote one task for the bank's and the card's statements, and
@@ -953,6 +995,8 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 	if err != nil {
 		if closed, ok := closeJSON(text); ok {
 			v, err = pyjson.Loads(closed)
+		} else if first, ok := firstJSON(text); ok {
+			v, err = pyjson.Loads(first)
 		}
 	}
 	if err != nil {
@@ -1039,14 +1083,30 @@ func (s *Service) planErrand(ctx context.Context, goal string, menu []MenuEntry,
 	if len(menu) == 0 {
 		menu = commandMenu()
 	}
-	data, err := s.runPlanner(ctx, buildPrompt(goal, menu, live))
-	if err != nil {
-		return Plan{}, err
+	once := func(prompt string) (Plan, error) {
+		data, err := s.runPlanner(ctx, prompt)
+		if err != nil {
+			return Plan{}, err
+		}
+		allowed, risky, free := allowedOf(menu)
+		plan, err := planFromData(data, allowed, goal, risky, free, true)
+		plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))))
+		return plan, err
 	}
-	allowed, risky, free := allowedOf(menu)
-	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))))
-	return plan, err
+	prompt := buildPrompt(goal, menu, live)
+	plan, err := once(prompt)
+	if err != nil || live {
+		return plan, err // spoken at the computer, the work starts at once: no second look
+	}
+	// The plan is checked against the request before it runs, and planned once more with what it
+	// left out: a plan missing a part of the request ran as it was.
+	if gap := s.planGap(ctx, goal, nil, plan.Steps); gap != "" {
+		s.log().Info("errands: plan left something out; planning again", "missing", gap)
+		if again, err := once(prompt + "\n\nAn earlier plan for this goal left out: " + gap + ". Include a step that produces it."); err == nil {
+			return again, nil
+		}
+	}
+	return plan, nil
 }
 
 // RefinePlan is refine_errand_plan: the allowed set also keeps the plan's own commands, so a
@@ -1075,17 +1135,32 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		menu = commandMenu()
 	}
 	progress := summarizeProgress(done, results)
-	data, err := s.runPlanner(ctx, BuildReplanPrompt(goal, done, progress, reason, menu))
-	if err != nil {
-		return Plan{}, err
+	once := func(reason string) (Plan, error) {
+		data, err := s.runPlanner(ctx, BuildReplanPrompt(goal, done, progress, reason, menu))
+		if err != nil {
+			return Plan{}, err
+		}
+		allowed, risky, free := allowedOf(menu)
+		fallback := truthyStr(data, "summary")
+		if fallback == "" {
+			fallback = "continue"
+		}
+		plan, err := planFromData(data, allowed, fallback, risky, free, false)
+		plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))
+		return plan, err
 	}
-	allowed, risky, free := allowedOf(menu)
-	fallback := truthyStr(data, "summary")
-	if fallback == "" {
-		fallback = "continue"
+	plan, err := once(reason)
+	if err != nil && !errors.Is(err, ErrPlan) {
+		return plan, err
 	}
-	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))
+	// What is left of the plan is checked against the request, an answer that couldn't be read
+	// or had no steps too: the errand would end there with a part of the request undone.
+	if gap := s.planGap(ctx, goal, done, plan.Steps); gap != "" {
+		s.log().Info("errands: replan left something out; planning again", "missing", gap)
+		if again, aerr := once(reason + ". An earlier answer left out: " + gap + ": include a step that produces it"); aerr == nil && len(again.Steps) > 0 {
+			return again, nil
+		}
+	}
 	return plan, err
 }
 

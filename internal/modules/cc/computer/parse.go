@@ -27,6 +27,9 @@ type Checkout struct {
 	Seller   string `json:"seller,omitempty"`
 	ShipTo   string `json:"ship_to,omitempty"`
 	Card     string `json:"card,omitempty"` // last 4 only
+	// Warning is Jarvis's own, never the model's: how the order differs from what was asked,
+	// when its check found a difference the model didn't put right (orderDiffers).
+	Warning string `json:"warning,omitempty"`
 }
 
 // Reply is one parsed model answer: a batch of actions (with an optional checkout), done, or a

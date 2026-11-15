@@ -322,6 +322,13 @@ func (e *Env) sandbox(ctx context.Context) error {
 			e.logf("coordinates: %s (%s)", a.Name, e.Model)
 		}
 	}
+	// CCSUITE_THINK_TOKENS runs the pass with the model thinking before each round.
+	if n, err := strconv.Atoi(os.Getenv("CCSUITE_THINK_TOKENS")); err == nil && n > 0 {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.think_tokens", map[string]any{"value": n}, nil); err != nil {
+			return fmt.Errorf("computer.think_tokens: %w", err)
+		}
+		e.logf("thinking: %d tokens a round", n)
+	}
 	var hhs []struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`

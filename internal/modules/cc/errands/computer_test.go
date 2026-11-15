@@ -1006,3 +1006,49 @@ func TestComputerStepReadsItsSource(t *testing.T) {
 		t.Fatalf("run = %s %+v", w.State, w.Results)
 	}
 }
+
+// A plan is checked against the request before it runs: what it left out goes back to the
+// planner once. A plan that covers it, and a check that can't be read, leave the plan alone.
+func TestPlanErrandChecksThePlanAgainstTheRequest(t *testing.T) {
+	c := newComputerEnv(t)
+	download := step(policy.ToolComputerTask, "Download", `{"goal": "download the statement", "target": "browser", "site": "`+shopSite+`"}`)
+	c.llm.say("plan", planJSON("Budget", download),
+		planJSON("Budget", download, step("write_spreadsheet", "Budget sheet", `{"name": "Budget"}`)))
+	c.llm.say("check", `{"covered": false, "missing": "the spreadsheet of spending"}`, `{"covered": true}`)
+	menu := []MenuEntry{computerEntry(), {Command: "write_spreadsheet"}}
+	p, err := c.s.PlanErrand(context.Background(), "download my statement and make a budget spreadsheet", menu)
+	if err != nil || len(p.Steps) != 2 {
+		t.Fatalf("plan = %+v %v, want the spreadsheet step added", p, err)
+	}
+	var again string
+	for _, r := range c.llm.reqs {
+		if q := *r.Messages[0].Content.Text; promptKind(q) == "plan" {
+			again = q
+		}
+	}
+	if !strings.Contains(again, "left out: the spreadsheet of spending") {
+		t.Errorf("the second planning call doesn't say what was left out")
+	}
+}
+
+// A replan whose answer has more after its object (a step closed early) is still read, and one
+// that leaves the errand ending short of the request is planned again.
+func TestReplanReadsASlipAndChecksWhatIsLeft(t *testing.T) {
+	c := newComputerEnv(t)
+	menu := []MenuEntry{computerEntry(), {Command: "write_spreadsheet"}}
+	c.llm.say("replan", `{"summary": "Make the sheet", "steps": [{"command": "write_spreadsheet", "args": {"name": "Budget"}, "computer": "Jarvis"}], "label": "write it"}]}`)
+	c.llm.say("check", `{"covered": true}`)
+	p, err := c.s.ReplanFromProgress(context.Background(), "make a budget spreadsheet", nil, nil, "the files are read", menu)
+	if err != nil || len(p.Steps) != 1 || p.Steps[0].Command != "write_spreadsheet" {
+		t.Fatalf("replan with a slip = %+v %v", p, err)
+	}
+
+	c = newComputerEnv(t)
+	c.llm.say("replan", `{"summary": "Nothing more", "steps": []}`,
+		`{"summary": "Make the sheet", "steps": [{"command": "write_spreadsheet", "args": {"name": "Budget"}, "label": "write it"}]}`)
+	c.llm.say("check", `{"covered": false, "missing": "the budget spreadsheet"}`)
+	p, err = c.s.ReplanFromProgress(context.Background(), "make a budget spreadsheet", nil, nil, "the files are read", menu)
+	if err != nil || len(p.Steps) != 1 {
+		t.Fatalf("replan that ended short = %+v %v, want the spreadsheet step", p, err)
+	}
+}

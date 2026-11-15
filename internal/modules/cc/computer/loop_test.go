@@ -30,11 +30,26 @@ type scriptLLM struct {
 	reqs    []llm.ChatRequest
 	// cut: the answers (by call index) that end with finish_reason length.
 	cut map[int]bool
+	// orders answers the order check (orderDiffers), apart from the queue: the last repeats,
+	// none is "yes". orderReqs are its requests.
+	orders    []string
+	orderReqs []llm.ChatRequest
 }
 
 func (s *scriptLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if req.Messages[0].Content.Text != nil && strings.HasPrefix(*req.Messages[0].Content.Text, "You check an order") {
+		s.orderReqs = append(s.orderReqs, req)
+		ans := "yes"
+		if len(s.orders) > 0 {
+			ans = s.orders[0]
+			if len(s.orders) > 1 {
+				s.orders = s.orders[1:]
+			}
+		}
+		return &llm.ChatResponse{Content: ans}, nil
+	}
 	s.reqs = append(s.reqs, req)
 	if len(s.answers) == 0 {
 		return nil, errors.New("script ran out")
@@ -1177,5 +1192,62 @@ func TestCoordinatesSetting(t *testing.T) {
 	e.setts[SettingCoordinates] = "auto"
 	if a := e.loop.adapter(context.Background(), sc, Pick{Adapter: computeruse.Norm1000}); a.Name != "norm1000" {
 		t.Fatalf("auto keeps the model's: %s", a.Name)
+	}
+}
+
+// An order is checked against the request before the user is asked: one that differs goes back
+// to the model to be put right, and one still different after that is asked with a warning.
+func TestOrderIsCheckedAgainstTheRequest(t *testing.T) {
+	buy := `{"checkout": {"product": "Lavender soap", "price": "9.98", "warning": "the model's own"}, "actions": [` + press("e5", "Place the order") + `]}`
+	e := newEnv(t)
+	e.llm.orders = []string{"no, the cart holds two bars and one was asked for.", "yes"}
+	e.script(buy, buy)
+	out := e.run()
+	if out.State != StateNeedsApproval || out.Checkout == nil || out.Checkout.Warning != "" || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v (checkout %+v), %d calls: want it sent back once, then asked", out, out.Checkout, len(e.llm.reqs))
+	}
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, "isn't what was asked for: the cart holds two bars") {
+		t.Fatalf("no order feedback:\n%s", txt)
+	}
+	if q := *e.llm.orderReqs[0].Messages[1].Content.Text; !strings.Contains(q, "Lavender soap") || !strings.Contains(q, "9.98") {
+		t.Errorf("the check wasn't given the order:\n%s", q)
+	}
+
+	e = newEnv(t)
+	e.llm.orders = []string{"no, the cart holds two bars."}
+	e.script(buy, buy)
+	out = e.run()
+	if out.State != StateNeedsApproval || out.Checkout == nil || out.Checkout.Warning != "the cart holds two bars" {
+		t.Fatalf("outcome %+v (checkout %+v): want it asked with the difference", out, out.Checkout)
+	}
+}
+
+// A desktop task told to save under a name isn't done while nothing has that name: the model's
+// own check (the name is on screen, in the Save dialog) doesn't stand in for the file.
+func TestDoneNeedsTheSavedFile(t *testing.T) {
+	done := `{"done": true, "summary": "Saved it.", "verify": {"text_present": ["Velmora"]}}`
+	dialog := Observation{Title: "Save", Elements: []Element{{Ref: "a3", Role: "textbox", Name: "Name", Value: "Velmora"}}}
+	e := newEnv(t, dialog)
+	e.exec.files = map[string]FileInfo{"list " + DocumentsDir: {Entries: []FileEntry{{Name: "Jarvis", Dir: true}}}}
+	e.script(done, done)
+	tk := task()
+	tk.Goal, tk.Target = "Summarize this page into LibreOffice and save it as Velmora.", computeruse.Target{Kind: "desktop", App: "LibreOffice Writer"}
+	e.loop.Run(context.Background(), tk)
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `nothing is saved as "Velmora" yet`) || !strings.Contains(txt, "Save dialog is still open") {
+		t.Fatalf("a done with the Save dialog open wasn't sent back:\n%s", txt)
+	}
+
+	// The file is there: the model's check decides.
+	e = newEnv(t, dialog)
+	e.exec.files = map[string]FileInfo{"list " + DocumentsDir: {Entries: []FileEntry{{Name: "Velmora.odt", Bytes: 9000}}}}
+	e.script(done)
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("outcome %+v, want done with the file saved", out)
+	}
+	for g, want := range map[string]string{"make a note titled Groceries and save it": "",
+		"save the page as a PDF called report in Documents": "report", "Save it as Velmora.": "Velmora"} {
+		if got := saveName(g); got != want {
+			t.Errorf("saveName(%q) = %q, want %q", g, got, want)
+		}
 	}
 }
