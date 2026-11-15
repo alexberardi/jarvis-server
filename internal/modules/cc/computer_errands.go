@@ -86,6 +86,15 @@ func computerDefinitions() []settings.Definition {
 			},
 			Description: "Most tokens the model may think before each round of a computer task (0 = it answers at once). " +
 				"Thinking makes each round slower and can make a local model more careful."},
+		{Key: computer.SettingLocateClicks, Category: "computer", Type: settings.String, Default: "off",
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != "on" && s != "off" {
+					return errors.New(`must be "on" or "off"`)
+				}
+				return nil
+			},
+			Description: "Whether a click aimed from a screenshot is placed by a question of its own (on) or taken from the round's answer (off). " +
+				"On makes a small local model's clicks land, at two short model calls a click."},
 		llm.SlotSetting(computer.SettingModel, "computer",
 			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider)."),

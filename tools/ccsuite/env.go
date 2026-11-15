@@ -329,6 +329,13 @@ func (e *Env) sandbox(ctx context.Context) error {
 		}
 		e.logf("thinking: %d tokens a round", n)
 	}
+	// CCSUITE_LOCATE_CLICKS=on runs the pass with each screenshot click placed by its own question.
+	if v := os.Getenv("CCSUITE_LOCATE_CLICKS"); v != "" {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.locate_clicks", map[string]any{"value": v}, nil); err != nil {
+			return fmt.Errorf("computer.locate_clicks: %w", err)
+		}
+		e.logf("locate clicks: %s", v)
+	}
 	var hhs []struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`

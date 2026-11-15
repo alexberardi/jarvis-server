@@ -143,14 +143,14 @@ func TestVerifyFile(t *testing.T) {
 	}
 }
 
-const doneThanks = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/thanks"}}`
+const doneThanks = `{"done": true, "summary": "Added the soap to the cart.", "verify": {"url_contains": "/thanks"}}`
 
 func TestVerifyFailsThenRecovers(t *testing.T) {
 	e := newEnv(t, shopPage(), shopPage(), shopPage(), thanksPage())
 	e.script(doneThanks, actions(press("e4", "Open the cart")), doneThanks)
 	out := e.run()
 	if out.State != StateDone || out.Checked != `the address contains "/thanks"` ||
-		out.Summary != `Ordered the soap. Checked: the address contains "/thanks".` || out.Rounds != 3 {
+		out.Summary != `Added the soap to the cart. Checked: the address contains "/thanks".` || out.Rounds != 3 {
 		t.Fatalf("outcome %+v", out)
 	}
 	// The failed check is the next round's feedback.
@@ -206,7 +206,7 @@ func TestVerifyBudgetSurvivesResume(t *testing.T) {
 func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 	t.Run("then gives one", func(t *testing.T) {
 		e := newEnv(t)
-		e.script(`{"done": true, "summary": "Ordered the soap."}`, doneAnswer)
+		e.script(`{"done": true, "summary": "Added the soap to the cart."}`, doneAnswer)
 		out := e.run()
 		if out.State != StateDone || out.Rounds != 2 {
 			t.Fatalf("outcome %+v", out)
@@ -217,7 +217,7 @@ func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 	})
 	t.Run("twice fails", func(t *testing.T) {
 		e := newEnv(t)
-		e.script(`{"done": true, "summary": "Ordered the soap."}`, `{"done": true, "summary": "Really done."}`)
+		e.script(`{"done": true, "summary": "Added the soap to the cart."}`, `{"done": true, "summary": "Really done."}`)
 		out := e.run()
 		if out.State != StateFailed || out.Rounds != 2 ||
 			out.Summary != "I couldn't confirm the task was finished: there was no way to check it." {
@@ -228,7 +228,7 @@ func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 		e := newEnv(t, thanksPage())
 		tk := task()
 		tk.Success = &SuccessCheck{TextPresent: []string{"Order 1234"}}
-		e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/nowhere"}}`)
+		e.script(`{"done": true, "summary": "Added the soap to the cart.", "verify": {"url_contains": "/nowhere"}}`)
 		out := e.loop.Run(context.Background(), tk)
 		if out.State != StateDone || out.Checked != `the page shows "Order 1234"` || out.Rounds != 1 {
 			t.Fatalf("the task's check comes first: %+v", out)

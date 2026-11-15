@@ -212,7 +212,7 @@ func (e *tenv) run() Outcome {
 func task() Task {
 	uid := int64(7)
 	return Task{HouseholdID: "hh-1", UserID: &uid, NodeID: "n1", WorkflowID: "wf_1", Step: 2,
-		Goal: "Order the lavender soap", Target: computeruse.Target{Kind: "browser"}}
+		Goal: "Add the lavender soap to the cart", Target: computeruse.Target{Kind: "browser"}}
 }
 
 func (e *tenv) events() []policy.Event {
@@ -262,7 +262,7 @@ func buying(acts ...string) string {
 	return `{"checkout": {"product": "Lavender soap", "price": "4.99"}, "actions": [` + strings.Join(acts, ",") + `]}`
 }
 
-const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`
+const doneAnswer = `{"done": true, "summary": "Added the soap to the cart.", "verify": {"url_contains": "/soap"}}`
 
 // --- tests ---
 
@@ -270,7 +270,7 @@ func TestLoopDone(t *testing.T) {
 	e := newEnv(t)
 	e.script(actions(press("e3", "Add the soap to the cart")), doneAnswer)
 	out := e.run()
-	if out.State != StateDone || out.Summary != `Ordered the soap. Checked: the address contains "/soap".` || out.Checked != `the address contains "/soap"` || out.Rounds != 2 {
+	if out.State != StateDone || out.Summary != `Added the soap to the cart. Checked: the address contains "/soap".` || out.Checked != `the address contains "/soap"` || out.Rounds != 2 {
 		t.Fatalf("outcome %+v", out)
 	}
 	if out.Verify == nil || out.Verify.URLContains != "/soap" {
@@ -1249,5 +1249,39 @@ func TestDoneNeedsTheSavedFile(t *testing.T) {
 		if got := saveName(g); got != want {
 			t.Errorf("saveName(%q) = %q, want %q", g, got, want)
 		}
+	}
+}
+
+// A done on the checkout page is not an order: the 9B said "ordered" with Place order still on
+// the page.
+func TestUnplacedOrder(t *testing.T) {
+	checkout := Observation{Elements: []Element{{Ref: "e9", Role: "radio", Name: "Saved Visa"}, {Ref: "e10", Role: "button", Name: "Place order"}}}
+	confirmed := Observation{Elements: []Element{{Ref: "e1", Role: "link", Name: "Continue shopping"}}}
+	buy := Task{Goal: "find the watch", Request: "order the best-rated smart watch under $300"}
+	if btn := unplacedOrder(buy, "", checkout); btn == nil || btn.Ref != "e10" {
+		t.Fatalf("the pay button isn't found: %+v", btn)
+	}
+	if unplacedOrder(buy, "Ordered the watch", confirmed) != nil {
+		t.Fatal("a confirmation page is taken for an unplaced order")
+	}
+	if unplacedOrder(Task{Goal: "tell me the total in my cart"}, "The total is $249", checkout) != nil {
+		t.Fatal("a task that buys nothing is held at the checkout page")
+	}
+}
+
+// The loop sends such a done back and says which button places the order.
+func TestDoneWithThePayButtonStillThereIsSentBack(t *testing.T) {
+	e := newEnv(t)
+	e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`,
+		`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`,
+		`{"ask": "Should I place the order?", "reason": "unclear"}`)
+	tk := task()
+	tk.Goal = "Order the lavender soap"
+	out := e.loop.Run(context.Background(), tk)
+	if out.State != StateAsk {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.llm.reqs) != 3 || !strings.Contains(userText(e.llm.reqs[1]), `nothing is ordered yet: the page still has "Place order" (e5)`) {
+		t.Fatalf("the done wasn't sent back: %d calls", len(e.llm.reqs))
 	}
 }

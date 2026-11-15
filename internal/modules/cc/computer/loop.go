@@ -326,6 +326,8 @@ type round struct {
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
 	sendAsked int
+	// buyAsked counts the dones of an order on a page that still has its pay button (at most 2).
+	buyAsked int
 }
 
 // downloads are the names of the finished files in Downloads, nil when it can't be listed.
@@ -386,6 +388,24 @@ func unsentForm(history []Entry, obs Observation) *Element {
 	for i, e := range obs.Elements {
 		el := &computeruse.Element{Role: e.Role, Name: e.Name, Type: e.Type}
 		if e.Role == "button" && computeruse.Classify(computeruse.Action{Kind: "press", Ref: e.Ref}, el, computeruse.Target{Kind: "browser"}).Category == computeruse.CatSubmitThirdParty {
+			return &obs.Elements[i]
+		}
+	}
+	return nil
+}
+
+// buyRE is a task or a summary about buying something.
+var buyRE = regexp.MustCompile(`(?i)\b(order(ed|ing)?|buy(ing)?|bought|purchas(e|ed|ing))\b`)
+
+// unplacedOrder is the pay button still on obs when the task, or the done's own summary, is
+// about buying something: an order that was placed leaves the checkout page. nil otherwise.
+func unplacedOrder(t Task, summary string, obs Observation) *Element {
+	if !buyRE.MatchString(t.Goal + " " + t.Request + " " + summary) {
+		return nil
+	}
+	for i, e := range obs.Elements {
+		el := &computeruse.Element{Role: e.Role, Name: e.Name, Type: e.Type}
+		if e.Role == "button" && computeruse.Classify(computeruse.Action{Kind: "press", Ref: e.Ref}, el, computeruse.Target{Kind: "browser"}).Category == computeruse.CatPay {
 			return &obs.Elements[i]
 		}
 	}
@@ -517,6 +537,14 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 			}
 			return Outcome{}, false
 		}
+		if btn := unplacedOrder(r.task, reply.Summary, obs); btn != nil && r.buyAsked < 2 {
+			// The house model reached the checkout page, said "ordered" without pressing
+			// Place order, and then took the checkout page for the confirmation.
+			r.buyAsked++
+			r.feedback = fmt.Sprintf(`you said done, but nothing is ordered yet: the page still has %q (%s), so the order isn't placed. `+
+				`Propose pressing it, with its "checkout": Jarvis asks the user and presses it once they approve`, btn.Name, btn.Ref)
+			return Outcome{}, false
+		}
 		return l.done(ctx, r, reply, obs)
 	case reply.Ask != "":
 		if reply.Reason == ReasonPageInstructions {
@@ -530,6 +558,12 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	for _, a := range reply.Actions {
 		if a.Kind == "screenshot" {
 			r.wantShot = true
+			continue
+		}
+		if x, y, ok := l.locate(ctx, r, a); ok {
+			// Placed by a question of its own: already the newest screenshot's pixels.
+			a.X, a.Y, a.CaptureID = &x, &y, r.shots[len(r.shots)-1].CaptureID
+			actions = append(actions, a)
 			continue
 		}
 		actions = append(actions, l.toImage(r, a))
