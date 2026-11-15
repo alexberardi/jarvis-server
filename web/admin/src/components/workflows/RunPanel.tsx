@@ -88,27 +88,28 @@ export default function RunPanel({ wf, onRevision }: { wf: TaughtWorkflow; onRev
         className="mb-2"
       />
       <form
-        className="flex flex-wrap items-end gap-3"
+        className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault()
-          e.stopPropagation() // the page's own form saves the workflow
-          if (!missing) run.mutate()
+          // A value of spaces passes the browser's own check.
+          if (missing) toast.error('Fill in every value first')
+          else run.mutate()
         }}
       >
         {asks.map((p) => (
-          <div key={p.name} className="min-w-40 flex-1">
-            <Input
-              label={p.name}
-              placeholder={p.example}
-              value={params[p.name] ?? ''}
-              onChange={(e) => setParams((cur) => ({ ...cur, [p.name]: e.target.value }))}
-            />
-          </div>
+          <Input
+            key={p.name}
+            label={p.name.replace(/_/g, ' ')}
+            placeholder={p.example}
+            required
+            value={params[p.name] ?? ''}
+            onChange={(e) => setParams((cur) => ({ ...cur, [p.name]: e.target.value }))}
+          />
         ))}
         <Button
           type="submit"
           icon={<Play size={16} aria-hidden />}
-          disabled={missing || rec?.state === 'running'}
+          disabled={rec?.state === 'running'}
           loading={run.isPending}
         >
           {rec ? 'Run again' : 'Run'}

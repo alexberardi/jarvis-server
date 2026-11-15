@@ -179,7 +179,7 @@ describe('WorkflowEditPage', () => {
   it('renames, shares, edits an intent, adds, deletes and makes a step ask first', async () => {
     renderPage()
     await screen.findAllByTestId('step')
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '  Monthly statement ' } })
+    fireEvent.change(screen.getByLabelText('Workflow name'), { target: { value: '  Monthly statement ' } })
     fireEvent.click(screen.getByRole('switch', { name: 'Share with the household' }))
     fireEvent.change(screen.getByLabelText('Step 1 intent'), { target: { value: 'Open the bank site' } })
     fireEvent.click(screen.getByRole('switch', { name: 'Ask me first before step 2' }))
@@ -225,7 +225,7 @@ describe('WorkflowEditPage', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add step' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Step 1 intent')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Name')).toBeDisabled()
+    expect(screen.getByLabelText('Workflow name')).toBeDisabled()
     expect(screen.getByRole('switch', { name: 'Share with the household' })).toBeDisabled()
   })
 
@@ -322,14 +322,14 @@ describe('WorkflowEditPage', () => {
     expect(api.relearnWorkflow).toHaveBeenCalledWith('tw_1')
     expect(await screen.findByText('This is a fresh draft from your recording')).toBeInTheDocument()
     expect(steps()).toHaveLength(2)
-    expect(screen.getByLabelText('Name')).toHaveValue('Get the statement')
+    expect(screen.getByLabelText('Workflow name')).toHaveValue('Get the statement')
     expect(screen.getByLabelText("It's done when")).toHaveValue('The statement is in Downloads')
     expect(api.saveWorkflow).not.toHaveBeenCalled()
 
     // Discarding goes back to the stored workflow.
     fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
     expect(steps()).toHaveLength(5)
-    expect(screen.getByLabelText('Name')).toHaveValue('Download bank statement')
+    expect(screen.getByLabelText('Workflow name')).toHaveValue('Download bank statement')
 
     // Saving the draft stores it and the notice goes.
     await act(async () => {
@@ -408,9 +408,15 @@ describe('WorkflowEditPage', () => {
     expect(items[2]).toHaveTextContent('Found: the page shows a sign-in form')
     expect(items[3]).toHaveTextContent('Result: The statement is in Downloads (not reached)')
 
-    // It needs the month before it can start, and sends it.
+    // It needs the month before it can start: the button answers (the field is required)
+    // rather than sitting disabled with no reason given. Then it sends the month.
     const run = screen.getByRole('button', { name: 'Run again' })
-    expect(run).toBeDisabled()
+    expect(run).toBeEnabled()
+    expect(screen.getByLabelText('month')).toBeRequired()
+    await act(async () => {
+      fireEvent.click(run)
+    })
+    expect(api.runWorkflow).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText('month'), { target: { value: '2026-10' } })
     await act(async () => {
       fireEvent.click(run)
