@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/godbus/dbus/v5"
 
@@ -54,6 +55,7 @@ const (
 	roleToggleButton  = 62
 	roleEntry         = 79
 	roleLink          = 88
+	roleDocumentText  = 94 // a word processor's page (LibreOffice Writer's document)
 	roleTableRow      = 90
 	roleTreeItem      = 91
 	roleSwitch        = 130
@@ -67,7 +69,7 @@ var roleNames = map[uint32]string{
 	roleSpinButton: "spinbutton", roleSlider: "slider", roleMenuItem: "menuitem",
 	roleCheckMenuItem: "menuitemcheckbox", roleRadioMenuItem: "menuitemradio", roleLink: "link",
 	roleListItem: "listitem", roleTreeItem: "treeitem", roleTableCell: "cell", roleTableRow: "row",
-	rolePageTab: "tab",
+	rolePageTab: "tab", roleDocumentText: RoleDocument,
 }
 
 // containerRoles name a group of controls (a toolbar, a dialog, a menu): the nearest named one
@@ -339,6 +341,8 @@ func windowTitled(ctx context.Context, pid int, title string) (obj, bool) {
 	if err != nil {
 		return obj{}, false
 	}
+	var best obj
+	bestRank := 0
 	for _, a := range apps {
 		var p uint32
 		cctx, cancel := context.WithTimeout(ctx, callTimeout)
@@ -349,12 +353,25 @@ func windowTitled(ctx context.Context, pid int, title string) (obj, bool) {
 		}
 		wins, _ := a.children(ctx)
 		for _, w := range wins {
-			if strings.TrimSpace(w.name(ctx)) == title {
-				return w, true
+			if strings.TrimSpace(w.name(ctx)) != title {
+				continue
+			}
+			// Two can share a title (a Save dialog opened again while a closed one lingers): the
+			// one in use wins, then one on screen. The first found was a dialog no longer shown,
+			// whose name field read "Velmora" while the one on screen still said "Untitled 2"
+			// and its Save button did nothing (suite on Gemma 4 26B, 2026-11-15).
+			rank := 1
+			if st := w.state(ctx); st.has(stateActive) {
+				rank = 3
+			} else if st.has(stateShowing) {
+				rank = 2
+			}
+			if rank > bestRank {
+				best, bestRank = w, rank
 			}
 		}
 	}
-	return obj{}, false
+	return best, bestRank > 0
 }
 
 // findApp is the registry's app whose bus connection belongs to pid.
@@ -538,6 +555,8 @@ func (w *walker) keep(o obj, role string, secure bool, near string, shown bool) 
 		if st.has(stateChecked) {
 			el.State = append(el.State, "checked")
 		}
+	case role == RoleDocument && !w.showing:
+		el.Value = clip(docText(ctx, o, maxText+1)) // how it starts: what a task typed shows here
 	case textRoles[role] && !w.showing: // a voice snapshot never reads what was typed (§2, A15 F6)
 		el.Value = clip(o.text(ctx))
 	}
@@ -586,6 +605,49 @@ func setValue(gen int, ref, text string) error {
 		}
 		return e.o.do(ifEditableText+".SetTextContents", text)
 	})
+}
+
+// docText is a document's text: its paragraphs' (its children's), a line each, up to about
+// limit runes. The document itself has no Text.
+func docText(ctx context.Context, o obj, limit int) string {
+	kids, _ := o.children(ctx)
+	var b strings.Builder
+	n := 0
+	for _, k := range kids {
+		t := k.text(ctx)
+		if t == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(t)
+		if n += utf8.RuneCountInString(t) + 1; n >= limit {
+			break
+		}
+	}
+	return b.String()
+}
+
+// maxReadText bounds text(): enough to tell whether typing changed a long document.
+const maxReadText = 200_000
+
+func textOf(gen int, ref string) (string, error) {
+	var out string
+	err := refs.lookup(gen, ref, func(e entry) error {
+		if e.secure {
+			return &Error{Code: CodePasswordField, Msg: ref + " is a password text; it is never read"}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		if e.role == RoleDocument {
+			out = docText(ctx, e.o, maxReadText)
+		} else {
+			out = e.o.text(ctx)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func focus(gen int, ref string) error {

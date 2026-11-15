@@ -37,7 +37,7 @@ Answer with exactly one JSON object and nothing else, in one of these shapes:
 
 An action is {"kind": "...", "intent": "<what this action is for, one line>", ...}, e.g. {"kind": "press", "ref": "e5", "intent": "Open the product list"}. Kinds:
 - press {"ref"}: click a listed element. set_value {"ref", "text"}: fill a field, or set a checkbox or radio button to "checked" or "unchecked" (a press toggles it). select {"ref", "text"}: pick an option by its label.
-- navigate {"url"}: open an http or https address. scroll {"dx", "dy"}. wait {"ms"} (at most 5000). keypress {"keys": ["ctrl", "s"]}. type {"text"}.
+- navigate {"url"}: open an http or https address. scroll {"dx", "dy"}. wait {"ms"} (at most 5000). keypress {"keys": ["ctrl", "s"]}. type {"text"}: types where the cursor is; with a "ref", into that textbox (replacing what it holds) or that document (adding to it).
 - screenshot: see the screen next turn.
 - click, double_click, move {"x", "y"}; drag {"path": [[x, y], ...]}: only on a screenshot, in its coordinates.
 - In a desktop app: clipboard_write {"text"} puts text on the clipboard, clipboard_read shows you what is on it next turn; keypress chords like ["cmd", "v"] work. When the app lists no elements, press buttons through their shortcuts or menu, e.g. {"kind": "keypress", "keys": ["ctrl", "s"], "intent": "Save the note"}: a click on a small button can miss, and a missed click gives no error. Web pages are only for browser tasks.

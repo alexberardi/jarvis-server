@@ -811,6 +811,107 @@ func (t *Tools) typeLines(ctx context.Context, in input.Input, text string) erro
 	return nil
 }
 
+// typedAX is an AX that can say what an element is and read its text back, so typing into an
+// element can be real keystrokes and then checked (Linux). An element action that reported ok
+// while nothing changed sent a local model in circles: a summary "typed" into the Paragraph
+// Style box, a file name set on a dialog that never took it (suite on Gemma 4 26B, 2026-11-15).
+type typedAX interface {
+	Role(gen int, ref string) (string, error)
+	Text(gen int, ref string) (string, error)
+}
+
+// settleTries and settleEvery bound the wait for an app to show what was typed.
+const (
+	settleTries = 10
+	settleEvery = 100 * time.Millisecond
+)
+
+// settled reads ref's text until ok accepts it or the tries run out; it is the last read.
+func (t *Tools) settled(ctx context.Context, ta typedAX, gen int, ref string, ok func(string) bool) (string, bool) {
+	var got string
+	for i := range settleTries {
+		if i > 0 {
+			t.sleep(ctx, settleEvery)
+		}
+		s, err := ta.Text(gen, ref)
+		if err != nil {
+			return got, true // it can't be read back: no word against the action
+		}
+		if got = s; ok(got) {
+			return got, true
+		}
+	}
+	return got, false
+}
+
+func sameText(a, b string) bool { return strings.TrimSpace(a) == strings.TrimSpace(b) }
+
+func clipText(s string) string {
+	if r := []rune(s); len(r) > 60 {
+		return string(r[:60]) + "…"
+	}
+	return s
+}
+
+// typeInto types action.Text into the element action.Ref with the keyboard: the element takes
+// the focus, a text field's old text is selected so the new replaces it, a document's stays
+// (text is added where its cursor is), and the element's text is read back. Anything else isn't
+// somewhere to type. code "" with an error is the accessibility layer's own.
+func (t *Tools) typeInto(ctx context.Context, in input.Input, ta typedAX, gen int, action computeruse.Action) (string, error) {
+	d := t.Desktop
+	role, err := ta.Role(gen, action.Ref)
+	if err != nil {
+		return "", err
+	}
+	replace := true
+	switch role {
+	case "textbox", "combobox", "spinbutton":
+	case "document":
+		replace = false
+	case "passwordtext":
+		return "", d.AX.SetValue(gen, action.Ref, action.Text) // refused there, in its words
+	default:
+		return "not_editable", fmt.Errorf("%s is a %s, not somewhere to type: type into a textbox or the document, or click where the text goes and type without a ref", action.Ref, role)
+	}
+	before, _ := ta.Text(gen, action.Ref)
+	if err := d.AX.Focus(gen, action.Ref); err != nil {
+		if !replace {
+			return "", err
+		}
+		// It won't take the focus: its text is set outright, and checked the same way.
+		if err := d.AX.SetValue(gen, action.Ref, action.Text); err != nil {
+			return "", err
+		}
+	} else {
+		if replace {
+			if err := in.Keys(ctx, []string{"ctrl", "a"}); err != nil {
+				return typeCode(err), err
+			}
+		}
+		if err := t.typeLines(ctx, in, action.Text); err != nil {
+			return typeCode(err), err
+		}
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(action.Text), "\n")
+	took := func(s string) bool {
+		if replace {
+			return strings.Contains(s, strings.TrimSpace(first))
+		}
+		return s != before
+	}
+	if got, ok := t.settled(ctx, ta, gen, action.Ref, took); !ok {
+		return "no_effect", fmt.Errorf("typed into %s, but its text didn't change (it shows %q): click where the text goes, then type without a ref", action.Ref, clipText(got))
+	}
+	return "", nil
+}
+
+func typeCode(err error) string {
+	if errors.Is(err, ErrPaused) {
+		return "paused"
+	}
+	return "failed"
+}
+
 // doDesktop runs one checked action. text is clipboard_read's.
 func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Run, pts [][2]int) (text, code string, err error) {
 	d := t.Desktop
@@ -868,6 +969,15 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 		}
 	case "type":
 		if action.Ref != "" {
+			if ta, ok := d.AX.(typedAX); ok {
+				if code, err := t.typeInto(ctx, in, ta, gen, action); err != nil {
+					if code == "" {
+						return axErr(err)
+					}
+					return "", code, err
+				}
+				break
+			}
 			if err := d.AX.SetValue(gen, action.Ref, action.Text); err != nil {
 				return axErr(err)
 			}
@@ -889,6 +999,14 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 		}
 		if err := d.AX.SetValue(gen, action.Ref, action.Text); err != nil {
 			return axErr(err)
+		}
+		// A text field that took the call and shows something else didn't take the value.
+		if ta, ok := d.AX.(typedAX); ok && action.Kind == "set_value" {
+			if role, _ := ta.Role(gen, action.Ref); role == "textbox" {
+				if got, shows := t.settled(ctx, ta, gen, action.Ref, func(s string) bool { return sameText(s, action.Text) }); !shows {
+					return "", "no_effect", fmt.Errorf("%s still shows %q after set_value: type into it instead", action.Ref, clipText(got))
+				}
+			}
 		}
 	case "clipboard_read", "clipboard_write":
 		if d.Clipboard == nil {

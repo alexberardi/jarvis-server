@@ -64,6 +64,15 @@ func parseReply(s string) (Reply, error) {
 			}
 		}
 	}
+	if len(r.Actions) == 0 && !r.Done && strings.TrimSpace(r.Ask) == "" {
+		// One action sent bare, without the object around it ({"kind": "press", "ref": "a2",
+		// …}): it is the batch. Gemma 4 26B answered so twice running and the task ended as
+		// unreadable with its document already saved (2026-11-15).
+		var one computeruse.Action
+		if json.Unmarshal([]byte(repairSlips(s[i:j+1])), &one) == nil && one.Kind != "" {
+			r.Actions = []computeruse.Action{one}
+		}
+	}
 	switch {
 	case r.Done:
 		if strings.TrimSpace(r.Summary) == "" {

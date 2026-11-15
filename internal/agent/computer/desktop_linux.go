@@ -148,6 +148,16 @@ func (a *linuxAX) Press(gen int, ref string) error          { return atspi.Press
 func (a *linuxAX) SetValue(gen int, ref, text string) error { return atspi.SetValue(gen, ref, text) }
 func (a *linuxAX) Focus(gen int, ref string) error          { return atspi.Focus(gen, ref) }
 
+// Role and Text make linuxAX a typedAX: typing into an element is keystrokes, then checked.
+func (a *linuxAX) Role(gen int, ref string) (string, error) {
+	el, err := atspi.Element(gen, ref)
+	if err != nil {
+		return "", err
+	}
+	return el.Role, nil
+}
+func (a *linuxAX) Text(gen int, ref string) (string, error) { return atspi.Text(gen, ref) }
+
 func (a *linuxAX) At(x, y float64) (*ax.Recorded, error) {
 	if a.getenv("WAYLAND_DISPLAY") != "" {
 		return nil, nil

@@ -124,3 +124,10 @@ func TestParseReplyEarlyClose(t *testing.T) {
 		t.Fatalf("early-close reply parsed to %+v", r.Actions)
 	}
 }
+
+func TestParseReplyBareAction(t *testing.T) {
+	r, err := parseReply("```json\n" + `{"kind": "press", "ref": "a2", "intent": "Click the Save button"}` + "\n```")
+	if err != nil || len(r.Actions) != 1 || r.Actions[0].Kind != "press" || r.Actions[0].Ref != "a2" {
+		t.Fatalf("bare action = %+v, %v", r.Actions, err)
+	}
+}

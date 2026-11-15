@@ -667,3 +667,49 @@ func TestEnable(t *testing.T) {
 		t.Fatalf("Enable with it on = %+v", st)
 	}
 }
+
+// A word processor's page is an element: typing has somewhere to go, and its value (how its
+// text starts) shows what was typed. Text reads all of it, a paragraph a line.
+func TestSnapshotListsTheDocument(t *testing.T) {
+	shown := func(s ...int) []int { return append(with(s...), stateShowingT) }
+	main := &fakeNode{role: roleFrame, name: "Untitled 1 — LibreOffice Writer", states: append(with(stateActive), stateShowingT), box: [4]int32{0, 0, 800, 600}, kids: []*fakeNode{
+		{role: roleDocumentText, name: "Untitled 1", states: shown(), box: [4]int32{0, 100, 800, 500}, kids: []*fakeNode{
+			{role: 73, states: shown(), text: "Velmora is a lakeside town."},
+			{role: 73, states: shown(), text: ""},
+			{role: 73, states: shown(), text: "It was founded in 1287."},
+		}},
+	}}
+	fakeDesktop(t, &fakeNode{role: roleApplication, name: "soffice", kids: []*fakeNode{main}})
+	s, err := Snapshot(context.Background(), os.Getpid(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Elements) != 1 || s.Elements[0].Role != RoleDocument || s.Elements[0].Value != "Velmora is a lakeside town.\nIt was founded in 1287." {
+		t.Fatalf("snapshot = %+v, want the document with its text", s.Elements)
+	}
+	if got, err := Text(s.Gen, "a1"); err != nil || got != "Velmora is a lakeside town.\nIt was founded in 1287." {
+		t.Errorf("Text = %q, %v", got, err)
+	}
+	if err := Focus(s.Gen, "a1"); err != nil {
+		t.Errorf("focus the document: %v", err)
+	}
+}
+
+// Of two windows with the title asked for, the one in use is read, not a closed one before it.
+func TestSnapshotWindowPrefersTheLiveOne(t *testing.T) {
+	shown := func(s ...int) []int { return append(with(s...), stateShowingT) }
+	dialog := func(states []int, value string) *fakeNode {
+		return &fakeNode{role: roleFrame, name: "Save", states: states, box: [4]int32{0, 0, 400, 300}, kids: []*fakeNode{
+			{role: roleEntry, name: "Name", states: shown(), text: value, box: [4]int32{10, 10, 100, 20}},
+		}}
+	}
+	fakeDesktop(t, &fakeNode{role: roleApplication, name: "soffice", kids: []*fakeNode{
+		dialog(usable, "Velmora"), dialog(append(with(stateActive), stateShowingT), "Untitled 2")}})
+	s, err := SnapshotWindow(context.Background(), os.Getpid(), "Save", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Elements) != 1 || s.Elements[0].Value != "Untitled 2" {
+		t.Fatalf("snapshot = %+v, want the dialog on screen's", s.Elements)
+	}
+}
