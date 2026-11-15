@@ -19,7 +19,7 @@ scripts/e2e computer --llm shared --label background --repeat 3 # the same from 
 
 Flags: `--filter RE` (case names), `--repeat N` (runs per case, default 1), `--llm shared|scripted|cloud`,
 `--label live|background`, `--include-pending`, `--out DIR` (default `.ccsuite/<run>/`, ignored by
-git), `--keep` (leave it all running: below), `--settle 1m` (below), `--chromium PATH`. Exit 0 when every
+git), `--keep` (leave it all running: below), `--settle 3m` (below), `--chromium PATH`. Exit 0 when every
 required case passed, 1 when one failed, 2 when the run could not bring its world up.
 
 **`--llm cloud`** runs computer tasks on the optional cloud slot, as a household that picked it
@@ -159,7 +159,7 @@ rewrites it).
    (`POST /api/v0/mobile/chat`, the app's chat). New inbox cards are answered as `answers` say.
    The errand is over at its completion card (category `errand`, not its progress card), or once the chat has answered
    and nothing new happened (no new or changed card, so the progress card's step-by-step edits
-   count, and no change in the sites' state) for `--settle` (1 min), or at `max_minutes`. An
+   count, and no change in the sites' state) for `--settle` (3 min), or at `max_minutes`. An
    errand still running or waiting then (its progress card has a Stop) gets Stop tapped until it
    says stopped, before scoring, so it never runs into the next run; `report.md` lists them under
    "Errands stopped at a run's end".
