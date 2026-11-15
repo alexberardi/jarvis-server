@@ -77,7 +77,9 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 			}
 			p.Messages = withThoughtSignatures(p.Messages)
 		}
-		return
+		if !ep.ThinkingControls || ep.API == APIAnthropic {
+			return
+		}
 	}
 	if budget == nil {
 		return
