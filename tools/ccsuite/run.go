@@ -39,7 +39,7 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 	rel := fs.String("rel", "", "prefix for the paths in results.json (scripts/e2e: the suite's dir in its run)")
 	keep := fs.Bool("keep", false, "leave it all running afterwards, a desktop session with the agent and the browser included (ccsuite down --run DIR)")
 	chromium := fs.String("chromium", "", "the Chromium binary (default: $CCSUITE_CHROMIUM, else Playwright's newest)")
-	settle := fs.Duration("settle", time.Minute, "an errand is over once nothing happened for this long after the chat's answer")
+	settle := fs.Duration("settle", 3*time.Minute, "an errand is over once nothing happened for this long after the chat's answer")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

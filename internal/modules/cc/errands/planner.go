@@ -1,6 +1,7 @@
 package errands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -688,6 +689,52 @@ func closeJSON(s string) (string, bool) {
 	return string(b), true
 }
 
+// balanceJSON is s with a closer put in wherever one was skipped, and whether any was: Gemma 4
+// 26B left out a step's "}" in a long replan ('"computer": "Jarvis"}]}'), the answer couldn't be
+// read and the errand never wrote its spreadsheet (2026-11-15). A closer that matches nothing
+// open is dropped, and what is still open at the end is closed.
+func balanceJSON(s string) (string, bool) {
+	var open []byte
+	out := make([]byte, 0, len(s)+4)
+	inStr, esc, changed := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			open = append(open, '}')
+		case c == '[':
+			open = append(open, ']')
+		case c == '}' || c == ']':
+			at := bytes.LastIndexByte(open, c)
+			if at < 0 {
+				changed = true
+				continue
+			}
+			for j := len(open) - 1; j > at; j-- {
+				out = append(out, open[j])
+				changed = true
+			}
+			open = open[:at]
+		}
+		out = append(out, c)
+	}
+	if inStr {
+		return s, false
+	}
+	for j := len(open) - 1; j >= 0; j-- {
+		out = append(out, open[j])
+		changed = true
+	}
+	return string(out), changed
+}
+
 // firstJSON is the first whole JSON value s starts with, when more follows it: Gemma 4 26B
 // closed a replan's step early and left "]}" after the object, the answer couldn't be read, and
 // the errand ended without its spreadsheet step (2026-11-15).
@@ -1007,6 +1054,11 @@ func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *
 			v, err = pyjson.Loads(closed)
 		} else if first, ok := firstJSON(text); ok {
 			v, err = pyjson.Loads(first)
+		}
+		if err != nil {
+			if fixed, ok := balanceJSON(text); ok {
+				v, err = pyjson.Loads(fixed)
+			}
 		}
 	}
 	if err != nil {

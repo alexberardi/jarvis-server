@@ -430,3 +430,22 @@ func TestPlannerModelSlot(t *testing.T) {
 		t.Errorf("no settings: %s", got)
 	}
 }
+
+// A step's skipped "}" is put back: the replan could not be read and the errand never wrote
+// its spreadsheet.
+func TestBalanceJSONPutsBackASkippedCloser(t *testing.T) {
+	got, ok := balanceJSON(`{"steps": [{"command": "a", "args": {"rows": [[1, "x]"]], "computer": "J"}]}`)
+	want := `{"steps": [{"command": "a", "args": {"rows": [[1, "x]"]], "computer": "J"}}]}`
+	if !ok || got != want {
+		t.Fatalf("balanceJSON = %q, %v; want %q", got, ok, want)
+	}
+	if _, err := pyjson.Loads(got); err != nil {
+		t.Fatalf("still unreadable: %v", err)
+	}
+	if got, ok := balanceJSON(`{"a": [1]}`); ok || got != `{"a": [1]}` {
+		t.Fatalf("a whole value was changed: %q", got)
+	}
+	if _, ok := balanceJSON(`{"a": "cut off`); ok {
+		t.Fatal("a value cut off inside a string was closed")
+	}
+}

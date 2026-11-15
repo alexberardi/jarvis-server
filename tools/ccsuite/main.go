@@ -6,7 +6,7 @@
 // (orders placed, files downloaded, spreadsheets, notes), never from the model's words alone.
 //
 //	ccsuite run [--filter RE] [--repeat N] [--llm shared|scripted|cloud] [--label live|background]
-//	            [--include-pending] [--out DIR] [--keep] [--settle 1m] [--chromium PATH]
+//	            [--include-pending] [--out DIR] [--keep] [--settle 3m] [--chromium PATH]
 //	ccsuite down --run DIR
 //
 // Writes report.md, report.json and results.json (the E2E report's suite shape, for

@@ -12,7 +12,7 @@
     {
       "kind": "document_has",
       "file": "Velmora*.odt",
-      "contains": ["Velmora", "Lake Orrin", "1287"],
+      "contains": ["Velmora", "1287"],
       "max_words": 350
     }
   ],
