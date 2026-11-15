@@ -39,6 +39,8 @@ func TestAdapters(t *testing.T) {
 		{"Qwen3.5-9B", "norm1000"},
 		{"qwen3.8-27b-instruct-q4_k_m", "norm1000"},
 		{"unsloth/Qwen3.5-VL-7B", "norm1000"},
+		{"gemma-4-26b-a4b", "norm1000"},
+		{"gemma-4-31b", "norm1000"},
 		{"qwen2.5-vl-7b", "pixels"},
 		{"claude-sonnet-5-5", "pixels"},
 		{"", "pixels"},
