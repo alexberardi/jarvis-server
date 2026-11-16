@@ -9,7 +9,7 @@
     "/devices": { "tests": ["e2e/web/tests/devices.spec.ts", "e2e/web/tests/roles.spec.ts"] },
     "/addons": { "tests": ["e2e/web/tests/addons.spec.ts"] },
     "/inbox": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/household.spec.ts"] },
-    "/inbox/:id": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/inbox-cards.spec.ts", "e2e/web/tests/push.spec.ts"] },
+    "/inbox/:id": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/inbox-cards.spec.ts", "e2e/web/tests/inbox-lists.spec.ts", "e2e/web/tests/push.spec.ts"] },
     "/workflows": { "tests": ["e2e/web/tests/workflows.spec.ts"] },
     "/workflows/:id": { "tests": ["e2e/web/tests/workflows.spec.ts"] },
     "/recordings": { "tests": ["e2e/web/tests/workflows.spec.ts"] },
