@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WStep } from '@/api/workflows'
-import { candidatesOf, draftSteps, eventSentence, foldTrace, stepSentence, traceEvents } from './workflows'
+import { paramTexts, candidatesOf, draftSteps, eventSentence, foldTrace, stepSentence, traceEvents } from './workflows'
 
 const step = (action: WStep['action'], element?: WStep['element']): WStep => ({ intent: action.intent, target: 'browser', action, element })
 
@@ -104,5 +104,17 @@ describe('foldTrace', () => {
       { kind: 'navigate', url: `${u}/` },
     ]
     expect(sentences(evs)).toEqual(['Clicked Chat', 'Typed "hi" in Message', 'Opened localhost:7710'])
+  })
+})
+
+describe('paramTexts', () => {
+  it('writes a value that is on into the sentences as a word, and puts one that is off back', () => {
+    const bind = paramTexts([
+      { key: 'p:amount', name: 'amount', kind: 'number', example: '1500', on: true, from: { param: 'amount' } },
+      { key: 'p:month', name: 'month', kind: 'text', example: 'October', on: false, from: { param: 'month' } },
+    ])
+    expect(bind('The value 1500 is saved in the {month} row')).toBe('The value {amount} is saved in the October row')
+    expect(bind('1500')).toBe('{amount}')
+    expect(bind('row 15000, {amount}')).toBe('row 15000, {amount}')
   })
 })

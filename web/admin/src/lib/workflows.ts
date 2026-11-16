@@ -258,6 +258,30 @@ export function applyParams(steps: DraftStep[], cands: Candidate[]): DraftStep[]
   })
 }
 
+/**
+ * paramTexts is applyParams for the sentences a run checks against (what a step is for and
+ * causes, the end state, the success check): a value that is on reads {name} where the sentence
+ * holds its example as a word, so the run looks for this run's amount, not the recorded one.
+ * Mirrors cc's paramTexts, 3 characters minimum included.
+ */
+export function paramTexts(cands: Candidate[]): (s: string) => string {
+  const subs: [RegExp | string, string][] = []
+  for (const c of [...cands].sort((a, b) => b.example.length - a.example.length)) {
+    if ('param' in c.from) subs.push([`{${c.from.param}}`, c.on ? `{${c.name}}` : c.example])
+    if (c.on && c.example.length >= 3) {
+      const word = c.example.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      subs.push([new RegExp(`(?<![\\p{L}\\p{N}{])${word}(?![\\p{L}\\p{N}}])`, 'gu'), `{${c.name}}`])
+    }
+  }
+  return (s) => subs.reduce((t, [from, to]) => (typeof from === 'string' ? t.split(from).join(to) : t.replace(from, () => to)), s)
+}
+
+const bindCheck = (c: SuccessCheck, bind: (s: string) => string): SuccessCheck => ({
+  ...c,
+  ...(c.screen ? { screen: bind(c.screen) } : {}),
+  ...(c.text_present ? { text_present: c.text_present.map(bind) } : {}),
+})
+
 /** successParts is the success check as clauses of "I'll know it worked when …". */
 export function successParts(check: SuccessCheck): string[] {
   const c = cleanSuccess(check)
@@ -335,6 +359,9 @@ export function toPut(d: {
   skill?: Skill
 }): WorkflowPut {
   const live = d.cands.filter((c) => !('step' in c.from) || d.steps.some((s) => s.uid === (c.from as { step: string }).step))
+  const bind = paramTexts(live)
+  const skill = d.skill && cleanSkill(d.skill)
+  if (skill?.goal?.end_state) skill.goal = { ...skill.goal, end_state: bind(skill.goal.end_state) }
   return {
     name: d.name.trim(),
     triggers: d.triggers ?? [],
@@ -348,17 +375,17 @@ export function toPut(d: {
       })),
     steps: applyParams(d.steps, live).map(({ step }) => {
       const { risk, goal, expect, ...rest } = step
-      const check = expect && cleanSuccess(expect)
+      const check = expect && bindCheck(cleanSuccess(expect), bind)
       return {
         ...rest,
         ...(risk ? { risk } : {}),
-        ...(goal?.trim() ? { goal: goal.trim() } : {}),
+        ...(goal?.trim() ? { goal: bind(goal.trim()) } : {}),
         ...(check && Object.keys(check).length ? { expect: check } : {}),
       }
     }),
-    success: cleanSuccess(d.success),
+    success: bindCheck(cleanSuccess(d.success), bind),
     shared: d.shared,
-    ...(d.skill ? { skill: cleanSkill(d.skill) } : {}),
+    ...(skill ? { skill } : {}),
   }
 }
 
