@@ -14,9 +14,9 @@ confirmation's buttons. Everything else the mobile inbox does
 | Expiring cards: buttons off once stale | `metadata.expires_at`, or the server refusing the tap | missing |
 | Interactive lists: sections, row actions, defaults, `requires` gates (`InteractiveListScreen.tsx`) | category `interactive_list` | missing |
 | Web-view picker: pick or sign in on a site, back to the list (`WebViewPickerScreen.tsx`) | from an interactive list | missing (web: a new tab plus a "Done" return) |
-| Callback result: follow a job started from a card (`InboxCallbackResultScreen.tsx`) | `GET /callbacks/{job_id}/status` | missing |
+| Callback result: follow a job started from a card (`InboxCallbackResultScreen.tsx`) | `GET /callbacks/{job_id}/status` | **no page needed**: no producer sends `stack` or `popover`, so every tap is watched inline on its card |
 | Watch alert and "Jarvis ran this" cards (`src/components/inbox/WatchAlertCard.tsx`, `AutonomyRanCard.tsx`) | `metadata.watch_alert`; `metadata.card_type: "autonomy_ran"` with `steps`, `rules` (`types/autonomyCards.ts`) | missing |
-| Audio: call recordings, voice clips (`src/components/InboxAudioPlayer.tsx`) | `metadata.audio` | missing |
+| Audio: call recordings, voice clips (`src/components/InboxAudioPlayer.tsx`) | `metadata.audio` | **not ported**: jarvisd writes no `metadata.audio`, so there is nothing to play |
 | Suppressed suggestions, with undo (`SuppressedSuggestionsScreen.tsx`) | `GET`/`DELETE /mobile/proposal-suppressions?household_id=` | missing |
 | Live alerts | push (relay) | the unread badge polls every 30 s |
 | Adapter proposals / deployed | category `adapter_proposal`, `adapter_deployed` | **not ported**: the LoRA pipeline is cut (legacy import skips them), so mobile's screens are dead too |
@@ -37,9 +37,10 @@ confirmation's buttons. Everything else the mobile inbox does
    household; the gateway only lets members reach them. Covered in `tiers_test.go` and
    `TestMemberTiersEndToEnd` (cross-household refusals).
 2. **Card renderer** on the item page: interactive elements (both planes), editable fields,
-   expiry, audio, watch alert and ran cards. Shared parsing goes in `web/admin/src/lib/inbox/`,
-   ported from mobile's parsers with their tests.
-3. **Interactive lists**, the web-view picker and callback results.
+   expiry, watch alert and ran cards. Shared parsing goes in `web/admin/src/lib/inbox/`,
+   ported from mobile's parsers with their tests. A tap is watched until its job finishes (a
+   failure toasts its message) and a card rewritten in place is refetched until its revision moves.
+3. **Interactive lists** and the web-view picker.
 4. **Suppressed suggestions** (a section of the inbox page or of Account).
 5. **Live badge and toast:** poll the unread count more often while the tab is visible, and
    when it goes up, fetch the newest items and toast each one with an "Open" link. No new

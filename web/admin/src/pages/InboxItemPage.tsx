@@ -9,6 +9,9 @@ import { sendNodeAction } from '@/api/chat'
 import Markdown from '@/components/chat/Markdown'
 import { Badge, Button, Card, ErrorState, Skeleton, type ButtonVariant } from '@/components/ui'
 import InboxAttachments from '@/components/inbox/InboxAttachments'
+import InboxCardActions from '@/components/inbox/InboxCardActions'
+import { RanCard, WatchAlertCard } from '@/components/inbox/AutonomyCards'
+import { parseRanCard, parseWatchAlert } from '@/lib/inbox/autonomyCards'
 import { useAuth } from '@/hooks/useAuth'
 import { inboxKeys } from '@/hooks/useInbox'
 import { errorMessage, errorStatus } from '@/lib/errors'
@@ -17,7 +20,10 @@ import { formatServerTime } from '@/lib/time'
 // A confirmation's button_type, as the posting service names it, to a Button variant.
 const actionVariant = (t?: string): ButtonVariant => (t === 'primary' ? 'primary' : t === 'destructive' ? 'danger' : 'secondary')
 
-/** InboxItemPage shows one item: its body as markdown, attachments, sources, and a confirmation's buttons. */
+/**
+ * InboxItemPage shows one item: its body as markdown, an autonomy or watch card, its editable fields
+ * and tappable elements, attachments, sources, and a node confirmation's buttons.
+ */
 export default function InboxItemPage() {
   const { id = '' } = useParams()
   const { activeHouseholdId } = useAuth()
@@ -94,6 +100,8 @@ export default function InboxItemPage() {
 
   const sources = sourcesOf(item)
   const m = item.metadata ?? {}
+  const ran = parseRanCard(m)
+  const watch = parseWatchAlert(m)
   const stats = typeof m.elapsed_seconds === 'number' || typeof m.elapsed_seconds === 'string'
 
   return (
@@ -139,9 +147,16 @@ export default function InboxItemPage() {
         </Card>
       )}
 
-      <Card className="text-body text-text md:p-6">
-        <Markdown>{item.body || item.summary || ''}</Markdown>
-      </Card>
+      {ran && <RanCard data={ran} />}
+      {watch && <WatchAlertCard data={watch} />}
+
+      {(item.body || item.summary) && (
+        <Card className="text-body text-text md:p-6">
+          <Markdown>{item.body || item.summary}</Markdown>
+        </Card>
+      )}
+
+      <InboxCardActions key={item.id} item={item} refresh={() => q.refetch().then((r) => r.data)} />
 
       <InboxAttachments itemId={item.id} attachments={item.attachments ?? []} />
 

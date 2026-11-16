@@ -213,4 +213,46 @@ describe('InboxItemPage (detail)', () => {
     expect(within(document.body).getByText('Done!')).toBeInTheDocument()
     expect(api.markRead).not.toHaveBeenCalled()
   })
+
+  it('shows a fired watch and what an autorun did, with why it was allowed', async () => {
+    api.getInboxItem.mockResolvedValueOnce(
+      it1({
+        id: 'w1',
+        title: 'Price dropped',
+        body: '',
+        summary: '',
+        category: 'watch',
+        is_read: true,
+        metadata: { card_type: 'watch_alert', looking_for: 'Under $400', value: '$379', previous: '$429', source_url: 'https://shop.example/ps5', source_label: 'Northwind Games', state: 'active' },
+      }),
+    )
+    renderAt('/inbox/w1')
+    const watch = await screen.findByTestId('watch-card')
+    expect(within(watch).getByText('$429 → $379')).toBeInTheDocument()
+    expect(within(watch).getByRole('link', { name: /Open Northwind Games/ })).toHaveAttribute('href', 'https://shop.example/ps5')
+  })
+
+  it('shows an autorun card: state, steps and rules', async () => {
+    api.getInboxItem.mockResolvedValueOnce(
+      it1({
+        id: 'a1',
+        title: 'Ran on its own',
+        category: 'autonomy_ran',
+        is_read: true,
+        metadata: {
+          card_type: 'autonomy_ran',
+          state: 'done',
+          source: { kind: 'automation', label: 'Morning lights' },
+          steps: [{ label: 'Turn on the kitchen lights', command: 'control_device', status: 'ok', result: 'On' }],
+          rules: [{ tool: 'control_device', effect: 'allow', scope: 'household', note: 'lights are fine', reason: '', rule_id: 3 }],
+        },
+      }),
+    )
+    renderAt('/inbox/a1')
+    const card = await screen.findByTestId('ran-card')
+    expect(within(card).getByText('Done')).toBeInTheDocument()
+    expect(within(card).getByText('From: Automation · Morning lights')).toBeInTheDocument()
+    expect(within(card).getByText('Turn on the kitchen lights')).toBeInTheDocument()
+    expect(within(card).getByText('Household rule')).toBeInTheDocument()
+  })
 })
