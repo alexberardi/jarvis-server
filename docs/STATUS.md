@@ -28,8 +28,8 @@ in core, `IJarvisDaemon` in the SDK, agents and daemons on desktop nodes. Replac
 - [ ] The Discord and Slack packages (jarvis-channel-discord, jarvis-channel-slack) and the
   mobile card (M1) are built; both connected to their services through a sandbox node on
   2026-11-15 (the user: link, messages). The Pantry is redeployed with SDK 0.18.0. Open: the
-  submissions, voice clips (K5: core's half is built, a WAV in and text out; the SDK and the
-  packages are next), closing #649. Not yet run for real: a daemon on a Pi, Windows or macOS.
+  submissions, voice clips (K5: core's half and SDK 0.19.0, pinned here, are built, a WAV in and
+  text out; the packages' PRs and a real clip are next), closing #649. Not yet run for real: a daemon on a Pi, Windows or macOS.
 
 ### Workflow skills (2026-11-12)
 
