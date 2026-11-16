@@ -589,3 +589,17 @@ func TestOpenedDocument(t *testing.T) {
 		t.Fatalf("nothing after the document opened: %+v", p)
 	}
 }
+
+// The clicks on the way to the stop control aren't steps.
+func TestTrimStop(t *testing.T) {
+	evs := []desktopEvent{
+		{Kind: "click", App: "libreoffice-calc", Element: &desktopElement{Role: "cell", Name: "October row, Amount column"}},
+		{Kind: "key", App: "libreoffice-calc", Key: "ctrl+s"},
+		{Kind: "click", App: "libreoffice-calc"},
+		{Kind: "click", App: "org.gnome.Nautilus"},
+		{Kind: "click"},
+	}
+	if got := trimStop(evs); len(got) != 3 {
+		t.Fatalf("kept %d", len(got))
+	}
+}

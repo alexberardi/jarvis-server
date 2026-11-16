@@ -839,6 +839,24 @@ func openedDocument(start []desktopStartWindow, evs []desktopEvent) ([]desktopEv
 	return evs, nil
 }
 
+// trimStop drops the clicks a recording ends with on the way to stopping it: clicks that named
+// nothing, outside the app the last named or typed event was in (the tray, a window passed
+// over). A nameless click in that app stays: it may be the task's last step.
+func trimStop(evs []desktopEvent) []desktopEvent {
+	work, named := "", false
+	for _, e := range evs {
+		if e.Value != "" || e.Key != "" || (e.Element != nil && e.Element.Name != "") {
+			work, named = e.App, true
+		}
+	}
+	// A recording with nothing named (no accessibility context) is all nameless clicks.
+	n := len(evs)
+	for named && n > 1 && evs[n-1].Kind == "click" && evs[n-1].App != work && (evs[n-1].Element == nil || evs[n-1].Element.Name == "") {
+		n--
+	}
+	return evs[:n]
+}
+
 func eventsPrompt(lines []string, cands []paramCandidate, narration, instructions string) string {
 	var b strings.Builder
 	if n := oneLine(narration); n != "" {
@@ -1691,7 +1709,7 @@ func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w Taug
 		}
 		// Before clicks are named by sight: a click that named nothing on the way to the
 		// document is told from work by having no name.
-		evs, opened := openedDocument(desktopStart(rec.Trace), evs)
+		evs, opened := openedDocument(desktopStart(rec.Trace), trimStop(evs))
 		note = m.nameClicksBySight(ctx, *rec, evs)
 		cands := desktopParamCandidates(evs)
 		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
