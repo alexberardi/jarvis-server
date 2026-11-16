@@ -99,6 +99,9 @@ func TestChecks(t *testing.T) {
 		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(3), "idle"}}}}
 	paused := State{Watch: &Watch{Interrupt: "user_input", Interrupted: at(3), Actions: []time.Time{at(2), at(9)},
 		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(4), "paused: New note"}, {at(8), "controlling: Save"}}}}
+	// The action that was under way when the stop fired lands a moment after it.
+	inFlight := State{Watch: &Watch{Interrupt: "stop", Interrupted: at(2), After: 1, Actions: []time.Time{at(3)},
+		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(4), "idle"}}}}
 	tests := []struct {
 		name  string
 		check Check
@@ -124,6 +127,7 @@ func TestChecks(t *testing.T) {
 		{"no_note fails", Check{Kind: "no_note"}, &st, "a note was saved: Groceries"},
 		{"stopped", Check{Kind: "stopped"}, &stopped, ""},
 		{"stopped, an action after", Check{Kind: "stopped"}, &paused, "1 actions landed after the stop"},
+		{"stopped, the action under way lands", Check{Kind: "stopped"}, &inFlight, ""},
 		{"paused", Check{Kind: "paused"}, &paused, ""},
 		{"paused never", Check{Kind: "paused"}, &stopped, "never showed paused"},
 		{"indicator", Check{Kind: "indicator"}, &stopped, ""},

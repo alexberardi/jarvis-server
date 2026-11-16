@@ -457,7 +457,10 @@ func (ch Check) evalWatch(w *Watch) string {
 		return n
 	}
 	if ch.Kind == "stopped" {
-		if n := after(time.Time{}); n > 0 {
+		// The stop fires as an action begins, and that action is logged when it ends: it was
+		// already under way, so it may land a moment after the stop (3 of 12 runs on
+		// 2026-11-16, each with that one action and no other). Any call past it is the failure.
+		if n := len(w.Actions) - max(w.After, 1); n > 0 && after(time.Time{}) > 0 {
 			return fmt.Sprintf("%d actions landed after the stop", n)
 		}
 		if last.kind() != "idle" {

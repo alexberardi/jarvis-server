@@ -35,6 +35,7 @@ type Watch struct {
 	Actions     []time.Time `json:"actions"` // successful computer_act calls, by their log time
 	Interrupt   string      `json:"interrupt,omitempty"`
 	Interrupted time.Time   `json:"interrupted,omitempty"`
+	After       int         `json:"after,omitempty"` // the action whose beginning fired the interrupt
 	FireErr     string      `json:"fire_error,omitempty"`
 }
 
@@ -86,7 +87,7 @@ func (w watcher) run(ctx context.Context, in *Interrupt) *Watch {
 		}
 		out.Actions = append(out.Actions, w.acts()...)
 		if in != nil && out.Interrupted.IsZero() && begun >= after {
-			out.Interrupt, out.Interrupted = in.Do, w.clk.now()
+			out.Interrupt, out.Interrupted, out.After = in.Do, w.clk.now(), after
 			if err := w.fire(ctx); err != nil {
 				out.FireErr = err.Error()
 			}
