@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/auth/AuthContext'
 import type { NodeLiveness } from '@/api/nodes'
 import ComputerStep from './ComputerStep'
+import { LINKS } from '@/lib/addons'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 const api = vi.hoisted(() => ({ getNodeLiveness: vi.fn(), getPairings: vi.fn(), approvePairing: vi.fn() }))
@@ -113,8 +114,9 @@ describe('wizard: This computer (install plan 3.3)', () => {
     fireEvent.click(ext)
     expect(await screen.findByTestId('extension-state')).toHaveTextContent('Waiting for the extension to connect')
     expect(await screen.findByText('Office-PC', { selector: 'strong' })).toBeInTheDocument()
-    // No store listing yet: the guide instead of a dead link.
-    expect(screen.getByRole('link', { name: 'How browser control works' })).toBeInTheDocument()
+    // A browser it can't name (jsdom) gets both store listings.
+    expect(screen.getByRole('link', { name: 'Firefox Add-ons' })).toHaveAttribute('href', LINKS.firefoxStore)
+    expect(screen.getByRole('link', { name: 'Chrome Web Store' })).toHaveAttribute('href', LINKS.chromeStore)
 
     api.getNodeLiveness.mockResolvedValue([agent(true, 'connected')])
     await waitFor(() => expect(screen.getByTestId('extension-state')).toHaveTextContent('The extension is connected'), { timeout: 5000 })
