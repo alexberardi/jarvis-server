@@ -3,6 +3,7 @@ package cc
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/channels"
 	"github.com/alexberardi/jarvis-server/internal/modules/recipes"
+	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 	"github.com/alexberardi/jarvis-server/internal/platform/authn"
 	"github.com/alexberardi/jarvis-server/internal/platform/httpx"
 )
@@ -29,6 +31,8 @@ const (
 	// crosses the agent in. Photos are shrunk here to the chat's limit, so a package sends
 	// them as it got them when they fit.
 	channelBodyMax = 15 << 20
+	// channelClipMax is the longest voice clip a message may carry.
+	channelClipMax = 2 * time.Minute
 )
 
 // channelConversations remembers each person's conversation in each place, in memory: a
@@ -107,7 +111,9 @@ func channelConvKey(l channels.Link, place string) string {
 }
 
 // handleChannelMessage answers what a linked account sent: {"linked": true, "reply": "..."},
-// or "failed" with what to tell them. An account that isn't linked gets {"linked": false} and
+// or "failed" with what to tell them. A voice clip comes as "audio_wav" (a 16-bit PCM WAV,
+// base64: the package converts whatever its service records) and is answered in text, with
+// what was heard in "heard". An account that isn't linked gets {"linked": false} and
 // the daemon says nothing: strangers are ignored without a word.
 func (m *Module) handleChannelMessage(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
 	provider, ok := m.channelCall(w, r, n)
@@ -127,8 +133,9 @@ func (m *Module) handleChannelMessage(w http.ResponseWriter, r *http.Request, n 
 	if _, present := b.m["images"]; present && raw == nil {
 		b.fail("images", "Input should be a list")
 	}
-	if strings.TrimSpace(text) == "" && len(raw) == 0 {
-		b.fail("text", "A message needs text or an image")
+	clip, _ := b.str("audio_wav", false)
+	if strings.TrimSpace(text) == "" && len(raw) == 0 && clip == "" {
+		b.fail("text", "A message needs text, an image or a voice clip")
 	}
 	if !b.done(w) {
 		return
@@ -147,12 +154,23 @@ func (m *Module) handleChannelMessage(w http.ResponseWriter, r *http.Request, n 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelTurnTimeout)
 	defer cancel()
+	out := map[string]any{"linked": true}
+	if clip != "" {
+		heard, msg := m.channelClip(ctx, clip)
+		if msg != "" {
+			failed(msg)
+			return
+		}
+		out["heard"] = heard
+		text = strings.TrimSpace(text + "\n" + heard)
+	}
 	key := channelConvKey(l, place)
 	res, err := m.ChatText(ctx, authn.User{ID: l.UserID, HouseholdID: l.HouseholdID}, ChatTextRequest{
 		Message: text, NodeID: l.NodeID, HouseholdID: l.HouseholdID, ConversationID: m.channelConvs.get(key), Images: images})
 	if err != nil {
 		m.deps.Log.Warn("channels: a turn failed", "provider", provider, "user", l.UserID, "err", err)
-		failed("Jarvis could not answer that: " + truncateRunes(err.Error(), 300))
+		out["failed"] = "Jarvis could not answer that: " + truncateRunes(err.Error(), 300)
+		httpx.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 	m.channelConvs.set(key, res.ConversationID)
@@ -160,7 +178,39 @@ func (m *Module) handleChannelMessage(w http.ResponseWriter, r *http.Request, n 
 	if reply == "" {
 		reply = "(no reply)"
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"linked": true, "reply": reply})
+	out["reply"] = reply
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// channelClip transcribes a message's voice clip. failure is what to tell the sender.
+func (m *Module) channelClip(ctx context.Context, b64 string) (heard, failure string) {
+	wav, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", "I couldn't read that voice clip."
+	}
+	samples, err := stt.DecodeWAV(wav)
+	if err != nil || len(samples) == 0 {
+		return "", "I couldn't read that voice clip."
+	}
+	if len(samples) > int(channelClipMax.Seconds())*stt.SampleRate {
+		return "", "That clip is too long. Keep it under two minutes."
+	}
+	const off = "I can't listen to voice clips: speech to text is off on this Jarvis."
+	if m.STT == nil {
+		return "", off
+	}
+	res, err := m.STT.Transcribe(ctx, wav, stt.TranscribeOptions{})
+	switch {
+	case errors.Is(err, stt.ErrEngineUnavailable):
+		return "", off
+	case err != nil:
+		m.deps.Log.Warn("channels: could not transcribe a clip", "err", err)
+		return "", "I couldn't make out that voice clip. Try again."
+	}
+	if heard = strings.TrimSpace(res.Text); heard == "" {
+		return "", "I didn't hear anything in that voice clip."
+	}
+	return heard, ""
 }
 
 // channelImages shrinks a message's photos ({"mime", "data"} as the mobile chat's) to what the
@@ -189,7 +239,7 @@ func channelImages(raw []any) (out []any, failure string) {
 }
 
 // handleChannelCommand runs one of the commands every channel has, whatever a person types to
-// reach it there: link, new, node, voice, notify, status. The answer is {"text", "private"};
+// reach it there: link, new, node, notify, status. The answer is {"text", "private"};
 // private is for the asker's eyes only where the service can do that. Unlike a message it
 // always answers, because the person asked directly.
 func (m *Module) handleChannelCommand(w http.ResponseWriter, r *http.Request, n *nodeCtx) {
@@ -259,17 +309,6 @@ func (m *Module) handleChannelCommand(w http.ResponseWriter, r *http.Request, n 
 			}
 		}
 		say("I don't know that node. Yours are: " + strings.Join(nodes, ", ") + ".")
-	case "voice":
-		mode := strings.ToLower(arg("mode"))
-		if mode != channels.VoiceAuto && mode != channels.VoiceAlways && mode != channels.VoiceNever {
-			say("Voice replies can be auto, always or never.")
-			return
-		}
-		if _, err := m.channelStore.SetPrefs(ctx, l.HouseholdID, provider, l.UserID, channels.Prefs{VoiceReplies: &mode}); err != nil {
-			say(wrong)
-			return
-		}
-		say("Voice replies: " + mode + ".")
 	case "notify":
 		state := strings.ToLower(arg("state"))
 		if state != "on" && state != "off" {
@@ -291,7 +330,7 @@ func (m *Module) handleChannelCommand(w http.ResponseWriter, r *http.Request, n 
 		if l.Proactive {
 			pro = "on"
 		}
-		say(fmt.Sprintf("Linked. Node: %s. Voice replies: %s. Reminder messages: %s.", l.NodeID, l.VoiceReplies, pro))
+		say(fmt.Sprintf("Linked. Node: %s. Reminder messages: %s.", l.NodeID, pro))
 	default:
 		say("I don't know that command.")
 	}

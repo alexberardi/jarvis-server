@@ -16,13 +16,6 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
 )
 
-// Voice reply modes (Link.VoiceReplies).
-const (
-	VoiceAuto   = "auto"   // a voice clip answers a voice clip
-	VoiceAlways = "always" // every answer also comes as a clip
-	VoiceNever  = "never"
-)
-
 // OnlineFor is how recently a provider's daemon must have called in to count as online.
 const OnlineFor = time.Minute
 
@@ -33,14 +26,13 @@ func ValidProvider(s string) bool { return providerRE.MatchString(s) }
 
 // Link ties an account on a provider to a Jarvis user in one household.
 type Link struct {
-	HouseholdID  string
-	Provider     string
-	ExternalID   string
-	UserID       int64
-	NodeID       string // the node the user's turns run through
-	VoiceReplies string
-	Proactive    bool // reminders may be sent unasked
-	CreatedAt    time.Time
+	HouseholdID string
+	Provider    string
+	ExternalID  string
+	UserID      int64
+	NodeID      string // the node the user's turns run through
+	Proactive   bool   // reminders may be sent unasked
+	CreatedAt   time.Time
 }
 
 // Provider is a service whose daemon has called in.
@@ -63,13 +55,15 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-const linkCols = `household_id, provider, external_user_id, user_id, node_id, voice_replies, proactive, created_at`
+// The table's voice_replies column is unused: answers are text only (docs/CHANNELS.md), and a
+// drop would break a rollback to the release before.
+const linkCols = `household_id, provider, external_user_id, user_id, node_id, proactive, created_at`
 
 func scanLink(row interface{ Scan(...any) error }) (Link, error) {
 	var l Link
 	var created string
 	var pro int
-	if err := row.Scan(&l.HouseholdID, &l.Provider, &l.ExternalID, &l.UserID, &l.NodeID, &l.VoiceReplies, &pro, &created); err != nil {
+	if err := row.Scan(&l.HouseholdID, &l.Provider, &l.ExternalID, &l.UserID, &l.NodeID, &pro, &created); err != nil {
 		return Link{}, err
 	}
 	l.Proactive = pro != 0
@@ -80,9 +74,6 @@ func scanLink(row interface{ Scan(...any) error }) (Link, error) {
 // Put links an account to a user, replacing the user's earlier link on that provider in the
 // household and any other user's claim on the same account.
 func (s *Store) Put(ctx context.Context, l Link) error {
-	if l.VoiceReplies == "" {
-		l.VoiceReplies = VoiceAuto
-	}
 	tx, err := s.DB.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -92,8 +83,8 @@ func (s *Store) Put(ctx context.Context, l Link) error {
 		AND (user_id = ? OR external_user_id = ?)`, l.HouseholdID, l.Provider, l.UserID, l.ExternalID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO cc_channel_links (`+linkCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		l.HouseholdID, l.Provider, l.ExternalID, l.UserID, l.NodeID, l.VoiceReplies, l.Proactive,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cc_channel_links (`+linkCols+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		l.HouseholdID, l.Provider, l.ExternalID, l.UserID, l.NodeID, l.Proactive,
 		s.now().UTC().Format(time.RFC3339)); err != nil {
 		return err
 	}
@@ -116,9 +107,8 @@ func (s *Store) ByUser(ctx context.Context, hh, provider string, userID int64) (
 
 // Prefs changes a link's settings; nil fields stay as they are.
 type Prefs struct {
-	NodeID       *string
-	VoiceReplies *string
-	Proactive    *bool
+	NodeID    *string
+	Proactive *bool
 }
 
 // SetPrefs updates the user's link, reporting whether they have one.
@@ -130,14 +120,11 @@ func (s *Store) SetPrefs(ctx context.Context, hh, provider string, userID int64,
 	if p.NodeID != nil {
 		l.NodeID = *p.NodeID
 	}
-	if p.VoiceReplies != nil {
-		l.VoiceReplies = *p.VoiceReplies
-	}
 	if p.Proactive != nil {
 		l.Proactive = *p.Proactive
 	}
-	_, err = s.DB.Write.ExecContext(ctx, `UPDATE cc_channel_links SET node_id = ?, voice_replies = ?, proactive = ?
-		WHERE household_id = ? AND provider = ? AND user_id = ?`, l.NodeID, l.VoiceReplies, l.Proactive, hh, provider, userID)
+	_, err = s.DB.Write.ExecContext(ctx, `UPDATE cc_channel_links SET node_id = ?, proactive = ?
+		WHERE household_id = ? AND provider = ? AND user_id = ?`, l.NodeID, l.Proactive, hh, provider, userID)
 	return true, err
 }
 

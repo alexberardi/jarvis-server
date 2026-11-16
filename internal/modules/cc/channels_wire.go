@@ -73,7 +73,7 @@ func (m *Module) channelEntry(ctx context.Context, hh string, p channels.Provide
 		return nil, err
 	}
 	if ok {
-		out["linked"], out["node_id"], out["voice_replies"], out["proactive"] = true, l.NodeID, l.VoiceReplies, l.Proactive
+		out["linked"], out["node_id"], out["proactive"] = true, l.NodeID, l.Proactive
 	}
 	return out, nil
 }
@@ -162,7 +162,7 @@ func (m *Module) handleChannelLinkCode(w http.ResponseWriter, r *http.Request, u
 		"code": m.channelCodes.New(hh, provider, u.ID, nodeID), "expires_in": int(channels.CodeTTL.Seconds())})
 }
 
-// handleChannelPrefs changes the caller's own link: node, voice replies, reminders.
+// handleChannelPrefs changes the caller's own link: node, reminders.
 func (m *Module) handleChannelPrefs(w http.ResponseWriter, r *http.Request, u authn.User) {
 	ctx := r.Context()
 	hh, provider, ok := m.channelMember(w, r, u, true)
@@ -176,12 +176,6 @@ func (m *Module) handleChannelPrefs(w http.ResponseWriter, r *http.Request, u au
 	var p channels.Prefs
 	if v, present := b.optStrPtr("node_id"); present {
 		p.NodeID = v
-	}
-	if v, present := b.optStrPtr("voice_replies"); present && v != nil {
-		if *v != channels.VoiceAuto && *v != channels.VoiceAlways && *v != channels.VoiceNever {
-			b.fail("voice_replies", "Input should be 'auto', 'always' or 'never'")
-		}
-		p.VoiceReplies = v
 	}
 	if _, present := b.m["proactive"]; present {
 		if v, ok := b.boolean("proactive"); ok {
