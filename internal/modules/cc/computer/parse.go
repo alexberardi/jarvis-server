@@ -63,7 +63,11 @@ func parseReply(s string) (Reply, error) {
 		if json.Unmarshal([]byte(repairSlips(s[i:j+1])), &r) != nil {
 			fixed, ok := closeTruncated(repairSlips(strings.TrimRight(s[i:], " \t\r\n")))
 			if !ok || json.Unmarshal([]byte(fixed), &r) != nil {
-				return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
+				rest, thought, ok := dropBrokenThought(s[i : j+1])
+				if !ok || json.Unmarshal([]byte(rest), &r) != nil {
+					return Reply{}, fmt.Errorf("the answer is not valid JSON: %v", err)
+				}
+				r.Thought = thought
 			}
 		}
 	}
@@ -107,6 +111,15 @@ func parseReply(s string) (Reply, error) {
 			}
 		}
 		r.Actions = splitLongTypes(r.Actions)
+		for _, a := range r.Actions {
+			// A question written as an action: Qwen3.5 9B did it at a checkout, was told only
+			// that the kind is unknown, and answered the same again (2026-11-15).
+			if a.Kind == "ask" {
+				return Reply{}, errors.New(`there is no "ask" action. To pay, order, send or delete, ` +
+					`put the action itself in "actions" (press the button): Jarvis asks the user before ` +
+					`it runs. For any other question, answer {"ask": "<the question>", "reason": "unclear"}`)
+			}
+		}
 		if err := computeruse.ValidateBatch(r.Actions); err != nil {
 			return Reply{}, fmt.Errorf(`"actions": %v`, err)
 		}
@@ -226,4 +239,27 @@ func closeTruncated(s string) (string, bool) {
 		}
 	}
 	return string(b), true
+}
+
+// afterThought finds where an answer's next key starts after its thought.
+var afterThought = regexp.MustCompile(`",\s*"(actions|checkout|done|ask)"\s*:`)
+
+// dropBrokenThought reads an answer whose thought quotes something without escaping it (Qwen3.5 9B
+// quoting the prompt's "checkout" back, 2026-11-16): the thought ends where the rest of the answer
+// reads as JSON without it. It returns that rest as an object and the thought as written.
+func dropBrokenThought(s string) (rest, thought string, ok bool) {
+	open := regexp.MustCompile(`^\{\s*"thought"\s*:\s*"`).FindString(s)
+	if open == "" {
+		return "", "", false
+	}
+	for _, m := range afterThought.FindAllStringIndex(s, -1) {
+		if m[0] < len(open) {
+			continue
+		}
+		rest = "{" + strings.TrimLeft(s[m[0]+2:], " \t\r\n")
+		if json.Valid([]byte(rest)) {
+			return rest, s[len(open):m[0]], true
+		}
+	}
+	return "", "", false
 }
