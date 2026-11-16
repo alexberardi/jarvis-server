@@ -11,10 +11,14 @@ import type {
   WorkflowPut,
 } from '@/api/workflows'
 
-/** A piece of a sentence; bold is what the step acts on ("Click **Download CSV**"). */
+/**
+ * A piece of a sentence; bold is what the step acts on ("Click **Download CSV**"), value is
+ * what it types or chooses, which may change each run.
+ */
 export interface Part {
   text: string
   bold?: boolean
+  value?: boolean
 }
 
 function host(url: string | undefined): string {
@@ -41,10 +45,10 @@ export function stepSentence(s: WStep): Part[] {
       break
     case 'type':
     case 'set_value':
-      if (a.text) return [{ text: `Type ${a.text}` }]
+      if (a.text) return [{ text: 'Type ' }, { text: a.text, value: true }]
       break
     case 'select':
-      if (a.text) return [{ text: 'Choose ' }, { text: a.text, bold: true }]
+      if (a.text) return [{ text: 'Choose ' }, { text: a.text, bold: true, value: true }]
       break
     case 'keypress':
       if (a.keys?.length) return [{ text: `Press ${a.keys.join('+')}` }]
@@ -158,7 +162,7 @@ export interface DraftStep {
 }
 
 /**
- * A value that may change each run ("Which of these change each time?"): one of the workflow's
+ * A value that may change each run ("What changes each time"): one of the workflow's
  * params (from.param, its saved name), or a literal a step types (from.step, that step's uid).
  * on means it is a param when saved, under name.
  */

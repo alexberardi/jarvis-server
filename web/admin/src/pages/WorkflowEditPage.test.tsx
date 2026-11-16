@@ -113,15 +113,15 @@ describe('WorkflowEditPage', () => {
   it('params: a value turned off goes back to its example, one turned on is named in its step', async () => {
     renderPage()
     await screen.findAllByTestId('step')
-    const section = screen.getByRole('region', { name: 'Which of these change each time?' })
-    const month = within(section).getByRole('switch', { name: '2026-09 changes each time' })
-    const account = within(section).getByRole('switch', { name: 'checking changes each time' })
-    expect(month).toBeChecked()
-    expect(account).not.toBeChecked()
+    const section = screen.getByRole('region', { name: 'What changes each time' })
+    // The value Jarvis found is listed; the one it didn't is a button in its step.
+    expect(within(section).getByLabelText('Name for 2026-09')).toHaveValue('month')
+    expect(within(section).queryByLabelText('Name for checking')).not.toBeInTheDocument()
 
-    fireEvent.click(month)
+    fireEvent.click(within(section).getByRole('button', { name: '2026-09 stays the same' }))
     expect(sentence(2)).toBe('Type 2026-09')
-    fireEvent.click(account)
+    expect(within(steps()[2]).getByRole('button', { name: 'Make 2026-09 change each time' })).toBeInTheDocument()
+    fireEvent.click(within(steps()[3]).getByRole('button', { name: 'Make checking change each time' }))
     fireEvent.change(within(section).getByLabelText('Name for checking'), { target: { value: 'which_account' } })
     expect(sentence(3)).toBe('Choose {which_account}')
 
@@ -137,11 +137,11 @@ describe('WorkflowEditPage', () => {
   it('params: renaming one renames it in the steps; a bad or repeated name blocks Save', async () => {
     renderPage()
     await screen.findAllByTestId('step')
-    const section = screen.getByRole('region', { name: 'Which of these change each time?' })
+    const section = screen.getByRole('region', { name: 'What changes each time' })
     fireEvent.change(within(section).getByLabelText('Name for 2026-09'), { target: { value: 'period' } })
     expect(sentence(2)).toBe('Type {period}')
 
-    fireEvent.click(within(section).getByRole('switch', { name: 'checking changes each time' }))
+    fireEvent.click(within(steps()[3]).getByRole('button', { name: 'Make checking change each time' }))
     fireEvent.change(within(section).getByLabelText('Name for checking'), { target: { value: 'period' } })
     expect(screen.getByRole('alert')).toHaveTextContent('Two values are named "period".')
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -190,7 +190,7 @@ describe('WorkflowEditPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
     expect(steps()).toHaveLength(5)
     // The deleted step's typed value is no longer a candidate.
-    expect(screen.queryByRole('switch', { name: 'checking changes each time' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Make checking change each time' })).not.toBeInTheDocument()
 
     const body = await save()
     expect(body.name).toBe('Monthly statement')

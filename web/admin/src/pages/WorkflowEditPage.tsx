@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowLeft, ArrowUp, Eye, GripVertical, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Eye, GripVertical, Plus, RefreshCw, ShieldAlert, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { deleteWorkflow, relearnWorkflow, saveWorkflow } from '@/api/workflows'
 import type { ParamKind, Skill, SuccessCheck, TaughtWorkflow, WStep, WorkflowPut } from '@/api/workflows'
@@ -106,6 +106,7 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
 
   const shown = applyParams(steps, cands)
   const live = cands.filter((c) => !('step' in c.from) || steps.some((s) => s.uid === (c.from as { step: string }).step))
+  const on = live.filter((c) => c.on)
   const problem = !name.trim() ? 'The workflow needs a name.' : !steps.length ? 'A workflow needs at least one step.' : paramError(live)
 
   const save = useMutation({
@@ -214,10 +215,6 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
         </Banner>
       )}
 
-      {edit && !isDraft && <RunPanel wf={wf} onRevision={(r) => onDraft({ put: r.draft, from: 'note', changes: r.changes ?? [], summary: r.summary })} />}
-
-      {/* The run panel has a form of its own, so it sits outside this one: a form inside a
-          form submits natively in a browser (the page reloads and nothing runs). */}
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -232,6 +229,69 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
           </h2>
           <Input label="Workflow name" value={name} disabled={!edit} maxLength={100} onChange={(e) => setName(e.target.value)} />
           <Switch label="Share with the household" checked={shared} disabled={!edit} onCheckedChange={setShared} />
+        </Card>
+
+        <Card as="section" aria-labelledby="wf-params">
+          <CardHeader
+            id="wf-params"
+            title="What changes each time"
+            description={
+              on.length
+                ? 'Jarvis asks for these before each run.'
+                : edit && live.length
+                  ? 'Nothing yet. Select a value in a step below, like what it types, to be asked for it before each run.'
+                  : 'Nothing: every run does exactly the same.'
+            }
+            className={on.length ? undefined : 'mb-0'}
+          />
+          {on.length > 0 && (
+            <ul className="space-y-3">
+              {on.map((c) => (
+                <li key={c.key} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <span className="min-w-0 flex-1 truncate text-body text-text">
+                    {c.example ? (
+                      <>
+                        <span className="text-text-muted">Recorded as </span>
+                        {c.example}
+                      </>
+                    ) : (
+                      `{${c.name}}`
+                    )}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      aria-label={`Name for ${c.example || c.name}`}
+                      wrapperClassName="flex-1 sm:w-40 sm:flex-none"
+                      value={c.name}
+                      disabled={!edit}
+                      onChange={(e) => patchCand(c.key, { name: e.target.value.trim() })}
+                    />
+                    <Select
+                      aria-label={`Kind of ${c.example || c.name}`}
+                      wrapperClassName="w-28"
+                      options={KINDS.map((k) => ({ value: k, label: k }))}
+                      value={c.kind}
+                      disabled={!edit}
+                      onValueChange={(v) => patchCand(c.key, { kind: v as ParamKind })}
+                    />
+                    {edit && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`${c.example || c.name} stays the same`}
+                        title={c.example ? 'Stop asking: use the recorded value' : 'It has no recorded value to go back to'}
+                        // A param with no example has nothing to fall back to.
+                        disabled={!c.example}
+                        onClick={() => patchCand(c.key, { on: false })}
+                      >
+                        <X size={16} aria-hidden />
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         <GoalCard skill={skill} edit={edit} onChange={setSkill} />
@@ -288,7 +348,15 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
                   <span className="mt-px w-5 shrink-0 text-body text-text-muted tabular-nums">{i + 1}.</span>
                   <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-2">
                     <p className="col-span-2 text-body text-text [overflow-wrap:anywhere]">
-                      <Sentence parts={stepSentence(d.step)} />
+                      <Sentence
+                        parts={stepSentence(d.step)}
+                        onValue={
+                          // This step's own value, or one that was a value before.
+                          edit && offValue(live, raw.uid, d.step.action?.text)
+                            ? (text) => patchCand(offValue(live, raw.uid, text)!.key, { on: true })
+                            : undefined
+                        }
+                      />
                       {risky && (
                         <Badge tone="warning" title={riskLabel(d.step.risk)} className="ml-2 align-middle">
                           <ShieldAlert size={12} aria-hidden /> Asks first
@@ -400,52 +468,6 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
           )}
         </Card>
 
-        <Card as="section" aria-labelledby="wf-params">
-          <CardHeader
-            id="wf-params"
-            title="Which of these change each time?"
-            description={live.length === 0 ? 'Nothing this workflow types changes between runs.' : undefined}
-            className={live.length === 0 ? 'mb-0' : undefined}
-          />
-          {live.length > 0 && (
-            <ul className="space-y-3">
-              {live.map((c) => (
-                <li key={c.key} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <Switch
-                      aria-label={`${c.example || c.name} changes each time`}
-                      checked={c.on}
-                      // A param with no example has nothing to fall back to.
-                      disabled={!edit || (c.on && !c.example)}
-                      onCheckedChange={(on) => patchCand(c.key, { on })}
-                    />
-                    <span className="truncate font-mono text-small text-text">{c.example || `{${c.name}}`}</span>
-                  </div>
-                  {c.on && (
-                    <div className="flex gap-2">
-                      <Input
-                        aria-label={`Name for ${c.example || c.name}`}
-                        wrapperClassName="flex-1 sm:w-40 sm:flex-none"
-                        value={c.name}
-                        disabled={!edit}
-                        onChange={(e) => patchCand(c.key, { name: e.target.value.trim() })}
-                      />
-                      <Select
-                        aria-label={`Kind of ${c.example || c.name}`}
-                        wrapperClassName="w-28"
-                        options={KINDS.map((k) => ({ value: k, label: k }))}
-                        value={c.kind}
-                        disabled={!edit}
-                        onValueChange={(v) => patchCand(c.key, { kind: v as ParamKind })}
-                      />
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
         <Card as="section" aria-labelledby="wf-success" className="space-y-4">
           <CardHeader id="wf-success" title="I'll know it worked when …" className="mb-2" />
           <p className="text-body text-text" data-testid="success-sentence">
@@ -505,8 +527,17 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
           </div>
         )}
       </form>
+
+      {/* Last, because everything above feeds it; and outside the form above, because a form
+          inside a form submits natively in a browser (the page reloads and nothing runs). */}
+      {edit && !isDraft && <RunPanel wf={wf} onRevision={(r) => onDraft({ put: r.draft, from: 'note', changes: r.changes ?? [], summary: r.summary })} />}
     </div>
   )
+}
+
+/** offValue is the candidate a step's value could become: not yet one that changes each time. */
+function offValue(cands: Candidate[], uid: string, text: string | undefined) {
+  return cands.find((c) => !c.on && (('step' in c.from && c.from.step === uid) || (!!text && c.example === text)))
 }
 
 /** expectFixed: the recording proved this expectation (the page a step opened, a download), so it isn't typed over. */

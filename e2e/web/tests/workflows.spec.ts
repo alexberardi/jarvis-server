@@ -40,8 +40,8 @@ test('edits a workflow and the server keeps the edit', async ({ page }) => {
     await expect(steps.nth(1).locator('strong')).toHaveText('Statements')
     await expect(steps.nth(2)).toContainText('Type {month}')
 
-    const params = page.getByRole('region', { name: 'Which of these change each time?' })
-    await params.getByRole('switch', { name: 'checking changes each time' }).check()
+    const params = page.getByRole('region', { name: 'What changes each time' })
+    await steps.nth(3).getByRole('button', { name: 'Make checking change each time' }).click()
     await params.getByLabel('Name for checking').fill('account')
     await expect(steps.nth(3)).toContainText('Choose {account}')
     await page.getByRole('button', { name: 'Move step 5 up' }).click()
