@@ -36,7 +36,7 @@ func TestStoreLinkLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	l, ok, _ := s.ByExternal(ctx, "hh", "discord", "d1")
-	if !ok || l.UserID != 7 || l.VoiceReplies != channels.VoiceAuto || l.Proactive || l.Provider != "discord" {
+	if !ok || l.UserID != 7 || l.Proactive || l.Provider != "discord" {
 		t.Fatalf("link %+v", l)
 	}
 
@@ -62,12 +62,12 @@ func TestStoreLinkLifecycle(t *testing.T) {
 	}
 
 	// Preferences change only what is given.
-	on, never := true, channels.VoiceNever
-	if ok, err := s.SetPrefs(ctx, "hh", "discord", 8, channels.Prefs{Proactive: &on, VoiceReplies: &never}); !ok || err != nil {
+	on := true
+	if ok, err := s.SetPrefs(ctx, "hh", "discord", 8, channels.Prefs{Proactive: &on}); !ok || err != nil {
 		t.Fatalf("set prefs %v %v", ok, err)
 	}
 	l, _, _ = s.ByUser(ctx, "hh", "discord", 8)
-	if !l.Proactive || l.VoiceReplies != channels.VoiceNever || l.NodeID != "n1" {
+	if !l.Proactive || l.NodeID != "n1" {
 		t.Fatalf("prefs %+v", l)
 	}
 	if ok, _ := s.SetPrefs(ctx, "hh", "discord", 99, channels.Prefs{Proactive: &on}); ok {

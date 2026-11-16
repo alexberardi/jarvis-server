@@ -22,7 +22,7 @@ it could hopefully work across multiple services like slack, telegram, discord, 
   workspace, on a desktop node and a Pi, and adding Slack needed no change to jarvisd or the Go
   agent.
 - **Constraint:** no service's name, client library or limits in core. Generic building blocks
-  are fine when useful on their own: `IJarvisDaemon`, agents on desktop nodes, an Opus package,
+  are fine when useful on their own: `IJarvisDaemon`, agents on desktop nodes,
   the channels contract ([decision](decisions/2026-11-13-channels-are-packages.md)).
 - **Who builds it:** this project, all of it, using parts of #649 and jarvis-node-mobile#158 with
   credit to their author. Both PRs are closed with an explanation once the replacement exists.
@@ -56,11 +56,15 @@ it could hopefully work across multiple services like slack, telegram, discord, 
 - **Desktop nodes run agents and daemons too** (user, 2026-11-13), bundled with this work.
 - **One host node per daemon** (user, 2026-11-13): the node the package was installed on. A second
   install of the same daemon package in the household is refused. No failover in this version.
-- **Core decodes voice clips** (user, 2026-11-13): libopus is acceptable in core as a generic,
-  built-in audio package (`internal/audio/`, loaded with purego, naming no service), not as part of
-  a channel. #649's `opusnative` and Ogg code are the starting point. A package hands core the
-  clip's bytes and content type. It must load on every install target, not only the container
-  image; where it is missing, only clips say so.
+- **The package converts voice clips; core takes a WAV** (user, 2026-11-15; replaces "core decodes
+  clips with libopus" of 2026-11-13). Services record differently (Discord Ogg Opus; Slack WebM
+  Opus or MP4 AAC, which libopus cannot read), and core's speech to text takes a WAV already. So
+  the request is the same for every service: the package converts the clip to a 16-bit PCM WAV
+  (PyAV has wheels for every node target) and core needs no codec. Nothing of #649's Opus code is
+  used.
+- **Answers are text only** (user, 2026-11-15): no spoken reply to a clip, and no voice-reply
+  setting. A clip's answer carries what Jarvis heard, which the package shows above it. The
+  `voice_replies` column stays in the table unused (a drop breaks a rollback).
 - **Live voice is a follow-up** (user, 2026-11-13), inside the Discord package. The contract leaves
   room: a daemon will need "transcribe this audio" and "speak this text" from core.
 - **The inbound turn is one blocking request** (chosen here): the daemon posts a message and gets
@@ -120,13 +124,13 @@ class IJarvisDaemon(ABC):
 Ported from #649 with the service names removed.
 
 - **Links:** `cc_channel_links (household_id, provider, external_user_id, user_id, node_id,
-  voice_replies, proactive, created_at)`. Link codes as in #649: ten minutes, single use, five
+  proactive, created_at)`. Link codes as in #649: ten minutes, single use, five
   wrong guesses lock that external account out for ten minutes.
 - **Inbound turn** (node-authenticated, from the daemon's host node): provider, external user,
   place, text, attachments. Core resolves the link, runs `ChatText` as that user and returns the
   reply. An unlinked account gets nothing. A conversation is kept per person and place.
-- **Commands** core answers for every provider: link, new conversation, node, voice replies,
-  reminders on or off, status. How a person types them is the package's.
+- **Commands** core answers for every provider: link, new conversation, node, reminders on or
+  off, status. How a person types them is the package's.
 - **Outbox:** a reminder a node pushes is queued for each channel the user opted into (off by
   default); the daemon drains it. Jarvis starts no other conversation.
 - **App routes:** `/api/v0/mobile/household/{id}/channels` and `/channels/{provider}/…` for
@@ -232,8 +236,8 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
 
   | Route | Body | Answer |
   |---|---|---|
-  | `message` | external user, place, text, images | `{reply}`; `{linked: false}` for an account that isn't linked (the package says nothing) |
-  | `command` | external user, place, name, args | `{text, private}`; the names are core's: `link`, `new`, `node`, `voice`, `notify`, `status` |
+  | `message` | external user, place, text, images, `audio_wav` (one voice clip, at most two minutes) | `{reply}`, and `heard` for a clip; `{linked: false}` for an account that isn't linked (the package says nothing) |
+  | `command` | external user, place, name, args | `{text, private}`; the names are core's: `link`, `new`, `node`, `notify`, `status` |
   | `outbox` | ids to acknowledge | reminders waiting for this provider's linked users; the call is also the daemon's sign of life |
 
   A `message` is held open for the whole chat turn (up to three minutes), so the agent's `cc.post`
@@ -314,10 +318,12 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
 - [ ] **M1 — the mobile card** (jarvis-node-mobile, batched into one PR): the channels list with
   link code, preferences and unlink (the member half of #158), and a `daemon` settings entry
   worded as a daemon, not an agent with an interval.
-- [ ] **K5 — voice clips.** `internal/audio/opus` (libopus by purego, #649's `opusnative` and Ogg
-  code) on all four release targets; `message` takes a clip and can answer with one, by the
-  user's voice-reply preference.
-  - Verify: the conversions' tests; a real clip from Discord and from Slack.
+- [ ] **K5 — voice clips.** Core: `message` takes `audio_wav`, transcribes it and answers in text
+  with `heard`; the voice-reply setting and its `voice` command are removed. **Built.** Then the
+  SDK (`Channel.message(audio=…)`, `ChannelReply.heard`, `voice` out of `COMMANDS`), both
+  packages (convert with PyAV, show what was heard) and the app's type.
+  - Verify: the route's test; a real clip from Discord and from Slack, a phone's Slack clip
+    among them.
 - [ ] **Then:** close #649 and jarvis-node-mobile#158 with an explanation and credit; live voice
   as a follow-up inside the Discord package.
 
@@ -334,4 +340,4 @@ Each task is one PR. `channels-core` and the packages are planned after D3.
 | The contract fits Discord and not Slack | P2 is the test; K3's shapes are written against both services' events before any package |
 | A held-open request per turn ties up a daemon thread and a server connection for minutes | Turns are few and bounded by the timeout; a stream replaces it only if live voice needs one |
 | A package on a household's node can speak as any linked user of any provider | Stated above as the trust boundary; the Pantry's review is what stands between a package and a node |
-| libopus is missing on an install | K5 is last and separate; without it only clips say so |
+| A node target has no PyAV wheel | Checked 2026-11-15: wheels for Linux x86-64, ARM64 and ARMv7, macOS and Windows; without it only clips fail |

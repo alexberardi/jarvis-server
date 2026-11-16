@@ -59,15 +59,14 @@ func TestChannelLinkFlowOverTheApp(t *testing.T) {
 		UserID: p.UserID, NodeID: p.NodeID}); err != nil {
 		t.Fatal(err)
 	}
-	if e := list()[0].(map[string]any); e["linked"] != true || e["voice_replies"] != "auto" || e["proactive"] != false || e["node_id"] != ce.node.id {
+	if e := list()[0].(map[string]any); e["linked"] != true || e["proactive"] != false || e["node_id"] != ce.node.id {
 		t.Fatalf("linked entry %v", e)
 	}
 
-	// Preferences: validated, and only for the caller's own link on that provider.
-	ce.do("PUT", base+"/discord/me", map[string]any{"voice_replies": "loud"}, tok).want(400)
+	// Preferences: only for the caller's own link on that provider.
 	ce.do("PUT", base+"/discord/me", map[string]any{"node_id": "elsewhere"}, tok).want(404)
-	st := ce.do("PUT", base+"/discord/me", map[string]any{"proactive": true, "voice_replies": "never"}, tok).want(200).json()
-	if st["proactive"] != true || st["voice_replies"] != "never" || st["provider"] != "discord" {
+	st := ce.do("PUT", base+"/discord/me", map[string]any{"proactive": true}, tok).want(200).json()
+	if st["proactive"] != true || st["provider"] != "discord" {
 		t.Fatalf("prefs %v", st)
 	}
 	ce.do("PUT", base+"/discord/me", map[string]any{"proactive": true}, bearer("tok-8")).want(404) // no link of their own

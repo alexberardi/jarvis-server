@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
+	"github.com/alexberardi/jarvis-server/internal/modules/stt"
 )
 
 // A channel's daemon, on a node of the household, posts what an account on its service sent.
@@ -88,8 +89,27 @@ func TestChannelDaemonTurns(t *testing.T) {
 	if got := cmd("alex#1", "notify", map[string]any{"state": "on"}); got != "I'll send your reminders here." {
 		t.Fatalf("notify: %q", got)
 	}
-	if got := cmd("alex#1", "voice", map[string]any{"mode": "loud"}); !strings.Contains(got, "auto, always or never") {
-		t.Fatalf("voice: %q", got)
+	if got := cmd("alex#1", "voice", map[string]any{"mode": "always"}); got != "I don't know that command." {
+		t.Fatalf("voice replies are gone, yet: %q", got)
+	}
+
+	// A voice clip (a WAV, whatever the service recorded) is heard, then answered in text
+	// with what was heard beside it.
+	clip := func(seconds int) map[string]any {
+		t.Helper()
+		wav := base64.StdEncoding.EncodeToString(stt.EncodeWAV(make([]float32, seconds*stt.SampleRate)))
+		return post("message", map[string]any{"external_user_id": "alex#1", "place": "dm:1", "audio_wav": wav})
+	}
+	ce.stt.wakeText = "is the café open"
+	ce.eng.say("Yes, until six.")
+	if out := clip(3); out["heard"] != "is the café open" || out["reply"] != "Yes, until six." {
+		t.Fatalf("clip: %v", out)
+	}
+	if out := clip(121); out["failed"] != "That clip is too long. Keep it under two minutes." || out["reply"] != nil {
+		t.Fatalf("long clip: %v", out)
+	}
+	if out := post("message", map[string]any{"external_user_id": "alex#1", "place": "dm:1", "audio_wav": "T2dnUw=="}); out["failed"] != "I couldn't read that voice clip." {
+		t.Fatalf("not a WAV: %v", out)
 	}
 	if got := cmd("alex#1", "node", map[string]any{"name": "attic"}); !strings.Contains(got, "Yours are: "+ce.node.id) {
 		t.Fatalf("node: %q", got)
