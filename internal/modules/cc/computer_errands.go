@@ -86,6 +86,15 @@ func computerDefinitions() []settings.Definition {
 			},
 			Description: "Most tokens the model may think before each round of a computer task (0 = it answers at once). " +
 				"Thinking makes each round slower and can make a local model more careful."},
+		{Key: computer.SettingLoop, Category: "computer", Type: settings.String, Default: computer.LoopRounds,
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != computer.LoopRounds && s != computer.LoopTurns {
+					return errors.New(`must be "rounds" or "turns"`)
+				}
+				return nil
+			},
+			Description: "How a computer task talks to its model: rounds (a fresh prompt each round, with a line per past action) or " +
+				"turns (one conversation for the task: the plan, then each answer and what it changed on the screen, one action an answer)."},
 		{Key: computer.SettingLocateClicks, Category: "computer", Type: settings.String, Default: "off",
 			Validate: func(v any) error {
 				if s, _ := v.(string); s != "on" && s != "off" {

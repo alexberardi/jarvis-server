@@ -125,6 +125,9 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		if req := parse.PyStrip(rc.goal); req != t.Goal {
 			t.Request = req
 		}
+		if rc.wf != nil {
+			t.Plan = planLines(rc.wf.Steps, i)
+		}
 		// The step's goal and the user's own words: the planner may have dropped "last month".
 		t.Dates = dates.New(s.now(), rc.timezone).Explain(t.Goal + " . " + rc.goal)
 		t.Target = computeruse.Target{Kind: "browser", Site: siteOf(truthyStr(args, "site")), App: parse.PyStrip(truthyStr(args, "app"))}
@@ -653,4 +656,25 @@ func (s *Service) stopComputer(ctx context.Context, workflowID string, ended boo
 		s.Computer.Loop.Exec.Stop(ctx, run.ID)
 	}
 	return true
+}
+
+// planLines is an errand's steps for the task doing step at: one a line, the done ones said so
+// and the task's own marked "->". "" for an errand of one step.
+func planLines(steps []Step, at int) string {
+	if len(steps) < 2 {
+		return ""
+	}
+	var b strings.Builder
+	for j, st := range steps {
+		name := strings.Join(strings.Fields(firstNonEmpty(st.Label, st.Command)), " ")
+		switch {
+		case j < at:
+			fmt.Fprintf(&b, "   %d. %s (done)\n", j+1, name)
+		case j == at:
+			fmt.Fprintf(&b, "-> %d. %s\n", j+1, name)
+		default:
+			fmt.Fprintf(&b, "   %d. %s\n", j+1, name)
+		}
+	}
+	return b.String()
 }

@@ -49,6 +49,13 @@ type Entry struct {
 	Intent string `json:"intent"`
 	Ref    string `json:"ref,omitempty"`
 	Result string `json:"result"` // ok | failed: <code> <error> | blocked: … | not run
+	// A conversation's (turns.go): the model's thought (on its round's first entry; the whole
+	// answer on a KindSaid entry), the action as the model wrote it (JSON, long text cut), and
+	// what its round changed on the screen (on the round's last entry; what the model was told
+	// on a KindSaid entry).
+	Thought string `json:"thought,omitempty"`
+	Act     string `json:"act,omitempty"`
+	Outcome string `json:"outcome,omitempty"`
 	// A replay's (replay.go): the workflow step (1-based) the action belongs to, whether it
 	// finished that step, and the element the step was healed to.
 	WStep    int              `json:"wstep,omitempty"`

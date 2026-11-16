@@ -154,7 +154,10 @@ type Task struct {
 	// Request is everything the user asked for when Goal is one step of it ("" = Goal is the
 	// request): a planner's step can drop "last month" or "under $300".
 	Request string
-	Target  computeruse.Target
+	// Plan is the errand's steps, one a line, this task's marked "->" ("" = it has none): what
+	// a conversation keeps in view all task long.
+	Plan   string
+	Target computeruse.Target
 	// StartURL is where the task's window opens on its first look ("" = https://<site>): the web
 	// address the user gave, with its scheme, port and path.
 	StartURL string
@@ -326,6 +329,17 @@ type round struct {
 	checkoutAsked bool
 	// sendAsked counts the dones over a filled-in form that wasn't sent, sent back (at most 2).
 	sendAsked int
+	// turns: the task is a conversation (SettingLoop): one action an answer, each followed by
+	// what it changed. prev is the screen the last answer was decided on, answer and thought the
+	// newest answer (for the history), dropped how many of its actions were left unrun.
+	turns   bool
+	prev    *Observation
+	answer  string
+	thought string
+	dropped int
+	wrote   string // the answer's one action as the model wrote it (actOf)
+	// downloadsSeen are the files in Downloads at the last outcome, so the next can name new ones.
+	downloadsSeen map[string]bool
 	// buyAsked counts the dones of an order on a page that still has its pay button (at most 2).
 	buyAsked int
 }
@@ -428,6 +442,9 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 	pick.Adapter = l.adapter(ctx, sc, pick)
 	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
+	if r.turns = l.str(ctx, SettingLoop, sc, LoopRounds) == LoopTurns; r.turns {
+		maxRounds *= 2 // a round is one action, not a batch of them
+	}
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
 
 	if out, blocked := l.blockedSite(ctx, r); blocked {
@@ -469,6 +486,10 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 		out, done := l.round(ctx, r)
 		if done {
 			return l.end(ctx, run, out)
+		}
+		if n := len(run.History); r.turns && r.answer != "" && (n == 0 || run.History[n-1].Round != run.Rounds) {
+			// The answer ran nothing (sent back, refused): the conversation keeps it and why.
+			run.History = append(run.History, Entry{Round: run.Rounds, Kind: KindSaid, Thought: r.answer, Outcome: r.feedback})
 		}
 		if err := l.Store.Save(ctx, run); err != nil {
 			return l.end(ctx, run, Outcome{State: StateFailed, Summary: "I couldn't save the task's progress."})
@@ -518,11 +539,18 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	if stop != nil {
 		return *stop, true
 	}
+	if r.turns {
+		l.noteOutcome(ctx, r, obs)
+	}
 	reply, err := l.ask(ctx, r, obs)
 	if err != nil {
 		return Outcome{State: StateFailed, Summary: err.Error()}, true
 	}
 	r.feedback, r.clipboard = "", ""
+	r.answer, r.thought, r.wrote, r.dropped = "", "", "", 0
+	if r.turns {
+		r.answer, r.thought = said(reply), oneLine(reply.Thought)
+	}
 	switch {
 	case reply.Done:
 		if btn := unsentForm(r.run.History, obs); btn != nil && r.sendAsked < 2 {
@@ -570,6 +598,18 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	if len(actions) == 0 {
 		return Outcome{}, false
+	}
+	if r.turns && len(actions) > 1 {
+		// One action an answer: the rest would run without their outcomes being seen.
+		r.dropped, actions = len(actions)-1, actions[:1]
+	}
+	if r.turns {
+		for _, a := range reply.Actions {
+			if a.Kind != "screenshot" {
+				r.wrote = actOf(a)
+				break
+			}
+		}
 	}
 	if r.task.Target.Kind == "desktop" {
 		if a, b := blindSecondType(actions); b != nil {
@@ -904,12 +944,13 @@ func (l *Loop) observe(ctx context.Context, r *round) (Observation, error) {
 // ask sends the round's prompt and parses the answer, with one retry on an unreadable one.
 func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error) {
 	t := r.task
-	text, stable := renderPromptSplit(promptInput{
+	in := promptInput{
 		Goal: t.Goal, Request: t.Request, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
 		Source: t.Source,
-	})
+	}
+	text, stable := renderPromptSplit(in)
 	// The task and its source text are the same every round: a cloud model keeps them.
 	parts := []llm.Part{{Type: "text", Text: text, CachePrefix: stable}}
 	for _, im := range r.shots {
@@ -919,6 +960,10 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 	msgs := []llm.Message{
 		{Role: "system", Content: llm.TextContent(systemPrompt)},
 		{Role: "user", Content: &llm.Content{Parts: parts}},
+	}
+	if r.turns {
+		in.Plan = t.Plan
+		msgs = turnsMessages(in, r.shots)
 	}
 	var lastErr error
 	budget := maxTokens
@@ -1375,8 +1420,13 @@ func (l *Loop) mint(ctx context.Context, r *round, digest string) (string, error
 
 // record appends the action to the run's history and writes its audit row.
 func (l *Loop) record(ctx context.Context, r *round, d decision, outcome, result string) {
-	r.run.History = append(r.run.History, Entry{Round: r.run.Rounds, Kind: d.action.Kind,
-		Intent: d.action.Intent, Ref: d.action.Ref, Result: result, WStep: r.wstep, Healed: r.heal})
+	e := Entry{Round: r.run.Rounds, Kind: d.action.Kind,
+		Intent: d.action.Intent, Ref: d.action.Ref, Result: result, WStep: r.wstep, Healed: r.heal}
+	if r.turns {
+		e.Thought, e.Act = r.thought, r.wrote
+		r.thought, r.wrote = "", ""
+	}
+	r.run.History = append(r.run.History, e)
 	if l.Audit == nil {
 		return
 	}
@@ -1542,4 +1592,54 @@ func coordinateHint(a computeruse.Adapter, shots []*Image) string {
 func saveDialog(title string) bool {
 	title = strings.ToLower(strings.TrimSpace(title))
 	return title == "save" || title == "save as" || strings.HasPrefix(title, "save ")
+}
+
+// noteOutcome writes what the last answer changed on the screen into its history entry, from the
+// screen it was decided on (r.prev) and the screen now. An answer that ran in an earlier call
+// (an approved purchase) has no screen to compare with: it gets where the screen is now.
+func (l *Loop) noteOutcome(ctx context.Context, r *round, obs Observation) {
+	defer func() { o := obs; r.prev = &o }()
+	n := len(r.run.History)
+	if n == 0 {
+		return
+	}
+	last := &r.run.History[n-1]
+	if last.Kind == KindSaid || last.Outcome != "" || last.Round != r.run.Rounds-1 {
+		return
+	}
+	switch {
+	case r.prev != nil:
+		last.Outcome = describeChange(*r.prev, obs)
+	case obs.URL != "":
+		last.Outcome = fmt.Sprintf("it now shows %s (%q).", defang(obs.URL), defang(obs.Title))
+	case obs.Title != "":
+		last.Outcome = fmt.Sprintf("the window in front is titled %q.", defang(obs.Title))
+	}
+	if r.task.Target.Kind == "browser" && r.downloadsBefore != nil {
+		// A download changes nothing on the page: the 9B pressed "Download CSV", was told
+		// nothing changed, and called the button unresponsive.
+		if now := l.downloads(ctx, r.run.ID); now != nil {
+			if r.downloadsSeen == nil {
+				r.downloadsSeen = r.downloadsBefore
+			}
+			var names []string
+			for name := range now {
+				if !r.downloadsSeen[name] {
+					names = append(names, name)
+				}
+			}
+			sort.Strings(names)
+			if len(names) > 0 {
+				got := "A file was downloaded: " + strings.Join(names, ", ") + " (now in Downloads)."
+				if strings.HasPrefix(last.Outcome, "nothing visibly changed") {
+					last.Outcome = ""
+				}
+				last.Outcome = strings.TrimSpace(got + " " + last.Outcome)
+			}
+			r.downloadsSeen = now
+		}
+	}
+	if r.dropped > 0 {
+		last.Outcome = strings.TrimSpace(last.Outcome + fmt.Sprintf(" Only your first action ran: the other %d did not. Send one action per answer.", r.dropped))
+	}
 }

@@ -329,6 +329,13 @@ func (e *Env) sandbox(ctx context.Context) error {
 		}
 		e.logf("thinking: %d tokens a round", n)
 	}
+	// CCSUITE_LOOP=turns runs the pass with each task as one conversation with its model.
+	if v := os.Getenv("CCSUITE_LOOP"); v != "" {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.loop", map[string]any{"value": v}, nil); err != nil {
+			return fmt.Errorf("computer.loop: %w", err)
+		}
+		e.logf("loop: %s", v)
+	}
 	// CCSUITE_LOCATE_CLICKS=on runs the pass with each screenshot click placed by its own question.
 	if v := os.Getenv("CCSUITE_LOCATE_CLICKS"); v != "" {
 		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.locate_clicks", map[string]any{"value": v}, nil); err != nil {

@@ -60,6 +60,7 @@ const defaultRules = "Risky actions (pay, send, delete, sharing, install, subscr
 type promptInput struct {
 	Goal        string
 	Request     string // what the user asked for in all, when Goal is one step of it
+	Plan        string // the errand's steps, one a line, the task's own marked (turns only)
 	Today       string // the day in the household's zone, "" = not said
 	Dates       string // the goal's relative dates worked out, "" = it names none
 	Success     *SuccessCheck
@@ -87,41 +88,57 @@ func renderPrompt(in promptInput) string {
 // source text (the rest is too short to be worth keeping).
 func renderPromptSplit(in promptInput) (string, int) {
 	var b strings.Builder
+	stable := renderHeader(&b, in)
+	renderHistory(&b, in)
+	renderScreen(&b, in)
+	return b.String(), stable
+}
+
+// renderHeader writes what stays the same all task long (the task, its dates and rules, the
+// text it works from) and returns where the part worth a cloud model's keeping ends (0: none).
+func renderHeader(b *strings.Builder, in promptInput) int {
 	stable := 0
-	fmt.Fprintf(&b, "Task: %s\n", oneLine(in.Goal))
+	fmt.Fprintf(b, "Task: %s\n", oneLine(in.Goal))
 	if req := oneLine(in.Request); req != "" && req != oneLine(in.Goal) {
-		fmt.Fprintf(&b, "This is one step of what the user asked for: %q. Do only this step, but keep to the details of what they asked (which month, which item, how many, what limit).\n", req)
+		fmt.Fprintf(b, "This is one step of what the user asked for: %q. Do only this step, but keep to the details of what they asked (which month, which item, how many, what limit).\n", req)
+	}
+	if in.Plan != "" {
+		fmt.Fprintf(b, "The whole plan (-> marks the step you are doing; the others are not yours to do):\n%s\n", strings.TrimRight(in.Plan, "\n"))
 	}
 	if in.Today != "" {
-		fmt.Fprintf(&b, "Today is %s.\n", in.Today)
+		fmt.Fprintf(b, "Today is %s.\n", in.Today)
 	}
 	if in.Dates != "" {
-		fmt.Fprintf(&b, "Dates in the task, worked out for you (use these, don't work them out again): %s.\n", oneLine(in.Dates))
+		fmt.Fprintf(b, "Dates in the task, worked out for you (use these, don't work them out again): %s.\n", oneLine(in.Dates))
 	}
 	if s := in.Success.describe(); s != "" {
-		fmt.Fprintf(&b, "Done when: %s\n", s)
+		fmt.Fprintf(b, "Done when: %s\n", s)
 	}
 	rules := in.Rules
 	if rules == "" {
 		rules = defaultRules
 	}
-	fmt.Fprintf(&b, "Rules: %s\n", oneLine(rules))
+	fmt.Fprintf(b, "Rules: %s\n", oneLine(rules))
 	if in.Hint != "" {
-		fmt.Fprintf(&b, "Hint: %s\n", oneLine(in.Hint))
+		fmt.Fprintf(b, "Hint: %s\n", oneLine(in.Hint))
 	}
 	if in.Answer != "" {
-		fmt.Fprintf(&b, "The user answered your question: %s\n", oneLine(in.Answer))
+		fmt.Fprintf(b, "The user answered your question: %s\n", oneLine(in.Answer))
 	}
 
 	if src := in.Source; src != nil {
 		// A desktop task can't read the browser: the page it works from comes with the task (C25).
-		fmt.Fprintf(&b, "\nSource: %s (already read for you: its text is below, and the task works from it. Don't open or navigate to it; write from this text, not from memory. "+
+		fmt.Fprintf(b, "\nSource: %s (already read for you: its text is below, and the task works from it. Don't open or navigate to it; write from this text, not from memory. "+
 			"A type action holds at most %d characters: keep a summary within one; only text that must be longer goes in several type actions, in order, each as full as it can be; "+
 			"line breaks in its text start new paragraphs. Write the text into the document first, then save)\n", defang(src.URL), computeruse.MaxText)
 		b.WriteString(PageBegin + "\n" + renderText(src.Text) + "\n" + PageEnd + "\n")
 		stable = b.Len()
 	}
+	return stable
+}
 
+// renderHistory writes the run so far as one line an action, and what the last turn was told.
+func renderHistory(b *strings.Builder, in promptInput) {
 	b.WriteString("\nWhat you did so far:\n")
 	h := in.History
 	if len(h) > historyInPrompt {
@@ -135,16 +152,18 @@ func renderPromptSplit(in promptInput) (string, int) {
 		if e.Ref != "" {
 			ref = " " + e.Ref
 		}
-		fmt.Fprintf(&b, "- round %d: %s%s %q: %s\n", e.Round, e.Kind, ref, e.Intent, e.Result)
+		fmt.Fprintf(b, "- round %d: %s%s %q: %s\n", e.Round, e.Kind, ref, e.Intent, e.Result)
 	}
 	if in.Desktop && len(h) > 0 && justSaved(h[len(h)-1]) && !saveDialog(in.Obs.Title) {
-		b.WriteString("Your save keypress went through. A save that works usually shows nothing new on screen: " +
-			"if what the task asked for is in place, say done with a \"verify\" now. Don't save again or retype anything.\n")
+		b.WriteString(saveWentThrough + "\n")
 	}
 	if in.Feedback != "" {
-		fmt.Fprintf(&b, "Last turn: %s\n", oneLine(in.Feedback))
+		fmt.Fprintf(b, "Last turn: %s\n", oneLine(in.Feedback))
 	}
+}
 
+// renderScreen writes the page or window as it is now, and asks for the answer.
+func renderScreen(b *strings.Builder, in promptInput) {
 	if in.Desktop {
 		b.WriteString("\nCurrent window:\n")
 	} else {
@@ -153,13 +172,13 @@ func renderPromptSplit(in promptInput) (string, int) {
 	b.WriteString(PageBegin + "\n")
 	o := in.Obs
 	if o.URL != "" {
-		fmt.Fprintf(&b, "url: %s\n", defang(o.URL))
+		fmt.Fprintf(b, "url: %s\n", defang(o.URL))
 	}
 	if o.Title != "" {
-		fmt.Fprintf(&b, "title: %q\n", defang(o.Title))
+		fmt.Fprintf(b, "title: %q\n", defang(o.Title))
 	}
 	if o.App != "" {
-		fmt.Fprintf(&b, "app: %q\n", defang(o.App))
+		fmt.Fprintf(b, "app: %q\n", defang(o.App))
 	}
 	if len(o.Elements) == 0 {
 		if in.Desktop && in.Images > 0 {
@@ -183,15 +202,14 @@ func renderPromptSplit(in promptInput) (string, int) {
 		b.WriteString("text on the page:\n" + t + "\n")
 	}
 	if in.Clipboard != "" {
-		fmt.Fprintf(&b, "clipboard: %q\n", defang(in.Clipboard))
+		fmt.Fprintf(b, "clipboard: %q\n", defang(in.Clipboard))
 	}
 	b.WriteString(PageEnd + "\n")
 
 	if in.Images > 0 {
-		fmt.Fprintf(&b, "\n%d screenshot(s) follow, the newest last. %s\n", in.Images, in.Coordinates)
+		fmt.Fprintf(b, "\n%d screenshot(s) follow, the newest last. %s\n", in.Images, in.Coordinates)
 	}
 	b.WriteString("\nYour JSON answer:")
-	return b.String(), stable
 }
 
 // renderElement is one snapshot line: e12 button "Place order" value="2" [disabled]. A desktop
@@ -335,3 +353,7 @@ func justSaved(e Entry) bool {
 }
 
 var saveIntentRE = regexp.MustCompile(`(?i)\bsav(e|ing)\b`)
+
+// saveWentThrough is what a desktop model is told after its save shortcut ran (justSaved).
+const saveWentThrough = "Your save keypress went through. A save that works usually shows nothing new on screen: " +
+	"if what the task asked for is in place, say done with a \"verify\" now. Don't save again or retype anything."
