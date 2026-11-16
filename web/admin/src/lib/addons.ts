@@ -3,15 +3,15 @@ import type { NodeLiveness } from '@/api/nodes'
 /**
  * Where the Add-ons page sends people (install plan §3.2). A store URL stays null until that
  * listing is public: the page then shows the install guide instead of a dead store link.
- * TODO(install plan 4.2, 3.6): fill in the AMO and Chrome Web Store listings, the App Store and
- * Google Play pages, and per-OS agent installers once they ship.
+ * TODO(install plan 4.2, 3.6): fill in the App Store and Google Play pages, and per-OS agent
+ * installers once they ship.
  */
 export const LINKS = {
   releases: 'https://github.com/alexberardi/jarvis-server/releases',
   agentGuide: 'https://github.com/alexberardi/jarvis-server#install-the-agent-from-source',
   browserGuide: 'https://github.com/alexberardi/jarvis-server/blob/main/docs/agent/DESIGN.md#10-browser-control-2026-10-10',
-  firefoxStore: null as string | null,
-  chromeStore: null as string | null,
+  firefoxStore: 'https://addons.mozilla.org/firefox/addon/browser@jarvis.agent/' as string | null,
+  chromeStore: 'https://chromewebstore.google.com/detail/abkbjmelelgelkhneobebgoilejlgbob' as string | null,
   appStore: null as string | null,
   playStore: null as string | null,
 }

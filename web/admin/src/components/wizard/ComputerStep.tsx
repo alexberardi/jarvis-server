@@ -174,15 +174,15 @@ export default function ComputerStep({ onNext, onBack }: { onNext: () => void; o
                 </a>
               ) : (
                 <p className="text-text-muted">
-                  The store listings are on their way. Until then the desktop agent sets it up.{' '}
-                  <a
-                    href={LINKS.browserGuide}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary underline underline-offset-2"
-                  >
-                    How browser control works
+                  The extension is for Firefox and Chromium browsers (Chrome, Edge, Brave):{' '}
+                  <a href={LINKS.firefoxStore ?? LINKS.browserGuide} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">
+                    Firefox Add-ons
+                  </a>{' '}
+                  or{' '}
+                  <a href={LINKS.chromeStore ?? LINKS.browserGuide} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">
+                    Chrome Web Store
                   </a>
+                  .
                 </p>
               )}
               <p className="mt-1 text-small text-text-muted" data-testid="extension-state">
