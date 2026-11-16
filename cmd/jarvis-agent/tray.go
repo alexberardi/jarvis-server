@@ -121,7 +121,7 @@ func (ic *trayIcon) state() tray.State {
 	s.Activity = string(k)
 	s.StopHotkey = island.StopHotkey()
 	s.ComputerAvailable, s.Computer = ic.computer != nil, ic.computer.On()
-	s.Record = ic.recorder != nil
+	s.Record = teachInMenu && ic.recorder != nil
 	if s.Record {
 		_, s.RecordDesktop = ic.recorder.Sources[computer.ModeDesktop]
 	}
@@ -251,3 +251,8 @@ func trayStatus() string {
 	}
 	return tray.Probe()
 }
+
+// teachInMenu shows "Record a macro…" and "Record the desktop…". Off: taught workflows are
+// shelved (docs/decisions/2026-11-15-taught-workflows-shelved.md); `jarvis-agent computer
+// record` still records. A var for the tests of the menu items.
+var teachInMenu = false

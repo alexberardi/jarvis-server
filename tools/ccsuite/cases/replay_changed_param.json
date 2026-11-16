@@ -2,7 +2,7 @@
   "name": "replay_changed_param",
   "about": "Replay a taught workflow (download the bank statement, demonstrated for 2026-09 by setup.demonstrate) with another month.",
   "phase": "teach",
-  "status": "required",
+  "status": "pending",
   "say": "Download my bank statement for August.",
   "target": "browser",
   "setup": {"login": ["bank"], "demonstrate": "bank_download"},
