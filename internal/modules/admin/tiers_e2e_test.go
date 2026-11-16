@@ -162,6 +162,32 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 
 	testDeviceMemberRoutes(t, base, h1, h2, root, users)
 
+	// Inbox cards: a callback job only on the caller's household's node, and its status only to
+	// the job's household (cc D5).
+	cb := map[string]any{"command_name": "make_phone_call", "callback_name": "confirm_call", "data": map[string]any{}}
+	cb["target_node_id"] = "node-h2"
+	if code, out := call(t, "POST", base+"/api/cc/api/v0/callbacks", cb, bearer(m1)...); code != 403 {
+		t.Fatalf("callback on an H2 node as an H1 member: %d %v", code, out)
+	}
+	cb["target_node_id"] = "node-h1"
+	cbCode, cbOut := call(t, "POST", base+"/api/cc/api/v0/callbacks", cb, bearer(m1)...)
+	if cbCode != 201 {
+		t.Fatalf("callback on the member's node: %d %v", cbCode, cbOut)
+	}
+	job := fmt.Sprint(obj(t, cbOut)["id"])
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/callbacks/"+job+"/status", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("callback status: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/callbacks/"+job+"/status", nil, bearer(m2)...); code != 403 && code != 404 {
+		t.Fatalf("another household's callback status: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/proposal-suppressions?household_id="+h1, nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own proposal suppressions: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/proposal-suppressions?household_id="+h2, nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's proposal suppressions: %d %v", code, out)
+	}
+
 	// G10: a member's own account.
 	if code, out := call(t, "GET", base+"/api/auth/me", nil, bearer(m1)...); code != 200 || obj(t, out)["email"] != "m1@example.com" {
 		t.Fatalf("member me: %d %v", code, out)

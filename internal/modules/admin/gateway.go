@@ -123,6 +123,13 @@ var passRoutes = []passRoute{
 	ccUserRoute("GET /api/cc/api/v0/mobile/chat/capabilities"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/nodes/{node_id}/tools"),
 	ccUserRoute("POST /api/cc/api/v0/nodes/{node_id}/actions"),
+	// The inbox's cards (docs/webapp/03): a tap's callback job and its status; cc checks
+	// membership of the target node's (or the named) household and of the job's.
+	ccUserRoute("POST /api/cc/api/v0/callbacks"),
+	ccUserRoute("GET /api/cc/api/v0/callbacks/{job_id}/status"),
+	// The caller's own "don't suggest this again" rows.
+	ccUserRoute("GET /api/cc/api/v0/mobile/proposal-suppressions"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/proposal-suppressions/{suppression_id}"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.

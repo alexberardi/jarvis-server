@@ -8,6 +8,15 @@ Edit it only when the state changes: an item is ticked or added, or the Next lin
 
 ## Current phase: 6 (packaging) — pre-releases through `v0.1.0-rc18.18`, no full release yet; from rc18 (user 2026-10-21) jarvisd is the install for new users and the legacy stack is retired for new installs; prod cut over to jarvisd (rc12, 2026-10-09). Phases 0–5 done. In parallel: the Go node, `jarvis-agent` (desktop voice, browser control, island, read the screen, dictation; Pi phase 4.1 HAT done, 4.3 `install-pi.sh` built, 3a and 3b (not yet run on a Pi), shipped with each release (#162), 4.4 provisioning HTTP API done, NetworkManager D-Bus Wi-Fi backend + recovery cycle built (not yet run on a Pi), 4.5 the built-in commands in the sidecar built, with reminders, alerts and the button (#175) (not yet on a Pi), parity 5.7 factory reset + routines sync + context requests built (not yet on a Pi; a reset Pi boots into setup mode, #292, not yet on a Pi), 4.2 next; the 24 h soak script `scripts/pi-soak.sh`, the parity checklist and the Python node's retirement path are written ([go-pi-node §3.19](agent/go-pi-node.md), #181): the soak is the user's to run on the lab Zero 2 W, and the retirement is **blocked** on five open gaps: #180 17b–17e (17b built, not yet on a Pi), voice device control/routines/send_link (Go built-ins, not yet on a Pi), K2 + settings snapshot on the Pi, setup mode at boot (built, #292; the lab Pi check left), the on-device rollback repro)
 
+### Web inbox parity (2026-11-15, top priority)
+
+The web inbox matches the mobile one: card actions, editable fields, interactive lists,
+callback results, autonomy cards, audio, suppressed suggestions, a live badge and toast.
+Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
+
+- [ ] 1 gateway routes (callbacks, proposal suppressions), held for review
+- [ ] 2 card renderer · 3 interactive lists + callback results · 4 suppressed suggestions · 5 live badge and toast
+
 ### Touch display (2026-10-23)
 
 - [x] Opt-in agent shell, central inheritance and acknowledgements, PIN exit, device and media controls, sandboxed themes, receivers and speech visualisation.
