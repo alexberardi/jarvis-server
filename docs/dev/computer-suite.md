@@ -37,6 +37,8 @@ required case passed, 1 when one failed, 2 when the run could not bring its worl
 | `replay_changed_param` | teach | the bank download, demonstrated for 2026-09 (`setup.demonstrate`), replayed for August | piece 32 |
 | `replay_moved_button` | teach | the same replayed after the site moved its buttons (every page the moved variant) | piece 32 |
 
+The two teach cases are `pending` while taught workflows are shelved (`run_workflow` is not offered to the model): [decision](../decisions/2026-11-15-taught-workflows-shelved.md).
+
 A case is `tools/ccsuite/cases/<name>.json` (the file name is its name):
 
 ```jsonc

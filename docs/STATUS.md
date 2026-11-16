@@ -42,6 +42,10 @@ in core, `IJarvisDaemon` in the SDK, agents and daemons on desktop nodes. Replac
 
 ### Workflow skills (2026-11-12)
 
+**Shelved 2026-11-15:** hidden from the web app, the agent's menu and the model; the code stays.
+Why and what would bring it back: [decision](decisions/2026-11-15-taught-workflows-shelved.md).
+The open items below are parked with it.
+
 A taught workflow learns a structured skill (goal, prerequisites, step goals and expectations)
 and runs model-led and verified. Spec, decisions Q1–Q6, plan: [agent/WORKFLOW-SKILLS.md](agent/WORKFLOW-SKILLS.md).
 

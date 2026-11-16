@@ -259,6 +259,12 @@ func TestComputerRecordStartStop(t *testing.T) {
 
 	// The menu.
 	ic := &trayIcon{log: slog.New(slog.DiscardHandler), sw: newFakeVoice().sw(false), activity: a, computer: sw, recorder: rec}
+	// Shelved: hidden until teachInMenu is back on.
+	if s := ic.state(); s.Record {
+		t.Fatalf("Record a macro… shown while shelved: %+v", s)
+	}
+	teachInMenu = true
+	t.Cleanup(func() { teachInMenu = false })
 	if s := ic.state(); !s.Record || s.RecordDesktop {
 		t.Fatalf("Record a macro… hidden or Record the desktop… shown: %+v", s)
 	}

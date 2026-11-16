@@ -2,7 +2,7 @@
   "name": "replay_moved_button",
   "about": "Replay the taught bank download (demonstrated on the default layout) after the site moved its buttons: every page is the moved variant, whose Download CSV button has another place, wrapper and id. The replay finds it again by role and name.",
   "phase": "teach",
-  "status": "required",
+  "status": "pending",
   "say": "Download my bank statement for September.",
   "target": "browser",
   "setup": {"login": ["bank"], "layout": "moved", "demonstrate": "bank_download"},

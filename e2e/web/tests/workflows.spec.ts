@@ -12,8 +12,9 @@ const BANK = 'tw_5eed000000000001'
 const cc = (p: string) => `${env('SBX_CC')}/api/v0${p}`
 
 test('lists the taught workflows: yours and the shared one', async ({ page }) => {
-  await page.goto('/chat')
-  await sidebar(page).getByRole('link', { name: 'Workflows' }).click()
+  // Shelved: the page has no sidebar link (docs/decisions/2026-11-15-taught-workflows-shelved.md).
+  await page.goto('/workflows')
+  await expect(sidebar(page).getByRole('link', { name: 'Workflows' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Workflows', exact: true })).toBeVisible()
   const bank = page.getByRole('link', { name: /Download bank statement/ })
   await expect(bank).toContainText('Yours')

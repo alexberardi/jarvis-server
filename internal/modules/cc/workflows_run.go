@@ -24,6 +24,10 @@ import (
 
 const toolRunWorkflow = "run_workflow"
 
+// workflowsOffered puts run_workflow in front of the model. Off: taught workflows are shelved
+// (docs/decisions/2026-11-15-taught-workflows-shelved.md); the API and the pages still work.
+const workflowsOffered = false
+
 // taughtWorkflows are cc_taught_workflows as the errand runner and the replay see them.
 type taughtWorkflows struct{ m *Module }
 

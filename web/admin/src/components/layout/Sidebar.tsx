@@ -13,8 +13,6 @@ import {
   MessageSquare,
   Puzzle,
   Inbox,
-  Workflow,
-  Video,
   Phone,
   Store,
   Radio,
@@ -40,8 +38,8 @@ const memberNav: NavItem[] = [
   { label: 'Devices', icon: Radio, path: '/devices' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
-  { label: 'Workflows', icon: Workflow, path: '/workflows' },
-  { label: 'Recordings', icon: Video, path: '/recordings' },
+  // Workflows and Recordings are shelved (docs/decisions/2026-11-15-taught-workflows-shelved.md):
+  // their pages and routes stay, with no link to them.
 ]
 
 /** The Admin group: superusers only, and the server refuses these routes to anyone else (G1). */
