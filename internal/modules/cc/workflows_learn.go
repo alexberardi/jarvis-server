@@ -1689,8 +1689,10 @@ func (m *Module) draftFromRecording(ctx context.Context, rec *Recording) (w Taug
 		if err := m.awaitKeyframes(ctx, *rec, evs); err != nil {
 			return w, "", err
 		}
-		note = m.nameClicksBySight(ctx, *rec, evs)
+		// Before clicks are named by sight: a click that named nothing on the way to the
+		// document is told from work by having no name.
 		evs, opened := openedDocument(desktopStart(rec.Trace), evs)
+		note = m.nameClicksBySight(ctx, *rec, evs)
 		cands := desktopParamCandidates(evs)
 		system, prompt = desktopLearnSystemPrompt, desktopLearnPrompt(evs, cands, rec.Narration)
 		build = func(out learnOutput) (TaughtWorkflow, error) {
