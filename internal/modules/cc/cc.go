@@ -417,7 +417,8 @@ func (m *Module) Register(mux *http.ServeMux, deps module.Deps) {
 
 	// Phase 5b: the voice pipeline, tool loop, media proxy and node plugin API.
 	m.registerVoice(mux)
-	m.registerPlayback(mux) // docs/agent/PLAYBACK.md piece 3
+	m.registerPlayback(mux)     // docs/agent/PLAYBACK.md piece 3
+	m.registerBrowserMatch(mux) // docs/webapp/03 step 3
 	// Phase 5d: mobile chat (doc 13 §3.1-3.2) and the mobile voice-profile routes (doc 06 V1/V6).
 	m.registerMobileChat(mux)
 	m.registerVoiceProfiles(mux)

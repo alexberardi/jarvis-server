@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 	"github.com/alexberardi/jarvis-server/internal/agent/sidecar"
@@ -174,5 +175,11 @@ func wireNodeSettings(r *node.Runner, st *nodesettings.Store, tools node.Multi, 
 	}
 	r.Requests = map[string]func(context.Context, string, []byte) (string, []byte){
 		nodesettings.TopicCommandData: cd.Handle, nodesettings.TopicContext: cx.Handle}
+	// The web's "Find ID" (docs/webapp/03 step 3): the owner's open tabs, matched here.
+	for _, t := range tools {
+		if bt, ok := t.(*browser.Tools); ok && bt.Hub != nil {
+			r.Requests[browser.TopicMatchTabs] = (&browser.MatchTabs{Tabs: browser.HubTabs(bt.Hub), Log: log}).Handle
+		}
+	}
 	r.NeedsK2 = func() bool { return !st.HasK2() }
 }

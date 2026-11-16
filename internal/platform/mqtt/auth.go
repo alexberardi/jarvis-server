@@ -67,6 +67,7 @@ func CanSubscribe(nodeID, filter string) bool {
 //
 //	jarvis/nodes/{id}/command-data/{op}/response/{correlation_id}
 //	jarvis/nodes/{id}/context/{query,operations}/response/{correlation_id}
+//	jarvis/nodes/{id}/browser/match-tabs/response/{correlation_id} (docs/webapp/03 step 3)
 func CanPublish(nodeID, topic string) bool {
 	rest, ok := strings.CutPrefix(topic, "jarvis/nodes/"+nodeID+"/")
 	if !ok {
@@ -76,7 +77,8 @@ func CanPublish(nodeID, topic string) bool {
 	if len(l) != 4 || l[2] != "response" || l[3] == "" || strings.ContainsAny(l[3], "+#") {
 		return false
 	}
-	return (l[0] == "command-data" && commandDataOps[l[1]]) || (l[0] == "context" && (l[1] == "query" || l[1] == "operations"))
+	return (l[0] == "command-data" && commandDataOps[l[1]]) || (l[0] == "context" && (l[1] == "query" || l[1] == "operations")) ||
+		(l[0] == "browser" && l[1] == "match-tabs")
 }
 
 // validNodeID rejects IDs that would let a node's subtree overlap another's or a wildcard.

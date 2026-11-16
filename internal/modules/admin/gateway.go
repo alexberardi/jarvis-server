@@ -130,6 +130,12 @@ var passRoutes = []passRoute{
 	// The caller's own "don't suggest this again" rows.
 	ccUserRoute("GET /api/cc/api/v0/mobile/proposal-suppressions"),
 	ccUserRoute("DELETE /api/cc/api/v0/mobile/proposal-suppressions/{suppression_id}"),
+	// Interactive lists (docs/webapp/03 step 3): a row's live record gate and a picked value saved
+	// onto it (cc checks membership of the node's household), and the owner's "Find ID" tab
+	// matches (cc: the member who paired the node only).
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records"),
+	ccUserRoute("PATCH /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/nodes/{node_id}/browser/matches"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.
