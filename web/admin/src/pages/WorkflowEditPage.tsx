@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowLeft, ArrowUp, Eye, GripVertical, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { relearnWorkflow, saveWorkflow } from '@/api/workflows'
+import { deleteWorkflow, relearnWorkflow, saveWorkflow } from '@/api/workflows'
 import type { ParamKind, Skill, SuccessCheck, TaughtWorkflow, WStep, WorkflowPut } from '@/api/workflows'
 import { Badge, Banner, Button, Card, CardHeader, ErrorState, Input, PageHeader, Select, Skeleton, Switch } from '@/components/ui'
 import { useWorkflow, workflowKeys } from '@/hooks/useWorkflows'
@@ -117,6 +117,17 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
       toast.success('Saved')
     },
     onError: (err) => toast.error(errorMessage(err, 'Could not save the workflow')),
+  })
+
+  const navigate = useNavigate()
+  const remove = useMutation({
+    mutationFn: () => deleteWorkflow(wf.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['workflows'] })
+      toast.success('Deleted')
+      navigate('/workflows')
+    },
+    onError: (err) => toast.error(errorMessage(err, 'Could not delete the workflow')),
   })
 
   const relearn = useMutation({
@@ -477,6 +488,17 @@ function Editor({ wf, storedName, draft, onDraft }: EditorProps) {
                 {problem}
               </p>
             )}
+            <Button
+              variant="danger"
+              className="mr-auto"
+              icon={<Trash2 size={16} aria-hidden />}
+              loading={remove.isPending}
+              onClick={() => {
+                if (window.confirm(`Delete "${wf.name}"? Jarvis forgets how to do it.`)) remove.mutate()
+              }}
+            >
+              Delete workflow
+            </Button>
             <Button type="submit" variant="primary" disabled={!!problem} loading={save.isPending}>
               Save
             </Button>

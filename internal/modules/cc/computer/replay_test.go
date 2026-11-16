@@ -743,12 +743,13 @@ func TestReplayWorksTowardTheResult(t *testing.T) {
 			e.exec.pages = []Observation{shown}
 		}
 	}
-	e.script(actions(press("e8", "Open the statement")))
+	// The address is right after the press; the end state is then asked of the screenshot.
+	e.script(actions(press("e8", "Open the statement")), "yes")
 	wf := statementWorkflow()
 	wf.Success = SuccessCheck{URLContains: "/view"}
 	wf.Skill.Goal.EndState = "The {month} statement is open"
 	out := e.replay(wf, map[string]string{"month": "October 2026"})
-	if out.State != StateDone || out.Summary != `Ran "Bank statement". Checked: the address contains "/view".` {
+	if out.State != StateDone || out.Summary != `Ran "Bank statement". Checked: the address contains "/view"; Is this true now: The October 2026 statement is open?: yes.` {
 		t.Fatalf("outcome %+v", out)
 	}
 	txt := userText(e.llm.reqs[0])
@@ -789,6 +790,21 @@ func TestResultCheckIsBound(t *testing.T) {
 	got := c.with(func(s string) string { return wf.BindText(s, map[string]string{"month": "2026-08"}) })
 	if got.Download.NameLike != "statement_2026-08.csv" || got.Screen != "2026-08 and {other}" || c.Download.NameLike != "statement_{month}.csv" {
 		t.Fatalf("bound %+v %+v, original %+v", got.Download, got.Screen, c.Download)
+	}
+}
+
+// A text on the page is only a sign: the end state is still asked of the screenshot, and a "no"
+// there is not a verified run ("1500" was on the sheet, in another month's row).
+func TestTextCheckDoesNotStandInForTheEndState(t *testing.T) {
+	page := bankPage(download)
+	page.Image = &Image{MIME: "image/png", Data: []byte("png"), CaptureID: "c9", Width: 800, Height: 600}
+	e := newEnv(t, page)
+	e.script("no it is in another row", "no", "no", "no", "no", "no", "no", "no")
+	wf := statementWorkflow()
+	wf.Success = SuccessCheck{TextPresent: []string{"Download CSV"}}
+	wf.Skill.Goal.EndState = "The {month} statement is showing"
+	if out := e.replay(wf, map[string]string{"month": "October 2026"}); out.State == StateDone {
+		t.Fatalf("outcome %+v", out)
 	}
 }
 
@@ -856,7 +872,10 @@ func itemLines(r RunRecord) string {
 // The workflow's page follows a run: a record after every step and at the end, saying what each
 // step expected and, where a check failed, what was seen.
 func TestReplayRecordsTheRun(t *testing.T) {
-	e := newEnv(t, bankPage(download))
+	page := bankPage(download)
+	page.Image = &Image{MIME: "image/png", Data: []byte("png"), CaptureID: "c9", Width: 800, Height: 600}
+	e := newEnv(t, page)
+	e.script("yes") // the end state, asked of the screenshot
 	wfs := &fakeWorkflows{}
 	e.loop.Workflows = wfs
 	wf := checkedWorkflow()

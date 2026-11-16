@@ -461,10 +461,10 @@ func (l *Loop) replayDone(ctx context.Context, r *round, wf *Workflow, steps []W
 	bind := func(s string) string { return wf.BindText(s, params) }
 	check := wf.Success.with(bind)
 	end := oneLine(bind(wf.Skill.Goal.EndState))
-	// The end state is asked of the screen only when nothing observable checks the result: a
-	// download, a file, an address or a text is proof, and "the statement is in Downloads" is
-	// not something a screenshot shows.
-	if end != "" && !check.concrete() && check.Screen == "" && r.pick.Vision {
+	// The end state is asked of the screen whatever else is checked: an address or a text is
+	// only a sign ("1500" was on the sheet, in October's row). A download or a file is proof on
+	// the disk, and "the statement is in Downloads" is not something a screenshot shows.
+	if end != "" && check.Download == nil && check.File == nil && check.Screen == "" && r.pick.Vision {
 		check.Screen = "Is this true now: " + end + "?"
 	}
 	if check.empty() {

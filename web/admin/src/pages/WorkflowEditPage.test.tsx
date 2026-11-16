@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { TaughtWorkflow, WorkflowPut } from '@/api/workflows'
 import WorkflowEditPage from './WorkflowEditPage'
 
-const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn(), getLastRun: vi.fn(), runWorkflow: vi.fn(), reviseWorkflow: vi.fn() }))
+const api = vi.hoisted(() => ({ getWorkflow: vi.fn(), saveWorkflow: vi.fn(), relearnWorkflow: vi.fn(), getLastRun: vi.fn(), runWorkflow: vi.fn(), reviseWorkflow: vi.fn(), deleteWorkflow: vi.fn() }))
 vi.mock('@/api/workflows', async (orig) => ({ ...(await orig<typeof import('@/api/workflows')>()), ...api }))
 
 const bank = (over: Partial<TaughtWorkflow> = {}): TaughtWorkflow => ({
@@ -472,5 +472,18 @@ describe('WorkflowEditPage', () => {
     const body = await save()
     expect(body.steps[1].intent).toBe('Go to the statements of the checking account')
     expect(screen.queryByText('Proposed changes from your note')).not.toBeInTheDocument()
+  })
+
+  it('deletes the workflow after a confirmation', async () => {
+    api.getWorkflow.mockResolvedValue(bank())
+    api.deleteWorkflow.mockResolvedValue(undefined)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    renderPage()
+    const del = await screen.findByRole('button', { name: 'Delete workflow' })
+    fireEvent.click(del)
+    expect(api.deleteWorkflow).not.toHaveBeenCalled()
+    fireEvent.click(del)
+    await waitFor(() => expect(api.deleteWorkflow).toHaveBeenCalledWith('tw_1'))
+    confirm.mockRestore()
   })
 })

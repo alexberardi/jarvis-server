@@ -143,6 +143,10 @@ export async function saveWorkflow(id: string, body: WorkflowPut): Promise<Taugh
 }
 
 /** relearnWorkflow learns it again from its recording and answers the draft; cc stores nothing until it is saved. */
+export async function deleteWorkflow(id: string): Promise<void> {
+  await apiClient.delete(`${V0}/workflows/${encodeURIComponent(id)}`)
+}
+
 export async function relearnWorkflow(id: string): Promise<WorkflowPut> {
   const { data } = await apiClient.post<WorkflowPut>(`${V0}/workflows/${encodeURIComponent(id)}/relearn`, {})
   return data
