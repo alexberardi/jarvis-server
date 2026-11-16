@@ -181,9 +181,12 @@ curl -fsS "$ADMIN/api/update/apply" "${auth[@]}"
 echo
 [ "$(R "$BIN.prev" version)" = v0.0.2 ] || fail "jarvisd.prev is not v0.0.2"
 if [ "$MODE" = system ]; then
-  sudo journalctl -u jarvisd --no-pager | grep -q 'prestart: installed v0.0.4' || fail "the ExecStartPre helper didn't swap"
+  # Not `journalctl | grep -q`: grep -q exits at the match, journalctl then dies of SIGPIPE once
+  # the journal is longer than a pipe holds, and pipefail calls that a failure.
+  sudo journalctl -u jarvisd --no-pager >"$W/journal.txt"
+  grep -q 'prestart: installed v0.0.4' "$W/journal.txt" || fail "the ExecStartPre helper didn't swap"
   say "4a. the helper rewrote the unit (v0.0.4's), and systemd loaded it after the start"
-  sudo journalctl -u jarvisd --no-pager | grep -q 'rewrote the service definition' || fail "the helper didn't refresh the unit"
+  grep -q 'rewrote the service definition' "$W/journal.txt" || fail "the helper didn't refresh the unit"
   J service status --json | tee "$W/status.json"
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert not d["definition_stale"], d' "$W/status.json" ||
     fail "definition_stale after the admin button"
