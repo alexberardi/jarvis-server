@@ -582,6 +582,8 @@ func paramCandidates(evs []traceEvent) []paramCandidate {
 	return out
 }
 
+var plainNumber = regexp.MustCompile(`^-?\d[\d,]*(?:\.\d+)?$`)
+
 // desktopParamCandidates are paramCandidates for a desktop trace: the dates, months, file
 // names and amounts in typed values (never masked ones) and in the names of what was clicked
 // (the cell in the October row). There are no URLs on a desktop.
@@ -601,6 +603,11 @@ func desktopParamCandidates(evs []desktopEvent) []paramCandidate {
 			if !slices.ContainsFunc(found, func(o paramCandidate) bool { return o.Kind == c.Kind && o.Value == c.Value }) {
 				found = append(found, c)
 			}
+		}
+		// A typed value that is nothing but a number ("1500" in a cell) is an amount, where
+		// one inside a sentence is as likely a year or a count.
+		if from == "typed" && len(found) == 0 && plainNumber.MatchString(strings.TrimSpace(text)) {
+			found = append(found, paramCandidate{Event: i + 1, Kind: "number", Value: strings.TrimSpace(text), From: from})
 		}
 		out = append(out, found...)
 	}
@@ -1252,6 +1259,24 @@ func learnParams(w *TaughtWorkflow, out learnOutput, cands []paramCandidate) map
 		for _, c := range picked {
 			subs[c.Event] = append(subs[c.Event], paramSub{c, name})
 		}
+	}
+	// A number or a date the user typed is what they'd type differently next time, whether or
+	// not the model said so ("1500" in a budget). It is asked for by default; the owner turns
+	// it off with one press, where a missed one silently repeats the recorded value.
+	for _, c := range cands {
+		if c.From != "typed" || c.Kind == "file" || len(subs[c.Event]) > 0 || len(w.Params) == maxWorkflowParams {
+			continue
+		}
+		base := map[string]string{"number": "amount"}[c.Kind]
+		if base == "" {
+			base = c.Kind
+		}
+		name := base
+		for n := 2; slices.ContainsFunc(w.Params, func(o Param) bool { return o.Name == name }); n++ {
+			name = fmt.Sprintf("%s_%d", base, n)
+		}
+		w.Params = append(w.Params, Param{Name: name, Kind: c.Kind, Example: c.Value})
+		subs[c.Event] = append(subs[c.Event], paramSub{c, name})
 	}
 	return subs
 }

@@ -534,6 +534,35 @@ func TestLearnDesktopClickedParam(t *testing.T) {
 	}
 }
 
+// A typed number the model didn't name as a param is one anyway: the run asks for it, and the
+// checks look for this run's amount.
+func TestLearnTypedNumberIsAParamByDefault(t *testing.T) {
+	evs := []desktopEvent{
+		{Kind: "click", App: "calc", Element: &desktopElement{Role: "cell", Name: "October row, Amount column"}},
+		{Kind: "input", App: "calc", Value: "1500"},
+	}
+	cands := desktopParamCandidates(evs)
+	out, err := parseLearnOutput(`{"name": "Enter the budget", "goal": {"end_state": "The October row contains 1500"}, "steps": [
+		{"intent": "Select the amount for October", "event_seqs": [1]},
+		{"intent": "Type the amount", "expect": "The cell displays the value 1500", "event_seqs": [2]}],
+		"params": [{"name": "month", "kind": "month", "example": "October", "from_seqs": [1]}],
+		"success": {"text_present": ["1500"]}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := buildDesktopWorkflow(Recording{ID: "r", HouseholdID: cbHH, OwnerID: 5}, evs, cands, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Params) != 2 || w.Params[1] != (Param{Name: "amount", Kind: "number", Example: "1500"}) {
+		t.Fatalf("params %s", mustJSON(t, w.Params))
+	}
+	if w.Steps[1].Action.Text != "{amount}" || w.Steps[1].Expect.Screen != "The cell displays the value {amount}" ||
+		w.Skill.Goal.EndState != "The {month} row contains {amount}" || w.Success.TextPresent[0] != "{amount}" {
+		t.Fatalf("workflow %s", mustJSON(t, w))
+	}
+}
+
 // TestOpenedDocument: a recording that begins by finding a document in the file manager and
 // double-clicking it keeps the events from the document on and learns "this file is open";
 // one that did something else first, or began with the document open, is left as it is.
