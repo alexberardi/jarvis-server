@@ -86,23 +86,33 @@ func computerDefinitions() []settings.Definition {
 			},
 			Description: "Most tokens the model may think before each round of a computer task (0 = it answers at once). " +
 				"Thinking makes each round slower and can make a local model more careful."},
-		{Key: computer.SettingLoop, Category: "computer", Type: settings.String, Default: computer.LoopRounds,
+		{Key: computer.SettingLoop, Category: "computer", Type: settings.String, Default: computer.LoopAuto,
 			Validate: func(v any) error {
-				if s, _ := v.(string); s != computer.LoopRounds && s != computer.LoopTurns {
-					return errors.New(`must be "rounds" or "turns"`)
+				if s, _ := v.(string); s != computer.LoopAuto && s != computer.LoopRounds && s != computer.LoopTurns {
+					return errors.New(`must be "auto", "rounds" or "turns"`)
 				}
 				return nil
 			},
-			Description: "How a computer task talks to its model: rounds (a fresh prompt each round, with a line per past action) or " +
+			Description: "How a computer task talks to its model: auto (turns for a large model, about 20B and up or the cloud one; rounds for any other), rounds (a fresh prompt each round, with a line per past action) or " +
 				"turns (one conversation for the task: the plan, then each answer and what it changed on the screen, one action an answer)."},
-		{Key: computer.SettingLocateClicks, Category: "computer", Type: settings.String, Default: "off",
+		{Key: computer.SettingModelSize, Category: "computer", Type: settings.String, Default: "auto",
 			Validate: func(v any) error {
-				if s, _ := v.(string); s != "on" && s != "off" {
-					return errors.New(`must be "on" or "off"`)
+				if s, _ := v.(string); s != "auto" && s != "large" && s != "small" {
+					return errors.New(`must be "auto", "large" or "small"`)
 				}
 				return nil
 			},
-			Description: "Whether a click aimed from a screenshot is placed by a question of its own (on) or taken from the round's answer (off). " +
+			Description: "How large the model that drives computer tasks is: auto (from the model catalogue or the size in the model's name), " +
+				"large (about 20B and up) or small. Set it when the model runs elsewhere under a name that doesn't say. " +
+				"It picks the loop and click placing on auto, and whether a failed task says the model may be too small."},
+		{Key: computer.SettingLocateClicks, Category: "computer", Type: settings.String, Default: "auto",
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != "auto" && s != "on" && s != "off" {
+					return errors.New(`must be "auto", "on" or "off"`)
+				}
+				return nil
+			},
+			Description: "Whether a click aimed from a screenshot is placed by a question of its own (on) or taken from the round's answer (off); auto is on for a small model only. " +
 				"On makes a small local model's clicks land, at two short model calls a click."},
 		llm.SlotSetting(computer.SettingModel, "computer",
 			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+

@@ -24,6 +24,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -321,6 +322,13 @@ func (e *Env) sandbox(ctx context.Context) error {
 			}
 			e.logf("coordinates: %s (%s)", a.Name, e.Model)
 		}
+	}
+	// The same goes for the model's size, which picks the loop and click placing on auto.
+	if fit := computer.FitOf(e.Model); fit != computer.FitUnknown && e.Model != "scripted" {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.model_size", map[string]any{"value": string(fit)}, nil); err != nil {
+			return fmt.Errorf("computer.model_size: %w", err)
+		}
+		e.logf("model size: %s (%s)", fit, e.Model)
 	}
 	// CCSUITE_THINK_TOKENS runs the pass with the model thinking before each round.
 	if n, err := strconv.Atoi(os.Getenv("CCSUITE_THINK_TOKENS")); err == nil && n > 0 {

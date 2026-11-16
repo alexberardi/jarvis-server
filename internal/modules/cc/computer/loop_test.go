@@ -186,7 +186,7 @@ func newEnv(t *testing.T, pages ...Observation) *tenv {
 		pages = []Observation{shopPage()}
 	}
 	e := &tenv{t: t, db: d, llm: &scriptLLM{}, exec: &fakeExec{pages: pages}, mint: &fakeMint{},
-		clock: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), setts: fakeSettings{}}
+		clock: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), setts: fakeSettings{SettingLoop: LoopRounds}} // the rounds loop unless a test asks: the fixture's model is a large one
 	now := func() time.Time { e.clock = e.clock.Add(e.tick); return e.clock }
 	e.rules = &policy.Store{DB: d, Now: now}
 	e.loop = &Loop{

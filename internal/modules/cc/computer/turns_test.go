@@ -2,6 +2,7 @@ package computer
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -147,5 +148,34 @@ func TestImageChange(t *testing.T) {
 	}
 	if got := imageChange(blank, nil); got != "" {
 		t.Errorf("nothing to compare: %q", got)
+	}
+}
+
+// auto is a conversation for a large model and rounds for a small one, and a small model's
+// lost task says the model may be why.
+func TestLoopFollowsTheModelsSize(t *testing.T) {
+	for _, c := range []struct {
+		model     string
+		wantTurns bool
+	}{{"qwen3.8-27b", true}, {"qwen3.5-9b", false}} {
+		e := newEnv(t, shopPage())
+		delete(e.setts, SettingLoop)
+		e.setts[SettingMaxRounds] = 1
+		e.loop.Models.Endpoint = func(_ context.Context, _ string) (llm.Endpoint, error) {
+			return llm.Endpoint{Model: c.model, Vision: true}, nil
+		}
+		go1 := `{"actions": [` + press("e3", "Add the soap to the cart") + `]}`
+		e.script(go1, go1, go1)
+		out := e.loop.Run(t.Context(), task())
+		if out.State != StateFailed {
+			t.Fatalf("%s: outcome %+v, want it out of rounds", c.model, out)
+		}
+		sys := msgText(e.llm.reqs[0].Messages[0])
+		if got := sys == turnsSystemPrompt; got != c.wantTurns {
+			t.Errorf("%s: a conversation = %v, want %v", c.model, got, c.wantTurns)
+		}
+		if got := out.ModelNote != ""; got == c.wantTurns {
+			t.Errorf("%s: model note %q", c.model, out.ModelNote)
+		}
 	}
 }

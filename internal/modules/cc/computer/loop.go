@@ -204,7 +204,12 @@ type Outcome struct {
 	// Downloads are the files a browser task downloaded (done), by name in ~/Downloads.
 	Downloads []string
 	Rounds    int
-	Healed    []Heal // a replay's done: the steps whose element moved (stored when Loop.Workflows is set)
+	// ModelNote is for the user after a failure on a small or unknown model ("" otherwise).
+	ModelNote string
+	// lost: the failure is the model losing its way (stuck, out of rounds or time, unreadable,
+	// unconfirmed), not something outside it (a blocked site, an unreachable computer).
+	lost   bool
+	Healed []Heal // a replay's done: the steps whose element moved (stored when Loop.Workflows is set)
 }
 
 // PendingAction is one risky action held for the user's confirmation. All the risky actions of a
@@ -438,11 +443,16 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 	if err != nil {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
-	run.Model = pick.Model
+	if v := Fit(l.str(ctx, SettingModelSize, sc, "auto")); v == FitLarge || v == FitSmall {
+		pick.Fit = v // the user says what Jarvis can't tell
+	}
+	run.Model, run.fit = pick.Model, pick.Fit
 	pick.Adapter = l.adapter(ctx, sc, pick)
 	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
-	if r.turns = l.str(ctx, SettingLoop, sc, LoopRounds) == LoopTurns; r.turns {
+	// auto: a large model works better as a conversation, a small one loses its way in it.
+	loop := l.str(ctx, SettingLoop, sc, LoopAuto)
+	if r.turns = loop == LoopTurns || (loop == LoopAuto && pick.Fit == FitLarge); r.turns {
 		maxRounds *= 2 // a round is one action, not a batch of them
 	}
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
@@ -472,14 +482,14 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 			return l.end(ctx, run, Outcome{State: StateStopped, Summary: "Stopped."})
 		}
 		if v := run.Verify; v != nil && v.FailedAt > 0 && (run.Rounds-v.FailedAt >= verifyRounds || run.Rounds >= maxRounds) {
-			return l.end(ctx, run, Outcome{State: StateFailed, Summary: v.couldntConfirm()})
+			return l.end(ctx, run, Outcome{State: StateFailed, lost: true, Summary: v.couldntConfirm()})
 		}
 		if run.Rounds >= maxRounds {
-			return l.end(ctx, run, Outcome{State: StateFailed,
+			return l.end(ctx, run, Outcome{State: StateFailed, lost: true,
 				Summary: fmt.Sprintf("I stopped after %d rounds without finishing.", run.Rounds)})
 		}
 		if !l.now().Before(deadline) {
-			return l.end(ctx, run, Outcome{State: StateFailed,
+			return l.end(ctx, run, Outcome{State: StateFailed, lost: true,
 				Summary: "I ran out of time before finishing."})
 		}
 		run.Rounds++
@@ -544,7 +554,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	reply, err := l.ask(ctx, r, obs)
 	if err != nil {
-		return Outcome{State: StateFailed, Summary: err.Error()}, true
+		return Outcome{State: StateFailed, lost: true, Summary: err.Error()}, true
 	}
 	r.feedback, r.clipboard = "", ""
 	r.answer, r.thought, r.wrote, r.dropped = "", "", "", 0
@@ -641,7 +651,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	switch {
 	case r.sameActs >= stuckGiveUp:
-		return Outcome{State: StateFailed, Summary: fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.",
+		return Outcome{State: StateFailed, lost: true, Summary: fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.",
 			lowerFirst(firstIntent(actions)))}, true
 	case r.sameBatch >= stuckAfter, r.sameActs >= stuckAnyScreen:
 		// A button in a desktop dialog whose press does nothing is confirmed with Enter instead,
@@ -828,7 +838,7 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 			r.feedback = `you said done but gave no "verify" check, so I can't confirm it. If the task is finished, say done again with a "verify" that shows it (url_contains, text_present, download, file or screen); if not, carry on.`
 			return Outcome{}, false
 		}
-		return Outcome{State: StateFailed, Summary: "I couldn't confirm the task was finished: there was no way to check it."}, true
+		return Outcome{State: StateFailed, lost: true, Summary: "I couldn't confirm the task was finished: there was no way to check it."}, true
 	}
 	var res Verified
 	if why := l.unsaved(ctx, r, obs); why != "" {
@@ -1477,6 +1487,10 @@ func (l *Loop) open(ctx context.Context, t Task) (run *Run, paused bool, err err
 // end saves the run in the state the outcome leaves it in.
 func (l *Loop) end(ctx context.Context, run *Run, out Outcome) Outcome {
 	out.RunID, out.Rounds = run.ID, run.Rounds
+	if out.State == StateFailed && out.lost && run.Model != "" {
+		// A failure on a model that isn't a large one says so: it may be the model, not the task.
+		out.ModelNote = fitNote(run.fit, run.Model)
+	}
 	switch out.State {
 	case StateDone:
 		run.State = RunDone

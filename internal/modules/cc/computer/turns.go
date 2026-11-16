@@ -21,6 +21,7 @@ const SettingLoop = "computer.loop"
 
 // SettingLoop's values.
 const (
+	LoopAuto   = "auto" // turns for a large model (Fit), rounds for any other
 	LoopRounds = "rounds"
 	LoopTurns  = "turns"
 )

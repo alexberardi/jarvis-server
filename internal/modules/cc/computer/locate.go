@@ -46,7 +46,14 @@ func (l *Loop) locate(ctx context.Context, r *round, a computeruse.Action) (x, y
 	if a.X == nil || a.Ref != "" || a.Intent == "" || !locatable[a.Kind] || len(r.shots) == 0 || l.Settings == nil {
 		return 0, 0, false
 	}
-	if l.Settings.String(ctx, SettingLocateClicks, settings.Scope{HouseholdID: r.task.HouseholdID}) != "on" {
+	// auto: a small model's clicks need it; a large one's weren't measured with it.
+	switch l.str(ctx, SettingLocateClicks, settings.Scope{HouseholdID: r.task.HouseholdID}, "auto") {
+	case "on":
+	case "auto":
+		if r.pick.Fit != FitSmall {
+			return 0, 0, false
+		}
+	default:
 		return 0, 0, false
 	}
 	// Only a click the model is making again: its own aim is good on wide controls (a text

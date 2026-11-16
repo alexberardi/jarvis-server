@@ -239,7 +239,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	case computer.StateStopped:
 		return Result{Command: cmd, Label: label, Error: firstNonEmpty(out.Summary, "Stopped."), stopped: true}, nil
 	}
-	return failed(firstNonEmpty(out.Summary, "the computer task failed"))
+	return failed(strings.TrimSpace(firstNonEmpty(out.Summary, "the computer task failed") + " " + out.ModelNote))
 }
 
 // computerWait is what a computer step parked on: a confirmation of its held actions (with the

@@ -38,6 +38,7 @@ type Run struct {
 	Pending              *Held        // the batch waiting for a confirmation, or nil
 	Verify               *VerifyState // the result checks so far, or nil
 	Model, Error         string
+	fit                  Fit // the model's (this call only: not stored)
 	CreatedAt, UpdatedAt time.Time
 }
 

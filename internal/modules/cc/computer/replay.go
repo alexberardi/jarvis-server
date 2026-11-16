@@ -55,7 +55,7 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	if err != nil {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
-	run.Model = pick.Model
+	run.Model, run.fit = pick.Model, FitLarge // a replay runs its steps directly: its failure isn't the model's
 	pick.Adapter = l.adapter(ctx, sc, pick)
 	// A replay's direct steps have no model to read a checkout from the page: a purchase holds
 	// for the user as recorded, without sending the step back for one.
