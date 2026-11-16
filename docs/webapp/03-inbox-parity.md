@@ -13,7 +13,7 @@ confirmation's buttons. Everything else the mobile inbox does
 | Editable fields before confirming (`src/utils/inboxEditors.ts`) | `metadata.editable_text`, `metadata.editable_fields`; fail closed on an unknown field type or newer `editor_schema` | missing |
 | Expiring cards: buttons off once stale | `metadata.expires_at`, or the server refusing the tap | missing |
 | Interactive lists: sections, row actions, defaults, `requires` gates (`InteractiveListScreen.tsx`) | category `interactive_list` | missing |
-| Web-view picker: pick or sign in on a site, back to the list (`WebViewPickerScreen.tsx`) | from an interactive list | missing (web: a new tab plus a "Done" return) |
+| Web-view picker: pick or sign in on a site, back to the list (`WebViewPickerScreen.tsx`) | from an interactive list | missing; on the web the site opens in a new tab and the agent matches your open tabs ([decision](../decisions/2026-11-15-web-pick-reads-your-tabs.md)), else you paste the address |
 | Callback result: follow a job started from a card (`InboxCallbackResultScreen.tsx`) | `GET /callbacks/{job_id}/status` | **no page needed**: no producer sends `stack` or `popover`, so every tap is watched inline on its card |
 | Watch alert and "Jarvis ran this" cards (`src/components/inbox/WatchAlertCard.tsx`, `AutonomyRanCard.tsx`) | `metadata.watch_alert`; `metadata.card_type: "autonomy_ran"` with `steps`, `rules` (`types/autonomyCards.ts`) | missing |
 | Audio: call recordings, voice clips (`src/components/InboxAudioPlayer.tsx`) | `metadata.audio` | **not ported**: jarvisd writes no `metadata.audio`, so there is nothing to play |
@@ -40,7 +40,11 @@ confirmation's buttons. Everything else the mobile inbox does
    expiry, watch alert and ran cards. Shared parsing goes in `web/admin/src/lib/inbox/`,
    ported from mobile's parsers with their tests. A tap is watched until its job finishes (a
    failure toasts its message) and a card rewritten in place is refetched until its revision moves.
-3. **Interactive lists** and the web-view picker.
+3. **Interactive lists** and the web-view picker. Server half (held for review): gateway routes
+   for a node's command records (list, update), and `GET /mobile/nodes/{id}/browser/matches`
+   (owner only) answered by the agent's `browser/match-tabs`. Web half: the list page (sections,
+   checkbox and stepper rows, record gates, actions) and "Find ID" (new tab, then matches;
+   paste as the fallback).
 4. **Suppressed suggestions** (a section of the inbox page or of Account).
 5. **Live badge and toast:** poll the unread count more often while the tab is visible, and
    when it goes up, fetch the newest items and toast each one with an "Open" link. No new

@@ -188,6 +188,21 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		t.Fatalf("another household's proposal suppressions: %d %v", code, out)
 	}
 
+	// Interactive lists: another household's node's records are refused (cc: not a member), and
+	// tab matches only answer the member who paired the node (an admin-key node has no owner).
+	cd := base + "/api/cc/api/v0/mobile/command-data/nodes/node-h2/commands/export_shopping_list/records"
+	if code, out := call(t, "GET", cd, nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's node records: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", cd+"/milk", map[string]any{"walmart_item_id": "1"}, bearer(m1)...); code != 403 {
+		t.Fatalf("patch another household's node record: %d %v", code, out)
+	}
+	for _, n := range []string{"node-h1", "node-h2"} {
+		if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/nodes/"+n+"/browser/matches?pattern=(x)", nil, bearer(m1)...); code != 404 {
+			t.Fatalf("tab matches on %s, not the member's: %d %v", n, code, out)
+		}
+	}
+
 	// G10: a member's own account.
 	if code, out := call(t, "GET", base+"/api/auth/me", nil, bearer(m1)...); code != 200 || obj(t, out)["email"] != "m1@example.com" {
 		t.Fatalf("member me: %d %v", code, out)
