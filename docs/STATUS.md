@@ -14,8 +14,9 @@ The web inbox matches the mobile one: card actions, editable fields, interactive
 callback results, autonomy cards, audio, suppressed suggestions, a live badge and toast.
 Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 
-- [ ] 1 gateway routes (callbacks, proposal suppressions), held for review
-- [ ] 2 card renderer · 3 interactive lists + callback results · 4 suppressed suggestions · 5 live badge and toast
+- [x] 1 gateway routes (callbacks, proposal suppressions) (#683)
+- [x] 2 card renderer: elements, editable fields, expiry, watch and ran cards
+- [ ] 3 interactive lists + web-view picker · 4 suppressed suggestions · 5 live badge and toast
 
 ### Touch display (2026-10-23)
 
