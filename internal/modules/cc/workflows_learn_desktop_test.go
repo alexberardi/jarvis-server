@@ -575,7 +575,13 @@ func TestOpenedDocument(t *testing.T) {
 	if rest, p := openedDocument([]desktopStartWindow{{App: "soffice", Title: calc}}, evs); p != nil || len(rest) != len(evs) {
 		t.Fatalf("open at the start: %+v", p)
 	}
-	other := append([]desktopEvent{{Kind: "click", App: "firefox", Window: win("firefox", "Bank")}}, evs...)
+	// A click that named nothing in the window the recording started in is on the way too.
+	away := append([]desktopEvent{{Kind: "click", App: "brave-browser", Window: win("brave-browser", "Jarvis")}}, evs...)
+	if rest, p := openedDocument(nil, away); p == nil || len(rest) != 2 {
+		t.Fatalf("a nameless click first: %+v, kept %d", p, len(rest))
+	}
+	other := append([]desktopEvent{{Kind: "click", App: "firefox", Window: win("firefox", "Bank"),
+		Element: &desktopElement{Role: "link", Name: "Statements"}}}, evs...)
 	if rest, p := openedDocument(nil, other); p != nil || len(rest) != len(other) {
 		t.Fatalf("work in another app first: %+v", p)
 	}

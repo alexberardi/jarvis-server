@@ -812,7 +812,11 @@ func openedDocument(start []desktopStartWindow, evs []desktopEvent) ([]desktopEv
 	for i, e := range evs {
 		t := title(e)
 		if t == "" {
-			if !inFileManager(e.App) {
+			// On the way to the document: the file manager, or a click or typing that named
+			// nothing (the window the recording started in, the launcher). Work on something
+			// named in another app is part of the workflow, and stays.
+			named := e.Element != nil && e.Element.Name != ""
+			if !inFileManager(e.App) && e.App != "" && (named || e.Kind != "click") {
 				return evs, nil
 			}
 			continue
