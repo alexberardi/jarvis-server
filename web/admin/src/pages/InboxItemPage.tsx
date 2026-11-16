@@ -12,6 +12,8 @@ import InboxAttachments from '@/components/inbox/InboxAttachments'
 import InboxCardActions from '@/components/inbox/InboxCardActions'
 import { RanCard, WatchAlertCard } from '@/components/inbox/AutonomyCards'
 import { parseRanCard, parseWatchAlert } from '@/lib/inbox/autonomyCards'
+import InteractiveList from '@/components/inbox/InteractiveList'
+import { parsePayload } from '@/lib/inbox/interactiveList'
 import { useAuth } from '@/hooks/useAuth'
 import { inboxKeys } from '@/hooks/useInbox'
 import { errorMessage, errorStatus } from '@/lib/errors'
@@ -100,6 +102,8 @@ export default function InboxItemPage() {
 
   const sources = sourcesOf(item)
   const m = item.metadata ?? {}
+  const list = item.category === 'interactive_list' ? parsePayload(m) : null
+  const listOk = list && !('invalid' in list) ? list : null
   const ran = parseRanCard(m)
   const watch = parseWatchAlert(m)
   const stats = typeof m.elapsed_seconds === 'number' || typeof m.elapsed_seconds === 'string'
@@ -113,7 +117,7 @@ export default function InboxItemPage() {
         </Button>
       </div>
       <header className="space-y-2">
-        <h1 className="text-title text-text [overflow-wrap:anywhere]">{item.title}</h1>
+        <h1 className="text-title text-text [overflow-wrap:anywhere]">{listOk?.payload.title_override ?? item.title}</h1>
         <p className="flex flex-wrap items-center gap-2 text-small text-text-muted">
           <Badge>{item.category.replace(/_/g, ' ')}</Badge>
           <span>{formatServerTime(item.created_at)}</span>
@@ -150,13 +154,19 @@ export default function InboxItemPage() {
       {ran && <RanCard data={ran} />}
       {watch && <WatchAlertCard data={watch} />}
 
-      {(item.body || item.summary) && (
-        <Card className="text-body text-text md:p-6">
-          <Markdown>{item.body || item.summary}</Markdown>
-        </Card>
+      {listOk ? (
+        // An interactive list is its own card; an invalid one falls back to the plain item, as mobile.
+        <InteractiveList key={item.id} item={item} payload={listOk.payload} truncated={listOk.truncated} />
+      ) : (
+        <>
+          {(item.body || item.summary) && (
+            <Card className="text-body text-text md:p-6">
+              <Markdown>{item.body || item.summary}</Markdown>
+            </Card>
+          )}
+          <InboxCardActions key={item.id} item={item} refresh={() => q.refetch().then((r) => r.data)} />
+        </>
       )}
-
-      <InboxCardActions key={item.id} item={item} refresh={() => q.refetch().then((r) => r.data)} />
 
       <InboxAttachments itemId={item.id} attachments={item.attachments ?? []} />
 

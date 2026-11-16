@@ -16,7 +16,7 @@ Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 
 - [x] 1 gateway routes (callbacks, proposal suppressions) (#683)
 - [x] 2 card renderer: elements, editable fields, expiry, watch and ran cards
-- [ ] 3 interactive lists + web-view picker: server half (record routes, owner's tab matches) in review; web half next
+- [x] 3 interactive lists + "Find ID" from your open tabs (#687 server; web half)
 - [ ] 4 suppressed suggestions · 5 live badge and toast
 
 ### Touch display (2026-10-23)
