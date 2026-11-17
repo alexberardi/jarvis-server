@@ -469,6 +469,21 @@ func (s *Sidecar) RunAgent(_ context.Context, name string) ([]json.RawMessage, e
 	return res.Alerts, nil
 }
 
+// AgentContext is each package agent's context after its last run ({"home_assistant": {...}}),
+// for a conversation's node_context.agents, as the Python node sent; nil when none has any.
+func (s *Sidecar) AgentContext(context.Context) (map[string]json.RawMessage, error) {
+	var res struct {
+		Agents map[string]json.RawMessage `json:"agents"`
+	}
+	if err := s.roundTrip("agent_context", nil, &res); err != nil {
+		return nil, err
+	}
+	if len(res.Agents) == 0 {
+		return nil, nil
+	}
+	return res.Agents, nil
+}
+
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

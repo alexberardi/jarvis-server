@@ -216,6 +216,25 @@ func TestReportToolsListsInstalledPackages(t *testing.T) {
 	}
 }
 
+// The package agents' context goes out with the tools as "agents" (a Go agent's Home Assistant
+// entities, which CC lists in mobile chat's prompt); none, and the key is left out.
+func TestReportToolsCarriesAgentContext(t *testing.T) {
+	cc := newFakeCC()
+	ctxs := map[string]json.RawMessage{"home_assistant": json.RawMessage(`{"device_controls":{"switch":[{"entity_id":"switch.plug"}]}}`)}
+	d := &Dispatcher{CC: cc, Tools: &echoTools{}, Log: quiet,
+		AgentContext: func(context.Context) map[string]json.RawMessage { return ctxs }}
+	d.Handle(context.Background(), publish(t, "report_tools", map[string]any{"reply_request_id": "r6"}))
+	got, _ := json.Marshal(cc.reports["r6"].(map[string]any)["agents"])
+	if string(got) != `{"home_assistant":{"device_controls":{"switch":[{"entity_id":"switch.plug"}]}}}` {
+		t.Fatalf("agents = %s", got)
+	}
+	ctxs = nil
+	d.Handle(context.Background(), publish(t, "report_tools", map[string]any{"reply_request_id": "r7"}))
+	if _, ok := cc.reports["r7"].(map[string]any)["agents"]; ok {
+		t.Fatal("no agent context: agents is left out")
+	}
+}
+
 func TestOtherVerbsAndJunkAreIgnored(t *testing.T) {
 	cc := newFakeCC()
 	d := &Dispatcher{CC: cc, Tools: &echoTools{}, Log: quiet}

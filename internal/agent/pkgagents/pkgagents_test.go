@@ -192,3 +192,41 @@ func TestRunTestsRunsTheTestAgentsNow(t *testing.T) {
 		t.Fatalf("ran %v before its interval after the manual run", sc.ran)
 	}
 }
+
+// The user's demo (2026-11-16): after a package update, Home Assistant's agent waited a whole
+// interval before the new sidecar knew any entities. A new sidecar (any package change) runs
+// an installed package's startup agent at once, as the Python node's restart after an install
+// did, keeping its failures; an agent that doesn't run on startup keeps its schedule.
+func TestSchedulerRerunsStartupAgentsOnANewSidecar(t *testing.T) {
+	now := time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)
+	sc := &fakeSidecar{
+		agents: []sidecar.AgentDef{
+			{Name: "home_assistant", Package: "home-assistant", Interval: 5 * time.Minute, RunOnStartup: true, Sidecar: 1},
+			{Name: "comfyui_jobs", Package: "comfyui", Interval: 3 * time.Hour, Sidecar: 1},
+		},
+		fail: map[string]error{"home_assistant": errors.New("ValueError: no URL")},
+	}
+	s, _ := newScheduler(sc, &now)
+	ctx := context.Background()
+	at := func(d time.Duration, want ...string) {
+		t.Helper()
+		now = now.Add(d)
+		sc.ran = nil
+		s.Tick(ctx)
+		if strings.Join(sc.ran, ",") != strings.Join(want, ",") {
+			t.Fatalf("+%v ran %v, want %v", d, sc.ran, want)
+		}
+	}
+	at(0, "home_assistant")
+	at(CheckEvery)
+	sc.agents[0].Sidecar, sc.agents[1].Sidecar = 2, 2 // a package update swapped the sidecar
+	at(CheckEvery, "home_assistant")
+	at(CheckEvery)
+	s.mu.Lock()
+	failures := s.state["home_assistant"].failures
+	s.mu.Unlock()
+	if failures != 2 {
+		t.Fatalf("failures = %d, want 2 (kept across the new sidecar)", failures)
+	}
+	at(5*time.Minute, "home_assistant")
+}

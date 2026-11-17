@@ -292,7 +292,12 @@ Install, Update, Revert and Uninstall work on a computer as on a Pi:
   serving. At start the agent serves what is installed; a package that doesn't load is reported
   with `health: "failed"`.
 - **report_tools** lists `installed_packages` (`name`, `version`, `previous_version`, `health`)
-  as a Pi does, for the app's Update, Revert and health badge.
+  as a Pi does, for the app's Update, Revert and health badge, and `agents`: each package
+  agent's `get_context_data()` after its last run (Home Assistant's entities), which mobile chat
+  uses as its device context in place of the DB devices. Voice sends the same as
+  `node_context.agents` at conversation start, as the Python node did. Package code reads it
+  through a `services.agent_scheduler_service` shim in the sidecar (the HA resolver), and a new
+  sidecar runs the `run_on_startup` agents at once so the context is never a whole interval stale.
 
 Not built: removing an uninstalled package's secrets and stored data (the Pi does), agents and
 the other Pi component types, `min_sdk_version`/`min_jarvis_version` checks, Forge test

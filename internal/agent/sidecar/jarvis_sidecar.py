@@ -23,6 +23,9 @@ JSON-lines requests on stdin:
     <- {"id": 7, "result": {"alerts": [{Alert.to_dict()}, ...]} | {"error": "..."}}
     -> {"id": 8, "method": "user_secrets", "params": {"user_id": 7}}
     <- {"id": 8, "result": {"secrets": {"command_name": [{secret}, ...]}}}   as that user
+    -> {"id": 9, "method": "agent_context"}
+    <- {"id": 9, "result": {"agents": {"home_assistant": {...}, ...}}}  each agent's
+       get_context_data() after its last run (node_context.agents)
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
 A Pi's packages may also have background agents (the listing's "agents": IJarvisAgent
@@ -549,6 +552,43 @@ def test_events(params: dict) -> dict:
 # The installed packages' background agents by name, and the package each came from.
 AGENTS: dict = {}
 AGENT_PACKAGE: dict = {}
+# Each agent's get_context_data() after its last run, or its error (N:services/
+# agent_scheduler_service._context_cache): what agent_context answers and what package code
+# reads through the services.agent_scheduler_service shim.
+AGENT_CONTEXT: dict = {}
+
+
+class _AgentContextScheduler:
+    def get_aggregated_context(self) -> dict:
+        return dict(AGENT_CONTEXT)
+
+
+def _install_agent_context_shim() -> None:
+    """Packages written for the Python node read their agents' context through
+    services.agent_scheduler_service (the Home Assistant resolver maps "the plug" to an entity
+    with it). Without that module, or with the node's (its scheduler never runs here: the Go
+    agent schedules the agents), they would read nothing."""
+    import types
+
+    scheduler = _AgentContextScheduler()
+    try:
+        module = importlib.import_module("services.agent_scheduler_service")
+    except ImportError:
+        if "services" not in sys.modules:
+            # An empty package: services.secret_service and the like still fail to import, as
+            # the packages' fallbacks expect.
+            parent = types.ModuleType("services")
+            parent.__path__ = []
+            sys.modules["services"] = parent
+        module = types.ModuleType("services.agent_scheduler_service")
+        sys.modules["services.agent_scheduler_service"] = module
+        setattr(sys.modules["services"], "agent_scheduler_service", module)
+    module.get_agent_scheduler_service = lambda: scheduler
+
+
+def agent_context() -> dict:
+    """{"agents": {name: context}}: the agents' context for a conversation's node_context."""
+    return {"agents": dict(AGENT_CONTEXT)}
 # The packages' daemons, by name, for their settings only: each runs in a process of its own
 # (run_daemon), never here.
 DAEMONS: dict = {}
@@ -809,11 +849,19 @@ def agent_run(params: dict) -> dict:
     try:
         _run(agent.run())
     except BaseException as exc:  # a SystemExit in run() must not end the sidecar
+        from datetime import datetime, timezone
+
+        AGENT_CONTEXT[name] = {"last_error": str(exc), "error_time": datetime.now(timezone.utc).isoformat()}
         print(f"sidecar: agent {name} failed:\n{traceback.format_exc()}", file=sys.stderr)
         _test_event(package, "agent", agent=name, ms=int((time.monotonic() - started) * 1000),
                     error=traceback.format_exc()[-_MAX_AGENT_ERROR:])
         return {"error": f"{type(exc).__name__}: {exc}"}
     ms = int((time.monotonic() - started) * 1000)
+    try:
+        if getattr(agent, "include_in_context", True):
+            AGENT_CONTEXT[name] = agent.get_context_data() or {}
+    except Exception as exc:
+        print(f"sidecar: agent {name}: context not read: {exc}", file=sys.stderr)
     alerts = []
     try:
         alerts = [a.to_dict() for a in agent.get_alerts() or []]
@@ -1840,6 +1888,7 @@ def main() -> None:
         package, rel = sys.argv[sys.argv.index("--daemon") + 1:][:2]
         sys.exit(run_daemon(sys.argv[1], package, rel))
     _install_test_log_handler()
+    _install_agent_context_shim()
     commands = None
     while True:
         line = sys.stdin.readline()  # not `for line in sys.stdin`: _ask reads replies from it too
@@ -1891,6 +1940,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": playback_reports()}
             elif method == "agent_run":
                 reply = {"id": msg_id, "result": agent_run(msg.get("params") or {})}
+            elif method == "agent_context":
+                reply = {"id": msg_id, "result": agent_context()}
             elif method == "reminders_due":
                 if "reminder" not in commands:
                     raise RuntimeError("no built-in reminder command in this sidecar")

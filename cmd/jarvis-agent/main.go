@@ -992,6 +992,7 @@ func runAgent(ctx context.Context, args []string) error {
 	sw.serve = func(ctx context.Context, vs *voiceStack, cc *node.CC) {
 		// Voice turns run the same toolset the MQTT dispatcher serves.
 		o := vs.options(cc, served, log, nil)
+		o.AgentContext = func(ctx context.Context) map[string]json.RawMessage { return agentContext(ctx, tf.live, log) }
 		o.Mic = mic
 		o.Computer = activity // the wake word pauses a computer task, "stop" ends it
 		withPiMusic(&o, duck)

@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -148,6 +149,9 @@ type Pipeline struct {
 	// as node_context.stt_vocabulary at each conversation start for whisper's prompt. Never
 	// the LLM's (DESIGN.md §14).
 	Vocabulary func(ctx context.Context) string
+	// AgentContext, when set, is node_context.agents at each conversation start: the package
+	// agents' context ({"home_assistant": {...}}) CC lists the devices from, as the Python node sent.
+	AgentContext func(ctx context.Context) map[string]json.RawMessage
 	// Live, when set, lets the node retune and measure this pipeline while it runs (live.go).
 	Live *Live
 	// Mic, when set, is how others record through this pipeline's microphone (take.go).
@@ -456,12 +460,18 @@ func (p *Pipeline) listen(ctx context.Context, chunks <-chan []int16) error {
 	}
 }
 
-// nodeContext is /conversation/start's node_context: the timezone, and the vocabulary.
+// nodeContext is /conversation/start's node_context: the timezone, the vocabulary and the
+// package agents' context.
 func (p *Pipeline) nodeContext(ctx context.Context) map[string]any {
 	nc := map[string]any{"timezone": p.Cfg.Timezone}
 	if p.Vocabulary != nil {
 		if v := p.Vocabulary(ctx); v != "" {
 			nc["stt_vocabulary"] = v
+		}
+	}
+	if p.AgentContext != nil {
+		if a := p.AgentContext(ctx); len(a) > 0 {
+			nc["agents"] = a
 		}
 	}
 	return nc

@@ -154,6 +154,12 @@ func (s *Scheduler) due() []sidecar.AgentDef {
 		if st != nil && test && st.sidecar != a.Sidecar {
 			st = nil
 		}
+		// A new sidecar (any package change swaps it) starts with no agent context, so a startup
+		// agent runs on it at once, as the Python node's agents did when it restarted after an
+		// install; its failures carry over.
+		if st != nil && !test && a.RunOnStartup && st.sidecar != a.Sidecar {
+			st.sidecar, st.lastRun = a.Sidecar, time.Time{}
+		}
 		if st == nil {
 			st = &state{pkg: a.Package, sidecar: a.Sidecar, seen: now}
 			s.state[a.Name] = st

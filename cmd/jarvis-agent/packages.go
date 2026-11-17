@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -56,6 +57,7 @@ func wirePackages(r *node.Runner, pm *packages.Manager, live *sidecar.Live, log 
 		r.Topics[topic] = func(ctx context.Context, cc *node.CC, payload []byte) { q.Handle(ctx, cc, topic, payload) }
 	}
 	r.Packages = pm.Report
+	r.AgentContext = func(ctx context.Context) map[string]json.RawMessage { return agentContext(ctx, live, log) }
 	// What a Forge test install does (logs, scans, device controls) goes to jarvisd for Send to Forge.
 	serve := r.OnConnected
 	r.OnConnected = func(ctx context.Context, cc *node.CC) {
@@ -65,5 +67,39 @@ func wirePackages(r *node.Runner, pm *packages.Manager, live *sidecar.Live, log 
 		} else {
 			<-ctx.Done()
 		}
+	}
+}
+
+// agentContextWait bounds how long a conversation start or tool report waits for the agents'
+// context: the sidecar answers one request at a time and may be in a package agent's run.
+const agentContextWait = 2 * time.Second
+
+// agentContext is the package agents' context for node_context.agents and report_tools
+// (sidecar.AgentContext), or nil when there is none, it fails, or the sidecar is busy longer
+// than agentContextWait (the turn goes on without it, as with no packages).
+func agentContext(ctx context.Context, live *sidecar.Live, log *slog.Logger) map[string]json.RawMessage {
+	if live == nil {
+		return nil
+	}
+	type result struct {
+		agents map[string]json.RawMessage
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		a, err := live.AgentContext(ctx)
+		done <- result{a, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			log.Warn("agent context unavailable", "err", r.err)
+		}
+		return r.agents
+	case <-time.After(agentContextWait):
+		log.Warn("agent context: the sidecar is busy; sending none")
+		return nil
+	case <-ctx.Done():
+		return nil
 	}
 }

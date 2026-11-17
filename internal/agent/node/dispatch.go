@@ -26,6 +26,10 @@ type Dispatcher struct {
 	// Packages, if set, is report_tools' installed_packages (the app's Update / Revert / health
 	// on a package card); nil reports none.
 	Packages func() []map[string]any
+	// AgentContext, if set, is report_tools' agents: the package agents' context
+	// ({"home_assistant": {...}}), which CC puts in the prompt's device list as the Python
+	// node's node_context.agents; nil or empty sends none.
+	AgentContext func(ctx context.Context) map[string]json.RawMessage
 	// Verbs are the verbs this node speaks beyond report_tools and tool_call (a Pi's
 	// enroll_voice and verify_voice), each given the command's details. They can't replace
 	// the two built-ins. A verb in neither is ignored.
@@ -87,7 +91,13 @@ func (d *Dispatcher) Report(ctx context.Context) map[string]any {
 			pkgs = p
 		}
 	}
-	return map[string]any{"client_tools": clientTools, "available_commands": commands, "installed_packages": pkgs}
+	report := map[string]any{"client_tools": clientTools, "available_commands": commands, "installed_packages": pkgs}
+	if d.AgentContext != nil {
+		if a := d.AgentContext(ctx); len(a) > 0 {
+			report["agents"] = a
+		}
+	}
+	return report
 }
 
 func (d *Dispatcher) reportTools(ctx context.Context, det map[string]any) {
