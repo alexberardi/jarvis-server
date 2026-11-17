@@ -1121,6 +1121,31 @@ func TestLongTypeIsSplit(t *testing.T) {
 
 // Told it is stuck and still answering the same, the task ends saying what it was stuck on
 // rather than burning its rounds (suite on Qwen3.5-9B, 2026-11-13: 16 more rounds).
+// A press of what is already selected is answered with what comes next, not run again.
+func TestAlreadySelected(t *testing.T) {
+	obs := Observation{Elements: []Element{
+		{Ref: "e7", Role: "tab", Name: "Carryout", State: []string{"selected"}},
+		{Ref: "e9", Role: "textbox", Name: "ZIP Code"},
+		{Ref: "e3", Role: "checkbox", Name: "Extra cheese", State: []string{"checked"}},
+	}}
+	press := func(ref string) []computeruse.Action { return []computeruse.Action{{Kind: "press", Ref: ref}} }
+	got := alreadySelected(obs, press("e7"))
+	for _, want := range []string{`tab "Carryout" (e7) is already selected`, `e9 textbox "ZIP Code"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message lacks %q: %s", want, got)
+		}
+	}
+	if m := alreadySelected(obs, press("e9")); m != "" {
+		t.Errorf("an unselected element: %q", m)
+	}
+	if m := alreadySelected(obs, press("e3")); m != "" {
+		t.Errorf("a ticked checkbox may be unticked: %q", m)
+	}
+	if m := alreadySelected(obs, append(press("e7"), press("e9")...)); m != "" {
+		t.Errorf("a batch that goes on: %q", m)
+	}
+}
+
 func TestStuckTaskGivesUp(t *testing.T) {
 	press := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e1", "intent": "Close the dialog"}]}`
 	e := newEnv(t)

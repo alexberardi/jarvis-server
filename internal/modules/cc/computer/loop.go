@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -652,6 +653,13 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	} else {
 		r.lastBatch, r.sameBatch = key, 0
 	}
+	// Pressing what is already selected changes nothing, and says so sooner than "stuck": on a
+	// real pizza site the house model pressed the selected Carryout tab seven rounds running,
+	// with the ZIP code field it needed next listed right below it (2026-11-16).
+	if msg := alreadySelected(obs, actions); msg != "" && r.sameActs >= 1 && r.sameActs < stuckGiveUp {
+		r.feedback = msg
+		return Outcome{}, false
+	}
 	switch {
 	case r.sameActs >= stuckGiveUp:
 		return Outcome{State: StateFailed, lost: true, Summary: fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.",
@@ -741,6 +749,27 @@ func batchKey(obs Observation, actions []computeruse.Action) string {
 		fmt.Fprintf(&b, "|%s:%s:%s:%s", e.Ref, e.Role, e.Name, e.Value)
 	}
 	return b.String()
+}
+
+// alreadySelected is what the model is told when its one action presses an element the screen
+// lists as selected (a tab, an option): "" otherwise. A checkbox is not one: pressing it unticks it.
+func alreadySelected(obs Observation, actions []computeruse.Action) string {
+	if len(actions) != 1 || actions[0].Kind != "press" || actions[0].Ref == "" {
+		return ""
+	}
+	for i, e := range obs.Elements {
+		if e.Ref != actions[0].Ref || !slices.Contains(e.State, "selected") {
+			continue
+		}
+		next := ""
+		if i+1 < len(obs.Elements) {
+			n := obs.Elements[i+1]
+			next = fmt.Sprintf(", starting with %s %s %q", n.Ref, n.Role, n.Name)
+		}
+		return fmt.Sprintf("%s %q (%s) is already selected: that part is done, and pressing it again changes nothing. Don't press it again. "+
+			"Go on to the next thing the task needs, using the elements listed after it%s.", e.Role, e.Name, e.Ref, next)
+	}
+	return ""
 }
 
 // stuckFeedback tells the model its repeated batch isn't working and what else to try.
