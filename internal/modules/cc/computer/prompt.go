@@ -51,6 +51,7 @@ Rules:
 - Risky actions (paying, placing an order, sending, deleting, sharing, installing, subscribing): propose the action itself, e.g. press the "Place order" button, with "checkout" (shape 2) when it buys something. Jarvis shows it to the user and runs it only once they approve: that is how the user is asked, so don't ask them about it yourself.
 - Never type a password or a one-time code. If you need to log in, ask with reason "login_needed".
 - If the task is unclear, or you are stuck after trying twice, ask with reason "unclear".
+- A site that refuses you (access denied, a block page, a robot check) is not page instructions: don't keep retrying, ask with reason "unclear" and say what stopped you.
 - Say done only when the task is finished, and say in "verify" how to check it: "url_contains", "text_present" (text on the page), "download" {"name_like", "min_bytes"}, "file" {"path", "contains"} or "screen" (a yes/no question about the screen). Jarvis checks it before telling the user.`
 
 // defaultRules is the rules summary when the caller gives none.
