@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -284,11 +285,14 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 		if run.Opening {
 			s, err = t.settledSnapshot(ctx, run.Tab, s, err)
 		}
+		if run.Acted && err == nil {
+			s, err = t.quietSnapshot(ctx, run.Tab, s)
+		}
 		if err != nil {
 			return failCode(errorCode(err), "%v", err)
 		}
 		t.runs().With(a.RunID, func(r *Run) {
-			r.Snap, r.Opening = &s, false
+			r.Snap, r.Opening, r.Acted = &s, false, false
 			if s.URL != "" {
 				r.URL = s.URL
 			}
@@ -338,6 +342,54 @@ var (
 	settleFor  = 10 * time.Second
 	settlePoll = 300 * time.Millisecond
 )
+
+// actSettle, actPoll and actSettleMax are how observe waits out the page after an action: a
+// first pause, then a snapshot every actPoll until two in a row are the same, for at most
+// actSettleMax in all (vars for the tests).
+var (
+	actSettle    = 700 * time.Millisecond
+	actPoll      = 400 * time.Millisecond
+	actSettleMax = 4 * time.Second
+)
+
+// quietSnapshot snapshots a page an action just ran on once it has stopped changing, from the
+// first try's s. The extension waits for a navigation, not for what a press fetches: a store
+// search's results arrived after a snapshot taken 15 ms after the press, the model saw the page
+// without them, and took the search for broken (2026-11-16).
+func (t *Tools) quietSnapshot(ctx context.Context, tab string, s computeruse.Snapshot) (computeruse.Snapshot, error) {
+	deadline := time.Now().Add(actSettleMax)
+	wait := actSettle
+	for {
+		select {
+		case <-ctx.Done():
+			return s, nil
+		case <-time.After(wait):
+		}
+		next, err := t.Browser.Snapshot(ctx, tab, 0)
+		if err != nil {
+			return s, nil // the last good one: the page may be between two documents
+		}
+		same := sameSnapshot(s, next)
+		s, wait = next, actPoll
+		if same || !time.Now().Before(deadline) {
+			return s, nil
+		}
+	}
+}
+
+// sameSnapshot reports whether two snapshots show the same page: its address and its elements.
+func sameSnapshot(a, b computeruse.Snapshot) bool {
+	if a.URL != b.URL || a.Title != b.Title || len(a.Elements) != len(b.Elements) {
+		return false
+	}
+	for i := range a.Elements {
+		x, y := a.Elements[i], b.Elements[i]
+		if x.Role != y.Role || x.Name != y.Name || x.Value != y.Value || x.Context != y.Context || !slices.Equal(x.State, y.State) {
+			return false
+		}
+	}
+	return true
+}
 
 // settledSnapshot snapshots a task window just opened on a web address (by observe's url or a
 // navigate action) until its page has loaded, from the first try's s and err: the new tab is
@@ -438,6 +490,9 @@ func (t *Tools) act(ctx context.Context, a actArgs) map[string]any {
 	for i, action := range a.Actions {
 		r := t.step(ctx, a, i, action)
 		results = append(results, r.out())
+		if r.OK && action.Kind != "wait" && action.Kind != "screenshot" && action.Kind != "navigate" {
+			t.runs().With(a.RunID, func(r *Run) { r.Acted = true })
+		}
 		if !r.OK {
 			out["success"] = false
 			out["stopped_at"] = i

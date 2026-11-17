@@ -263,3 +263,27 @@ func dropBrokenThought(s string) (rest, thought string, ok bool) {
 	}
 	return "", "", false
 }
+
+// salvageFirstAction reads the first whole action out of an answer that was cut off inside its
+// "actions" list: the house model, looping, repeats a few actions until its budget ends, and
+// asked again does the same. Its first action is run alone; it then looks again.
+func salvageFirstAction(s string) (Reply, bool) {
+	i := strings.Index(s, `"actions"`)
+	if i < 0 {
+		return Reply{}, false
+	}
+	j := strings.IndexByte(s[i:], '[')
+	if j < 0 {
+		return Reply{}, false
+	}
+	dec := json.NewDecoder(strings.NewReader(s[i+j:]))
+	if _, err := dec.Token(); err != nil || !dec.More() {
+		return Reply{}, false
+	}
+	var first json.RawMessage
+	if err := dec.Decode(&first); err != nil {
+		return Reply{}, false
+	}
+	r, err := parseReply(`{"thought": "(the answer was cut off: its first action only)", "actions": [` + string(first) + `]}`)
+	return r, err == nil && len(r.Actions) == 1
+}

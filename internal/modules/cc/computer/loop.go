@@ -1082,6 +1082,12 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 			// off inside its thought was the house model arguing with itself for the whole
 			// budget ("Wait, ..."), and shown that again it did the same: it isn't sent back.
 			why, budget = "Your answer was cut off before it ended", writeMaxTokens
+			if r.task.Source == nil {
+				// Not a long text being typed: a list of actions that ran on and on.
+				if first, ok := salvageFirstAction(resp.Content); ok {
+					return first, nil
+				}
+			}
 			if !strings.Contains(resp.Content, `"actions"`) && !strings.Contains(resp.Content, `"done"`) {
 				msgs = append(msgs, llm.Message{Role: "user", Content: llm.TextContent(
 					`Your last answer was cut off inside its "thought", which ran far too long. Keep the thought to one short sentence and decide. ` +

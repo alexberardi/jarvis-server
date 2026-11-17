@@ -154,3 +154,17 @@ func TestParseReplyReadsPastAThoughtWithBareQuotes(t *testing.T) {
 		t.Fatalf("thought = %q, want it kept", r.Thought)
 	}
 }
+
+// An answer cut off inside a runaway list of actions gives its first action.
+func TestSalvageFirstAction(t *testing.T) {
+	cut := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e3", "intent": "Pick carryout"}, {"kind": "press", "ref": "e1", "intent": "Close"}, {"kind": "pre`
+	r, ok := salvageFirstAction(cut)
+	if !ok || len(r.Actions) != 1 || r.Actions[0].Ref != "e3" {
+		t.Fatalf("salvaged %+v %v", r, ok)
+	}
+	for _, s := range []string{`{"thought": "I think that`, `{"thought": "x", "actions": [{"kind": "press", "ref": "e`, `{"actions": []}`} {
+		if _, ok := salvageFirstAction(s); ok {
+			t.Errorf("salvaged from %q", s)
+		}
+	}
+}

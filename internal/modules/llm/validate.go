@@ -424,6 +424,12 @@ func parseChat(o *pyjson.Object) (chatInput, []httpx.FieldError) {
 	r.Temperature = c.optFloat(o, "temperature", body)
 	r.TopP = c.optFloat(o, "top_p", body)
 	r.MaxTokens = intPtr(c.optInt(o, "max_tokens", body))
+	if r.MaxTokens == nil {
+		// What jarvisd itself sends a remote (client.go): another jarvisd calling this one (a
+		// sandbox on the installed model) had no cap at all, and a runaway answer ran until
+		// the context was full.
+		r.MaxTokens = intPtr(c.optInt(o, "max_completion_tokens", body))
+	}
 	r.Seed = c.optInt(o, "seed", body)
 	if s := c.optBool(o, "stream", body); s != nil {
 		in.Stream = *s

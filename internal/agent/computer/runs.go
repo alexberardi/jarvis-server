@@ -22,6 +22,7 @@ type Run struct {
 	URL     string
 	Snap    *computeruse.Snapshot
 	Opening bool // its task window was just opened and its page not snapshotted yet
+	Acted   bool // browser: an action ran since the last snapshot, so the page may still be changing
 	Stopped bool
 	App     string // desktop: the task's app, as its window names it ("Notes")
 	PID     int    // desktop: its process
