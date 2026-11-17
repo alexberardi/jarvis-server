@@ -638,7 +638,7 @@ func (m *Module) proposalSuppress(ctx context.Context, sc SignalCallbackContext)
 		m.deps.Log.Warn("cc: record_suppression failed", "err", err) // never fail a tap on bookkeeping
 	}
 	return SignalCallbackResult{Success: true, ContextData: inboxCard(sc.HouseholdID, "Won't suggest that again",
-		"You won't get more cards like this one. Manage these in the app.")}
+		"You won't get more cards like this one. To allow it again, open Blocked suggestions in your inbox.")}
 }
 
 // --- the automation confirm card (D7) ---

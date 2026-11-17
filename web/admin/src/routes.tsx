@@ -24,6 +24,7 @@ import PhonePage from '@/pages/PhonePage'
 import RecordingsPage from '@/pages/RecordingsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import SetupWizard from '@/pages/SetupWizard'
+import SuppressedSuggestionsPage from '@/pages/SuppressedSuggestionsPage'
 import StorePackagePage from '@/pages/StorePackagePage'
 import StorePage from '@/pages/StorePage'
 import TraceDetailPage from '@/pages/TraceDetailPage'
@@ -86,6 +87,7 @@ export function shellRoutes() {
       <Route path="/devices" element={<DevicesPage />} />
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
+      <Route path="/inbox/suppressed" element={<SuppressedSuggestionsPage />} />
       <Route path="/inbox/:id" element={<InboxItemPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />
       <Route path="/workflows/:id" element={<WorkflowEditPage />} />

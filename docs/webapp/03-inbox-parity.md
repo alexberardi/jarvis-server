@@ -17,8 +17,8 @@ confirmation's buttons. Everything else the mobile inbox does
 | Callback result: follow a job started from a card (`InboxCallbackResultScreen.tsx`) | `GET /callbacks/{job_id}/status` | **no page needed**: no producer sends `stack` or `popover`, so every tap is watched inline on its card |
 | Watch alert and "Jarvis ran this" cards (`src/components/inbox/WatchAlertCard.tsx`, `AutonomyRanCard.tsx`) | `metadata.watch_alert`; `metadata.card_type: "autonomy_ran"` with `steps`, `rules` (`types/autonomyCards.ts`) | missing |
 | Audio: call recordings, voice clips (`src/components/InboxAudioPlayer.tsx`) | `metadata.audio` | **not ported**: jarvisd writes no `metadata.audio`, so there is nothing to play |
-| Suppressed suggestions, with undo (`SuppressedSuggestionsScreen.tsx`) | `GET`/`DELETE /mobile/proposal-suppressions?household_id=` | missing |
-| Live alerts | push (relay) | the unread badge polls every 30 s |
+| Suppressed suggestions, with undo (`SuppressedSuggestionsScreen.tsx`) | `GET`/`DELETE /mobile/proposal-suppressions?household_id=` | done: `/inbox/suppressed` ("Blocked suggestions") |
+| Live alerts | push (relay) | done: the unread badge polls every 10 s while the tab is visible; a rise toasts the new items with Open |
 | Adapter proposals / deployed | category `adapter_proposal`, `adapter_deployed` | **not ported**: the LoRA pipeline is cut (legacy import skips them), so mobile's screens are dead too |
 
 ## Decisions

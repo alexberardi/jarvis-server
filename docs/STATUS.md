@@ -16,8 +16,11 @@ Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 
 - [x] 1 gateway routes (callbacks, proposal suppressions) (#683)
 - [x] 2 card renderer: elements, editable fields, expiry, watch and ran cards
-- [x] 3 interactive lists + "Find ID" from your open tabs (#687 server; web half)
-- [ ] 4 suppressed suggestions · 5 live badge and toast
+- [x] 3 interactive lists + "Find ID" from your open tabs (#687 server, #688 web)
+- [x] 4 blocked suggestions (`/inbox/suppressed`) · 5 live badge and toast
+
+Done. Not ported, on purpose: audio cards and the callback-result page (see the plan).
+Next: full alarms, spec first.
 
 ### Touch display (2026-10-23)
 

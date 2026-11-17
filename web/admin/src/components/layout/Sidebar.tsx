@@ -18,7 +18,7 @@ import {
   Radio,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { useUnreadCount } from '@/hooks/useInbox'
+import { useInboxAlerts } from '@/hooks/useInbox'
 import { cn } from '@/lib/utils'
 import SystemInfoBar from './SystemInfoBar'
 import HouseholdSwitcher from './HouseholdSwitcher'
@@ -107,8 +107,9 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
   const close = () => onClose?.()
   const { state } = useAuth()
   const superuser = Boolean(state.user?.is_superuser)
-  // The unread badge polls only for a usable session (not while the password must change).
-  const unread = useUnreadCount(state.isAuthenticated && !state.user?.must_change_password)
+  // The unread badge polls (and toasts new items) only for a usable session, not while the
+  // password must change.
+  const unread = useInboxAlerts(state.isAuthenticated && !state.user?.must_change_password)
   const member = memberNav.map((i) => (i.path === '/inbox' ? { ...i, badge: unread.data ?? 0 } : i))
   return (
     <>

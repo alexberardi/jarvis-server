@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCheck, Inbox, ListChecks, Trash2, X } from 'lucide-react'
+import { BellOff, CheckCheck, Inbox, ListChecks, Trash2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { bulkDelete, bulkRead, confirmationOf } from '@/api/inbox'
 import type { InboxItem } from '@/api/inbox'
-import { Badge, Button, Card, EmptyState, ErrorState, List, PageHeader, SkeletonList } from '@/components/ui'
+import { Badge, Button, buttonStyles, Card, EmptyState, ErrorState, List, PageHeader, SkeletonList } from '@/components/ui'
 import { inboxKeys, useInboxList } from '@/hooks/useInbox'
 import { errorMessage } from '@/lib/errors'
 import { timeAgo } from '@/lib/time'
@@ -43,8 +43,13 @@ export default function InboxPage() {
     }
   }
 
+  const blocked = (
+    <Link to="/inbox/suppressed" className={buttonStyles({ size: 'sm', variant: 'ghost' })}>
+      <BellOff size={16} aria-hidden /> Blocked suggestions
+    </Link>
+  )
   const actions =
-    items.length === 0 ? null : selecting ? (
+    items.length === 0 ? blocked : selecting ? (
       <>
         <span className="text-small text-text-muted">{selected.size} selected</span>
         <Button
@@ -83,9 +88,12 @@ export default function InboxPage() {
         </Button>
       </>
     ) : (
-      <Button size="sm" icon={<ListChecks size={16} aria-hidden />} onClick={() => setSelecting(true)}>
-        Select
-      </Button>
+      <>
+        {blocked}
+        <Button size="sm" icon={<ListChecks size={16} aria-hidden />} onClick={() => setSelecting(true)}>
+          Select
+        </Button>
+      </>
     )
 
   return (

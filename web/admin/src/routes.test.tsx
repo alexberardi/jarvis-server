@@ -17,7 +17,7 @@ const auth = vi.hoisted(() => ({
 }))
 vi.mock('@/api/auth', async (orig) => ({ ...(await orig<typeof import('@/api/auth')>()), ...auth }))
 vi.mock('@/hooks/useSystem', () => ({ useSystemInfo: () => ({ data: undefined }) }))
-vi.mock('@/hooks/useInbox', () => ({ useUnreadCount: () => ({ data: 3 }) }))
+vi.mock('@/hooks/useInbox', () => ({ useInboxAlerts: () => ({ data: 3 }) }))
 // The admin pages themselves are covered elsewhere; here only where they mount matters.
 vi.mock('@/pages/DashboardPage', () => ({ default: () => <p>dashboard page</p> }))
 vi.mock('@/pages/SettingsPage', () => ({ default: () => <p>settings page</p> }))
