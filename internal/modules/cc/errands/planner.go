@@ -998,6 +998,26 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 // long as it liked ran into the planner's time limit on every call and was asked again without.
 const planCheckThinkTokens = 512
 
+// defaultPlannerThinkTokens is errands.planner_think_tokens' default. Measured on Qwen3.5-9B
+// with a computer errand's planning prompt (2026-11-16): no thinking 1.7 s; 1024 tokens of it
+// 11 s, and a plan; unlimited 117 s to the end of the 12,000-token budget, and no plan.
+const defaultPlannerThinkTokens = 1024
+
+// plannerThinkTokens is a planning call's thinking allowance: nil for no limit.
+func (s *Service) plannerThinkTokens(ctx context.Context) *int {
+	n := int64(defaultPlannerThinkTokens)
+	if s.Settings != nil {
+		if v := s.Settings.Int(ctx, SettingPlannerThinkTokens, settings.Scope{}); v != 0 {
+			n = v
+		}
+	}
+	if n < 0 {
+		return nil
+	}
+	v := int(n)
+	return &v
+}
+
 // thinkOffFor is how long the planner plans without thinking after a plan thought past its time.
 const thinkOffFor = 30 * time.Minute
 
@@ -1008,7 +1028,10 @@ func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *
 	}
 	temp, maxTok := 0.0, s.plannerMaxTokens(ctx)
 	start := time.Now()
-	if think == nil && s.now().Unix() < s.thinkOffUntil.Load() {
+	if think == nil {
+		think = s.plannerThinkTokens(ctx)
+	}
+	if (think == nil || *think != 0) && s.now().Unix() < s.thinkOffUntil.Load() {
 		// It thought past its time on a plan a little while ago, and would again: the house
 		// model spent 30 s on every errand before its 5 s plan (2026-11-16).
 		off := 0

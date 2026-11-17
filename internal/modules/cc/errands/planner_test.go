@@ -144,7 +144,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 	}
 	req := e.llm.requests("plan")[0]
 	// Label: unset (auto) keeps planning on background, as it was hardcoded before errands.model.
-	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != defaultPlannerMaxTokens || req.ReasoningBudget != nil {
+	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != defaultPlannerMaxTokens || !thinksAsSet(req) {
 		t.Fatalf("planner request = %+v", req)
 	}
 
@@ -163,7 +163,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("retry: %+v %v", plan, err)
 	}
 	reqs := e.llm.requests("plan")[n:]
-	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
+	if len(reqs) != 2 || !thinksAsSet(reqs[0]) || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
 		t.Fatalf("retry requests: %+v", reqs)
 	}
 	// Thinking ran past its wall-clock budget (the demo dry run: 105 s of thinking on a shared
@@ -175,7 +175,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("time-capped retry: %+v %v", plan, err)
 	}
 	reqs = e.llm.requests("plan")[n:]
-	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
+	if len(reqs) != 2 || !thinksAsSet(reqs[0]) || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
 		t.Fatalf("time-capped requests: %+v", reqs)
 	}
 	// Having thought past its time once, it plans the next ones without thinking.
@@ -457,4 +457,9 @@ func TestBalanceJSONPutsBackASkippedCloser(t *testing.T) {
 	if _, ok := balanceJSON(`{"a": "cut off`); ok {
 		t.Fatal("a value cut off inside a string was closed")
 	}
+}
+
+// thinksAsSet reports whether a planning request thinks for the allowance's default.
+func thinksAsSet(r llm.ChatRequest) bool {
+	return r.ReasoningBudget != nil && *r.ReasoningBudget == defaultPlannerThinkTokens
 }
