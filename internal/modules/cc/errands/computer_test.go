@@ -1068,3 +1068,32 @@ func TestReplanReadsASlipAndChecksWhatIsLeft(t *testing.T) {
 		t.Fatalf("replan that ended short = %+v %v, want the spreadsheet step", p, err)
 	}
 }
+
+// A failed lookup doesn't stop lookups on other sites or the write-up; anything else does.
+func TestCarriesOn(t *testing.T) {
+	look := func(site, goal string) Step {
+		return Step{Command: cmdComputer, Args: servertools.Obj("goal", goal, "target", "browser", "site", site)}
+	}
+	doc := Step{Command: cmdWriteDoc}
+	ok := []Result{{Success: true}, {}}
+	for name, c := range map[string]struct {
+		steps   []Step
+		failed  int
+		results []Result
+		want    bool
+	}{
+		"other shops then write-up": {[]Step{look("a.example", "find vacuums"), look("b.example", "find vacuums"), doc}, 0, []Result{{}}, true},
+		"last shop, one found":      {[]Step{look("a.example", "find"), look("b.example", "find"), doc}, 1, ok, true},
+		"nothing found to write":    {[]Step{look("a.example", "find"), doc}, 0, []Result{{}}, false},
+		"last step":                 {[]Step{look("a.example", "find")}, 0, []Result{{}}, false},
+		"same site next":            {[]Step{look("a.example", "find"), look("https://a.example/x", "find more"), doc}, 0, []Result{{}}, false},
+		"a later step orders":       {[]Step{look("a.example", "find"), look("b.example", "order the cheapest"), doc}, 0, []Result{{}}, false},
+		"failed step was an order":  {[]Step{look("a.example", "buy a mug"), look("b.example", "find"), doc}, 0, []Result{{}}, false},
+		"a later step sends":        {[]Step{look("a.example", "find"), look("b.example", "find"), {Command: "send_email"}}, 0, []Result{{}}, false},
+		"no site":                   {[]Step{look("", "find"), look("b.example", "find"), doc}, 0, []Result{{}}, false},
+	} {
+		if got := carriesOn(c.steps, c.failed, c.results); got != c.want {
+			t.Errorf("%s: carriesOn = %v, want %v", name, got, c.want)
+		}
+	}
+}

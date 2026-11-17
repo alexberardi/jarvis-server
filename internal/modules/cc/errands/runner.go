@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -557,12 +558,50 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 			s.updateRanCard(ctx, w, results, "running", "")
 		}
 		if !r.Success {
+			if carriesOn(w.Steps, i, results) {
+				s.log().Info("errands: step failed, the rest don't need it", "index", i, "command", cmd)
+				continue
+			}
 			s.log().Info("errands: fail-fast", "index", i, "command", cmd)
 			break
 		}
 	}
 	agg := s.aggregateAndCompose(ctx, w.Goal, results)
 	return &agg, nil
+}
+
+// actsRe is a goal that buys, sends or changes something rather than looking something up.
+var actsRe = regexp.MustCompile(`(?i)\b(buy|order|purchase|pay|book|reserve|send|submit|post|reply|apply|sign up|subscribe|cancel|delete|remove|change|update|fill|cart|check ?out)\b`)
+
+// carriesOn reports whether the run goes on after steps[failed] failed (user, 2026-11-17): the
+// failed step was a lookup on one website, and all that is left is lookups on other websites
+// and the write-up, which don't need it. Anything that would buy, send or change something
+// stops the run, as does a write-up with nothing found to write from.
+func carriesOn(steps []Step, failed int, results []Result) bool {
+	site := func(st Step) string {
+		if strings.TrimSpace(st.Command) != cmdComputer || st.IsRisky || actsRe.MatchString(objStr(st.Args, "goal")) {
+			return ""
+		}
+		return siteOf(objStr(st.Args, "site"))
+	}
+	seen := map[string]bool{site(steps[failed]): true}
+	if seen[""] || failed+1 >= len(steps) {
+		return false
+	}
+	lookups := false
+	for _, r := range results {
+		lookups = lookups || r.Success
+	}
+	for _, st := range steps[failed+1:] {
+		switch cmd := strings.TrimSpace(st.Command); {
+		case cmd == cmdWriteDoc || cmd == cmdWriteSheet:
+		case site(st) == "" || seen[site(st)]:
+			return false
+		default:
+			seen[site(st)], lookups = true, true
+		}
+	}
+	return lookups
 }
 
 // recordStep logs what the household's rules did to one step of a run.
