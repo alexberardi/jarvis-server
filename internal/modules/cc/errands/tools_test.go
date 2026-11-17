@@ -54,11 +54,27 @@ func TestBuildRecurrence(t *testing.T) {
 		"once":             "",
 		"":                 "",
 		"fortnightly-ish":  "",
+		// Named days: "monday" contains "day", which used to read as daily.
+		"every monday":          `{"type": "cron", "cron": "0 9 * * 1"}`,
+		"mondays and thursdays": `{"type": "cron", "cron": "0 9 * * 1,4"}`,
+		"every sunday at 9am":   `{"type": "cron", "cron": "0 9 * * 0"}`,
+		"weekends":              `{"type": "cron", "cron": "0 9 * * 0,6"}`,
 	}
 	for in, want := range cases {
 		if got := BuildRecurrence(in, fire, ny); got != want {
 			t.Errorf("%q: got %s want %s", in, got, want)
 		}
+	}
+	// The first fire moves onto the schedule: Thursday 9:00 for "every monday" first runs
+	// Monday 9:00; a daily or one-shot fire stays as asked.
+	if got := FirstFire(BuildRecurrence("every monday", fire, ny), fire, ny); got.Format(time.RFC3339) != "2026-10-12T13:00:00Z" {
+		t.Errorf("first fire for every monday = %v", got)
+	}
+	if got := FirstFire(BuildRecurrence("daily", fire, ny), fire, ny); !got.Equal(fire) {
+		t.Errorf("first fire for daily = %v", got)
+	}
+	if got := FirstFire("", fire, ny); !got.Equal(fire) {
+		t.Errorf("first fire for a one-shot = %v", got)
 	}
 	next, ok := NextFire(`{"type": "cron", "cron": "0 9 * * *"}`, mustTime(t, "2026-10-08T14:00:00Z"), ny)
 	if !ok || next.Format(time.RFC3339) != "2026-10-09T13:00:00Z" {

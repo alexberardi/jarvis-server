@@ -159,6 +159,7 @@ func (t *ScheduleErrandTool) Execute(ctx context.Context, call servertools.Call,
 		return errObj("bad_time", "I couldn't work out when to run that — tell me a day and a time, like 'tomorrow at 9am'."), nil
 	}
 	rec := BuildRecurrence(recDesc, fire, tz)
+	fire = FirstFire(rec, fire, tz)
 	if !fire.After(now) {
 		if rec == "" {
 			return errObj("past_time", "That time has already passed — give me a future time."), nil

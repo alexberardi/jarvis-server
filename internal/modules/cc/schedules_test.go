@@ -26,7 +26,8 @@ func TestDescribeRecurrence(t *testing.T) {
 		`{"type": "cron", "cron": "0 0 * * *"}`:          "every day at 12:00 AM",
 		`{"type": "cron", "cron": "0 12 * * *"}`:         "every day at 12:00 PM",
 		`{"type": "cron", "cron": "*/5 * * * *"}`:        "every day",
-		`{"type": "cron", "cron": "0 9 * * 1,3,5"}`:      "every day at 9:00 AM", // multi-day reads as every day (kept)
+		`{"type": "cron", "cron": "0 9 * * 1,3,5"}`:      "every Monday, Wednesday and Friday at 9:00 AM", // was "every day" (§8.15)
+		`{"type": "cron", "cron": "0 9 * * 0,6"}`:        "every weekend at 9:00 AM",
 		`{"type": "cron", "cron": "0 9 * *"}`:            "repeating",
 		`{"type": "interval", "interval_seconds": 3600}`: "every hour",
 		`{"type": "interval", "interval_seconds": 7200}`: "every 2 hours",
