@@ -79,3 +79,16 @@ func TestRepeatsAreCountedByElementName(t *testing.T) {
 		t.Fatalf("outcome %+v after %d calls", out, len(e.llm.reqs))
 	}
 }
+
+func TestKeysAtLastElement(t *testing.T) {
+	obs := Observation{Elements: []Element{{Ref: "e4", Role: "searchbox", Name: "Search"}, {Ref: "e5", Role: "button", Name: "Go"}}}
+	hist := []Entry{{Kind: "set_value", On: `searchbox "Search"`}, {Kind: "said"}}
+	got := keysAtLastElement(obs, hist, []computeruse.Action{{Kind: "keypress", Keys: []string{"Enter"}}})
+	if got[0].Ref != "e4" {
+		t.Errorf("Enter went to %q, not the search box just typed into", got[0].Ref)
+	}
+	got = keysAtLastElement(obs, []Entry{{Kind: "press", On: `link "Gone"`}}, []computeruse.Action{{Kind: "keypress", Keys: []string{"Enter"}}})
+	if got[0].Ref != "" {
+		t.Errorf("Enter went to %q though the last element is gone", got[0].Ref)
+	}
+}

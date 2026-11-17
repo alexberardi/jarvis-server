@@ -615,6 +615,9 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{}, false
 	}
 	reply.Actions = named
+	if r.task.Target.Kind == "browser" {
+		reply.Actions = keysAtLastElement(obs, r.run.History, reply.Actions)
+	}
 
 	// A screenshot "action" is the model asking to see the screen next round.
 	var actions []computeruse.Action
@@ -918,6 +921,32 @@ func pastCheckout(request string, obs Observation, actions []computeruse.Action)
 		}
 	}
 	return ""
+}
+
+// keysAtLastElement gives a browser task's keypress that names no element the one the task
+// last acted on, when the page still lists it: "type the search, then press Enter" and "press
+// Escape to close the calendar" are how a person does it, and both were refused for want of a
+// ref on four real sites (2026-11-17).
+func keysAtLastElement(obs Observation, history []Entry, actions []computeruse.Action) []computeruse.Action {
+	last := ""
+	for i := len(history) - 1; i >= 0 && last == ""; i-- {
+		last = history[i].On
+	}
+	if last == "" {
+		return actions
+	}
+	for i, a := range actions {
+		if a.Kind != "keypress" || a.Ref != "" {
+			continue
+		}
+		for _, e := range obs.Elements {
+			if strings.TrimSpace(e.Role+" "+strconv.Quote(clipName(e.Name))) == last {
+				actions[i].Ref = e.Ref
+				break
+			}
+		}
+	}
+	return actions
 }
 
 // otherSite is what the model is told when a task for one website navigates to another: ""
