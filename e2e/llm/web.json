@@ -42,6 +42,11 @@
       "reply": "Sorry, I could not set up that watch."
     },
     {
+      "match": "(?i)every morning at 8,? check the e2e weather",
+      "tool_calls": [{"name": "schedule_errand", "arguments": {"goal": "Check the e2e weather and say if I need an umbrella",
+        "fire_at": "tomorrow at 8am", "recurrence": "every day at 8am"}}]
+    },
+    {
       "match": "(?i)what is in this photo",
       "reply": "Scripted model: I got your photo."
     },

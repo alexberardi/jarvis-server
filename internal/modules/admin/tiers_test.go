@@ -61,6 +61,8 @@ var wantTiers = map[string]tier{
 	"GET /api/cc/api/v0/callbacks/{job_id}/status":                                                   tierUser,
 	"GET /api/cc/api/v0/mobile/proposal-suppressions":                                                tierUser,
 	"DELETE /api/cc/api/v0/mobile/proposal-suppressions/{suppression_id}":                            tierUser,
+	"GET /api/cc/api/v0/mobile/household/{household_id}/schedules":                                   tierUser,
+	"POST /api/cc/api/v0/mobile/household/{household_id}/schedules/{schedule_id}/cancel":             tierUser,
 	"GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records":         tierUser,
 	"PATCH /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}": tierUser,
 	"GET /api/cc/api/v0/mobile/nodes/{node_id}/browser/matches":                                      tierUser,

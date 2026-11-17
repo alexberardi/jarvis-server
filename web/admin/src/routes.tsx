@@ -10,6 +10,7 @@ import ChangePasswordPage from '@/pages/ChangePasswordPage'
 import ChatPage from '@/pages/ChatPage'
 import DevicesPage from '@/pages/DevicesPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
+import ErrandsPage from '@/pages/ErrandsPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
 import InboxItemPage from '@/pages/InboxItemPage'
@@ -87,6 +88,7 @@ export function shellRoutes() {
       <Route path="/devices" element={<DevicesPage />} />
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
+      <Route path="/errands" element={<ErrandsPage />} />
       <Route path="/inbox/suppressed" element={<SuppressedSuggestionsPage />} />
       <Route path="/inbox/:id" element={<InboxItemPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />

@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
+  CalendarClock,
   LayoutDashboard,
   Settings,
   Link2,
@@ -38,6 +39,7 @@ const memberNav: NavItem[] = [
   { label: 'Devices', icon: Radio, path: '/devices' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
+  { label: 'Errands', icon: CalendarClock, path: '/errands' },
   // Workflows and Recordings are shelved (docs/decisions/2026-11-15-taught-workflows-shelved.md):
   // their pages and routes stay, with no link to them.
 ]

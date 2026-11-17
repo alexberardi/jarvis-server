@@ -187,6 +187,17 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/proposal-suppressions?household_id="+h2, nil, bearer(m1)...); code != 403 {
 		t.Fatalf("another household's proposal suppressions: %d %v", code, out)
 	}
+	// Scheduled errands: the member's household lists; another household's lists and cancels
+	// are refused.
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/household/"+h1+"/schedules", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own scheduled errands: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/household/"+h2+"/schedules", nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's scheduled errands: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", base+"/api/cc/api/v0/mobile/household/"+h2+"/schedules/s1/cancel", map[string]any{}, bearer(m1)...); code != 403 {
+		t.Fatalf("cancel another household's errand: %d %v", code, out)
+	}
 
 	// Interactive lists: another household's node's records are refused (cc: not a member), and
 	// tab matches only answer the member who paired the node (an admin-key node has no owner).
