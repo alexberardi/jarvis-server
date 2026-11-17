@@ -72,6 +72,8 @@ const (
 	// answer was cut off. Found live 2026-11-13: a typed summary was cut at 1024 tokens, the
 	// cut JSON couldn't be read, and the task failed in its first round.
 	writeMaxTokens = 4096
+	// askTimeout is how long one answer may take before it is asked for again.
+	askTimeout = 2 * time.Minute
 	// verifyRounds is the extra budget after a done whose check failed: this many more rounds to
 	// fix it and say done again.
 	verifyRounds = 5
@@ -1016,11 +1018,19 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		// The answer's budget is its own: thinking is on top of it.
 		think := l.int(ctx, SettingThinkTokens, settings.Scope{HouseholdID: t.HouseholdID}, 0)
 		temp, mt := 0.0, budget+think
-		resp, err := l.LLM.Chat(ctx, llm.ChatRequest{
+		// One answer has its own time limit: a call that hangs (the model's server busy or
+		// restarting) held a task for a minute with nothing on the card, then failed it.
+		cctx, cancel := context.WithTimeout(ctx, askTimeout)
+		resp, err := l.LLM.Chat(cctx, llm.ChatRequest{
 			Label: r.pick.Label, Priority: llm.PriorityBackground, Temperature: &temp, MaxTokens: &mt,
 			ReasoningBudget: &think, Messages: msgs,
 		})
+		cancel()
 		if err != nil {
+			if attempt == 0 && ctx.Err() == nil {
+				lastErr = err
+				continue // once more: a busy or restarting model is back within seconds
+			}
 			return Reply{}, fmt.Errorf("The model didn't answer: %v", err)
 		}
 		reply, err := parseReply(resp.Content)
@@ -1388,7 +1398,11 @@ func (l *Loop) decide(ctx context.Context, t Task, tgt computeruse.Target, obs O
 			d.site = u.Hostname()
 		}
 	}
-	d.risk = computeruse.Classify(a, el, computeruse.Target{Kind: tgt.Kind, Site: d.site, App: d.app})
+	page := ""
+	if tgt.Kind == "browser" {
+		page = obs.URL
+	}
+	d.risk = computeruse.ClassifyOn(a, el, computeruse.Target{Kind: tgt.Kind, Site: d.site, App: d.app}, page)
 	if d.risk.Level == computeruse.LevelDeny {
 		d.verdict = policy.Verdict{Effect: policy.Block, Reason: d.risk.Reason}
 		return d

@@ -552,7 +552,7 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 	for _, h := range run.History {
 		// What the task did: not the actions it held for the user, nor the ones that never ran,
 		// nor its questions (the question card says those).
-		if h.Intent != "" && h.Kind != "ask" && h.Result != heldResult && h.Result != "not run" {
+		if h.Intent != "" && h.Kind != "ask" && h.Kind != "wait" && h.Result != heldResult && h.Result != "not run" {
 			intents = append(intents, h.Intent)
 		}
 	}
@@ -567,8 +567,14 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 		if len(intents) > 0 {
 			line += ": " + intents[len(intents)-1]
 		}
-	case computer.RunWaiting, computer.RunPaused:
-		line = "Waiting for you in " + where
+	case computer.RunWaiting:
+		// Held for a confirmation or a question: the card for it is the next one down.
+		line = "Needs your OK to go on in " + where + ": see the card that asks"
+		if run.Pending == nil {
+			line = "Has a question for you about " + where + ": see the card that asks"
+		}
+	case computer.RunPaused:
+		line = "Paused in " + where + " while you use the computer"
 	}
 	return line, intents, true
 }

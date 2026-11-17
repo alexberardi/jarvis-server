@@ -692,7 +692,7 @@ func (t *Tools) desktopStep(ctx context.Context, a actArgs, i int, action comput
 	if secureFocus {
 		return fail("password_field", "the focused field is a password field: Jarvis doesn't type passwords; the user enters it")
 	}
-	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt); !ok {
+	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt, ""); !ok {
 		return r
 	}
 	if why := t.pasteBlocked(ctx, a.RunID, action, el); why != "" {

@@ -319,7 +319,7 @@ func TestCheckoutCardThenApprove(t *testing.T) {
 	if len(c.comp.acted()) != 0 {
 		t.Fatal("the order ran before the OK")
 	}
-	if up, _ := c.cards.update("item-1"); up.Metadata["steps"].([]any)[0].(map[string]any)["result"] != "Waiting for you in "+shopSite {
+	if up, _ := c.cards.update("item-1"); up.Metadata["steps"].([]any)[0].(map[string]any)["result"] != "Needs your OK to go on in "+shopSite+": see the card that asks" {
 		t.Fatalf("progress card while waiting = %#v", up.Metadata["steps"])
 	}
 	if !card.Push {

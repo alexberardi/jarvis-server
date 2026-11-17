@@ -3,7 +3,9 @@ package computeruse
 import (
 	"fmt"
 	"math/big"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -54,7 +56,13 @@ type Element struct {
 // in target t. The built-in deny list comes first, then the confirm categories; anything else is
 // LevelNone. Classify reads names, so an action by coordinates is only judged by what it types:
 // the executor should pass the element under the point whenever it can find it.
-func Classify(a Action, el *Element, t Target) Risk {
+func Classify(a Action, el *Element, t Target) Risk { return ClassifyOn(a, el, t, "") }
+
+// ClassifyOn is Classify for an element on the web page at pageURL ("" = not known, or not a
+// page). The page only ever loosens one thing: a button whose name starts an order as often as
+// it places one ("Order now" on a restaurant's home page) asks only on a page that looks like a
+// checkout (user, 2026-11-16: holding it stalled every food order at its first press).
+func ClassifyOn(a Action, el *Element, t Target, pageURL string) Risk {
 	if deny, why := DenyAction(a, t); deny {
 		return Risk{LevelDeny, CatDenied, why}
 	}
@@ -98,6 +106,9 @@ func Classify(a Action, el *Element, t Target) Risk {
 			continue
 		}
 		if w := firstPhrase(ws, l.words); w != "" {
+			if l.category == CatPay && slices.Contains(startOrderWords, w) && pageURL != "" && !CheckoutPage(pageURL) {
+				continue
+			}
 			return confirm(l.category, fmt.Sprintf("%s %q matches %q", roleOf(el), el.Name, w))
 		}
 	}
@@ -299,4 +310,23 @@ func validIBAN(s string) bool {
 	}
 	n, ok := new(big.Int).SetString(b.String(), 10)
 	return ok && new(big.Int).Mod(n, big.NewInt(97)).Int64() == 1
+}
+
+// checkoutWords are the words in a page's address that make it a checkout: a cart, a payment
+// or an order's review.
+var checkoutWords = []string{"checkout", "cart", "basket", "bag", "payment", "pay", "billing", "purchase", "review", "confirm", "summary"}
+
+// CheckoutPage reports whether pageURL's path, query or fragment names a checkout step.
+func CheckoutPage(pageURL string) bool {
+	u, err := url.Parse(pageURL)
+	if err != nil {
+		return true // unreadable: the careful answer
+	}
+	rest := strings.ToLower(u.Path + " " + u.RawQuery + " " + u.Fragment)
+	for _, w := range strings.FieldsFunc(rest, func(r rune) bool { return r < 'a' || r > 'z' }) {
+		if slices.Contains(checkoutWords, w) {
+			return true
+		}
+	}
+	return false
 }

@@ -10,6 +10,10 @@ var payWords = []string{
 	"submit payment", "submit order", "confirm and pay", "order now",
 }
 
+// startOrderWords are the payWords that as often begin an order as place one: they ask only on
+// a checkout page (ClassifyOn).
+var startOrderWords = []string{"order now"}
+
 var deleteWords = []string{
 	"delete", "remove", "erase", "empty trash", "empty bin", "move to trash", "move to bin",
 	"empty recycle bin", "permanently delete",

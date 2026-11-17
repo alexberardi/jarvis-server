@@ -492,7 +492,7 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 	if (action.Kind == "set_value" || action.Kind == "type") && el != nil && el.Secure {
 		return fail("password_field", "%s is a password field: Jarvis doesn't type passwords; the user enters it", action.Ref)
 	}
-	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt); !ok {
+	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt, run.URL); !ok {
 		return r
 	}
 
@@ -505,11 +505,11 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 
 // checkRisk classifies action i (on el, or nil, in tgt): ok when it may run, else its failed
 // result. A risky one runs only with a valid approval token for exactly it.
-func (t *Tools) checkRisk(ctx context.Context, runID string, i int, action computeruse.Action, el *computeruse.Element, tgt computeruse.Target) (Result, bool) {
+func (t *Tools) checkRisk(ctx context.Context, runID string, i int, action computeruse.Action, el *computeruse.Element, tgt computeruse.Target, pageURL string) (Result, bool) {
 	fail := func(code, format string, args ...any) Result {
 		return Result{I: i, Code: code, Error: fmt.Sprintf(format, args...)}
 	}
-	risk := computeruse.Classify(action, el, tgt)
+	risk := computeruse.ClassifyOn(action, el, tgt, pageURL)
 	switch risk.Level {
 	case computeruse.LevelDeny:
 		r := fail("denied", "%s", risk.Reason)
