@@ -307,6 +307,9 @@ func offSite(sites []string, raw string) string {
 // awaitingCheck reports whether step wstep ran and is waiting on its failed check.
 func awaitingCheck(h []Entry, wstep int) bool {
 	n := len(h)
+	for n > 0 && h[n-1].Kind == "ask" {
+		n-- // the question the run then asked the user is recorded after the check (end)
+	}
 	return n > 0 && h[n-1].Kind == entryCheck && h[n-1].WStep == wstep && !h[n-1].StepDone
 }
 
