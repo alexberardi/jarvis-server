@@ -545,8 +545,8 @@ func cronTimePhrase(minute, hour string) string {
 	return fmt.Sprintf(" at %d:%02d %s", h12, mi, suffix)
 }
 
-// describeRecurrence is _describe_recurrence ("once" for a one-shot). A multi-day dow reads
-// as "every day" (§8.15), kept.
+// describeRecurrence is _describe_recurrence ("once" for a one-shot). A list of days reads as
+// those days, not legacy's "every day" (§8.15).
 func describeRecurrence(rec any) string {
 	s, _ := rec.(string)
 	if s == "" {
@@ -585,6 +585,17 @@ func describeRecurrence(rec any) string {
 		case isDigits(dow):
 			d, _ := strconv.Atoi(dow)
 			return "every " + weekdayNames[d%7] + tod
+		case dow == "0,6":
+			return "every weekend" + tod
+		case dow != "*" && strings.Trim(dow, "0123456789,") == "":
+			// A list of days ("mondays and thursdays"): legacy read it as every day (§8.15),
+			// which is wrong now that schedule_errand writes these.
+			var names []string
+			for _, p := range strings.Split(dow, ",") {
+				d, _ := strconv.Atoi(p)
+				names = append(names, weekdayNames[d%7])
+			}
+			return "every " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + tod
 		case isDigits(dom):
 			return "monthly on day " + dom + tod
 		}

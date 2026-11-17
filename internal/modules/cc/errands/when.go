@@ -154,7 +154,14 @@ func BuildRecurrence(descriptor string, fireUTC time.Time, tzName string) string
 	}
 	local := fireUTC.In(zoneOf(tzName))
 	hh, mm := local.Hour(), local.Minute()
+	at := strconv.Itoa(mm) + " " + strconv.Itoa(hh) + " * * "
+	// Named days first: "monday" contains "day", which would read as daily.
+	if days := namedCronDays(d); days != "" {
+		return recJSON("type", "cron", "cron", at+days)
+	}
 	switch {
+	case strings.Contains(d, "weekend"):
+		return recJSON("type", "cron", "cron", at+"0,6")
 	case strings.Contains(d, "weekday"):
 		return recJSON("type", "cron", "cron", strconv.Itoa(mm)+" "+strconv.Itoa(hh)+" * * 1-5")
 	case strings.Contains(d, "week"):
@@ -165,6 +172,37 @@ func BuildRecurrence(descriptor string, fireUTC time.Time, tzName string) string
 		return recJSON("type", "cron", "cron", strconv.Itoa(mm)+" "+strconv.Itoa(hh)+" * * *")
 	}
 	return ""
+}
+
+// namedCronDays is the cron day-of-week list (Sunday 0) of the weekdays named in d, in order,
+// or "" when none is.
+func namedCronDays(d string) string {
+	var on [7]bool
+	for _, w := range weekdayNames {
+		if strings.Contains(d, w.name) {
+			on[(w.wd+1)%7] = true
+		}
+	}
+	var out []string
+	for i, ok := range on {
+		if ok {
+			out = append(out, strconv.Itoa(i))
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// FirstFire moves a cron recurrence's first fire onto its schedule: "every monday" asked on a
+// Tuesday for "tomorrow at 6pm" first runs on Monday at 6 PM, not Wednesday. Other recurrences
+// (none, an interval) start at fire as asked.
+func FirstFire(recurrence string, fire time.Time, tzName string) time.Time {
+	if !strings.Contains(recurrence, `"cron"`) {
+		return fire
+	}
+	if n, ok := NextFire(recurrence, fire.Add(-time.Minute), tzName); ok {
+		return n
+	}
+	return fire
 }
 
 // DefaultRecurringFire is _default_recurring_fire: 9:00 local today.
