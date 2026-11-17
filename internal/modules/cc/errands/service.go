@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -176,6 +177,8 @@ type Service struct {
 	PhoneDeadline    time.Duration // 60 min from confirm (D40 Q6)
 	// PlannerThinkTimeout overrides errands.planner_think_seconds (0 = the setting; <0 = none).
 	PlannerThinkTimeout time.Duration
+	// thinkOffUntil (unix seconds): until then the planner doesn't think (thinkOffFor).
+	thinkOffUntil atomic.Int64
 
 	driving sync.Map // workflow id → struct{}: runs this process is driving right now
 	// stopRequested: autorun workflow id → the tapping user id (int64); the run stops before its

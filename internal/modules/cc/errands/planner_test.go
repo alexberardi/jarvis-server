@@ -178,6 +178,15 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
 		t.Fatalf("time-capped requests: %+v", reqs)
 	}
+	// Having thought past its time once, it plans the next ones without thinking.
+	n = len(e.llm.requests("plan"))
+	e.llm.say("plan", planJSON("Timer", step("get_weather", "Weather", "")))
+	if _, err := e.s.PlanErrand(context.Background(), "goal", nil); err != nil {
+		t.Fatalf("the plan after a time-capped one: %v", err)
+	}
+	if reqs = e.llm.requests("plan")[n:]; len(reqs) != 1 || reqs[0].ReasoningBudget == nil || *reqs[0].ReasoningBudget != 0 {
+		t.Fatalf("the plan after a time-capped one thought: %+v", reqs)
+	}
 	// A job that is itself cancelled (shutdown) is not a budget overrun: no retry.
 	n = len(e.llm.requests("plan"))
 	e.s.PlannerThinkTimeout = -1

@@ -998,6 +998,9 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 // long as it liked ran into the planner's time limit on every call and was asked again without.
 const planCheckThinkTokens = 512
 
+// thinkOffFor is how long the planner plans without thinking after a plan thought past its time.
+const thinkOffFor = 30 * time.Minute
+
 // runPlannerThinking is runPlanner with a set thinking allowance (nil = left to the label).
 func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *int) (*pyjson.Object, error) {
 	if s.LLM == nil {
@@ -1005,6 +1008,12 @@ func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *
 	}
 	temp, maxTok := 0.0, s.plannerMaxTokens(ctx)
 	start := time.Now()
+	if think == nil && s.now().Unix() < s.thinkOffUntil.Load() {
+		// It thought past its time on a plan a little while ago, and would again: the house
+		// model spent 30 s on every errand before its 5 s plan (2026-11-16).
+		off := 0
+		think = &off
+	}
 	req := llm.ChatRequest{
 		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: think,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
@@ -1027,6 +1036,7 @@ func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *
 		s.log().Warn("errands: planner thought past its time budget; retrying without thinking",
 			"budget", s.plannerThinkTimeout(ctx), "elapsed", time.Since(start).Round(100*time.Millisecond))
 		resp = &llm.ChatResponse{FinishReason: "length"}
+		s.thinkOffUntil.Store(s.now().Add(thinkOffFor).Unix())
 	} else {
 		s.log().Info("errands: planner call", "completion_tokens", resp.Usage.CompletionTokens,
 			"prompt_tokens", resp.Usage.PromptTokens, "max_tokens", maxTok, "finish", resp.FinishReason,
