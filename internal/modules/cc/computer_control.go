@@ -184,6 +184,12 @@ func needsComputer(s string) bool {
 		}
 		return false
 	}
+	// A search on a website the user names ("on cars.com, find used CR-Vs under $20,000 …") is
+	// work on that site: a web search answered it with "I couldn't pull a specific list"
+	// (Gemma 26B, 2026-11-17). Before the list rule: "list the five cheapest" is no shopping list.
+	if onSiteRE.MatchString(s) && (has("find") || has("list") || has("search") || has("compare")) && !has("type") && !has("write") && !has("dictate") && !has("call") && !has("remind") {
+		return true
+	}
 	if has("call") || has("ring") || has("dial") || has("remind") || has("reminder") || has("list") {
 		return false // a phone call, a reminder or a list item about buying something
 	}
@@ -243,6 +249,9 @@ func needsComputer(s string) bool {
 	}
 	return false
 }
+
+// onSiteRE finds a website named as where to look ("on cars.com", "go to rei.com").
+var onSiteRE = regexp.MustCompile(`(?i)\b(on|to|at)\s+([a-z0-9-]+\.)+(com|org|net|io|co|gov|edu|us|uk|ca)\b`)
 
 // appWorkRE finds an app named as where the work happens ("in the Jarvis Test Notes app").
 var appWorkRE = regexp.MustCompile(`(?i)\b(in|into|inside|using|open)\s+(the\s+|my\s+)?([\w'&.-]+\s+){1,5}app\b`)

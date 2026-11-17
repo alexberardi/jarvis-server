@@ -87,6 +87,8 @@ func TestClassify(t *testing.T) {
 		{"submit form", press, &Element{Role: "button", Type: "submit", Name: "Submit"}, web, CatSubmitThirdParty, LevelConfirm},
 		{"sign up", press, btn("Sign up"), web, CatSubmitThirdParty, LevelConfirm},
 		{"register", press, btn("Register"), web, CatSubmitThirdParty, LevelConfirm},
+		{"apply now", press, btn("Apply now"), web, CatSubmitThirdParty, LevelConfirm},
+		{"apply a filter", press, btn("apply"), web, "", LevelNone},
 		{"enter on submit", Action{Kind: "keypress", Intent: "x", Keys: []string{"Enter"}}, &Element{Role: "button", Type: "submit", Name: "Submit application"}, web, CatSubmitThirdParty, LevelConfirm},
 		{"log in", press, &Element{Role: "button", Type: "submit", Name: "Log in"}, web, "", LevelNone},
 		{"sign in", press, btn("Sign in"), web, "", LevelNone},

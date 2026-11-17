@@ -662,7 +662,16 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	// was stuck on, rather than burning its rounds (16 more in the suite, same day). The same
 	// actions on a screen that does change (a name typed again into a field that keeps filling)
 	// are caught a little later, by the actions alone.
-	acts := batchKey(Observation{}, actions)
+	// By the element's name, not its ref: a ref moves when the page redraws, and a sort button
+	// that flips the list was pressed 60 rounds running, a new ref each time (2026-11-17).
+	byName := make([]computeruse.Action, len(actions))
+	for i, a := range actions {
+		if e := elementFor(obs, a.Ref); e != nil {
+			a.Ref = e.Role + " " + e.Name
+		}
+		byName[i] = a
+	}
+	acts := batchKey(Observation{}, byName)
 	if acts != "" && acts == r.lastActs {
 		r.sameActs++
 	} else {

@@ -1,6 +1,8 @@
 package computer
 
 import (
+	"context"
+	"strconv"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
@@ -56,5 +58,24 @@ func TestOtherSite(t *testing.T) {
 	}
 	if got := otherSite("", nav("https://www.bestbuy.com/")); got != "" {
 		t.Errorf("a task with no site refused: %s", got)
+	}
+}
+
+// The same button pressed round after round is stuck, even when each new snapshot gives it
+// another ref and flips what the page shows.
+func TestRepeatsAreCountedByElementName(t *testing.T) {
+	page := func(order string) Observation {
+		return Observation{URL: "https://shop.example.com/list", Title: order, Gen: 1,
+			Elements: []Element{{Ref: "e1", Role: "button", Name: "price"}, {Ref: "e2", Role: "button", Name: "price"}}}
+	}
+	e := newEnv(t, page("start"))
+	var script []string
+	for i := 0; i < 12; i++ {
+		e.exec.pages = append(e.exec.pages, page(strconv.Itoa(i)))
+		script = append(script, actions(press("e"+strconv.Itoa(1+i%2), "Sort by price")))
+	}
+	e.script(script...)
+	if out := e.loop.Run(context.Background(), task()); out.State != StateFailed || len(e.llm.reqs) > stuckGiveUp+1 {
+		t.Fatalf("outcome %+v after %d calls", out, len(e.llm.reqs))
 	}
 }

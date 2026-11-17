@@ -199,6 +199,12 @@ func isSubmit(el *Element, ws []string) bool {
 	if firstPhrase(ws, preApprovedSubmitWords) != "" {
 		return false
 	}
+	// A bare "Apply" applies a filter or a setting far more often than it sends an application
+	// ("Apply now", "Apply for this job"): held, it stalled a listing search at its price
+	// filter (Craigslist, 2026-11-17).
+	if len(ws) == 1 && ws[0] == "apply" || hasPhrase(ws, "apply filter") || hasPhrase(ws, "apply filters") {
+		return false
+	}
 	return firstPhrase(ws, submitWords) != ""
 }
 
