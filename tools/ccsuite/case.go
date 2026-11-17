@@ -52,6 +52,9 @@ type Setup struct {
 	// Block lists the sites (hosts, e.g. 127.0.0.1) the household blocks for computer tasks
 	// during the case: a household rule of cc's (policy.Rule, effect block) per site.
 	Block []string `json:"block,omitempty"`
+	// WebSearch turns the household's web search on for the case, so the planner may research
+	// with quick_search before a computer task (real web: for trial cases, not the required ones).
+	WebSearch bool `json:"web_search,omitempty"`
 	// Open is a fixture sites path (e.g. /wiki/Velmora) the suite opens in a browser tab in front
 	// before Say: the page the user means by "this page", whose address Say doesn't give.
 	Open string `json:"open,omitempty"`

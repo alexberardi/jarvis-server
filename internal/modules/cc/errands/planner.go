@@ -292,7 +292,10 @@ const budgetRule = "BUDGETS: for a budget or a spending report from statements, 
 // task no longer knew what the first had found.
 const websiteRule = "COMPUTER TASKS: everything the user wants done on one website or in one app (find, " +
 	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
-	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
+	"request for that site, with every detail they gave. Start the site at the web address they gave. " +
+	"When they name no website (research the best one, find the cheapest listing, add it to my cart), it is still ONE " +
+	"computer_task with no site: it starts on a web search. With quick_search on the menu, put ONE quick_search step " +
+	"before it for the research (what to buy and why); the computer_task is given what it found.\n\n"
 
 // documentRule is the computer rules' line for documents (ELEMENT-LAYER-WORK.md C27): typing a
 // document through Writer's window took 15+ rounds and failed at the Save dialog; the file is

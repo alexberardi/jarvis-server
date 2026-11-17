@@ -165,7 +165,10 @@ type Task struct {
 	// Source is the web page the task works from, fetched by the server (a desktop task can't
 	// read the browser), or nil.
 	Source *Source
-	Rules  string // the household's rules as one line for the model ("" = the defaults)
+	// Found is what the errand's earlier steps found (a web search's results), "" when there
+	// is none: a task that names no website picks what to open from it.
+	Found string
+	Rules string // the household's rules as one line for the model ("" = the defaults)
 	// Approved are the digests of held actions the user approved: the loop mints their tokens
 	// and runs the held batch before anything else.
 	Approved []string
@@ -958,7 +961,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		Goal: t.Goal, Request: t.Request, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
-		Source: t.Source,
+		Source: t.Source, Found: t.Found,
 	}
 	text, stable := renderPromptSplit(in)
 	// The task and its source text are the same every round: a cloud model keeps them.

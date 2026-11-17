@@ -900,6 +900,22 @@ func TestComputerTaskStartsAtTheGoalsAddress(t *testing.T) {
 	}
 }
 
+// A browser task that names no website starts on a web search, not on nothing: "the task has
+// no window yet" ended a real "find the cheapest listing and add it to my cart".
+func TestComputerTaskWithNoSiteStartsOnASearch(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Add a watch to the cart", step(policy.ToolComputerTask, "Find and add it",
+		`{"goal": "find the cheapest running watch and add it to my cart", "target": "browser"}`)))
+	c.llm.say("computer", doneReply)
+	c.draft("find the cheapest running watch and add it to my cart", ptr(7), []MenuEntry{computerEntry()})
+	c.idle()
+	c.comp.mu.Lock()
+	defer c.comp.mu.Unlock()
+	if len(c.comp.observes) == 0 || c.comp.observes[0].StartURL != searchStart {
+		t.Fatalf("observes %+v", c.comp.observes)
+	}
+}
+
 // The replan after the downloads that reads them and writes the spreadsheet stops at a
 // checkpoint in the spreadsheet's place, for what the reads find.
 func TestReplanSpreadsheetAfterReadIsACheckpoint(t *testing.T) {

@@ -138,6 +138,12 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			if t.Target.Site == "" {
 				t.Target.Site = siteOf(t.StartURL)
 			}
+			if t.StartURL == "" && t.Target.Site == "" {
+				// "Find the cheapest listing and add it to my cart" names no website: the task
+				// starts on a web search and goes where that leads.
+				t.StartURL = searchStart
+			}
+			t.Found = PriorResults(*rc.results)
 		}
 		if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
 			t.Success = &computer.SuccessCheck{Screen: ok}
@@ -370,6 +376,9 @@ func siteOf(site string) string {
 	}
 	return strings.ToLower(site)
 }
+
+// searchStart is where a browser task that names no website starts.
+const searchStart = "https://duckduckgo.com/"
 
 // startURL is where a browser task starts: site when it is a web address, else the first web
 // address on site (any site when it is "") in the goals, the step's then the errand's; "" when

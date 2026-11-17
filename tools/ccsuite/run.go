@@ -227,6 +227,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	if err := e.Block(cctx, c.Setup.Block); err != nil {
 		return fail("block: " + err.Error())
 	}
+	if err := e.api(cctx, "PUT", e.Sbx["SBX_CC"]+"/settings/web_search.enabled", map[string]any{"value": c.Setup.WebSearch}, nil); err != nil {
+		return fail("web search: " + err.Error())
+	}
 	if err := e.Login(cctx, c.Setup.Login); err != nil {
 		return fail("login: " + err.Error())
 	}
