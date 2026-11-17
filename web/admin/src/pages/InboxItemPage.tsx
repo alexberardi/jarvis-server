@@ -202,7 +202,7 @@ export default function InboxItemPage() {
   )
 }
 
-function BackLink() {
+export function BackLink() {
   return (
     <Link
       to="/inbox"
