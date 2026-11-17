@@ -43,3 +43,18 @@ func TestMadeUpDetail(t *testing.T) {
 		t.Errorf("a search asked about: %s", got)
 	}
 }
+
+func TestOtherSite(t *testing.T) {
+	nav := func(u string) []computeruse.Action { return []computeruse.Action{{Kind: "navigate", URL: u}} }
+	if otherSite("amazon.com", nav("https://www.bestbuy.com/")) == "" {
+		t.Error("another shop opened from a task for amazon.com")
+	}
+	for _, u := range []string{"https://www.amazon.com/s?k=x", "https://smile.amazon.com/"} {
+		if got := otherSite("amazon.com", nav(u)); got != "" {
+			t.Errorf("%s refused: %s", u, got)
+		}
+	}
+	if got := otherSite("", nav("https://www.bestbuy.com/")); got != "" {
+		t.Errorf("a task with no site refused: %s", got)
+	}
+}

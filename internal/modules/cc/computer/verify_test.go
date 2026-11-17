@@ -272,6 +272,10 @@ func TestDoneScreenTaskCheckedWithModelChecks(t *testing.T) {
 	if out.State != StateDone || out.Checked != `the address contains "/thanks"; an order confirmation page: yes` {
 		t.Fatalf("outcome %+v", out)
 	}
+	// The screen question carries what the model said it did or found.
+	if q := userText(e.llm.reqs[len(e.llm.reqs)-1]); !strings.Contains(q, "an order confirmation page (Jarvis reports: ") {
+		t.Fatalf("the report wasn't in the screen question:\n%s", q)
+	}
 }
 
 // A failed download check points at the page's download button.

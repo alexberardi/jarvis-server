@@ -21,6 +21,8 @@ type SuccessCheck struct {
 	Download    *DownloadCheck `json:"download,omitempty"`
 	File        *FileCheck     `json:"file,omitempty"`
 	Screen      string         `json:"screen,omitempty"` // free text, a yes/no question about a fresh screenshot
+	// report is what the model said it found, for the screen question ("" = nothing).
+	report string
 }
 
 // DownloadCheck: a download whose name matches NameLike, of at least MinBytes.
@@ -170,7 +172,11 @@ func (l *Loop) Verify(ctx context.Context, runID string, target computeruse.Targ
 	// a screenshot can't show (a finished download, a saved file) is judged with those facts, not
 	// failed beside a check that found the file.
 	if q := strings.TrimSpace(c.Screen); q != "" && looked != nil {
-		ok, why := l.askScreen(ctx, pick, *looked, q, checked)
+		ask := q
+		if c.report != "" {
+			ask += fmt.Sprintf(" (Jarvis reports: %q. When the task was to find or read something, answer yes if the page backs that report up: the page need not pick the answer out itself.)", c.report)
+		}
+		ok, why := l.askScreen(ctx, pick, *looked, ask, checked)
 		if !ok {
 			return fail(fmt.Sprintf("%s: %s", oneLine(q), why))
 		}

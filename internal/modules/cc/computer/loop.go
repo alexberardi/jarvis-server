@@ -689,6 +689,10 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		r.feedback = msg
 		return Outcome{}, false
 	}
+	if msg := otherSite(r.task.Target.Site, actions); msg != "" && r.sameActs < stuckGiveUp {
+		r.feedback = msg
+		return Outcome{}, false
+	}
 	if q := madeUpDetail(said, obs, actions); q != "" {
 		return Outcome{State: StateAsk, Ask: q, Reason: ReasonUnclear}, true
 	}
@@ -907,6 +911,26 @@ func pastCheckout(request string, obs Observation, actions []computeruse.Action)
 	return ""
 }
 
+// otherSite is what the model is told when a task for one website navigates to another: ""
+// otherwise. A plan's step for amazon.com saw the whole request, went on to the other two shops
+// itself and failed its own check on the last one (Gemma 26B, 2026-11-17).
+func otherSite(site string, actions []computeruse.Action) string {
+	site = strings.TrimPrefix(siteHost(site), "www.")
+	if site == "" {
+		return ""
+	}
+	for _, a := range actions {
+		if a.Kind != "navigate" {
+			continue
+		}
+		if h := offSite([]string{site}, a.URL); h != "" {
+			return fmt.Sprintf("this task is only for %s, so %s is not opened: any other website in the request is another step's job. "+
+				"Finish what the task needs on %s, then say done with what you found there.", site, h, site)
+		}
+	}
+	return ""
+}
+
 // madeUpDetail is the question for the user when an action types into a field for their name,
 // address, phone or email something that said (the request, what was found, their answer)
 // doesn't hold: "" otherwise.
@@ -1060,6 +1084,9 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 	case check.screenOnly() && reply.Verify.concrete():
 		both := *reply.Verify
 		both.Screen = check.Screen
+		// The model's own text checks go: the screen question now carries its report, and the
+		// names it picked failed a lookup whenever it had opened one result (2026-11-17).
+		both.TextPresent = nil
 		check = &both
 	}
 	if check != nil && check.Download != nil && r.fresh && len(r.downloadsBefore) > 0 {
@@ -1085,7 +1112,16 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 	if why := l.unsaved(ctx, r, obs); why != "" {
 		res = Verified{Why: why} // the model's own check can't stand in for the file
 	} else {
-		res = l.Verify(ctx, r.run.ID, r.task.Target, r.pick, check)
+		asked := check
+		if sum := oneLine(reply.Summary); sum != "" && strings.TrimSpace(check.Screen) != "" {
+			// A task that looks something up ends on a page that holds the answer without
+			// spelling it out: "the three best-rated vacuums under $300" is nowhere on a
+			// results page, and the bare question failed every such step (2026-11-17).
+			c := *check
+			c.report = sum
+			asked = &c
+		}
+		res = l.Verify(ctx, r.run.ID, r.task.Target, r.pick, asked)
 	}
 	if res.OK {
 		sum := strings.TrimSpace(reply.Summary)
