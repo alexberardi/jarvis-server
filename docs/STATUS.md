@@ -20,6 +20,10 @@ Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 - [x] 4 blocked suggestions (`/inbox/suppressed`) · 5 live badge and toast
 
 Done. Not ported, on purpose: audio cards and the callback-result page (see the plan).
+
+- [ ] Scheduled errands on the web (`/errands`, mobile's Schedules screen): list and stop
+- [ ] Recurrence: "every monday" was stored as daily (fix: #694)
+
 Next: full alarms, spec first.
 
 ### Touch display (2026-10-23)

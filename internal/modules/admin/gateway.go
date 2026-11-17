@@ -136,6 +136,10 @@ var passRoutes = []passRoute{
 	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records"),
 	ccUserRoute("PATCH /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/nodes/{node_id}/browser/matches"),
+	// Scheduled errands: the household's one-time and recurring errands, and cancelling one
+	// (mobile's Schedules screen); cc checks membership of the household.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/schedules"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/household/{household_id}/schedules/{schedule_id}/cancel"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.

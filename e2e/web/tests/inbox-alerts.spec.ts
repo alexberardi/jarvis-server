@@ -25,7 +25,7 @@ test('a blocked suggestion is listed and can be allowed again', async ({ asUser 
 
   const page = await asUser(u)
   await page.goto('/inbox')
-  await page.getByRole('link', { name: 'Blocked suggestions' }).click()
+  await page.getByRole('link', { name: 'Blocked suggestions', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Blocked suggestions' })).toBeVisible()
   await expect(page.getByText('Text Sam good morning')).toBeVisible()
 
