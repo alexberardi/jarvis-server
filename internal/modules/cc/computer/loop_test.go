@@ -1191,6 +1191,42 @@ func TestPageNews(t *testing.T) {
 	}
 }
 
+// The element an action names is the one it acts on, whatever ref the model wrote beside it.
+func TestMatchNames(t *testing.T) {
+	obs := Observation{Elements: []Element{
+		{Ref: "e1", Role: "button", Name: "Close"},
+		{Ref: "e2", Role: "button", Name: "Delivery, Get your order delivered to you, or to your door."},
+		{Ref: "e3", Role: "button", Name: "Carryout, Pick-up your order at a nearby Domino's."},
+		{Ref: "e8", Role: "button", Name: "9 Lanes Mill Road, Brick, NJ 08724"},
+		{Ref: "e9", Role: "link", Name: "Help"},
+		{Ref: "e10", Role: "link", Name: "Help"},
+	}}
+	act := func(ref, name string) []computeruse.Action {
+		return []computeruse.Action{{Kind: "press", Ref: ref, Name: name, Intent: "x"}}
+	}
+	for _, c := range []struct{ ref, name, want, wrong string }{
+		{"e3", "Carryout, Pick-up your order at a nearby Domino's.", "e3", ""},
+		{"e3", "carryout", "e3", ""}, // cut short, another case
+		{"e2", "Carryout", "e3", ""}, // the name is another element's: it goes there
+		{"e8", "Build Your Pizza", "", `nothing on this page is named "Build Your Pizza", and e8 is button "9 Lanes Mill Road, Brick, NJ 08724"`},
+		{"e40", "ZIP Code", "", `nothing on this page is named "ZIP Code", and e40 isn't on this page`},
+		{"e1", "Help", "", `"Help" is the name of e9, e10, not of e1`},
+		{"e9", "Help", "e9", ""}, // one of two with the name
+		{"e1", "", "e1", ""},     // no name given: as before
+	} {
+		got, wrong := matchNames(obs, act(c.ref, c.name))
+		if c.wrong != "" {
+			if !strings.Contains(wrong, c.wrong) {
+				t.Errorf("%s %q: told %q, want %q", c.ref, c.name, wrong, c.wrong)
+			}
+			continue
+		}
+		if wrong != "" || got[0].Ref != c.want || got[0].Name != "" {
+			t.Errorf("%s %q: %+v, told %q", c.ref, c.name, got[0], wrong)
+		}
+	}
+}
+
 // A press of what is already selected is answered with what comes next, not run again.
 func TestAlreadySelected(t *testing.T) {
 	obs := Observation{Elements: []Element{

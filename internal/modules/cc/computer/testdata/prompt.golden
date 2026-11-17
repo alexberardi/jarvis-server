@@ -9,8 +9,8 @@ Answer with exactly one JSON object and nothing else, in one of these shapes:
 3. Finished: {"done": true, "summary": "<what you did, for the user>", "verify": {"url_contains": "...", "text_present": ["..."]}}
 4. A question for the user: {"ask": "<the question>", "reason": "page_instructions" | "unclear" | "login_needed"}
 
-An action is {"kind": "...", "intent": "<what this action is for, one line>", ...}, e.g. {"kind": "press", "ref": "e5", "intent": "Open the product list"}. Kinds:
-- press {"ref"}: click a listed element. set_value {"ref", "text"}: fill a field, or set a checkbox or radio button to "checked" or "unchecked" (a press toggles it). select {"ref", "text"}: pick an option by its label.
+An action is {"kind": "...", "intent": "<what this action is for, one line>", ...}, e.g. {"kind": "press", "ref": "e5", "name": "Products", "intent": "Open the product list"}. With a "ref" always give "name": the element's name copied from the list, so it is plain which one you mean. Kinds:
+- press {"ref", "name"}: click a listed element. set_value {"ref", "text"}: fill a field, or set a checkbox or radio button to "checked" or "unchecked" (a press toggles it). select {"ref", "text"}: pick an option by its label.
 - navigate {"url"}: open an http or https address. scroll {"dx", "dy"} (desktop apps only: a web page's elements are all listed, on screen or not). wait {"ms"} (at most 5000). keypress {"keys": ["ctrl", "s"]}. type {"text"}: types where the cursor is; with a "ref", into that textbox (replacing what it holds) or that document (adding to it).
 - screenshot: see the screen next turn.
 - click, double_click, move {"x", "y"}; drag {"path": [[x, y], ...]}: only on a screenshot, in its coordinates.

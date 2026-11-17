@@ -318,6 +318,9 @@ type round struct {
 	wfGoal     string
 	notes      string // the workflow's "things to watch for", for a replay's model rounds
 	sites      []string
+	// nameSentBack is how many times this call sent a batch back for naming an element the
+	// page doesn't have.
+	nameSentBack int
 	// orderSentBack is how many times this call sent an order back to be put right.
 	orderSentBack int
 	// resume: the run was paused (the user used the computer); its next batch resumes it.
@@ -604,6 +607,15 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		return Outcome{State: StateAsk, Ask: reply.Ask, Reason: reply.Reason}, true
 	}
 
+	// The element an action names and the one its ref means have to be the same one.
+	named, wrong := matchNames(obs, reply.Actions)
+	if wrong != "" && r.nameSentBack < 3 {
+		r.nameSentBack++
+		r.feedback = wrong
+		return Outcome{}, false
+	}
+	reply.Actions = named
+
 	// A screenshot "action" is the model asking to see the screen next round.
 	var actions []computeruse.Action
 	for _, a := range reply.Actions {
@@ -713,6 +725,65 @@ func enterInstead(target string, obs Observation, actions []computeruse.Action) 
 		}
 	}
 	return nil, false
+}
+
+// matchNames checks each action's "name" against the element its ref means, and returns the
+// actions with their names cleared. A small model decides what it wants ("the ZIP code field")
+// and then writes a ref that is something else, from an earlier page or from nowhere: four of
+// the house model's lost runs on a real site in one evening (2026-11-16). When the name is
+// another element's, and only one's, the action goes to that one; when it is no element's,
+// wrong says so and nothing runs.
+func matchNames(obs Observation, actions []computeruse.Action) (out []computeruse.Action, wrong string) {
+	out = make([]computeruse.Action, len(actions))
+	for i, a := range actions {
+		name := a.Name
+		a.Name = ""
+		out[i] = a
+		if name == "" || a.Ref == "" || wrong != "" {
+			continue
+		}
+		var at *Element
+		var same []Element
+		for j, e := range obs.Elements {
+			if e.Ref == a.Ref {
+				at = &obs.Elements[j]
+			}
+			if sameName(e.Name, name) {
+				same = append(same, e)
+			}
+		}
+		switch {
+		case at != nil && sameName(at.Name, name):
+		case len(same) == 1:
+			out[i].Ref = same[0].Ref
+		case len(same) == 0:
+			is := "isn't on this page"
+			if at != nil {
+				is = fmt.Sprintf("is %s %q", at.Role, clipName(at.Name))
+			}
+			wrong = fmt.Sprintf("nothing on this page is named %q, and %s %s. Don't act on what you expect to be there: "+
+				"read the list, pick the element that does what the task needs now, and give its ref and its name exactly as listed.",
+				clipName(name), a.Ref, is)
+		default:
+			refs := make([]string, 0, len(same))
+			for _, e := range same {
+				refs = append(refs, e.Ref)
+			}
+			wrong = fmt.Sprintf("%q is the name of %s, not of %s: give the ref of the one you mean.", clipName(name), strings.Join(refs, ", "), a.Ref)
+		}
+	}
+	return out, wrong
+}
+
+// sameName reports whether the model's name for an element is the listed one: the same text
+// apart from case and spacing, or the start of it (a long name cut short).
+func sameName(listed, said string) bool {
+	norm := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+	l, s := norm(listed), norm(strings.TrimRight(strings.TrimSpace(said), "…."))
+	if l == "" || s == "" {
+		return false
+	}
+	return l == s || (len(s) >= 4 && strings.HasPrefix(l, s)) || (len(l) >= 4 && strings.HasPrefix(s, l))
 }
 
 // clipName is an element's name short enough for a history line.
