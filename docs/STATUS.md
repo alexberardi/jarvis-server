@@ -22,7 +22,7 @@ Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 Done. Not ported, on purpose: audio cards and the callback-result page (see the plan).
 
 - [ ] Scheduled errands on the web (`/errands`, mobile's Schedules screen): list and stop
-- [ ] Recurrence: "every monday" is stored as daily (`errands.BuildRecurrence`)
+- [ ] Recurrence: "every monday" was stored as daily (fix: #694)
 
 Next: full alarms, spec first.
 
