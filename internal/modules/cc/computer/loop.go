@@ -867,6 +867,13 @@ func (l *Loop) look(ctx context.Context, r *round) (Observation, *Outcome) {
 	for _, s := range lines {
 		r.prevLines[s] = true
 	}
+	if obs.Image == nil && r.task.Target.Kind != "desktop" {
+		// A page is looked at by its elements, with a screenshot only now and then: one from
+		// an earlier look shows a page that is gone. The house model pressed a store's button
+		// eight times "to open the Build Your Pizza menu", which was on a screenshot from
+		// twenty rounds before (2026-11-16).
+		r.shots = nil
+	}
 	if obs.Image != nil && r.pick.Vision {
 		r.shots = append(r.shots, obs.Image)
 		if len(r.shots) > maxScreenshots {

@@ -652,6 +652,24 @@ func TestHistoryHasNoImages(t *testing.T) {
 	}
 }
 
+// A browser task's screenshot is for the look it was asked on: the next look, taken without
+// one, doesn't show the model the page as it was.
+func TestBrowserScreenshotIsNotCarriedOn(t *testing.T) {
+	p := shopPage()
+	p.Image = &Image{MIME: "image/png", Data: []byte{'1'}, CaptureID: "c", Width: 100, Height: 100}
+	e := newEnv(t, p)
+	e.script(`{"thought": "look", "actions": [{"kind": "screenshot", "intent": "See the page"}]}`,
+		actions(press("e3", "Add it")), doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 3 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	for i, want := range []int{0, 1, 0} {
+		if got := images(e.llm.reqs[i]); got != want {
+			t.Errorf("call %d: %d images, want %d", i, got, want)
+		}
+	}
+}
+
 func TestImagePruning(t *testing.T) {
 	var pages []Observation
 	for i := range 5 {
