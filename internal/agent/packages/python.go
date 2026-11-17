@@ -141,12 +141,17 @@ func (p *Python) Install(ctx context.Context, reqs []string) error {
 	if sdk == "" {
 		sdk = SDKRequirement
 	}
-	args := append([]string{"pip", "install", "--python", p.Interpreter(), "--quiet", sdk}, reqs...)
+	args := append([]string{"pip", "install", "--python", p.Interpreter(), "--quiet", sdk, NodeBaseRequirement}, reqs...)
 	if out, err := p.Run(ctx, p.env(), uv, args...); err != nil {
 		return fmt.Errorf("installing Python packages: %v: %s", err, tail(out))
 	}
 	return nil
 }
+
+// NodeBaseRequirement is what the Python node had beside the SDK that the sidecar's node
+// modules use (nodecompat: utils.timezone_util and date_util convert zones with pytz, and fall
+// back to a coarser offset without it). Every venv gets it, as the SDK.
+const NodeBaseRequirement = "pytz"
 
 // InstallInto installs reqs into dir, apart from the venv: a test install's own packages.
 func (p *Python) InstallInto(ctx context.Context, dir string, reqs []string) error {

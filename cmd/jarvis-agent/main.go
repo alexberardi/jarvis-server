@@ -970,6 +970,11 @@ func runAgent(ctx context.Context, args []string) error {
 	if sc != nil {
 		wireDevices(r, sc, tf.registry, log)
 		wireRoutineVerb(r, served, log)
+		if tf.host != nil && tf.registry != nil {
+			// The Python node's DirectDeviceService (nodecompat) reads the same direct devices.
+			reg := tf.registry
+			tf.host.DirectDevices = func() any { return reg.Cached() }
+		}
 	}
 	if !p.desktop {
 		defer wireBluetooth(ctx, r, filepath.Dir(path), log)()

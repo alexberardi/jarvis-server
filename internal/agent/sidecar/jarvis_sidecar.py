@@ -92,6 +92,7 @@ import importlib.machinery
 import importlib.util
 import inspect
 import json
+import os
 import pathlib
 import re
 import sys
@@ -558,37 +559,123 @@ AGENT_PACKAGE: dict = {}
 AGENT_CONTEXT: dict = {}
 
 
-class _AgentContextScheduler:
-    def get_aggregated_context(self) -> dict:
-        return dict(AGENT_CONTEXT)
+# The Python node's modules that Pantry packages import (services.secret_service, utils.
+# config_service, device_families.domains, ...), from nodecompat/ beside this script
+# ($JARVIS_NODECOMPAT): the node's own pure code copied as it is, and its I/O modules over the Go
+# agent. These are the I/O ones: registered by name so they win over a Pi's jarvis-node-setup
+# copies, which read the Python node's database instead of the agent's store.
+_NODE_IO_MODULES = (
+    "device_families.base",
+    "services.secret_service", "services.command_auth_service", "services.agent_scheduler_service",
+    "services.direct_device_service", "services.storage_backend", "services.node_llm_client",
+    "services.proposal_client",
+    "utils.config_service", "utils.service_discovery", "utils.device_family_discovery_service",
+    "clients.rest_client", "scripts.text_to_speech",
+)
+# The node's install layout for another package's components (commands/custom_commands/<x>/):
+# here every installed package's own commands/, device_families/, ... directory.
+_NODE_LAYOUT = {"commands.custom_commands": "commands", "device_families.custom_families": "device_families",
+                "agents.custom_agents": "agents", "device_managers.custom_managers": "device_managers"}
+NODE_ROOTS: list = []
+_NODE_INFO: dict = {}
+_NODE_INFO_WARNED: list = []
 
 
-def _install_agent_context_shim() -> None:
-    """Packages written for the Python node read their agents' context through
-    services.agent_scheduler_service (the Home Assistant resolver maps "the plug" to an entity
-    with it). Without that module, or with the node's (its scheduler never runs here: the Go
-    agent schedules the agents), they would read nothing."""
+def _node_info() -> dict:
+    """The Go agent's node.info (node_id, room, household_id, command_center_url, home_context),
+    once per sidecar; {} while the agent can't answer (asked again next time)."""
+    if not _NODE_INFO:
+        try:
+            _NODE_INFO.update(_ask("node.info", {}) or {})
+        except Exception as exc:  # noqa: BLE001 — no host, or no server yet
+            if not _NODE_INFO_WARNED:
+                _NODE_INFO_WARNED.append(True)
+                print(f"sidecar: node info unavailable: {exc}", file=sys.stderr)
+    return dict(_NODE_INFO)
+
+
+def _node_compat_bridge():
+    """jarvis_node_compat: what nodecompat's modules reach in this process and the Go agent."""
     import types
 
-    scheduler = _AgentContextScheduler()
-    try:
-        module = importlib.import_module("services.agent_scheduler_service")
-    except ImportError:
-        if "services" not in sys.modules:
-            # An empty package: services.secret_service and the like still fail to import, as
-            # the packages' fallbacks expect.
-            parent = types.ModuleType("services")
-            parent.__path__ = []
-            sys.modules["services"] = parent
-        module = types.ModuleType("services.agent_scheduler_service")
-        sys.modules["services.agent_scheduler_service"] = module
-        setattr(sys.modules["services"], "agent_scheduler_service", module)
-    module.get_agent_scheduler_service = lambda: scheduler
+    bridge = types.ModuleType("jarvis_node_compat")
+    bridge.ask = _ask
+    bridge.families = lambda: FAMILIES
+    bridge.agent_context = lambda: dict(AGENT_CONTEXT)
+    bridge.node_info = _node_info
+    return bridge
+
+
+class _NodeLayoutFinder:
+    """commands.custom_commands (and the like) as namespace packages over every installed
+    package's commands/ (...), so `from commands.custom_commands.get_news.command import ...`
+    finds the package that has it, as on the node."""
+
+    @staticmethod
+    def find_spec(fullname, path=None, target=None):
+        sub = _NODE_LAYOUT.get(fullname)
+        if sub is None:
+            return None
+        locs = [str(pathlib.Path(r, sub)) for r in NODE_ROOTS if pathlib.Path(r, sub).is_dir()]
+        if not locs:
+            return None
+        spec = importlib.machinery.ModuleSpec(fullname, None, is_package=True)
+        spec.submodule_search_locations = locs
+        return spec
+
+
+def _node_compat_dir() -> str:
+    d = os.environ.get("JARVIS_NODECOMPAT") or ""
+    return d if d and os.path.isdir(d) else ""
+
+
+def _install_node_compat(roots: list) -> None:
+    """Make the Python node's modules importable for packages (see _NODE_IO_MODULES): the
+    nodecompat tree after the package roots on sys.path (a package's own code wins), the I/O
+    modules registered by name, and the node's custom_* layout. Before the packages load."""
+    sys.modules.setdefault("jarvis_node_compat", _node_compat_bridge())
+    if "jarvis_log_client" not in sys.modules and importlib.util.find_spec("jarvis_log_client") is None:
+        sys.modules["jarvis_log_client"] = _log_client_shim()  # the node modules log through it
+    NODE_ROOTS[:] = [r for r in roots if r]
+    if _NodeLayoutFinder not in sys.meta_path:
+        sys.meta_path.append(_NodeLayoutFinder)
+    compat = _node_compat_dir()
+    if not compat:
+        return
+    for r in NODE_ROOTS:
+        if r not in sys.path:
+            sys.path.append(r)
+    if compat not in sys.path:
+        sys.path.append(compat)
+    for name in _NODE_IO_MODULES:
+        parent, _, leaf = name.rpartition(".")
+        spec = importlib.util.spec_from_file_location(name, os.path.join(compat, *name.split(".")) + ".py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+            setattr(importlib.import_module(parent), leaf, module)
+        except BaseException as exc:  # one module failing must not take the others down
+            del sys.modules[name]
+            print(f"sidecar: node module {name} not available: {exc}", file=sys.stderr)
+
+
+# What command-center reads from an agent's context (the prompt's device list and
+# get_ha_entities); the rest (Home Assistant's every entity with its attributes) stays here
+# for the packages, out of every conversation start and tool report.
+_CONTEXT_FOR_CC = ("light_controls", "device_controls", "floors")
 
 
 def agent_context() -> dict:
-    """{"agents": {name: context}}: the agents' context for a conversation's node_context."""
-    return {"agents": dict(AGENT_CONTEXT)}
+    """{"agents": {name: context}}: the agents' context for a conversation's node_context, only
+    the keys command-center reads; an agent with none of them is left out."""
+    out = {}
+    for name, ctx in AGENT_CONTEXT.items():
+        if isinstance(ctx, dict):
+            kept = {k: ctx[k] for k in _CONTEXT_FOR_CC if k in ctx}
+            if kept:
+                out[name] = kept
+    return {"agents": out}
 # The packages' daemons, by name, for their settings only: each runs in a process of its own
 # (run_daemon), never here.
 DAEMONS: dict = {}
@@ -611,7 +698,10 @@ def load_packages(listing: str) -> dict:
         doc = json.load(f)
     packages = doc.get("packages") or []
     found = load_builtins(doc["builtins"]) if doc.get("builtins") else {}
-    _share_top_level([pkg["root"] for pkg in packages])
+    roots = [pkg["root"] for pkg in packages]
+    compat = _node_compat_dir()
+    _share_top_level(roots + ([compat] if compat else []))
+    _install_node_compat(roots)
     for pkg in packages:
         name, root = pkg["name"], pkg["root"]
         if name.startswith("test:"):
@@ -844,6 +934,13 @@ def agent_run(params: dict) -> dict:
     if agent is None:
         raise RuntimeError(f"no agent {name!r} in this sidecar")
     set_current_user_id(None)
+    # As N:'s scheduler: the household's home_context (its location) for get_home_context().
+    try:
+        from jarvis_command_sdk import set_home_context
+
+        set_home_context(_node_info().get("home_context"))
+    except ImportError:  # an SDK before home_context
+        pass
     package = AGENT_PACKAGE.get(name)
     started = time.monotonic()
     try:
@@ -1888,7 +1985,6 @@ def main() -> None:
         package, rel = sys.argv[sys.argv.index("--daemon") + 1:][:2]
         sys.exit(run_daemon(sys.argv[1], package, rel))
     _install_test_log_handler()
-    _install_agent_context_shim()
     commands = None
     while True:
         line = sys.stdin.readline()  # not `for line in sys.stdin`: _ask reads replies from it too

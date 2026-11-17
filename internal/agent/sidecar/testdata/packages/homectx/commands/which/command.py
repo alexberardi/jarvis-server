@@ -1,6 +1,6 @@
 """A command that resolves a device the way the Home Assistant package's resolver does: from its
-agent's cached context through the Python node's services.agent_scheduler_service, and that
-falls back as the package does when services.secret_service is missing."""
+agent's cached context through the Python node's services.agent_scheduler_service, and reads a
+secret through its services.secret_service (the Go agent's store, as the app set it)."""
 
 from typing import List
 
@@ -35,14 +35,14 @@ class Which(IJarvisCommand):
         return []
 
     def run(self, request_info, **kwargs) -> CommandResponse:
-        try:
-            from services.secret_service import get_secret_value  # noqa: F401
-            secret_service = "present"
-        except ImportError:
-            secret_service = "missing"
+        from services.secret_service import get_secret_value
+
+        secret_service = get_secret_value("HOUSE_URL", "integration")
         from services.agent_scheduler_service import get_agent_scheduler_service
 
         context = get_agent_scheduler_service().get_aggregated_context()
-        ids = [d["entity_id"] for d in context.get("house", {}).get("device_controls", {}).get("switch", [])]
+        house = context.get("house", {})
+        ids = [d["entity_id"] for d in house.get("device_controls", {}).get("switch", [])]
         return CommandResponse.success_response(
-            context_data={"entities": ids, "secret_service": secret_service}, wait_for_input=False)
+            context_data={"entities": ids, "secret_service": secret_service, "home": house.get("home")},
+            wait_for_input=False)
