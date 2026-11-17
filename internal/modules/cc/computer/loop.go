@@ -681,6 +681,17 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		r.feedback = msg
 		return Outcome{}, false
 	}
+	// What the request rules out is never run, whatever the model answers: asked to stop before
+	// checkout it pressed "CHECK OUT" anyway, and two models made up a delivery address
+	// (real pizza site, 2026-11-16). The prompt says both; it wasn't enough.
+	said := strings.Join([]string{r.task.Goal, r.task.Request, r.task.Plan, r.task.Found, r.task.Answer}, "\n")
+	if msg := pastCheckout(r.task.Goal+"\n"+r.task.Request, obs, actions); msg != "" && r.sameActs < stuckGiveUp {
+		r.feedback = msg
+		return Outcome{}, false
+	}
+	if q := madeUpDetail(said, obs, actions); q != "" {
+		return Outcome{State: StateAsk, Ask: q, Reason: ReasonUnclear}, true
+	}
 	switch {
 	case r.sameActs >= stuckGiveUp:
 		return Outcome{State: StateFailed, lost: true, Summary: stuckSummary(firstIntent(actions))}, true
@@ -868,6 +879,86 @@ func alreadySelected(obs Observation, actions []computeruse.Action) string {
 		}
 		return fmt.Sprintf("%s %q (%s) is already selected: that part is done, and pressing it again changes nothing. Don't press it again. "+
 			"Go on to the next thing the task needs, using the elements listed after it%s.", e.Role, e.Name, e.Ref, next)
+	}
+	return ""
+}
+
+var (
+	noCheckoutRe = regexp.MustCompile(`(?i)\b(before|don'?t|do not|without|not|no)\b[^.;\n]{0,30}\bcheck(ing)? ?out\b`)
+	checkoutRe   = regexp.MustCompile(`(?i)\bcheck ?out\b`)
+	addressRe    = regexp.MustCompile(`(?i)\b(street|address|apt|apartment|suite|city|zip|postal|postcode)\b`)
+	phoneRe      = regexp.MustCompile(`(?i)\b(phone|mobile|tel|telephone)\b`)
+	emailRe      = regexp.MustCompile(`(?i)\be-?mail\b`)
+	nameRe       = regexp.MustCompile(`(?i)\b(first|last|full|your) name\b`)
+	wordRe       = regexp.MustCompile(`[\pL\pN]+`)
+)
+
+// pastCheckout is what the model is told when the request says to stop before checkout and an
+// action presses a checkout button: "" otherwise.
+func pastCheckout(request string, obs Observation, actions []computeruse.Action) string {
+	if !noCheckoutRe.MatchString(request) {
+		return ""
+	}
+	for _, a := range actions {
+		if e := elementFor(obs, a.Ref); e != nil && (a.Kind == "press" || a.Kind == "click") && checkoutRe.MatchString(e.Name) {
+			return fmt.Sprintf("the request says to stop before checkout, so %s %q is not pressed. If everything before checkout is done, say done.", e.Role, e.Name)
+		}
+	}
+	return ""
+}
+
+// madeUpDetail is the question for the user when an action types into a field for their name,
+// address, phone or email something that said (the request, what was found, their answer)
+// doesn't hold: "" otherwise.
+// shortcut: only the newest answer counts, so a detail from an earlier answer is asked for
+// again; keep the run's answers once saved details (C13) fill these fields.
+func madeUpDetail(said string, obs Observation, actions []computeruse.Action) string {
+	known := map[string]bool{}
+	for _, w := range wordRe.FindAllString(strings.ToLower(said), -1) {
+		known[w] = true
+	}
+	for _, a := range actions {
+		e := elementFor(obs, a.Ref)
+		if e == nil || (a.Kind != "type" && a.Kind != "set_value") {
+			continue
+		}
+		what := personalField(e)
+		if what == "" {
+			continue
+		}
+		for _, w := range wordRe.FindAllString(strings.ToLower(a.Text), -1) {
+			if !known[w] {
+				return fmt.Sprintf("The page asks for your %s (%q) and the request doesn't give it. What should I enter?", what, e.Name)
+			}
+		}
+	}
+	return ""
+}
+
+// personalField is which of the user's details a field is for ("" = none), by its autocomplete
+// token first and its name second.
+func personalField(e *computeruse.Element) string {
+	for _, tok := range strings.Fields(strings.ToLower(e.Autocomplete)) {
+		switch {
+		case strings.Contains(tok, "address") || tok == "postal-code":
+			return "address"
+		case strings.HasPrefix(tok, "tel"):
+			return "phone number"
+		case tok == "email":
+			return "email address"
+		case tok == "name" || tok == "given-name" || tok == "family-name":
+			return "name"
+		}
+	}
+	switch {
+	case emailRe.MatchString(e.Name):
+		return "email address"
+	case phoneRe.MatchString(e.Name):
+		return "phone number"
+	case nameRe.MatchString(e.Name):
+		return "name"
+	case addressRe.MatchString(e.Name):
+		return "address"
 	}
 	return ""
 }

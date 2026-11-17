@@ -928,10 +928,12 @@ func formPage() Observation {
 // A done right after filling in a form that wasn't sent goes back once: press its button.
 func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
 	doneForm := `{"done": true, "summary": "Sent it.", "verify": {"text_present": ["Submit application"]}}`
+	apply := task()
+	apply.Goal = "Apply as Avery" // the name typed is the request's own (madeUpDetail)
 	e := newEnv(t, formPage())
 	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm,
 		actions(press("e3", "Send the application")), doneForm)
-	out := e.loop.Run(context.Background(), task())
+	out := e.loop.Run(context.Background(), apply)
 	if len(e.llm.reqs) != 3 {
 		t.Fatalf("%d calls", len(e.llm.reqs))
 	}
@@ -947,7 +949,7 @@ func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
 	// say not to send it).
 	e = newEnv(t, formPage())
 	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm, doneForm, doneForm)
-	if out := e.loop.Run(context.Background(), task()); out.State != StateDone || len(e.llm.reqs) != 4 {
+	if out := e.loop.Run(context.Background(), apply); out.State != StateDone || len(e.llm.reqs) != 4 {
 		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
 	}
 	if txt := userText(e.llm.reqs[3]); !strings.Contains(txt, `{"actions": [{"kind": "press", "ref": "e3", "intent": "Send the form"}]}`) {
