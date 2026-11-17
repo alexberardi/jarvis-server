@@ -83,6 +83,15 @@ func TestSwitchAndRecorderToolsNeverOffered(t *testing.T) {
 	}
 }
 
+// A task goes to a connected computer before one that is off with its switch still on.
+func TestComputerTargetsPreferAConnectedComputer(t *testing.T) {
+	cc := computerControl{on: []computerNode{{id: "asleep"}, {id: "desk", reachable: true}, {id: "off"}, {id: "den", reachable: true}}}
+	reachableFirst(cc.on)
+	if got := strings.Join(cc.targets(), " "); got != "desk den asleep off" {
+		t.Fatalf("targets %q", got)
+	}
+}
+
 func TestComputerTargets(t *testing.T) {
 	ve := newVoiceEnv(t, prompts.Qwen3_8B)
 	ctx := context.Background()

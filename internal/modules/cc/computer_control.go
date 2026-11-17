@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -23,7 +24,10 @@ const (
 )
 
 // computerNode is one of the household's computers (a desktop agent).
-type computerNode struct{ id, name string }
+type computerNode struct {
+	id, name  string
+	reachable bool // connected now (targets puts these first)
+}
 
 // computerControl is a household's computers by their switch.
 type computerControl struct{ on, off []computerNode }
@@ -43,12 +47,22 @@ func (m *Module) computerControl(ctx context.Context, hh string) (computerContro
 	for _, c := range all {
 		n := computerNode{id: c.row.nodeID, name: c.name}
 		if c.row.computerOn() {
+			n.reachable = m.nodeReachable(c.row)
 			out.on = append(out.on, n)
 		} else {
 			out.off = append(out.off, n)
 		}
 	}
+	// A task goes to the first: a computer that is on and connected comes before one that is
+	// asleep or shut down with its switch still on (found live: the errand went to an offline
+	// computer while another was waiting).
+	reachableFirst(out.on)
 	return out, nil
+}
+
+// reachableFirst puts the connected computers first, each group in its own order.
+func reachableFirst(on []computerNode) {
+	sort.SliceStable(on, func(i, j int) bool { return on[i].reachable && !on[j].reachable })
 }
 
 // targets are the node ids a computer task may run on: the computers with the switch on.
