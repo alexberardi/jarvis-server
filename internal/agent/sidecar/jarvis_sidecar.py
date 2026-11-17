@@ -637,8 +637,15 @@ def _install_node_compat(roots: list) -> None:
     if "jarvis_log_client" not in sys.modules and importlib.util.find_spec("jarvis_log_client") is None:
         sys.modules["jarvis_log_client"] = _log_client_shim()  # the node modules log through it
     NODE_ROOTS[:] = [r for r in roots if r]
+    # First: a Pi's jarvis-node-setup has its own (empty) commands/custom_commands, which would
+    # otherwise hide every installed package's commands.
     if _NodeLayoutFinder not in sys.meta_path:
-        sys.meta_path.append(_NodeLayoutFinder)
+        sys.meta_path.insert(0, _NodeLayoutFinder)
+    for name, sub in _NODE_LAYOUT.items():
+        module = sys.modules.get(name)  # already imported (a Pi's built-ins): search ours too
+        if module is not None and hasattr(module, "__path__"):
+            locs = [str(pathlib.Path(r, sub)) for r in NODE_ROOTS if pathlib.Path(r, sub).is_dir()]
+            module.__path__ = locs + [d for d in module.__path__ if d not in locs]
     compat = _node_compat_dir()
     if not compat:
         return
