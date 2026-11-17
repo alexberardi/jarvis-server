@@ -1141,6 +1141,37 @@ func TestLongTypeIsSplit(t *testing.T) {
 
 // Told it is stuck and still answering the same, the task ends saying what it was stuck on
 // rather than burning its rounds (suite on Qwen3.5-9B, 2026-11-13: 16 more rounds).
+// What a look adds to the last one is told: a form's complaint appears in the text near its
+// fields, and the house model pressed Continue three times without reading it.
+func TestPageNews(t *testing.T) {
+	before := Observation{Text: "Start your order", Elements: []Element{
+		{Ref: "e6", Role: "textbox", Name: "Street Address", Context: "Delivery Form Use my location Address Type House"},
+		{Ref: "e12", Role: "button", Name: "CONTINUE FOR DELIVERY"},
+	}}
+	after := before
+	after.Elements = []Element{
+		{Ref: "e6", Role: "textbox", Name: "Street Address", Context: "Delivery Form Use my location Address Type House Street address required City required"},
+		{Ref: "e12", Role: "button", Name: "CONTINUE FOR DELIVERY"},
+	}
+	prev := map[string]bool{}
+	for _, l := range pageLines(before) {
+		prev[l] = true
+	}
+	if got := pageNews(prev, pageLines(after)); len(got) != 1 || got[0] != "Street address required City required" {
+		t.Fatalf("news %q", got)
+	}
+	if got := pageNews(prev, pageLines(before)); len(got) != 0 || obsKey(before) == obsKey(after) {
+		t.Fatalf("the same page has news %q, or the changed one the same key", got)
+	}
+	p := renderPrompt(promptInput{Goal: "order", Obs: after, News: []string{"Street address required City required"}})
+	if !strings.Contains(p, `new since you last looked (often why an action didn't go through): "Street address required City required"`) {
+		t.Fatalf("prompt:\n%s", p)
+	}
+	if p := renderPrompt(promptInput{Goal: "order", Obs: before, Same: true}); !strings.Contains(p, "nothing here changed since you last looked") {
+		t.Fatalf("prompt:\n%s", p)
+	}
+}
+
 // A press of what is already selected is answered with what comes next, not run again.
 func TestAlreadySelected(t *testing.T) {
 	obs := Observation{Elements: []Element{
@@ -1160,6 +1191,9 @@ func TestAlreadySelected(t *testing.T) {
 	}
 	if m := alreadySelected(obs, press("e3")); m != "" {
 		t.Errorf("a ticked checkbox may be unticked: %q", m)
+	}
+	if got := stuckSummary("The overlay is still open. I need to close it by clicking the X."); !strings.Contains(got, `couldn't get past it ("The overlay`) {
+		t.Errorf("a thought as the intent: %s", got)
 	}
 	if m := alreadySelected(obs, append(press("e7"), press("e9")...)); m != "" {
 		t.Errorf("a batch that goes on: %q", m)

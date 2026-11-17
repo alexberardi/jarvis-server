@@ -292,17 +292,23 @@ type StepResult struct {
 
 // round is one Run call's state.
 type round struct {
-	run      *Run
-	task     Task
-	pick     Pick
-	shots    []*Image
-	seen     map[string]bool
-	wantShot bool
-	feedback string
-	hint     string // a replay's fallback round: where the step was recorded
-	looked   bool   // this Run call has observed once
-	wstep    int    // a replay's step (1-based) the round's actions belong to
-	heal     *RecordedElement
+	run   *Run
+	task  Task
+	pick  Pick
+	shots []*Image
+	seen  map[string]bool
+	// prevLines and prevKey are the last look's text (pageLines) and what it showed (obsKey);
+	// news is what this look's text adds to it, same whether nothing at all changed.
+	prevLines map[string]bool
+	prevKey   string
+	news      []string
+	same      bool
+	wantShot  bool
+	feedback  string
+	hint      string // a replay's fallback round: where the step was recorded
+	looked    bool   // this Run call has observed once
+	wstep     int    // a replay's step (1-based) the round's actions belong to
+	heal      *RecordedElement
 	// A replay's recovery round (a step ran but its check failed): what the check found; said
 	// reports that the model answered done; wfGoal is what the workflow is for; sites are the
 	// only sites a Strict workflow's model rounds may open (nil: any).
@@ -664,8 +670,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	switch {
 	case r.sameActs >= stuckGiveUp:
-		return Outcome{State: StateFailed, lost: true, Summary: fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.",
-			lowerFirst(firstIntent(actions)))}, true
+		return Outcome{State: StateFailed, lost: true, Summary: stuckSummary(firstIntent(actions))}, true
 	case r.sameBatch >= stuckAfter, r.sameActs >= stuckAnyScreen:
 		// A button in a desktop dialog whose press does nothing is confirmed with Enter instead,
 		// once: the dialog's default button takes it (user, 2026-11-13; the house model pressed
@@ -707,6 +712,18 @@ func enterInstead(target string, obs Observation, actions []computeruse.Action) 
 		}
 	}
 	return nil, false
+}
+
+// stuckSummary says what a task was stuck on. A short intent reads as a sentence ("I kept trying
+// to close the dialog"); the house model also writes whole thoughts there, which are quoted.
+func stuckSummary(intent string) string {
+	if r := []rune(intent); len(r) > 60 || strings.ContainsAny(intent, ".!?") {
+		if len(r) > 120 {
+			intent = string(r[:120]) + "…"
+		}
+		return fmt.Sprintf("I got stuck: one step kept failing and I couldn't get past it (%q).", intent)
+	}
+	return fmt.Sprintf("I got stuck: I kept trying to %s and it didn't work.", lowerFirst(intent))
 }
 
 // firstIntent is what a batch was trying to do, for the user: its first action's intent.
@@ -828,6 +845,17 @@ func (l *Loop) look(ctx context.Context, r *round) (Observation, *Outcome) {
 			return obs, &Outcome{State: StateAsk, Ask: injectionAsk, Reason: ReasonPageInstructions}
 		}
 		r.seen[s] = true
+	}
+	// What this look adds to the last one: a form's "Street address required" appears beside
+	// the field, where a small model pressing Continue again never looked (2026-11-16).
+	lines, key := pageLines(obs), obsKey(obs)
+	r.news, r.same = nil, false
+	if r.prevLines != nil {
+		r.news, r.same = pageNews(r.prevLines, lines), key == r.prevKey
+	}
+	r.prevKey, r.prevLines = key, make(map[string]bool, len(lines))
+	for _, s := range lines {
+		r.prevLines[s] = true
 	}
 	if obs.Image != nil && r.pick.Vision {
 		r.shots = append(r.shots, obs.Image)
@@ -992,7 +1020,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		Goal: t.Goal, Request: t.Request, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
-		Source: t.Source, Found: t.Found,
+		Source: t.Source, Found: t.Found, News: r.news, Same: r.same,
 	}
 	text, stable := renderPromptSplit(in)
 	// The task and its source text are the same every round: a cloud model keeps them.
@@ -1615,6 +1643,72 @@ func pageTexts(o Observation) []string {
 	for _, l := range strings.Split(o.Text, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// pageLines are the page's text a look is compared by: its text lines and the text near its
+// elements (where a form puts its complaints).
+func pageLines(o Observation) []string {
+	var out []string
+	for _, l := range strings.Split(o.Text, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
+	for _, e := range o.Elements {
+		if c := strings.TrimSpace(e.Context); c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// obsKey identifies what a look showed: the address, the elements with their values and states,
+// and the text.
+func obsKey(o Observation) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s|%s|%s|%s", o.URL, o.Title, o.App, o.Text)
+	for _, e := range o.Elements {
+		fmt.Fprintf(&b, "|%s:%s:%s:%s:%s:%s", e.Ref, e.Role, e.Name, e.Value, strings.Join(e.State, ","), e.Context)
+	}
+	return b.String()
+}
+
+// newsMax and newsRunes bound what a look's news says.
+const (
+	newsMax   = 5
+	newsRunes = 160
+)
+
+// pageNews is what lines add to prev: each line prev didn't have, cut down to its new end when
+// it only grew (the text near a field, with a complaint added).
+func pageNews(prev map[string]bool, lines []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, l := range lines {
+		if prev[l] {
+			continue
+		}
+		// The longest line of the last look that this one begins with: what follows is the news.
+		grew := ""
+		for p := range prev {
+			if len(p) >= 8 && len(p) > len(grew) && strings.HasPrefix(l, p) {
+				grew = p
+			}
+		}
+		l = l[len(grew):]
+		l = strings.TrimSpace(l)
+		if r := []rune(l); len(r) > newsRunes {
+			l = string(r[:newsRunes]) + "…"
+		}
+		if l == "" || seen[l] {
+			continue
+		}
+		seen[l] = true
+		if out = append(out, l); len(out) == newsMax {
+			break
 		}
 	}
 	return out

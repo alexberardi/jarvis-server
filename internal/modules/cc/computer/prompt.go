@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -76,7 +77,9 @@ type promptInput struct {
 	Clipboard   string // what the last batch read from the clipboard (content, like the page)
 	Desktop     bool   // the task is in a desktop app: its window, not a page
 	Source      *Source
-	Found       string // what the errand's earlier steps found, "" = nothing
+	Found       string   // what the errand's earlier steps found, "" = nothing
+	News        []string // text the page has now that it didn't at the last look
+	Same        bool     // the page is exactly as it was at the last look
 }
 
 // renderPrompt is the user turn's text for one round.
@@ -187,6 +190,16 @@ func renderScreen(b *strings.Builder, in promptInput) {
 	}
 	if o.App != "" {
 		fmt.Fprintf(b, "app: %q\n", defang(o.App))
+	}
+	switch {
+	case in.Same:
+		b.WriteString("(nothing here changed since you last looked: if you just acted, it had no effect, so don't repeat it)\n")
+	case len(in.News) > 0:
+		quoted := make([]string, len(in.News))
+		for i, s := range in.News {
+			quoted[i] = strconv.Quote(defang(oneLine(s)))
+		}
+		b.WriteString("new since you last looked (often why an action didn't go through): " + strings.Join(quoted, "; ") + "\n")
 	}
 	if len(o.Elements) == 0 {
 		if in.Desktop && in.Images > 0 {
