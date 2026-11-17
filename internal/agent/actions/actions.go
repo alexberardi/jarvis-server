@@ -44,6 +44,9 @@ type Handler struct {
 	// command turned off is not run, as N:'s command discovery leaves it out.
 	Enabled    func(name string) bool
 	SetEnabled func(name string, on bool) error
+	// FromPackage, if set, reports whether an installed package serves the command (it then
+	// replaces the agent's built-in of that name, as on N:).
+	FromPackage func(name string) bool
 	// Say, if set, speaks an action's message when it came from a voice turn (no
 	// reply_request_id: nobody is waiting on the result).
 	Say func(ctx context.Context, text string) error
@@ -187,6 +190,14 @@ func (h *Handler) toggle(_ context.Context, _ CC, det map[string]any) {
 	on := true
 	if v, ok := det["enabled"]; ok {
 		on = laxBool(v)
+	}
+	// jarvisd turns the built-in off because a Pantry device manager package provides the
+	// command (smart_home.use_external_devices). When that package's command is the one
+	// served here, the built-in is already replaced: turning the name off would take the
+	// package's command away instead (the Home Assistant demo, 2026-11-16).
+	if !on && h.FromPackage != nil && h.FromPackage(name) {
+		h.Log.Info("toggle_command: a package provides it; the built-in is already replaced", "command", name)
+		return
 	}
 	if err := h.SetEnabled(name, on); err != nil {
 		h.Log.Warn("toggle_command failed", "command", name, "err", err)

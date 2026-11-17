@@ -148,6 +148,14 @@ func (l *Live) AgentContext(ctx context.Context) (map[string]json.RawMessage, er
 	return nil, nil
 }
 
+// Package is the installed package serving command ("" for none, or no sidecar).
+func (l *Live) Package(command string) string {
+	if sc := l.Current(); sc != nil {
+		return sc.Package(command)
+	}
+	return ""
+}
+
 // Failed are the installed packages whose commands didn't load.
 func (l *Live) Failed() map[string]string {
 	if sc := l.Current(); sc != nil {
