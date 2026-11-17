@@ -608,6 +608,10 @@ func (t *Tools) do(ctx context.Context, a actArgs, action computeruse.Action, ru
 	case "screenshot":
 		return "", nil // the next computer_observe takes it
 	}
+	if action.Kind == "scroll" {
+		return "browser_window", errors.New("a browser task doesn't scroll: every element of the page is already listed, " +
+			"whichever part is on screen. Press the one you need by its ref; if it isn't listed, open the section or search that leads to it")
+	}
 	return "browser_window", fmt.Errorf("a browser task acts on page elements by ref (press, set_value, select, "+
 		"keypress with a ref and Enter, Escape, Tab or arrows; navigate); %s by coordinates or at the focus is for desktop tasks", action.Kind)
 }

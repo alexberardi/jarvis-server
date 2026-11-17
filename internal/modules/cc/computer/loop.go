@@ -653,10 +653,10 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	} else {
 		r.lastBatch, r.sameBatch = key, 0
 	}
-	// Pressing what is already selected changes nothing, and says so sooner than "stuck": on a
+	// Pressing what is already selected changes nothing, and is never run: on a
 	// real pizza site the house model pressed the selected Carryout tab seven rounds running,
 	// with the ZIP code field it needed next listed right below it (2026-11-16).
-	if msg := alreadySelected(obs, actions); msg != "" && r.sameActs >= 1 && r.sameActs < stuckGiveUp {
+	if msg := alreadySelected(obs, actions); msg != "" && r.sameActs < stuckGiveUp {
 		r.feedback = msg
 		return Outcome{}, false
 	}
@@ -1030,8 +1030,16 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		lastErr = err
 		why := "I couldn't read that: " + err.Error()
 		if resp.FinishReason == "length" {
-			// Cut off, not malformed: room for the whole answer on the second try.
+			// Cut off, not malformed: room for the whole answer on the second try. An answer cut
+			// off inside its thought was the house model arguing with itself for the whole
+			// budget ("Wait, ..."), and shown that again it did the same: it isn't sent back.
 			why, budget = "Your answer was cut off before it ended", writeMaxTokens
+			if !strings.Contains(resp.Content, `"actions"`) && !strings.Contains(resp.Content, `"done"`) {
+				msgs = append(msgs, llm.Message{Role: "user", Content: llm.TextContent(
+					`Your last answer was cut off inside its "thought", which ran far too long. Keep the thought to one short sentence and decide. ` +
+						"Answer with exactly one JSON object in one of the four shapes.")})
+				continue
+			}
 		}
 		if strings.Contains(err.Error(), "text is longer than") {
 			why += ": put longer text in several type actions, in order, each within the limit"

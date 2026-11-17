@@ -992,6 +992,26 @@ func TestPromptHasToday(t *testing.T) {
 	}
 }
 
+// An answer cut off inside its thought is not shown to the model again: on a real site the
+// house model argued with itself for the whole budget, and with that in front of it did so twice.
+func TestThoughtCutOffIsNotSentBack(t *testing.T) {
+	e := newEnv(t)
+	e.llm.cut = map[int]bool{0: true}
+	e.script(`{"thought": "The scroll failed. Wait, maybe the link is not listed. Wait, maybe`, doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	retry := e.llm.reqs[1].Messages
+	if last := *retry[len(retry)-1].Content.Text; !strings.Contains(last, "one short sentence") {
+		t.Fatalf("retry says %q", last)
+	}
+	for _, m := range retry {
+		if m.Role == "assistant" {
+			t.Fatalf("the cut-off thought was sent back: %+v", m)
+		}
+	}
+}
+
 // A task that writes from a source has room for a long typed text, and an answer cut off at the
 // budget is asked for again with more (2026-11-13: a typed summary was cut at 1024 tokens, the
 // cut JSON couldn't be read, and the task failed in its first round). Text over a type action's
