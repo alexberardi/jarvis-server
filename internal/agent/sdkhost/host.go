@@ -38,13 +38,17 @@ type Host struct {
 	// Only, when set, are the backend families this node serves (sidecar.Subset): a package's
 	// other calls keep the SDK's defaults instead of failing here.
 	Only []string
+	// DirectDevices, when set, are the household's direct devices this node caches
+	// (devices.Registry.Cached): devices.list, for the Python node's DirectDeviceService.
+	DirectDevices func() any
 
-	cc atomic.Pointer[node.CC]
+	cc   atomic.Pointer[node.CC]
+	info nodeInfo // node.info's answer, per server
 }
 
 // DesktopBackends are the families a desktop node serves: what goes to command-center and the
 // alert queue. It has no timers and no volume of its own.
-var DesktopBackends = []string{"llm", "cc", "inbox", "signals", "alerts"}
+var DesktopBackends = []string{"llm", "cc", "inbox", "signals", "alerts", "node", "devices"}
 
 // Backends is sidecar.Subset.
 func (h *Host) Backends() []string { return h.Only }
@@ -177,6 +181,9 @@ func (h *Host) Answer(ctx context.Context, method string, raw json.RawMessage) (
 	family, _, _ := strings.Cut(method, ".")
 	switch family {
 	case "llm", "cc", "inbox", "signals":
+		if method == "cc.request" {
+			return h.ccRequest(ctx, raw)
+		}
 		return h.commandCenter(ctx, method, p)
 	case "timer":
 		if h.Timers == nil {
@@ -190,6 +197,10 @@ func (h *Host) Answer(ctx context.Context, method string, raw json.RawMessage) (
 		return h.alerts(method, p)
 	case "audio":
 		return h.audio(ctx, method, p)
+	case "node":
+		return h.node(ctx, method)
+	case "devices":
+		return h.devices(method)
 	}
 	return nil, fmt.Errorf("unknown method %q", method)
 }

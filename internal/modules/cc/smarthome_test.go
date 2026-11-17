@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 	"slices"
 	"testing"
 	"time"
@@ -878,4 +879,25 @@ func TestBluetoothStatusListsEveryPairedDevice(t *testing.T) {
 	if rows != 1 {
 		t.Fatalf("status rows %d, want 1 (one made for the first pair, then patched)", rows)
 	}
+}
+
+// GET /api/v0/node/info: the calling node's own id, room and household, and its household's
+// home_context (null until a location is set), for packages written for the Python node
+// (Config.get_str("household_id"), Config.get_dict("home_context")). A node key is required.
+func TestNodeInfo(t *testing.T) {
+	e := newEnv(t)
+	n := e.createNode("n1", "hh1")
+	e.createNode("x1", "hh2")
+	r := e.do("GET", "/api/v0/node/info", nil, n.h()).want(200).json()
+	if r["node_id"] != "n1" || r["household_id"] != "hh1" || r["room"] != "kitchen" || r["home_context"] != nil {
+		t.Fatal(r)
+	}
+	if err := e.m.settings.Set(context.Background(), settingHouseholdLocation, "Springfield, IL", settings.Scope{HouseholdID: "hh1"}); err != nil {
+		t.Fatal(err)
+	}
+	r = e.do("GET", "/api/v0/node/info", nil, n.h()).want(200).json()
+	if hc, _ := r["home_context"].(map[string]any); hc["location"] != "Springfield, IL" {
+		t.Fatal(r)
+	}
+	e.do("GET", "/api/v0/node/info", nil, nil).want(400)
 }

@@ -23,6 +23,9 @@ JSON-lines requests on stdin:
     <- {"id": 7, "result": {"alerts": [{Alert.to_dict()}, ...]} | {"error": "..."}}
     -> {"id": 8, "method": "user_secrets", "params": {"user_id": 7}}
     <- {"id": 8, "result": {"secrets": {"command_name": [{secret}, ...]}}}   as that user
+    -> {"id": 9, "method": "agent_context"}
+    <- {"id": 9, "result": {"agents": {"home_assistant": {...}, ...}}}  each agent's
+       get_context_data() after its last run (node_context.agents)
     <- {"id": N, "error": "..."}            on a protocol-level failure
 
 A Pi's packages may also have background agents (the listing's "agents": IJarvisAgent
@@ -89,6 +92,7 @@ import importlib.machinery
 import importlib.util
 import inspect
 import json
+import os
 import pathlib
 import re
 import sys
@@ -549,6 +553,136 @@ def test_events(params: dict) -> dict:
 # The installed packages' background agents by name, and the package each came from.
 AGENTS: dict = {}
 AGENT_PACKAGE: dict = {}
+# Each agent's get_context_data() after its last run, or its error (N:services/
+# agent_scheduler_service._context_cache): what agent_context answers and what package code
+# reads through the services.agent_scheduler_service shim.
+AGENT_CONTEXT: dict = {}
+
+
+# The Python node's modules that Pantry packages import (services.secret_service, utils.
+# config_service, device_families.domains, ...), from nodecompat/ beside this script
+# ($JARVIS_NODECOMPAT): the node's own pure code copied as it is, and its I/O modules over the Go
+# agent. These are the I/O ones: registered by name so they win over a Pi's jarvis-node-setup
+# copies, which read the Python node's database instead of the agent's store.
+_NODE_IO_MODULES = (
+    "device_families.base",
+    "services.secret_service", "services.command_auth_service", "services.agent_scheduler_service",
+    "services.direct_device_service", "services.storage_backend", "services.node_llm_client",
+    "services.proposal_client",
+    "utils.config_service", "utils.service_discovery", "utils.device_family_discovery_service",
+    "clients.rest_client", "scripts.text_to_speech",
+)
+# The node's install layout for another package's components (commands/custom_commands/<x>/):
+# here every installed package's own commands/, device_families/, ... directory.
+_NODE_LAYOUT = {"commands.custom_commands": "commands", "device_families.custom_families": "device_families",
+                "agents.custom_agents": "agents", "device_managers.custom_managers": "device_managers"}
+NODE_ROOTS: list = []
+_NODE_INFO: dict = {}
+_NODE_INFO_WARNED: list = []
+
+
+def _node_info() -> dict:
+    """The Go agent's node.info (node_id, room, household_id, command_center_url, home_context),
+    once per sidecar; {} while the agent can't answer (asked again next time)."""
+    if not _NODE_INFO:
+        try:
+            _NODE_INFO.update(_ask("node.info", {}) or {})
+        except Exception as exc:  # noqa: BLE001 — no host, or no server yet
+            if not _NODE_INFO_WARNED:
+                _NODE_INFO_WARNED.append(True)
+                print(f"sidecar: node info unavailable: {exc}", file=sys.stderr)
+    return dict(_NODE_INFO)
+
+
+def _node_compat_bridge():
+    """jarvis_node_compat: what nodecompat's modules reach in this process and the Go agent."""
+    import types
+
+    bridge = types.ModuleType("jarvis_node_compat")
+    bridge.ask = _ask
+    bridge.families = lambda: FAMILIES
+    bridge.agent_context = lambda: dict(AGENT_CONTEXT)
+    bridge.node_info = _node_info
+    return bridge
+
+
+class _NodeLayoutFinder:
+    """commands.custom_commands (and the like) as namespace packages over every installed
+    package's commands/ (...), so `from commands.custom_commands.get_news.command import ...`
+    finds the package that has it, as on the node."""
+
+    @staticmethod
+    def find_spec(fullname, path=None, target=None):
+        sub = _NODE_LAYOUT.get(fullname)
+        if sub is None:
+            return None
+        locs = [str(pathlib.Path(r, sub)) for r in NODE_ROOTS if pathlib.Path(r, sub).is_dir()]
+        if not locs:
+            return None
+        spec = importlib.machinery.ModuleSpec(fullname, None, is_package=True)
+        spec.submodule_search_locations = locs
+        return spec
+
+
+def _node_compat_dir() -> str:
+    d = os.environ.get("JARVIS_NODECOMPAT") or ""
+    return d if d and os.path.isdir(d) else ""
+
+
+def _install_node_compat(roots: list) -> None:
+    """Make the Python node's modules importable for packages (see _NODE_IO_MODULES): the
+    nodecompat tree after the package roots on sys.path (a package's own code wins), the I/O
+    modules registered by name, and the node's custom_* layout. Before the packages load."""
+    sys.modules.setdefault("jarvis_node_compat", _node_compat_bridge())
+    if "jarvis_log_client" not in sys.modules and importlib.util.find_spec("jarvis_log_client") is None:
+        sys.modules["jarvis_log_client"] = _log_client_shim()  # the node modules log through it
+    NODE_ROOTS[:] = [r for r in roots if r]
+    # First: a Pi's jarvis-node-setup has its own (empty) commands/custom_commands, which would
+    # otherwise hide every installed package's commands.
+    if _NodeLayoutFinder not in sys.meta_path:
+        sys.meta_path.insert(0, _NodeLayoutFinder)
+    for name, sub in _NODE_LAYOUT.items():
+        module = sys.modules.get(name)  # already imported (a Pi's built-ins): search ours too
+        if module is not None and hasattr(module, "__path__"):
+            locs = [str(pathlib.Path(r, sub)) for r in NODE_ROOTS if pathlib.Path(r, sub).is_dir()]
+            module.__path__ = locs + [d for d in module.__path__ if d not in locs]
+    compat = _node_compat_dir()
+    if not compat:
+        return
+    for r in NODE_ROOTS:
+        if r not in sys.path:
+            sys.path.append(r)
+    if compat not in sys.path:
+        sys.path.append(compat)
+    for name in _NODE_IO_MODULES:
+        parent, _, leaf = name.rpartition(".")
+        spec = importlib.util.spec_from_file_location(name, os.path.join(compat, *name.split(".")) + ".py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+            setattr(importlib.import_module(parent), leaf, module)
+        except BaseException as exc:  # one module failing must not take the others down
+            del sys.modules[name]
+            print(f"sidecar: node module {name} not available: {exc}", file=sys.stderr)
+
+
+# What command-center reads from an agent's context (the prompt's device list and
+# get_ha_entities); the rest (Home Assistant's every entity with its attributes) stays here
+# for the packages, out of every conversation start and tool report.
+_CONTEXT_FOR_CC = ("light_controls", "device_controls", "floors")
+
+
+def agent_context() -> dict:
+    """{"agents": {name: context}}: the agents' context for a conversation's node_context, only
+    the keys command-center reads; an agent with none of them is left out."""
+    out = {}
+    for name, ctx in AGENT_CONTEXT.items():
+        if isinstance(ctx, dict):
+            kept = {k: ctx[k] for k in _CONTEXT_FOR_CC if k in ctx}
+            if kept:
+                out[name] = kept
+    return {"agents": out}
 # The packages' daemons, by name, for their settings only: each runs in a process of its own
 # (run_daemon), never here.
 DAEMONS: dict = {}
@@ -571,7 +705,10 @@ def load_packages(listing: str) -> dict:
         doc = json.load(f)
     packages = doc.get("packages") or []
     found = load_builtins(doc["builtins"]) if doc.get("builtins") else {}
-    _share_top_level([pkg["root"] for pkg in packages])
+    roots = [pkg["root"] for pkg in packages]
+    compat = _node_compat_dir()
+    _share_top_level(roots + ([compat] if compat else []))
+    _install_node_compat(roots)
     for pkg in packages:
         name, root = pkg["name"], pkg["root"]
         if name.startswith("test:"):
@@ -804,16 +941,31 @@ def agent_run(params: dict) -> dict:
     if agent is None:
         raise RuntimeError(f"no agent {name!r} in this sidecar")
     set_current_user_id(None)
+    # As N:'s scheduler: the household's home_context (its location) for get_home_context().
+    try:
+        from jarvis_command_sdk import set_home_context
+
+        set_home_context(_node_info().get("home_context"))
+    except ImportError:  # an SDK before home_context
+        pass
     package = AGENT_PACKAGE.get(name)
     started = time.monotonic()
     try:
         _run(agent.run())
     except BaseException as exc:  # a SystemExit in run() must not end the sidecar
+        from datetime import datetime, timezone
+
+        AGENT_CONTEXT[name] = {"last_error": str(exc), "error_time": datetime.now(timezone.utc).isoformat()}
         print(f"sidecar: agent {name} failed:\n{traceback.format_exc()}", file=sys.stderr)
         _test_event(package, "agent", agent=name, ms=int((time.monotonic() - started) * 1000),
                     error=traceback.format_exc()[-_MAX_AGENT_ERROR:])
         return {"error": f"{type(exc).__name__}: {exc}"}
     ms = int((time.monotonic() - started) * 1000)
+    try:
+        if getattr(agent, "include_in_context", True):
+            AGENT_CONTEXT[name] = agent.get_context_data() or {}
+    except Exception as exc:
+        print(f"sidecar: agent {name}: context not read: {exc}", file=sys.stderr)
     alerts = []
     try:
         alerts = [a.to_dict() for a in agent.get_alerts() or []]
@@ -1891,6 +2043,8 @@ def main() -> None:
                 reply = {"id": msg_id, "result": playback_reports()}
             elif method == "agent_run":
                 reply = {"id": msg_id, "result": agent_run(msg.get("params") or {})}
+            elif method == "agent_context":
+                reply = {"id": msg_id, "result": agent_context()}
             elif method == "reminders_due":
                 if "reminder" not in commands:
                     raise RuntimeError("no built-in reminder command in this sidecar")

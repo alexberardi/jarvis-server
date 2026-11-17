@@ -214,19 +214,25 @@ func (m *Module) handleMobileChatWarmup(w http.ResponseWriter, r *http.Request, 
 
 // chatWarmup is _do_warmup: the node context (room, voice mode, devices, room hierarchy), the
 // tools (the node's own report first — only when it is online, Q7 — then what the client
-// sent), then the shared voice warmup with the user as the known speaker.
+// sent), then the shared voice warmup with the user as the known speaker. The devices are the
+// node's package agents' context when its report has some (a Go agent's Home Assistant
+// entities, as the Python node's node_context.agents), else the household's DB devices.
 func (m *Module) chatWarmup(ctx context.Context, u authn.User, row *nodeRow, req chatRequest, cid string) (*conversation, error) {
 	nc := servertools.Obj("timezone", req.Timezone)
-	if agents := m.chatDeviceAgents(ctx, req.HouseholdID); agents != nil {
-		nc.Set("agents", agents)
-	}
 	clientTools, commands := req.ClientTools, req.Commands
+	var agents *pyjson.Object
 	if m.nodeReachable(row) {
-		if ct, ac, ok := m.fetchNodeTools(ctx, row.nodeID); ok {
-			clientTools, commands = ct, ac
+		if ct, ac, ag, ok := m.fetchNodeTools(ctx, row.nodeID); ok {
+			clientTools, commands, agents = ct, ac, ag
 		}
 	} else {
 		m.deps.Log.Info("cc: mobile chat node offline; using the client's tools", "node", row.nodeID)
+	}
+	if agents == nil || agents.Len() == 0 {
+		agents = m.chatDeviceAgents(ctx, req.HouseholdID)
+	}
+	if agents != nil {
+		nc.Set("agents", agents)
 	}
 	n := &nodeCtx{ID: row.nodeID, HouseholdID: req.HouseholdID, HouseholdMemberIDs: []int64{u.ID}, row: row}
 	return m.warmup(ctx, n, startRequest{ConversationID: cid, NodeContext: nc, Commands: commands,
@@ -242,19 +248,19 @@ func (m *Module) setChatSpeaker(ctx context.Context, conv *conversation) {
 // fetchNodeTools is _resolve_tools' MQTT step: report_tools to the node, kept in key order
 // (tool bytes are prompt bytes). ok=false when the node didn't answer or reported no client
 // tools.
-func (m *Module) fetchNodeTools(ctx context.Context, nodeID string) (clientTools, commands []*pyjson.Object, ok bool) {
+func (m *Module) fetchNodeTools(ctx context.Context, nodeID string) (clientTools, commands []*pyjson.Object, agents *pyjson.Object, ok bool) {
 	if !m.bus.Available() {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	raw, err := m.reportTools(ctx, nodeID, nodeToolsWait)
 	if err != nil {
 		m.deps.Log.Warn("cc: MQTT tool fetch failed", "node", nodeID, "err", err)
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	v, err := pyjson.Loads(string(raw))
 	report, _ := v.(*pyjson.Object)
 	if err != nil || report == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	objs := func(key string) []*pyjson.Object {
 		lv, _ := report.Get(key)
@@ -269,9 +275,12 @@ func (m *Module) fetchNodeTools(ctx context.Context, nodeID string) (clientTools
 	}
 	clientTools = objs("client_tools")
 	if len(clientTools) == 0 {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return clientTools, objs("available_commands"), true
+	// A Go agent's package agents' context (report_tools' agents), absent from older nodes.
+	av, _ := report.Get("agents")
+	agents, _ = av.(*pyjson.Object)
+	return clientTools, objs("available_commands"), agents, true
 }
 
 // chatDeviceAgents stands in for the node's DeviceDiscoveryAgent context (doc 07 §3: mobile

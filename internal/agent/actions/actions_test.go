@@ -300,3 +300,29 @@ func TestToggleCommand(t *testing.T) {
 		t.Fatalf("no command_name: %v", enabled)
 	}
 }
+
+// jarvisd turns control_device off when the household uses an external device manager
+// ("the Pantry package provides control_device"). When that package's control_device is the
+// one served, it stays on: the built-in it targets is already replaced (the Home Assistant
+// demo, 2026-11-16: the toggle took Home Assistant's control away). Turning it back on still
+// applies, and without a package the built-in goes off as before.
+func TestToggleKeepsAPackagesCommand(t *testing.T) {
+	h, _, enabled := newHandler(&fakeCommands{})
+	pkg := true
+	h.FromPackage = func(name string) bool { return pkg && name == "control_device" }
+	enabled["control_device"] = true
+	h.Verbs()[VerbToggle](context.Background(), &fakeCC{}, decode(t, `{"command_name":"control_device","enabled":false}`))
+	if !enabled["control_device"] {
+		t.Fatal("a package's control_device was turned off")
+	}
+	enabled["control_device"] = false
+	h.Verbs()[VerbToggle](context.Background(), &fakeCC{}, decode(t, `{"command_name":"control_device","enabled":true}`))
+	if !enabled["control_device"] {
+		t.Fatal("turning it back on didn't apply")
+	}
+	pkg = false
+	h.Verbs()[VerbToggle](context.Background(), &fakeCC{}, decode(t, `{"command_name":"control_device","enabled":false}`))
+	if enabled["control_device"] {
+		t.Fatal("without a package, the built-in should go off")
+	}
+}

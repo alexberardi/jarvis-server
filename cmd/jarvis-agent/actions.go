@@ -27,7 +27,8 @@ func wireActions(r *node.Runner, live *sidecar.Live, tools node.Multi, st *nodes
 			cmds.own = append(cmds.own, c)
 		}
 	}
-	h := &actions.Handler{Commands: cmds, Enabled: st.Enabled, SetEnabled: st.SetEnabled, Say: say, Log: log}
+	h := &actions.Handler{Commands: cmds, Enabled: st.Enabled, SetEnabled: st.SetEnabled, Say: say, Log: log,
+		FromPackage: func(name string) bool { return live.Package(name) != "" }}
 	verbs := map[string]func(context.Context, *node.CC, map[string]any){}
 	for verb, f := range h.Verbs() {
 		verbs[verb] = func(ctx context.Context, cc *node.CC, det map[string]any) { f(ctx, cc, det) }

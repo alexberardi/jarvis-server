@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -22,6 +23,8 @@ type Options struct {
 	Indicator     Indicator // the on-screen state (nil: none)
 	// Vocabulary is the names speech-to-text should expect (nil: none; Pipeline.Vocabulary).
 	Vocabulary func(ctx context.Context) string
+	// AgentContext is node_context.agents (nil: none; Pipeline.AgentContext).
+	AgentContext func(ctx context.Context) map[string]json.RawMessage
 	// Live, if set, retunes and measures whichever pipeline is running (Pipeline.Live).
 	Live *Live
 	// Mic, when set, records takes through the pipeline (Pipeline.Mic).
@@ -80,7 +83,7 @@ func serveOnce(ctx context.Context, o Options) error {
 	defer mic.Close()
 	o.Detector.Reset()
 	p := &Pipeline{Cfg: o.Config, Capture: mic, Detector: o.Detector, Server: o.Server, Tools: o.Tools, Log: o.Log, OnTurn: o.OnTurn, Indicator: o.Indicator,
-		Vocabulary: o.Vocabulary, Live: o.Live, Mic: o.Mic, Music: o.Music, Computer: o.Computer, WakeScores: o.WakeScores,
+		Vocabulary: o.Vocabulary, AgentContext: o.AgentContext, Live: o.Live, Mic: o.Mic, Music: o.Music, Computer: o.Computer, WakeScores: o.WakeScores,
 		Playback: func(rate, ch int) (device.Playback, error) { return device.OpenPlayback(o.Output, rate, ch) }}
 	o.Log.Info("voice: listening", "input", o.Input, "output", o.Output, "backend", device.Backend(),
 		"wake_threshold", o.Config.WakeThreshold, "wake_threshold_auto", o.Config.WakeThresholdAuto)

@@ -33,7 +33,7 @@ func TestInstallServesThePackage(t *testing.T) {
 		t.Fatalf("uv calls = %v", fr.calls)
 	}
 	pip := strings.Join(fr.calls[1], " ")
-	if !strings.HasPrefix(pip, "uv pip install --python "+m.Python.Interpreter()+" --quiet "+SDKRequirement+" httpx tzdata==2024.1") {
+	if !strings.HasPrefix(pip, "uv pip install --python "+m.Python.Interpreter()+" --quiet "+SDKRequirement+" "+NodeBaseRequirement+" httpx tzdata==2024.1") {
 		t.Fatalf("pip = %s", pip)
 	}
 	if got := sc.livePackages(); !reflect.DeepEqual(got, []string{"get_weather_meteo"}) {
@@ -251,7 +251,7 @@ func TestBootInstallsAndServesTheBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(fr.calls) != 2 || fr.calls[0][1] != "venv" ||
-		strings.Join(fr.calls[1], " ") != "uv pip install --python "+m.Python.Interpreter()+" --quiet "+SDKRequirement+" jarvis-node-setup @ https://x/a.tar.gz" {
+		strings.Join(fr.calls[1], " ") != "uv pip install --python "+m.Python.Interpreter()+" --quiet "+SDKRequirement+" "+NodeBaseRequirement+" jarvis-node-setup @ https://x/a.tar.gz" {
 		t.Fatalf("uv calls = %v", fr.calls)
 	}
 	if sc.live == nil || len(sc.livePackages()) != 0 {

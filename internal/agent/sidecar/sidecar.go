@@ -14,11 +14,12 @@ package sidecar
 import (
 	"bufio"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -44,6 +45,13 @@ type Storage interface {
 	Records(command string, now time.Time) []nodesettings.Record
 	DeleteData(command, key string) (bool, error)
 	DeleteAllData(command string) (int, error)
+}
+
+// secretLister is the part of a Storage that lists secrets (nodesettings.Store), for the
+// Python node's secret_service.get_all_secrets and get_secret_scope.
+type secretLister interface {
+	Secrets(scope string, uid *int64) []nodesettings.SecretRow
+	ScopeOf(key string) string
 }
 
 // Host answers the child's SDK backend requests other than storage (llm.*, cc.*, timer.*,
@@ -77,6 +85,32 @@ type Options struct {
 
 //go:embed jarvis_sidecar.py
 var hostScript []byte
+
+// nodeCompat is the Python node's modules that Pantry packages import (nodecompat/README.md),
+// written beside the script for every child.
+//
+//go:embed all:nodecompat
+var nodeCompat embed.FS
+
+// writeNodeCompat writes nodecompat/ under dir and returns its path.
+func writeNodeCompat(dir string) (string, error) {
+	root := filepath.Join(dir, "nodecompat")
+	err := fs.WalkDir(nodeCompat, "nodecompat", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(dir, filepath.FromSlash(p))
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o700)
+		}
+		b, err := nodeCompat.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dst, b, 0o600)
+	})
+	return root, err
+}
 
 // Sidecar is one running Python child. Requests are serialised: the child handles one at a
 // time, which is enough for a spike and matches how a Pi node runs commands.
@@ -268,6 +302,11 @@ func child(python, target string, o Options, more ...string) (*exec.Cmd, string,
 		os.RemoveAll(dir)
 		return nil, "", err
 	}
+	compat, err := writeNodeCompat(dir)
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, "", err
+	}
 	args := []string{"-u", script, target}
 	if o.Host != nil {
 		flag := "--backends"
@@ -278,7 +317,7 @@ func child(python, target string, o Options, more ...string) (*exec.Cmd, string,
 	}
 	cmd := exec.Command(python, append(args, more...)...)
 	// UTF-8 both ways whatever the platform's locale (Windows' Python would speak cp1252).
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8", "JARVIS_NODECOMPAT="+compat)
 	return cmd, dir, nil
 }
 
@@ -467,6 +506,21 @@ func (s *Sidecar) RunAgent(_ context.Context, name string) ([]json.RawMessage, e
 		return nil, errors.New(*res.Error)
 	}
 	return res.Alerts, nil
+}
+
+// AgentContext is each package agent's context after its last run ({"home_assistant": {...}}),
+// for a conversation's node_context.agents, as the Python node sent; nil when none has any.
+func (s *Sidecar) AgentContext(context.Context) (map[string]json.RawMessage, error) {
+	var res struct {
+		Agents map[string]json.RawMessage `json:"agents"`
+	}
+	if err := s.roundTrip("agent_context", nil, &res); err != nil {
+		return nil, err
+	}
+	if len(res.Agents) == 0 {
+		return nil, nil
+	}
+	return res.Agents, nil
 }
 
 func (s *Sidecar) roundTrip(method string, params map[string]any, out any) error {
@@ -667,6 +721,20 @@ func (s *Sidecar) storage(method string, raw json.RawMessage) (any, error) {
 			return nil, errors.New("set_secret without a value")
 		}
 		return nil, s.store.SetSecret(p.Key, *p.Value, p.Scope, p.ValueType, p.UserID)
+	case "storage.all_secrets", "storage.secret_scope":
+		// N:'s secret_service.get_all_secrets / get_secret_scope, for packages written for the
+		// Python node (nodecompat/services/secret_service.py); a store without them answers none.
+		sl, ok := s.store.(secretLister)
+		if !ok {
+			return nil, nil
+		}
+		if method == "storage.secret_scope" {
+			if sc := sl.ScopeOf(p.Key); sc != "" {
+				return sc, nil
+			}
+			return nil, nil
+		}
+		return sl.Secrets(p.Scope, p.UserID), nil
 	case "storage.delete_secret":
 		return nil, s.store.DeleteSecret(p.Key, p.Scope, p.UserID)
 	case "storage.save":

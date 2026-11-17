@@ -233,6 +233,34 @@ func (st *Store) Secret(key, scope string, uid *int64) string {
 	return ""
 }
 
+// SecretRow is one stored secret as N:'s secret_service returns it (models.secret.Secret).
+type SecretRow struct {
+	Key       string `json:"key"`
+	Scope     string `json:"scope"`
+	UserID    *int64 `json:"user_id"`
+	Value     string `json:"value"`
+	ValueType string `json:"value_type"`
+}
+
+// Secrets are the stored secrets of scope, as N:'s SecretRepository.get_all: a user's only
+// when scope is "user" and uid is set, otherwise every one of that scope (all users' for "user").
+func (st *Store) Secrets(scope string, uid *int64) []SecretRow {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := []SecretRow{}
+	for _, s := range st.s.Secrets {
+		if s.Scope != scope || (scope == "user" && uid != nil && !sameUser(s.UserID, uid)) {
+			continue
+		}
+		vt := s.ValueType
+		if vt == "" {
+			vt = "string"
+		}
+		out = append(out, SecretRow{Key: s.Key, Scope: s.Scope, UserID: s.UserID, Value: s.Value, ValueType: vt})
+	}
+	return out
+}
+
 // ScopeOf is the scope a key is already stored under without a user, as get_secret_scope.
 func (st *Store) ScopeOf(key string) string {
 	st.mu.Lock()

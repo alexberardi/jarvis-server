@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/node"
 	"github.com/alexberardi/jarvis-server/internal/agent/nodesettings"
 )
 
@@ -24,6 +25,9 @@ type attachHost struct {
 }
 
 func (h *attachHost) Answer(_ context.Context, method string, raw json.RawMessage) (any, error) {
+	if method != "inbox.post" {
+		return nil, nil // node.info before an agent's run: no household context here
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var p map[string]any
@@ -179,5 +183,80 @@ func TestPackagesShareTopLevelFamilies(t *testing.T) {
 	}
 	if _, err := sc.RunAgent(context.Background(), "twin"); err != nil {
 		t.Fatalf("twin: %v", err)
+	}
+}
+
+// The user's demo (2026-11-16): "turn on the Home Assistant plug" found nothing on a Go node.
+// The Python node cached each agent's get_context_data() after its runs and sent it as
+// node_context.agents, and the HA package's resolver read it through
+// services.agent_scheduler_service; the sidecar did neither. After a run, agent_context answers
+// the agent's context, and a package command reads the same through the node's
+// services.agent_scheduler_service, and its secrets through services.secret_service. The run
+// sees the household's home_context, as the node's scheduler seeded it.
+func TestSidecarKeepsAgentContext(t *testing.T) {
+	py := python(t)
+	root, err := filepath.Abs(filepath.Join("testdata", "packages", "homectx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"packages": []any{map[string]any{"name": "homectx", "root": root,
+		"commands": []string{"commands/which/command.py"}, "agents": []string{"agents/house/agent.py"}}}})
+	listing := filepath.Join(t.TempDir(), "commands.json")
+	if err := os.WriteFile(listing, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := nodesettings.OpenStore(t.TempDir(), "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := StartWith(context.Background(), py, listing, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Storage: st, Host: &compatHost{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sc.Close() })
+	ctx := context.Background()
+
+	which := func() map[string]any {
+		t.Helper()
+		out, ok := sc.Call(ctx, "homectx_which", map[string]any{}, node.Request{})
+		if !ok || out["success"] != true {
+			t.Fatalf("homectx_which = %v (known %v)", out, ok)
+		}
+		return out
+	}
+	if a, err := sc.AgentContext(ctx); err != nil || a != nil {
+		t.Fatalf("context before any run = %s, %v", a, err)
+	}
+	if err := st.SetSecret("HOUSE_URL", "http://house.local", "integration", "string", nil); err != nil {
+		t.Fatal(err)
+	}
+	if out := which(); len(out["entities"].([]any)) != 0 || out["secret_service"] != "http://house.local" {
+		t.Fatalf("before the run: %v", out)
+	}
+
+	if _, err := sc.RunAgent(ctx, "house"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := sc.AgentContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var house struct {
+		DeviceControls map[string][]map[string]string `json:"device_controls"`
+		Home           map[string]string              `json:"home"`
+	}
+	if len(a) != 1 || json.Unmarshal(a["house"], &house) != nil || len(house.DeviceControls["switch"]) != 1 ||
+		house.DeviceControls["switch"][0]["entity_id"] != "switch.kitchen_plug" || house.DeviceControls["switch"][0]["area"] != "Kitchen" {
+		t.Fatalf("context = %s", a)
+	}
+	// command-center gets only what it reads; "home" and the full "devices" cache stay here.
+	if house.Home != nil || strings.Contains(string(a["house"]), "full cache") {
+		t.Fatalf("context for cc = %s", a["house"])
+	}
+	if out := which(); out["home"] == nil || out["home"].(map[string]any)["location"] != "Springfield, IL" {
+		t.Fatalf("the run's home_context = %v, want the household's (node.info)", out["home"])
+	}
+	if out := which(); len(out["entities"].([]any)) != 1 || out["entities"].([]any)[0] != "switch.kitchen_plug" {
+		t.Fatalf("after the run: %v", out)
 	}
 }

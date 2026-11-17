@@ -86,6 +86,7 @@ func (m *Module) registerSmartHome(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE "+hh+"/devices/{device_id}", m.prov(m.handleDeleteDevice))
 	mux.HandleFunc("POST "+hh+"/devices/{device_id}/control", m.prov(m.handleControlDevice))
 	mux.HandleFunc("GET "+hh+"/devices/{device_id}/state", m.prov(m.handleDeviceState))
+	mux.HandleFunc("GET "+v0+"/node/info", m.node(m.handleNodeInfo))
 	mux.HandleFunc("GET "+v0+"/node/devices", m.node(m.handleNodeDevices))
 	mux.HandleFunc("GET "+v0+"/node/devices/{device_id}/state", m.node(m.handleNodeDeviceState))
 	mux.HandleFunc("POST "+v0+"/node/devices/{device_id}/control", m.node(m.handleNodeControlDevice))

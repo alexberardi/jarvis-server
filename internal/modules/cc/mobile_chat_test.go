@@ -574,6 +574,39 @@ func TestMobileChatTranscriptsD19(t *testing.T) {
 	}
 }
 
+// The user's demo (2026-11-16): "turn on the Home Assistant plug" in mobile chat guessed
+// light.home_assistant_plug: the prompt listed only the DB devices, never the Go agent's Home
+// Assistant entities. The node's report_tools "agents" (its package agents' context, the Python
+// node's node_context.agents) is the device context when present; without it, the DB devices.
+func TestMobileChatUsesTheNodesAgentContext(t *testing.T) {
+	ce := newChatEnv(t, prompts.Qwen3_8B)
+	ctx := context.Background()
+	if _, err := ce.d.Write.ExecContext(ctx, `INSERT INTO cc_devices (id, household_id, entity_id, name, domain)
+		VALUES ('d1', ?, 'light.den_lamp', 'Den Lamp', 'light')`, voiceHH); err != nil {
+		t.Fatal(err)
+	}
+	ce.pub.mu.Lock()
+	ce.pub.tools = `{"client_tools": ` + weatherTool + `, "available_commands": [], "installed_packages": [], ` +
+		`"agents": {"home_assistant": {"device_controls": {"switch": [{"entity_id": "switch.home_assistant_plug", ` +
+		`"name": "Home Assistant Plug", "area": "Office", "state": "off"}]}}}}`
+	ce.pub.mu.Unlock()
+	conv := ce.m.convs.get(ce.warm("tok-7"))
+	if got := pyjson.Dumps(conv.agents, false); got != `{"home_assistant": {"device_controls": {"switch": [{"entity_id": "switch.home_assistant_plug", "name": "Home Assistant Plug", "area": "Office", "state": "off"}]}}}` {
+		t.Fatalf("agents %s", got)
+	}
+	if !strings.Contains(conv.messages[0].Content, "switch.home_assistant_plug") {
+		t.Fatal("the node's devices are missing from the system prompt")
+	}
+
+	ce.pub.mu.Lock()
+	ce.pub.tools = `{"client_tools": ` + weatherTool + `, "available_commands": [], "installed_packages": []}`
+	ce.pub.mu.Unlock()
+	conv = ce.m.convs.get(ce.warm("tok-7"))
+	if got := pyjson.Dumps(conv.agents, false); !strings.Contains(got, "light.den_lamp") || strings.Contains(got, "switch.") {
+		t.Fatalf("no node agents: agents %s, want the DB devices", got)
+	}
+}
+
 // TestMobileChatContext: the selected node's room, the household's devices as agent context
 // (doc 07) and the ambient bundle (when opted in) reach the prompt.
 func TestMobileChatContext(t *testing.T) {
