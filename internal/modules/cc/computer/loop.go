@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -714,6 +715,15 @@ func enterInstead(target string, obs Observation, actions []computeruse.Action) 
 	return nil, false
 }
 
+// clipName is an element's name short enough for a history line.
+func clipName(s string) string {
+	s = oneLine(s)
+	if r := []rune(s); len(r) > 60 {
+		return string(r[:60]) + "…"
+	}
+	return s
+}
+
 // stuckSummary says what a task was stuck on. A short intent reads as a sentence ("I kept trying
 // to close the dialog"); the house model also writes whole thoughts there, which are quoted.
 func stuckSummary(intent string) string {
@@ -1099,6 +1109,7 @@ type decision struct {
 	app     string
 	verdict policy.Verdict
 	newApp  string // the app the executor said the action was the task's first in
+	on      string // the element it acts on, as the screen listed it (button "Close"), "" for none
 }
 
 // decideAndAct decides every action of the batch, then blocks, holds or runs it.
@@ -1335,7 +1346,12 @@ func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []d
 		default:
 			result := strings.TrimSpace("failed: " + sr.Code + " " + sr.Error)
 			l.record(ctx, r, d, policy.OutcomeFailed, result)
-			failed = append(failed, fmt.Sprintf("%q %s", d.action.Intent, result))
+			what := fmt.Sprintf("%q %s", d.action.Intent, result)
+			if d.on != "" {
+				// The house model set a value on "e8" three times: on that page e8 was a button.
+				what += fmt.Sprintf(" (%s is %s)", d.action.Ref, d.on)
+			}
+			failed = append(failed, what)
 			stopped = stopped || sr.Code == "stopped"
 		}
 	}
@@ -1421,6 +1437,9 @@ func absInt(v int) int {
 func (l *Loop) decide(ctx context.Context, t Task, tgt computeruse.Target, obs Observation, a computeruse.Action) decision {
 	el := elementFor(obs, a.Ref)
 	d := decision{action: a, app: tgt.App, site: siteHost(tgt.Site)}
+	if el != nil {
+		d.on = strings.TrimSpace(el.Role + " " + strconv.Quote(clipName(el.Name)))
+	}
 	if a.Kind == "navigate" {
 		if u, err := url.Parse(a.URL); err == nil {
 			d.site = u.Hostname()
@@ -1513,7 +1532,7 @@ func (l *Loop) mint(ctx context.Context, r *round, digest string) (string, error
 // record appends the action to the run's history and writes its audit row.
 func (l *Loop) record(ctx context.Context, r *round, d decision, outcome, result string) {
 	e := Entry{Round: r.run.Rounds, Kind: d.action.Kind,
-		Intent: d.action.Intent, Ref: d.action.Ref, Result: result, WStep: r.wstep, Healed: r.heal}
+		Intent: d.action.Intent, Ref: d.action.Ref, On: d.on, Result: result, WStep: r.wstep, Healed: r.heal}
 	if r.turns {
 		e.Thought, e.Act = r.thought, r.wrote
 		r.thought, r.wrote = "", ""

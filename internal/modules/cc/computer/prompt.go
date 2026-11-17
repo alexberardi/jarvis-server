@@ -160,7 +160,12 @@ func renderHistory(b *strings.Builder, in promptInput) {
 	}
 	for _, e := range h {
 		ref := ""
-		if e.Ref != "" {
+		switch {
+		case e.On != "":
+			// Not the ref: the house model copied "e8" from its history onto a page where e8
+			// was something else (2026-11-16).
+			ref = " " + defang(e.On)
+		case e.Ref != "":
 			ref = " " + e.Ref
 		}
 		fmt.Fprintf(b, "- round %d: %s%s %q: %s\n", e.Round, e.Kind, ref, e.Intent, e.Result)

@@ -49,6 +49,9 @@ type Entry struct {
 	Kind   string `json:"kind"`
 	Intent string `json:"intent"`
 	Ref    string `json:"ref,omitempty"`
+	// On is the element Ref was on the screen the action was decided on (button "Close"): a ref
+	// means another element on the next screen, so the history names what was acted on.
+	On     string `json:"on,omitempty"`
 	Result string `json:"result"` // ok | failed: <code> <error> | blocked: … | not run
 	// A conversation's (turns.go): the model's thought (on its round's first entry; the whole
 	// answer on a KindSaid entry), the action as the model wrote it (JSON, long text cut), and

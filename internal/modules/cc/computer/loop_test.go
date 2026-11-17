@@ -291,8 +291,9 @@ func TestLoopDone(t *testing.T) {
 	if req.Priority != llm.PriorityBackground || *req.MaxTokens != 1024 || *req.Temperature != 0 || req.Label != llm.LabelBackground {
 		t.Fatalf("request %+v", req)
 	}
-	// The second round's prompt carries the first round's action and its result.
-	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `- round 1: press e3 "Add the soap to the cart": ok`) {
+	// The second round's prompt carries the first round's action and its result, naming the
+	// element and not its ref: a ref means another element on the next page.
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `- round 1: press button "Add to cart" "Add the soap to the cart": ok`) {
 		t.Fatalf("history not in the prompt:\n%s", txt)
 	}
 }
