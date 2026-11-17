@@ -37,5 +37,34 @@
       {"say": "research espresso machines under 500 dollars in depth",
        "expect": {"any_tool": ["deep_research", "run_errand", "quick_search"], "not_tool": ["remember"]}}
     ]
+  },
+  {
+    "name": "errands: a lookup on a named service (on Google Flights, find …) is an errand, not a web search",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "on Google Flights, find the three cheapest round trips from Philadelphia to Denver, December 12 to 15",
+       "expect": {"server_tool": "run_errand", "args_match": {"goal": "(?i)google flights"},
+                  "not_tool": ["quick_search", "deep_research", "remember"]}}
+    ]
+  },
+  {
+    "name": "errands: compare … on Amazon and Best Buy is an errand, not a web search",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "compare the price of the Roborock Q5 on Amazon and Best Buy",
+       "expect": {"server_tool": "run_errand", "args_match": {"goal": "(?i)amazon"},
+                  "not_tool": ["quick_search", "deep_research", "remember"]}}
+    ]
+  },
+  {
+    "name": "errands near-miss: a plain question that names no site stays a quick answer",
+    "speaker": "primary",
+    "settings": {"web_search.enabled": true},
+    "turns": [
+      {"say": "how long is the flight from Philadelphia to Denver",
+       "expect": {"not_tool": ["run_errand", "schedule_errand", "deep_research", "remember"]}}
+    ]
   }
 ]
