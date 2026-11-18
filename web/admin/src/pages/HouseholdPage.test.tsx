@@ -6,7 +6,7 @@ import HouseholdPage from './HouseholdPage'
 const api = vi.hoisted(() => ({
   listMembers: vi.fn(), setMemberRole: vi.fn(), removeMember: vi.fn(), renameHousehold: vi.fn(), leaveHousehold: vi.fn(),
   listInvites: vi.fn(), createInvite: vi.fn(), revokeInvite: vi.fn(), joinHousehold: vi.fn(),
-  getHouseholdSettings: vi.fn(), putHouseholdSetting: vi.fn(),
+  getHouseholdSettings: vi.fn(), putHouseholdSetting: vi.fn(), getPersonaPresets: vi.fn(), getHouseholdTimezone: vi.fn(), listSignalAutomations: vi.fn(),
 }))
 vi.mock('@/api/household', async (orig) => ({ ...(await orig<typeof import('@/api/household')>()), ...api }))
 const auth = vi.hoisted(() => ({
@@ -35,6 +35,9 @@ describe('HouseholdPage', () => {
     vi.clearAllMocks()
     auth.households = [{ id: 'h1', name: 'Home', role: 'admin' }]
     api.listMembers.mockResolvedValue(members)
+    api.getPersonaPresets.mockResolvedValue({ presets: [], default_preset_id: '', default_text: '', max_chars: 2000 })
+    api.getHouseholdTimezone.mockResolvedValue({ timezone: 'UTC', source: 'default', node_timezone: '' })
+    api.listSignalAutomations.mockResolvedValue([])
     api.listInvites.mockResolvedValue([
       invite,
       { ...invite, id: 4, code: 'OLD0-CODE', revoked: true },

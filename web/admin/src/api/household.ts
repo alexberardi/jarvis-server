@@ -109,3 +109,34 @@ export interface HouseholdTimezone {
 export async function getHouseholdTimezone(id: string): Promise<HouseholdTimezone> {
   return (await apiClient.get<HouseholdTimezone>(`${root(id)}/timezone`)).data
 }
+
+/**
+ * Signal automations (mobile's Automations): a plain-English instruction per signal kind ("Lock
+ * the front door" when I leave home). Any member reads; cc lets only a household admin write. A
+ * blank instruction clears the rule.
+ */
+export type Delivery = 'automatic' | 'notification'
+
+export interface SignalAutomation {
+  kind: string
+  label: string
+  description: string
+  example: string
+  /** True once this kind has actually fired for the household. */
+  observed: boolean
+  instruction: string
+  enabled: boolean
+  delivery: Delivery
+}
+
+export async function listSignalAutomations(id: string): Promise<SignalAutomation[]> {
+  return (await apiClient.get<{ automations: SignalAutomation[] }>(`${root(id)}/signal-automations`)).data.automations ?? []
+}
+
+export async function putSignalAutomation(
+  id: string,
+  kind: string,
+  rule: { instruction: string; enabled: boolean; delivery: Delivery },
+): Promise<{ instruction: string; enabled: boolean; delivery: Delivery }> {
+  return (await apiClient.put(`${root(id)}/signal-automations/${encodeURIComponent(kind)}`, rule)).data
+}
