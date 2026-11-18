@@ -118,7 +118,7 @@ func TestCallContextPutCanonicalises(t *testing.T) {
 		t.Fatalf("get: %v", got)
 	}
 	cat := got["catalog"].(map[string]any)
-	if len(cat["well_known"].([]any)) != 9 || len(cat["categories"].([]any)) != 6 || len(cat["tiers"].([]any)) != 2 {
+	if len(cat["well_known"].([]any)) != 14 || len(cat["categories"].([]any)) != 6 || len(cat["tiers"].([]any)) != 2 {
 		t.Fatalf("catalog: %v", cat)
 	}
 }

@@ -23,6 +23,11 @@ type SuccessCheck struct {
 	Screen      string         `json:"screen,omitempty"` // free text, a yes/no question about a fresh screenshot
 	// report is what the model said it found, for the screen question ("" = nothing).
 	report string
+	// details are the user's saved details the task typed: the question shows their
+	// placeholders, not their values.
+	// shortcut: the screenshot sent with the question still shows them, so a cloud vision
+	// model would see them; blur the fields before saved details are allowed with one.
+	details []Detail
 }
 
 // DownloadCheck: a download whose name matches NameLike, of at least MinBytes.
@@ -176,7 +181,7 @@ func (l *Loop) Verify(ctx context.Context, runID string, target computeruse.Targ
 		if c.report != "" {
 			ask += fmt.Sprintf(" (Jarvis reports: %q. When the task was to find or read something, answer yes if the page backs that report up: the page need not pick the answer out itself.)", c.report)
 		}
-		ok, why := l.askScreen(ctx, pick, *looked, ask, checked)
+		ok, why := l.askScreen(ctx, pick, *looked, ask, checked, c.details...)
 		if !ok {
 			return fail(fmt.Sprintf("%s: %s", oneLine(q), why))
 		}
@@ -272,7 +277,7 @@ const screenTextMax = 4000
 // askScreen asks pick's model a yes/no question about obs's screenshot, with the page's address,
 // title and text (the house model answered "no" from the screenshot alone on a store's
 // confirmation page): yes, or why not.
-func (l *Loop) askScreen(ctx context.Context, pick Pick, obs Observation, q string, facts []string) (bool, string) {
+func (l *Loop) askScreen(ctx context.Context, pick Pick, obs Observation, q string, facts []string, mask ...Detail) (bool, string) {
 	im := obs.Image
 	switch {
 	case !pick.Vision:
@@ -287,7 +292,7 @@ func (l *Loop) askScreen(ctx context.Context, pick Pick, obs Observation, q stri
 		Messages: []llm.Message{
 			{Role: "system", Content: llm.TextContent(screenSystem)},
 			{Role: "user", Content: &llm.Content{Parts: []llm.Part{
-				{Type: "text", Text: screenQuestion(obs, q, facts)},
+				{Type: "text", Text: maskText(screenQuestion(obs, q, facts), mask)},
 				{Type: "image_url", ImageURL: &llm.ImageURL{URL: url}},
 			}}},
 		},

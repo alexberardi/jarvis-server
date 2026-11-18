@@ -11,6 +11,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -46,6 +47,7 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	if m.autonomy != nil {
 		loop.Audit = m.autonomy
 	}
+	loop.Details = m.computerDetails
 	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}, Source: m.computerSource,
 		OpenPage: m.computerOpenPage}
 }
@@ -373,4 +375,37 @@ func (e computerExec) Stop(ctx context.Context, runID string) {
 	if err := nodeFailure(out); err != nil {
 		e.m.deps.Log.Warn("cc: computer_stop", "run", runID, "node", run.NodeID, "err", err)
 	}
+}
+
+// formDetails are the saved details a website's form may get (COMPUTER-CONTROL.md C13): who the
+// user is and how to reach them. Anything else (medical, a vehicle, a custom field) is asked
+// for on the phone when a form wants it.
+var formDetails = map[string]bool{"full_name": true, "email": true, "callback_number": true,
+	"street": true, "city": true, "state": true, "postal_code": true}
+
+// computerDetails are userID's saved details a browser task may type by placeholder. PII:
+// the values go to the computer only, never to a model or a log.
+func (m *Module) computerDetails(ctx context.Context, userID *int64) []computer.Detail {
+	if userID == nil {
+		return nil
+	}
+	v, err := m.settings.Get(ctx, phone.SettingCallContext, settings.Scope{UserID: *userID})
+	if err != nil {
+		return nil
+	}
+	var out []computer.Detail
+	for _, f := range phone.ParseCallContext(v.Value) {
+		if !formDetails[f.Key] {
+			continue
+		}
+		out = append(out, computer.Detail{Key: f.Key, Label: f.Label, Value: f.Value})
+		if f.Key == "full_name" {
+			// Forms ask for the name in two fields as often as one.
+			if i := strings.LastIndex(f.Value, " "); i > 0 {
+				out = append(out, computer.Detail{Key: "given_name", Label: "First name", Value: f.Value[:i]},
+					computer.Detail{Key: "family_name", Label: "Last name", Value: f.Value[i+1:]})
+			}
+		}
+	}
+	return out
 }

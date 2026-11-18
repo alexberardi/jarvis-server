@@ -2,10 +2,13 @@ package computer
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 )
 
 func TestPastCheckout(t *testing.T) {
@@ -22,27 +25,58 @@ func TestPastCheckout(t *testing.T) {
 	}
 }
 
-func TestMadeUpDetail(t *testing.T) {
+func TestPlaceDetails(t *testing.T) {
 	obs := Observation{Elements: []Element{
 		{Ref: "e1", Role: "textbox", Name: "Street Address"},
 		{Ref: "e2", Role: "textbox", Name: "Search products"},
 		{Ref: "e3", Role: "textbox", Name: "Mobile", Autocomplete: "tel-national"},
+		{Ref: "e4", Role: "textbox", Name: "Company name"},
 	}}
 	typ := func(ref, text string) []computeruse.Action {
 		return []computeruse.Action{{Kind: "type", Ref: ref, Text: text}}
 	}
 	said := "order a pizza to 12 Elm Street, Springfield"
-	if madeUpDetail(said, obs, typ("e1", "123 Main St")) == "" {
-		t.Error("an address the request doesn't hold was typed")
+	saved := []Detail{{"callback_number", "Callback number", "555-0199"}, {"street", "Street", "9 Oak Lane"}}
+	text := func(ds []Detail, ref, in string) string {
+		t.Helper()
+		out, q := placeDetails(said, ds, obs, typ(ref, in))
+		if q != "" {
+			return "ASK: " + q
+		}
+		return out[0].Text
 	}
-	if madeUpDetail(said, obs, typ("e3", "555-0100")) == "" {
-		t.Error("a phone number the request doesn't hold was typed")
+	for _, c := range []struct{ name, ref, in, want string }{
+		{"an invented address with nothing to match it asks", "e1", "123 Main St", "ASK"},
+		{"the request's own address is typed", "e1", "12 Elm Street", "12 Elm Street"},
+		{"a search is not a detail", "e2", "pepperoni", "pepperoni"},
+		{"an invented phone becomes the saved one by the field's token", "e3", "555-0100", "{{callback_number}}"},
+		{"a saved detail's placeholder is typed", "e1", "{{street}}", "{{street}}"},
+		{"a placeholder for nothing saved asks", "e4", "{{company}}", "ASK"},
+	} {
+		if got := text(saved, c.ref, c.in); got != c.want && !(c.want == "ASK" && strings.HasPrefix(got, "ASK")) {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
 	}
-	if got := madeUpDetail(said, obs, typ("e1", "12 Elm Street")); got != "" {
-		t.Errorf("the request's own address asked about: %s", got)
+	// Off the task's site no detail is offered: the placeholder and the invention both ask.
+	for _, in := range []string{"{{callback_number}}", "555-0100"} {
+		if got := text(nil, "e3", in); !strings.HasPrefix(got, "ASK") {
+			t.Errorf("without details %q was typed as %q", in, got)
+		}
 	}
-	if got := madeUpDetail(said, obs, typ("e2", "pepperoni")); got != "" {
-		t.Errorf("a search asked about: %s", got)
+	if got := fillDetails("{{street}} / {{nope}}", saved); got != "9 Oak Lane / {{nope}}" {
+		t.Errorf("fillDetails = %q", got)
+	}
+	msgs := []llm.Message{{Role: "user", Content: &llm.Content{Parts: []llm.Part{{Type: "text", Text: "Street: 9 Oak Lane", CachePrefix: 5}}}}}
+	msgs = append(msgs, llm.Message{Role: "user", Content: llm.TextContent(`now holds "9 Oak Lane"`)})
+	maskDetails(msgs, saved)
+	if got := *msgs[1].Content.Text; got != `now holds "{{street}}"` {
+		t.Errorf("masked text = %q", got)
+	}
+	if p := msgs[0].Content.Parts[0]; p.Text != "Street: {{street}}" || p.CachePrefix != 0 {
+		t.Errorf("masked = %+v", p)
+	}
+	if line := detailsLine(saved); !strings.Contains(line, "{{street}} Street") || strings.Contains(line, "Oak") {
+		t.Errorf("detailsLine = %q", line)
 	}
 }
 
@@ -90,5 +124,58 @@ func TestKeysAtLastElement(t *testing.T) {
 	got = keysAtLastElement(obs, []Entry{{Kind: "press", On: `link "Gone"`}}, []computeruse.Action{{Kind: "keypress", Keys: []string{"Enter"}}})
 	if got[0].Ref != "" {
 		t.Errorf("Enter went to %q though the last element is gone", got[0].Ref)
+	}
+}
+
+// A saved detail is typed by placeholder: the computer gets the value, the model and the run's
+// history never do, even once the page shows it.
+func TestSavedDetailReachesOnlyTheComputer(t *testing.T) {
+	page := formPage()
+	filled := formPage()
+	filled.Elements[0].Value = "Avery Quill"
+	e := newEnv(t, page, filled)
+	e.loop.Details = func(context.Context, *int64) []Detail { return []Detail{{"full_name", "Full name", "Avery Quill"}} }
+	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "{{full_name}}", "intent": "Name"}`),
+		`{"done": true, "summary": "Filled in.", "verify": {"url_contains": "/apply"}}`,
+		`{"done": true, "summary": "Filled in.", "verify": {"url_contains": "/apply"}}`,
+		`{"done": true, "summary": "Filled in.", "verify": {"url_contains": "/apply"}}`)
+	apply := task()
+	apply.Goal, apply.Target.Site = "Fill in the application with my details, don't send it", "forms.example.com"
+	out := e.loop.Run(context.Background(), apply)
+	if len(e.exec.batches) != 1 || e.exec.batches[0].Actions[0].Text != "Avery Quill" {
+		t.Fatalf("the computer got %+v (outcome %+v)", e.exec.batches, out)
+	}
+	if !strings.Contains(userText(e.llm.reqs[0]), "{{full_name}} Full name") {
+		t.Errorf("the model isn't told the detail exists:\n%s", userText(e.llm.reqs[0]))
+	}
+	for i, req := range e.llm.reqs {
+		if strings.Contains(userText(req), "Avery") {
+			t.Errorf("call %d shows the model the value:\n%s", i, userText(req))
+		}
+	}
+	if n := len(e.llm.reqs); n != 2 {
+		t.Errorf("%d calls: a task that says not to send is done with the form unsent", n)
+	}
+	run, err := e.loop.Store.Get(context.Background(), out.RunID)
+	if err != nil || len(run.History) == 0 || strings.Contains(fmt.Sprint(run.History), "Avery") {
+		t.Errorf("history = %+v, %v", run, err)
+	}
+}
+
+func TestOnSite(t *testing.T) {
+	for _, c := range []struct {
+		site, page string
+		want       bool
+	}{
+		{"shop.example", "https://www.shop.example/cart", true},
+		{"https://www.shop.example/start", "https://pay.shop.example/x", true},
+		{"http://127.0.0.1:8765/form.html", "http://127.0.0.1:8765/form.html", true},
+		{"shop.example", "https://shop.example.evil.test/", false},
+		{"shop.example", "https://evilshop.example/", false},
+		{"", "https://shop.example/", false},
+	} {
+		if got := onSite(c.site, c.page); got != c.want {
+			t.Errorf("onSite(%q, %q) = %v", c.site, c.page, got)
+		}
 	}
 }

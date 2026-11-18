@@ -126,7 +126,9 @@ type Loop struct {
 	Settings  Settings
 	Models    Models
 	Workflows WorkflowStore // nil: a replay's healed steps aren't stored
-	Now       func() time.Time
+	// Details are a user's saved details a browser task may type by placeholder (nil: none).
+	Details func(ctx context.Context, userID *int64) []Detail
+	Now     func() time.Time
 	// Sleep waits d or until ctx ends (nil: a timer). A replay waits before it looks a second
 	// time at a step whose check failed.
 	Sleep func(ctx context.Context, d time.Duration)
@@ -293,11 +295,13 @@ type StepResult struct {
 
 // round is one Run call's state.
 type round struct {
-	run   *Run
-	task  Task
-	pick  Pick
-	shots []*Image
-	seen  map[string]bool
+	run  *Run
+	task Task
+	// details are the user's saved details the task may type by placeholder (details.go).
+	details []Detail
+	pick    Pick
+	shots   []*Image
+	seen    map[string]bool
 	// prevLines and prevKey are the last look's text (pageLines) and what it showed (obsKey);
 	// news is what this look's text adds to it, same whether nothing at all changed.
 	prevLines map[string]bool
@@ -465,6 +469,9 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 	run.Model, run.fit = pick.Model, pick.Fit
 	pick.Adapter = l.adapter(ctx, sc, pick)
 	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, fresh: run.Rounds == 0}
+	if l.Details != nil && t.Target.Kind == "browser" && t.Target.Site != "" {
+		r.details = l.Details(ctx, t.UserID)
+	}
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	// auto: a large model works better as a conversation, a small one loses its way in it.
 	loop := l.str(ctx, SettingLoop, sc, LoopAuto)
@@ -579,7 +586,9 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	switch {
 	case reply.Done:
-		if btn := unsentForm(r.run.History, obs); btn != nil && r.sendAsked < 2 {
+		// A task that says not to send or order is done with the button still there.
+		unsent := !noSendRe.MatchString(r.task.Goal + "\n" + r.task.Request)
+		if btn := unsentForm(r.run.History, obs); unsent && btn != nil && r.sendAsked < 2 {
 			// The house model fills a form in and says done without sending it, and may say
 			// it again after the first nudge: the second one writes the action out.
 			r.sendAsked++
@@ -591,7 +600,7 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 			}
 			return Outcome{}, false
 		}
-		if btn := unplacedOrder(r.task, reply.Summary, obs); btn != nil && r.buyAsked < 2 {
+		if btn := unplacedOrder(r.task, reply.Summary, obs); unsent && btn != nil && r.buyAsked < 2 {
 			// The house model reached the checkout page, said "ordered" without pressing
 			// Place order, and then took the checkout page for the confirmation.
 			r.buyAsked++
@@ -705,7 +714,13 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		r.feedback = msg
 		return Outcome{}, false
 	}
-	if q := madeUpDetail(said, obs, actions); q != "" {
+	// Saved details go only into the site the task named, never a page it was sent on to.
+	details := r.details
+	if !onSite(r.task.Target.Site, obs.URL) {
+		details = nil
+	}
+	actions, q := placeDetails(said, details, obs, actions)
+	if q != "" {
 		return Outcome{State: StateAsk, Ask: q, Reason: ReasonUnclear}, true
 	}
 	switch {
@@ -901,6 +916,7 @@ func alreadySelected(obs Observation, actions []computeruse.Action) string {
 
 var (
 	noCheckoutRe = regexp.MustCompile(`(?i)\b(before|don'?t|do not|without|not|no)\b[^.;\n]{0,30}\bcheck(ing)? ?out\b`)
+	noSendRe     = regexp.MustCompile(`(?i)\b(before|don'?t|do not|without|not|no)\b[^.;\n]{0,30}\b(submit|send|order|plac|pay|buy|purchas)`)
 	checkoutRe   = regexp.MustCompile(`(?i)\bcheck ?out\b`)
 	addressRe    = regexp.MustCompile(`(?i)\b(street|address|apt|apartment|suite|city|zip|postal|postcode)\b`)
 	phoneRe      = regexp.MustCompile(`(?i)\b(phone|mobile|tel|telephone)\b`)
@@ -964,34 +980,6 @@ func otherSite(site string, actions []computeruse.Action) string {
 		if h := offSite([]string{site}, a.URL); h != "" {
 			return fmt.Sprintf("this task is only for %s, so %s is not opened: any other website in the request is another step's job. "+
 				"Finish what the task needs on %s, then say done with what you found there.", site, h, site)
-		}
-	}
-	return ""
-}
-
-// madeUpDetail is the question for the user when an action types into a field for their name,
-// address, phone or email something that said (the request, what was found, their answer)
-// doesn't hold: "" otherwise.
-// shortcut: only the newest answer counts, so a detail from an earlier answer is asked for
-// again; keep the run's answers once saved details (C13) fill these fields.
-func madeUpDetail(said string, obs Observation, actions []computeruse.Action) string {
-	known := map[string]bool{}
-	for _, w := range wordRe.FindAllString(strings.ToLower(said), -1) {
-		known[w] = true
-	}
-	for _, a := range actions {
-		e := elementFor(obs, a.Ref)
-		if e == nil || (a.Kind != "type" && a.Kind != "set_value") {
-			continue
-		}
-		what := personalField(e)
-		if what == "" {
-			continue
-		}
-		for _, w := range wordRe.FindAllString(strings.ToLower(a.Text), -1) {
-			if !known[w] {
-				return fmt.Sprintf("The page asks for your %s (%q) and the request doesn't give it. What should I enter?", what, e.Name)
-			}
 		}
 	}
 	return ""
@@ -1150,19 +1138,25 @@ func (l *Loop) done(ctx context.Context, r *round, reply Reply, obs Observation)
 	if why := l.unsaved(ctx, r, obs); why != "" {
 		res = Verified{Why: why} // the model's own check can't stand in for the file
 	} else {
-		asked := check
+		withDetails := *check
+		withDetails.details = r.details
+		asked := &withDetails
 		if sum := oneLine(reply.Summary); sum != "" && strings.TrimSpace(check.Screen) != "" {
 			// A task that looks something up ends on a page that holds the answer without
 			// spelling it out: "the three best-rated vacuums under $300" is nowhere on a
 			// results page, and the bare question failed every such step (2026-11-17).
-			c := *check
-			c.report = sum
-			asked = &c
+			asked.report = sum
 		}
 		res = l.Verify(ctx, r.run.ID, r.task.Target, r.pick, asked)
 	}
 	if res.OK {
-		sum := strings.TrimSpace(reply.Summary)
+		// The user reads "your saved email", not "{{email}}".
+		sum := strings.TrimSpace(detailRe.ReplaceAllStringFunc(reply.Summary, func(p string) string {
+			if d, ok := detail(r.details, p[2:len(p)-2]); ok {
+				return "your saved " + strings.ToLower(d.Label)
+			}
+			return p
+		}))
 		if sum != "" && !strings.HasSuffix(sum, ".") {
 			sum += "."
 		}
@@ -1273,7 +1267,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		Goal: t.Goal, Request: t.Request, Today: t.Today, Dates: t.Dates, Success: t.Success, Rules: t.Rules, Answer: t.Answer, History: r.run.History,
 		Obs: obs, Images: len(r.shots), Coordinates: coordinateHint(r.pick.Adapter, r.shots),
 		Feedback: r.feedback, Hint: r.hint, Clipboard: r.clipboard, Desktop: t.Target.Kind == "desktop",
-		Source: t.Source, Found: t.Found, News: r.news, Same: r.same,
+		Source: t.Source, Found: t.Found, News: r.news, Same: r.same, Details: r.details,
 	}
 	text, stable := renderPromptSplit(in)
 	// The task and its source text are the same every round: a cloud model keeps them.
@@ -1290,6 +1284,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		in.Plan = t.Plan
 		msgs = turnsMessages(in, r.shots)
 	}
+	maskDetails(msgs, r.details)
 	var lastErr error
 	budget := maxTokens
 	if t.Source != nil {
@@ -1392,11 +1387,11 @@ func (l *Loop) decideAndAct(ctx context.Context, r *round, obs Observation, acti
 		switch {
 		case !asks:
 		case d.risk.Level == computeruse.LevelConfirm:
-			h.Category, h.Reason, h.Digest = d.risk.Category, d.risk.Reason, d.action.Digest(r.run.ID, tgt)
+			h.Category, h.Reason, h.Digest = d.risk.Category, d.risk.Reason, r.filled(d.action).Digest(r.run.ID, tgt)
 			pending = append(pending, PendingAction{Index: i, Action: d.action, Category: h.Category, Reason: h.Reason, Digest: h.Digest})
 		case d.verdict.Effect == policy.Ask:
 			// A site or app the household asks about: the whole batch waits, as one confirmation.
-			h.Reason, h.Digest = d.verdict.Reason, d.action.Digest(r.run.ID, tgt)
+			h.Reason, h.Digest = d.verdict.Reason, r.filled(d.action).Digest(r.run.ID, tgt)
 			pending = append(pending, PendingAction{Index: i, Action: d.action, Reason: h.Reason, Digest: h.Digest})
 		}
 		held.Actions = append(held.Actions, h)
@@ -1443,7 +1438,7 @@ func (l *Loop) decideAndAct(ctx context.Context, r *round, obs Observation, acti
 		if d.risk.Level != computeruse.LevelConfirm {
 			continue
 		}
-		tok, err := l.mint(ctx, r, d.action.Digest(r.run.ID, tgt))
+		tok, err := l.mint(ctx, r, r.filled(d.action).Digest(r.run.ID, tgt))
 		if err != nil {
 			for _, rest := range ds {
 				l.record(ctx, r, rest, policy.OutcomeFailed, "not run")
@@ -1558,7 +1553,7 @@ func (l *Loop) runApproved(ctx context.Context, r *round, held *Held) (Outcome, 
 func (l *Loop) act(ctx context.Context, r *round, tgt computeruse.Target, ds []decision) (Outcome, bool) {
 	b := Batch{RunID: r.run.ID, Target: tgt, Resume: r.resume}
 	for _, d := range ds {
-		b.Actions = append(b.Actions, d.action)
+		b.Actions = append(b.Actions, r.filled(d.action)) // the history and audit rows keep the placeholder
 	}
 	res, err := l.Exec.Act(ctx, b)
 	if err == nil {
@@ -2039,7 +2034,7 @@ func (l *Loop) noteOutcome(ctx context.Context, r *round, obs Observation) {
 	}
 	switch {
 	case r.prev != nil:
-		last.Outcome = describeChange(*r.prev, obs)
+		last.Outcome = maskText(describeChange(*r.prev, obs), r.details) // saved with the run
 	case obs.URL != "":
 		last.Outcome = fmt.Sprintf("it now shows %s (%q).", defang(obs.URL), defang(obs.Title))
 	case obs.Title != "":
@@ -2072,4 +2067,10 @@ func (l *Loop) noteOutcome(ctx context.Context, r *round, obs Observation) {
 	if r.dropped > 0 {
 		last.Outcome = strings.TrimSpace(last.Outcome + fmt.Sprintf(" Only your first action ran: the other %d did not. Send one action per answer.", r.dropped))
 	}
+}
+
+// filled is a with its placeholders' values in, as the computer gets it.
+func (r *round) filled(a computeruse.Action) computeruse.Action {
+	a.Text = fillDetails(a.Text, r.details)
+	return a
 }

@@ -80,6 +80,7 @@ type promptInput struct {
 	Source      *Source
 	Found       string   // what the errand's earlier steps found, "" = nothing
 	News        []string // text the page has now that it didn't at the last look
+	Details     []Detail // the user's saved details the task may type by placeholder
 	Same        bool     // the page is exactly as it was at the last look
 }
 
@@ -128,6 +129,7 @@ func renderHeader(b *strings.Builder, in promptInput) int {
 	if in.Hint != "" {
 		fmt.Fprintf(b, "Hint: %s\n", oneLine(in.Hint))
 	}
+	b.WriteString(detailsLine(in.Details))
 	if in.Answer != "" {
 		fmt.Fprintf(b, "The user answered your question: %s\n", oneLine(in.Answer))
 	}

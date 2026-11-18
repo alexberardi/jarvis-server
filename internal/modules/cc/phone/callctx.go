@@ -42,6 +42,13 @@ var wellKnownFields = []fieldSpec{
 	// "loyalty program" (docs/decisions/2026-11-05-call-context-by-category.md).
 	{"address", "Address", CatHome, TierIfAsked},
 	{"callback_number", "Callback number", CatGeneral, TierIfAsked},
+	// For forms on websites (COMPUTER-CONTROL.md C13): an email, and the address in the parts
+	// a form asks for. A call gets the parts as one Address (SelectForCall).
+	{"email", "Email", CatGeneral, TierIfAsked},
+	{"street", "Street", CatHome, TierIfAsked},
+	{"city", "City", CatHome, TierIfAsked},
+	{"state", "State", CatHome, TierIfAsked},
+	{"postal_code", "Postal code", CatHome, TierIfAsked},
 	{"date_of_birth", "Date of birth", CatMedical, TierIfAsked},
 	{"insurance_provider", "Insurance provider", CatMedical, TierIfAsked},
 	{"insurance_member_id", "Insurance member ID", CatMedical, TierIfAsked},
@@ -189,10 +196,34 @@ func ParseCallContext(raw any) []ContextField {
 	return out
 }
 
-// SelectForCall is what a call loads today: every field regardless of category (a deliberate
-// decision, 2026-07-23; per-call category selection is future work).
+// SelectForCall is what a call loads: every field regardless of category (a deliberate
+// decision, 2026-07-23), with the address's parts (street, city, state, postal code) said as
+// one Address, unless one is saved as a line already.
 func SelectForCall(fields []ContextField) []ContextField {
-	return append([]ContextField(nil), fields...)
+	part := map[string]string{}
+	var out []ContextField
+	hasAddress := false
+	for _, f := range fields {
+		switch f.Key {
+		case "street", "city", "state", "postal_code":
+			part[f.Key] = f.Value
+			continue
+		case "address":
+			hasAddress = true
+		}
+		out = append(out, f)
+	}
+	if hasAddress || len(part) == 0 {
+		return out
+	}
+	var line []string
+	for _, v := range []string{part["street"], part["city"], strings.TrimSpace(part["state"] + " " + part["postal_code"])} {
+		if v != "" {
+			line = append(line, v)
+		}
+	}
+	known, _ := wellKnown("address")
+	return append(out, ContextField{Key: known.key, Label: known.label, Value: strings.Join(line, ", "), Category: known.category, Tier: known.tier})
 }
 
 // SelectForCategories is what one call's brief carries: General details always, the others
