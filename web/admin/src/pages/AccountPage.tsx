@@ -82,6 +82,16 @@ export default function AccountPage() {
           </span>
           <ChevronRight size={18} aria-hidden className="text-text-muted" />
         </Link>
+        <Link
+          to="/call-details"
+          className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-5 py-4 text-body text-text transition-colors duration-(--duration-hover) hover:bg-surface-alt"
+        >
+          <span>
+            <span className="block font-medium">Call details</span>
+            <span className="block text-small text-text-muted">What Jarvis can tell a business when it calls for you</span>
+          </span>
+          <ChevronRight size={18} aria-hidden className="text-text-muted" />
+        </Link>
       </div>
     </div>
   )

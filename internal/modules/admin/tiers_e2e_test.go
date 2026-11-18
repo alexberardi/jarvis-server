@@ -293,6 +293,15 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "PUT", sa+h1+"/signal-automations/presence.left", rule, bearer(a1)...); code != 200 {
 		t.Fatalf("admin writes an automation: %d %v", code, out)
 	}
+	// Call details: each member's own; another member never sees them.
+	cctx := base + "/api/cc/api/v0/mobile/call-context"
+	detail := map[string]any{"fields": []any{map[string]any{"label": "Rewards number", "value": "9982-4471", "category": "dining", "tier": "if_asked"}}}
+	if code, out := call(t, "PUT", cctx, detail, bearer(m1)...); code != 200 {
+		t.Fatalf("own call details: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", cctx, nil, bearer(p1)...); code != 200 || strings.Contains(fmt.Sprint(out), "9982-4471") {
+		t.Fatalf("another member's call details: %d %v", code, out)
+	}
 	// Recent commands: the caller's own transcripts.
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {
 		t.Fatalf("own recent commands: %d %v", code, out)

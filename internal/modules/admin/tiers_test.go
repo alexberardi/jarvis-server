@@ -117,6 +117,8 @@ var wantTiers = map[string]tier{
 	"PUT /api/cc/api/v0/mobile/household/{household_id}/settings/{key...}":         tierUser,
 	"GET /api/cc/api/v0/mobile/household/{household_id}/persona/presets":           tierUser,
 	"GET /api/cc/api/v0/mobile/household/{household_id}/timezone":                  tierUser,
+	"GET /api/cc/api/v0/mobile/call-context":                                       tierUser,
+	"PUT /api/cc/api/v0/mobile/call-context":                                       tierUser,
 	"GET /api/cc/api/v0/mobile/household/{household_id}/signal-automations":        tierUser,
 	"PUT /api/cc/api/v0/mobile/household/{household_id}/signal-automations/{kind}": tierUser,
 	"GET /api/cc/api/v0/nodes/pairings":                                            tierUser,

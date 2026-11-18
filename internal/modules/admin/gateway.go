@@ -206,6 +206,9 @@ var passRoutes = []passRoute{
 	// starters and the zone in effect with where it came from; any member reads.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/persona/presets"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/timezone"),
+	// Call details (mobile's Call details): the caller's own; cc keys them by the user.
+	ccUserRoute("GET /api/cc/api/v0/mobile/call-context"),
+	ccUserRoute("PUT /api/cc/api/v0/mobile/call-context"),
 	// Signal automations (mobile's Automations): cc lets any member read, only a household admin write.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/signal-automations"),
 	ccUserRoute("PUT /api/cc/api/v0/mobile/household/{household_id}/signal-automations/{kind}"),

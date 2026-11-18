@@ -19,6 +19,7 @@ import RoutinesPage from '@/pages/RoutinesPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
 import HouseholdPage from '@/pages/HouseholdPage'
+import CallDetailsPage from '@/pages/CallDetailsPage'
 import InboxItemPage from '@/pages/InboxItemPage'
 import InboxPage from '@/pages/InboxPage'
 import LoginPage from '@/pages/LoginPage'
@@ -110,6 +111,7 @@ export function shellRoutes() {
       <Route path="/recordings" element={<RecordingsPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/household" element={<HouseholdPage />} />
+      <Route path="/call-details" element={<CallDetailsPage />} />
       {UiGalleryPage && (
         <Route
           path="/dev/ui"
