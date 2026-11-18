@@ -198,6 +198,30 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "POST", base+"/api/cc/api/v0/mobile/household/"+h2+"/schedules/s1/cancel", map[string]any{}, bearer(m1)...); code != 403 {
 		t.Fatalf("cancel another household's errand: %d %v", code, out)
 	}
+	// Routines: the member's household lists and creates; another household's list, create,
+	// read, edit, delete and run-now are refused.
+	rt := base + "/api/cc/api/v0/households/"
+	if code, out := call(t, "GET", rt+h1+"/routines", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own routines: %d %v", code, out)
+	}
+	newRoutine := map[string]any{"name": "Tier check", "trigger_phrases": []any{"tier check"},
+		"steps":                []any{map[string]any{"command": "get_weather", "args": []any{}, "label": "get_weather"}},
+		"response_instruction": "", "response_length": "short", "schedule": nil}
+	if code, out := call(t, "POST", rt+h1+"/routines", newRoutine, bearer(m1)...); code != 200 && code != 201 {
+		t.Fatalf("create own routine: %d %v", code, out)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/routines"}, {"POST", "/routines"}, {"GET", "/routines/r1"}, {"PATCH", "/routines/r1"},
+		{"DELETE", "/routines/r1"}, {"POST", "/routines/r1/run-now"},
+	} {
+		var body any
+		if c.method == "POST" || c.method == "PATCH" {
+			body = newRoutine
+		}
+		if code, out := call(t, c.method, rt+h2+c.path, body, bearer(m1)...); code != 403 {
+			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
+		}
+	}
 
 	// Interactive lists: another household's node's records are refused (cc: not a member), and
 	// tab matches only answer the member who paired the node (an admin-key node has no owner).

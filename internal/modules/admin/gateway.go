@@ -140,6 +140,14 @@ var passRoutes = []passRoute{
 	// (mobile's Schedules screen); cc checks membership of the household.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/schedules"),
 	ccUserRoute("POST /api/cc/api/v0/mobile/household/{household_id}/schedules/{schedule_id}/cancel"),
+	// Routines (mobile's Routines tab): the household's routines, editing them and run-now (cc
+	// holds run-now open until the node reports, up to 60 s); cc checks membership.
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/routines"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/routines"),
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
+	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/routines/{routine_id}/run-now"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.

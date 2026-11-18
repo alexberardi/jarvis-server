@@ -21,8 +21,9 @@ Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 
 Done. Not ported, on purpose: audio cards and the callback-result page (see the plan).
 
-- [ ] Scheduled errands on the web (`/errands`, mobile's Schedules screen): list and stop
-- [ ] Recurrence: "every monday" was stored as daily (fix: #694)
+- [x] Scheduled errands on the web (mobile's Schedules screen): list and stop (#693)
+- [x] Recurrence: "every monday" was stored as daily (#694)
+- [ ] Routines on the web (`/routines`, mobile's Routines tab): list, run now, Simple and Advanced editor, schedules; scheduled errands move under it (`/routines/errands`)
 
 Next: full alarms, spec first.
 
