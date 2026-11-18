@@ -13,6 +13,7 @@ import ConnectionsPage from '@/pages/ConnectionsPage'
 import ErrandsPage from '@/pages/ErrandsPage'
 import MemoriesPage from '@/pages/MemoriesPage'
 import PhonebookPage from '@/pages/PhonebookPage'
+import RecentCommandsPage from '@/pages/RecentCommandsPage'
 import RoutineEditPage from '@/pages/RoutineEditPage'
 import RoutinesPage from '@/pages/RoutinesPage'
 import DashboardPage from '@/pages/DashboardPage'
@@ -95,6 +96,7 @@ export function shellRoutes() {
       <Route path="/routines" element={<RoutinesPage />} />
       <Route path="/memories" element={<MemoriesPage />} />
       <Route path="/phonebook" element={<PhonebookPage />} />
+      <Route path="/recent" element={<RecentCommandsPage />} />
       <Route path="/routines/new" element={<RoutineEditPage />} />
       <Route path="/routines/errands" element={<ErrandsPage />} />
       <Route path="/routines/:id" element={<RoutineEditPage />} />

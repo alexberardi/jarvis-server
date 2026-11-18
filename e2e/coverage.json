@@ -12,6 +12,7 @@
     "/errands": { "tests": ["e2e/web/tests/errands.spec.ts"] },
     "/memories": { "tests": ["e2e/web/tests/memories-phonebook.spec.ts"] },
     "/phonebook": { "tests": ["e2e/web/tests/memories-phonebook.spec.ts"] },
+    "/recent": { "tests": ["e2e/web/tests/recent-commands.spec.ts"] },
     "/routines": { "tests": ["e2e/web/tests/routines.spec.ts"] },
     "/routines/new": { "tests": ["e2e/web/tests/routines.spec.ts"] },
     "/routines/:id": { "tests": ["e2e/web/tests/routines.spec.ts"] },

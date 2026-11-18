@@ -63,6 +63,7 @@ var wantTiers = map[string]tier{
 	"DELETE /api/cc/api/v0/mobile/proposal-suppressions/{suppression_id}":                            tierUser,
 	"GET /api/cc/api/v0/mobile/household/{household_id}/schedules":                                   tierUser,
 	"POST /api/cc/api/v0/mobile/household/{household_id}/schedules/{schedule_id}/cancel":             tierUser,
+	"GET /api/cc/api/v0/transcripts/recent":                                                          tierUser,
 	"GET /api/cc/api/v0/mobile/memories":                                                             tierUser,
 	"POST /api/cc/api/v0/mobile/memories":                                                            tierUser,
 	"GET /api/cc/api/v0/mobile/memories/{memory_id}":                                                 tierUser,
