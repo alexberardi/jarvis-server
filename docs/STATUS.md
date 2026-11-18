@@ -29,6 +29,7 @@ Done. Not ported, on purpose: audio cards and the callback-result page (see the 
 - [x] Household page (`/household`): name, members and roles, invites, join, leave, the feature switches (#700)
 - [x] The household's other settings on the web: voice, town, time zone, web search, Pantry, memory (#701); location and presence stay on the phone
 - [x] Signal automations on the web: the Household page's "When something happens" (mobile's Automations screen)
+- [x] Call details on the web (`/call-details`, from Account): what Jarvis may tell a business on a call
 
 Next: full alarms, spec first.
 
