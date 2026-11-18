@@ -11,6 +11,8 @@ import ChatPage from '@/pages/ChatPage'
 import DevicesPage from '@/pages/DevicesPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import ErrandsPage from '@/pages/ErrandsPage'
+import RoutineEditPage from '@/pages/RoutineEditPage'
+import RoutinesPage from '@/pages/RoutinesPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
 import InboxItemPage from '@/pages/InboxItemPage'
@@ -88,7 +90,12 @@ export function shellRoutes() {
       <Route path="/devices" element={<DevicesPage />} />
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
-      <Route path="/errands" element={<ErrandsPage />} />
+      <Route path="/routines" element={<RoutinesPage />} />
+      <Route path="/routines/new" element={<RoutineEditPage />} />
+      <Route path="/routines/errands" element={<ErrandsPage />} />
+      <Route path="/routines/:id" element={<RoutineEditPage />} />
+      {/* Scheduled errands moved under Routines (as on mobile). */}
+      <Route path="/errands" element={<Navigate to="/routines/errands" replace />} />
       <Route path="/inbox/suppressed" element={<SuppressedSuggestionsPage />} />
       <Route path="/inbox/:id" element={<InboxItemPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />
