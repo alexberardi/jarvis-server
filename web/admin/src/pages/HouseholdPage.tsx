@@ -19,6 +19,7 @@ import {
   type Member,
 } from '@/api/household'
 import HouseholdSettings from '@/components/account/HouseholdSettings'
+import { PlaceCard, VoiceCard } from '@/components/account/HouseholdVoiceAndPlace'
 import { Badge, Button, Card, CardHeader, Dialog, ErrorState, Input, PageHeader, Select, SkeletonList } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { errorMessage } from '@/lib/errors'
@@ -37,10 +38,11 @@ const refusal = (err: unknown, fallback: string) => {
 }
 
 /**
- * HouseholdPage is the active household's people and switches (mobile's Household settings):
- * its name, members and their roles, invite codes, the feature switches, joining another
- * household and leaving this one. Auth enforces who may do what; the page only hides controls
- * the caller's role can't use.
+ * HouseholdPage is the active household's people and settings (mobile's Household settings):
+ * its name, members and their roles, invite codes, how Jarvis talks, where the household is,
+ * the feature switches, joining another household and leaving this one. Location and presence
+ * detection stay on the phone (they come from its GPS). Auth and cc enforce who may do what;
+ * the page only hides controls the caller's role can't use.
  */
 export default function HouseholdPage() {
   const { activeHouseholdId: hh, households, state } = useAuth()
@@ -56,6 +58,8 @@ export default function HouseholdPage() {
       <MembersCard id={hh} isAdmin={isAdmin} myId={state.user?.id} />
       {/* As on mobile: codes let people in, so only those who may invite see them. */}
       {canInvite && <InvitesCard id={hh} isAdmin={isAdmin} />}
+      <VoiceCard hh={hh} canEdit={isAdmin} />
+      <PlaceCard hh={hh} canEdit={isAdmin} />
       <HouseholdSettings />
       <JoinCard />
       {households.length > 1 && me && <LeaveCard id={hh} name={me.name} />}

@@ -85,7 +85,8 @@ describe('HouseholdSettings', () => {
     await waitFor(() => expect(watches).toBeEnabled())
     expect(watches).not.toBeChecked()
     expect(errands).not.toBeChecked()
-    expect(screen.getAllByText(/Off by default/)).toHaveLength(2)
+    expect(screen.getAllByText(/Off by default/)).toHaveLength(4)
+    expect(screen.getAllByText(/On by default/)).toHaveLength(2)
     expect(screen.queryByText(/Only a household admin can change/)).toBeNull()
 
     await act(async () => {
@@ -111,6 +112,18 @@ describe('HouseholdSettings', () => {
     expect(screen.getByText('Only a household admin can change these.')).toBeVisible()
     fireEvent.click(watches)
     expect(household.putHouseholdSetting).not.toHaveBeenCalled()
+  })
+
+  it('shows memory on when the household never set it, and learning off-limits while memory is off', async () => {
+    auth.listHouseholds.mockResolvedValue([{ id: 'h1', name: 'Home', role: 'admin' }])
+    household.getHouseholdSettings.mockResolvedValue({ 'memory.enabled': false })
+    renderSettings()
+    const memory = await screen.findByRole('switch', { name: 'Memory' })
+    await waitFor(() => expect(memory).toBeEnabled())
+    expect(memory).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toBeDisabled()
+    expect(screen.getByRole('switch', { name: 'Web search' })).not.toBeChecked()
   })
 
   it('leaves the switch as it was when the write fails', async () => {

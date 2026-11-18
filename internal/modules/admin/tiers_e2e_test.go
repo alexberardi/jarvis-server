@@ -270,6 +270,17 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "POST", hp+h2+"/leave", map[string]any{}, bearer(m1)...); !refused(code) {
 		t.Fatalf("member leaves a household they're not in: %d %v", code, out)
 	}
+	// The household's voice starters and time zone: any member of it reads; another household's
+	// are refused.
+	for _, path := range []string{"/persona/presets", "/timezone"} {
+		u := base + "/api/cc/api/v0/mobile/household/"
+		if code, out := call(t, "GET", u+h1+path, nil, bearer(m1)...); code != 200 {
+			t.Fatalf("own household %s: %d %v", path, code, out)
+		}
+		if code, out := call(t, "GET", u+h2+path, nil, bearer(m1)...); code != 403 {
+			t.Fatalf("another household's %s: %d %v", path, code, out)
+		}
+	}
 	// Recent commands: the caller's own transcripts.
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {
 		t.Fatalf("own recent commands: %d %v", code, out)

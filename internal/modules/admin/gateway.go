@@ -202,6 +202,10 @@ var passRoutes = []passRoute{
 	// Household settings (Account page): cc lets any member read, only a household admin write.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/settings"),
 	ccUserRoute("PUT /api/cc/api/v0/mobile/household/{household_id}/settings/{key...}"),
+	// The Household page's voice and time zone (mobile's Household settings): the persona
+	// starters and the zone in effect with where it came from; any member reads.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/persona/presets"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/timezone"),
 	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
 	// waits (never listing codes) plus the caller's own households, and approves a typed code
 	// only into one of those.

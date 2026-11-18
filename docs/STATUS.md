@@ -26,8 +26,9 @@ Done. Not ported, on purpose: audio cards and the callback-result page (see the 
 - [x] Routines on the web (#696)
 - [x] Memories and the phonebook on the web (#697)
 - [x] Recent commands on the web (#698), every tool call recorded (#699); no ratings ([decision](decisions/2026-11-17-web-recent-commands-no-ratings.md))
-- [ ] Household page (`/household`): name, members and roles, invites, join, leave, the feature switches (moved from Account)
-- [ ] The household's other settings on the web (mobile's voice, web search, Pantry, watches and errands, memory, automations); location and presence stay on the phone
+- [x] Household page (`/household`): name, members and roles, invites, join, leave, the feature switches (#700)
+- [ ] The household's other settings on the web: voice, town, time zone, web search, Pantry, memory; location and presence stay on the phone
+- [ ] Signal automations on the web (mobile's Automations screen)
 
 Next: full alarms, spec first.
 
