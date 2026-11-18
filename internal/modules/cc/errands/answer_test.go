@@ -169,7 +169,7 @@ func TestCardSummarySkipsLeadIn(t *testing.T) {
 func TestComposePromptSendMeIsTheReport(t *testing.T) {
 	p := ComposePrompt(espressoGoal, []Result{serverOutcome("quick_search", espressoSources())})
 	if !strings.Contains(p, "'send me a summary', 'let me know') is NOT an undone action") ||
-		!strings.Contains(p, "no lead-in line") {
+		!strings.Contains(p, "Start with one plain sentence") {
 		t.Fatalf("compose prompt:\n%s", p)
 	}
 }

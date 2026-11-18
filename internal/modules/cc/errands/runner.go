@@ -772,9 +772,10 @@ func ComposePrompt(goal string, results []Result) string {
 		"step:\n" + strings.Join(lines, "\n") +
 		"\n\nIf the goal asks for information (to find, search, look up, compare, list or " +
 		"summarize something), this report IS the answer the user is waiting for: give it. " +
-		"Name the specific things found with their key facts (names, prices, ratings, times) " +
-		"taken from what the steps found, one per line, starting with the first one (no " +
-		"lead-in line), then one short closing sentence. If fewer were found than asked for, " +
+		"Start with one plain sentence that answers them (their notification shows it), then " +
+		"lay out the rest in whatever shape serves what they asked: you decide (a pick and " +
+		"why, a comparison, the tradeoffs, a list, a table). Use the specifics (names, prices, " +
+		"ratings, times) taken from what the steps found. If fewer were found than asked for, " +
 		"give the ones found and say so. Otherwise write a " +
 		"short, friendly 1-2 sentence summary. Base EVERY statement STRICTLY " +
 		"on the detail shown after each step — quote the useful information (the weather, " +
@@ -783,8 +784,7 @@ func ComposePrompt(goal string, results []Result) string {
 		"do NOT say a joke was told, a message was sent, an item was found, or a task was " +
 		"done unless that detail is actually shown above. The errand is OVER, so NEVER say " +
 		"you 'will' do something and never mention any action not in the steps above. If a " +
-		"step FAILED, say so honestly (a failed step stops the errand, so later steps did " +
-		"NOT run).\n" +
+		"step FAILED, say so honestly; a step that is not listed above did NOT run.\n" +
 		"CRITICAL — the goal may DESCRIBE actions (set a reminder, send a message, make a " +
 		"call, add a to-do) that were NOT performed: ONLY the steps listed above are real. " +
 		"If the goal mentions such an action but there is NO step for it above, you MUST " +
@@ -794,7 +794,7 @@ func ComposePrompt(goal string, results []Result) string {
 		"to the user themselves ('send me a summary', 'let me know') is NOT an undone " +
 		"action: this report is how they get it, so never say it was not sent; saving or noting " +
 		"the result is not sending it either. No " +
-		"preamble, no markdown (plain lines only)."
+		"preamble. Markdown is fine where it helps (a list, a table, bold for the pick)."
 }
 
 // composeErrandMessage LLM-composes the report on the background label (D40 09.Q11; legacy
@@ -803,7 +803,7 @@ func (s *Service) composeErrandMessage(ctx context.Context, goal string, results
 	if s.LLM == nil {
 		return fallback, false
 	}
-	temp, maxTok, off := 0.3, 800, 0
+	temp, maxTok, off := 0.3, 2000, 0 // room for a comparison; a short answer stays short
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
 		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &off,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(ComposePrompt(goal, results))}},
@@ -852,7 +852,8 @@ func cardSummary(a Aggregate) string {
 	}
 	var first string
 	for _, line := range strings.Split(a.Answer, "\n") {
-		if line = parse.PyStrip(line); line != "" {
+		// The push shows words, not a heading's or a list's marks.
+		if line = strings.Trim(parse.PyStrip(line), "#*->| "); line != "" {
 			if first == "" {
 				first = line
 			}
