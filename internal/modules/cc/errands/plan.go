@@ -272,6 +272,12 @@ func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error)
 		card.Gated, card.DedupeKey = true, "autorun:"+wfID
 		cardID = s.Cards.Post(ctx, card)
 	}
+	// The plan carries its card before the run can start: launch may run the first step at once,
+	// and anything reading the plan meanwhile (a Stop tap, the app) must find the card.
+	if cardID != "" {
+		p.InboxItemID = cardID
+		s.setPlanInbox(ctx, p.ID, cardID)
+	}
 	cmds := make([]any, 0, len(p.Steps))
 	for _, st := range p.Steps {
 		cmds = append(cmds, strings.TrimSpace(st.Command))
@@ -279,10 +285,6 @@ func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error)
 	raced, err := s.launch(ctx, p, wfID, KindAutorun, cardID, &policy.Event{HouseholdID: p.HouseholdID, UserID: p.UserID,
 		Source: policy.SourceErrandPlan, SourceID: p.ID, Effect: policy.Allow, Outcome: policy.OutcomeLaunched,
 		Reason: "every step is allowed by the household's rules", Detail: map[string]any{"workflow_id": wfID, "steps": cmds}})
-	if cardID != "" {
-		p.InboxItemID = cardID
-		s.setPlanInbox(ctx, p.ID, cardID)
-	}
 	if err != nil {
 		w.InboxItemID = cardID
 		rc.State = "failed"
