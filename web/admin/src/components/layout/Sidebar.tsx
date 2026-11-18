@@ -41,6 +41,7 @@ interface NavItem {
 const memberNav: NavItem[] = [
   { label: 'Chat', icon: MessageSquare, path: '/chat' },
   { label: 'Devices', icon: Radio, path: '/devices' },
+  { label: 'Nodes', icon: Cpu, path: '/nodes' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
   { label: 'Recent commands', icon: History, path: '/recent' },
@@ -62,7 +63,8 @@ const adminNav: NavItem[] = [
   { label: 'Connections', icon: Link2, path: '/admin/connections' },
   { label: 'Logs', icon: ScrollText, path: '/admin/logs' },
   { label: 'Traces', icon: Activity, path: '/admin/traces' },
-  { label: 'Nodes', icon: Cpu, path: '/admin/nodes' },
+  // The household's are under Nodes above; this is every household's.
+  { label: 'All nodes', icon: Cpu, path: '/admin/nodes' },
   { label: 'Users', icon: Users, path: '/admin/users' },
   { label: 'Phone', icon: Phone, path: '/admin/phone' },
   // /update used to be reachable ONLY via the dashboard's UpdateBanner, which
