@@ -25,7 +25,9 @@ Done. Not ported, on purpose: audio cards and the callback-result page (see the 
 - [x] Recurrence: "every monday" was stored as daily (#694)
 - [x] Routines on the web (#696)
 - [x] Memories and the phonebook on the web (#697)
-- [ ] Recent commands on the web (`/recent`); no ratings ([decision](decisions/2026-11-17-web-recent-commands-no-ratings.md))
+- [x] Recent commands on the web (#698), every tool call recorded (#699); no ratings ([decision](decisions/2026-11-17-web-recent-commands-no-ratings.md))
+- [ ] Household page (`/household`): name, members and roles, invites, join, leave, the feature switches (moved from Account)
+- [ ] The household's other settings on the web (mobile's voice, web search, Pantry, watches and errands, memory, automations); location and presence stay on the phone
 
 Next: full alarms, spec first.
 

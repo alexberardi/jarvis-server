@@ -50,7 +50,7 @@ export default function HouseholdSettings() {
     <Card as="section" aria-labelledby="household-settings">
       <CardHeader
         id="household-settings"
-        title={`Household${membership ? `: ${membership.name}` : ''}`}
+        title="Features"
         description={membership && !canEdit ? 'Only a household admin can change these.' : undefined}
       />
       {error && (

@@ -4,6 +4,7 @@ import {
   History,
   Brain,
   BookUser,
+  House,
   LayoutDashboard,
   Settings,
   Link2,
@@ -47,6 +48,7 @@ const memberNav: NavItem[] = [
   { label: 'Routines', icon: Workflow, path: '/routines' },
   { label: 'Memories', icon: Brain, path: '/memories' },
   { label: 'Phonebook', icon: BookUser, path: '/phonebook' },
+  { label: 'Household', icon: House, path: '/household' },
   // Workflows and Recordings are shelved (docs/decisions/2026-11-15-taught-workflows-shelved.md):
   // their pages and routes stay, with no link to them.
 ]

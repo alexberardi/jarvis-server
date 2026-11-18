@@ -17,3 +17,71 @@ export async function getHouseholdSettings(householdId: string): Promise<Record<
 export async function putHouseholdSetting(householdId: string, key: string, value: unknown): Promise<void> {
   await apiClient.put(`${base(householdId)}/${encodeURIComponent(key)}`, { value })
 }
+
+/**
+ * A household's people (mobile's Household settings), through auth's routes on the gateway.
+ * Auth checks the caller's role per route: any member lists; power users invite and revoke;
+ * admins rename, change roles and remove; leaving refuses the last admin and an only household.
+ */
+const hh = (id: string) => `/api/households/${encodeURIComponent(id)}`
+
+export type HouseholdRole = 'admin' | 'power_user' | 'member'
+
+export const ROLE_LABEL: Record<string, string> = { admin: 'Admin', power_user: 'Power user', member: 'Member' }
+
+export interface Member {
+  user_id: number
+  username: string
+  display_name: string | null
+  email: string
+  role: HouseholdRole
+  created_at: string
+}
+
+export interface Invite {
+  id: number
+  code: string
+  default_role: HouseholdRole
+  max_uses: number | null
+  use_count: number
+  expires_at: string | null
+  revoked: boolean
+  created_at: string
+}
+
+export async function renameHousehold(id: string, name: string): Promise<void> {
+  await apiClient.patch(hh(id), { name })
+}
+
+export async function listMembers(id: string): Promise<Member[]> {
+  return (await apiClient.get<Member[]>(`${hh(id)}/members`)).data
+}
+
+export async function setMemberRole(id: string, userId: number, role: HouseholdRole): Promise<void> {
+  await apiClient.patch(`${hh(id)}/members/${userId}`, { role })
+}
+
+export async function removeMember(id: string, userId: number): Promise<void> {
+  await apiClient.delete(`${hh(id)}/members/${userId}`)
+}
+
+export async function leaveHousehold(id: string): Promise<void> {
+  await apiClient.post(`${hh(id)}/leave`, {})
+}
+
+export async function listInvites(id: string): Promise<Invite[]> {
+  return (await apiClient.get<Invite[]>(`${hh(id)}/invites`)).data
+}
+
+export async function createInvite(id: string, body: { default_role: HouseholdRole; expires_in_days: number; max_uses: number | null }): Promise<Invite> {
+  return (await apiClient.post<Invite>(`${hh(id)}/invites`, body)).data
+}
+
+export async function revokeInvite(id: string, inviteId: number): Promise<void> {
+  await apiClient.delete(`${hh(id)}/invites/${inviteId}`)
+}
+
+/** joinHousehold joins another household with an invite code, as the caller, in the invite's role. */
+export async function joinHousehold(code: string): Promise<{ household_id: string; household_name: string; role: HouseholdRole }> {
+  return (await apiClient.post(`/api/households/join`, { invite_code: code })).data
+}
