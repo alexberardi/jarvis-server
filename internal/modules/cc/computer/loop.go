@@ -348,6 +348,8 @@ type round struct {
 	// lastActs and sameActs are the same for the actions alone, whatever the screen showed.
 	lastActs string
 	sameActs int
+	// waits counts the wait-only batches in a row on a page that hasn't changed.
+	waits int
 	// enterTried: this stuck batch's button was already confirmed with Enter instead, once.
 	enterTried bool
 	// checkoutAsked: a batch that buys something came without a checkout, and was sent back.
@@ -697,6 +699,19 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		r.sameActs++
 	} else {
 		r.lastActs, r.sameActs = acts, 0
+	}
+	// Waiting again for a page that is already as it was changes nothing: Gemma 4 12B waited
+	// "for the page to fully load" six rounds running on a loaded results page (2026-11-17).
+	if acts == "" && r.same {
+		if r.waits++; r.waits >= stuckGiveUp {
+			return Outcome{State: StateFailed, lost: true, Summary: stuckSummary(firstIntent(actions))}, true
+		}
+		if r.waits >= stuckAfter {
+			r.feedback = "the page has finished loading: it is exactly as it was at your last look, and everything on it is listed. Waiting again changes nothing. Act on what is listed, or say done with what the page shows."
+			return Outcome{}, false
+		}
+	} else {
+		r.waits = 0
 	}
 	key := batchKey(obs, actions)
 	if key != "" && key == r.lastBatch {

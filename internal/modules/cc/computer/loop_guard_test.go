@@ -202,3 +202,39 @@ func TestLongIntentIsCut(t *testing.T) {
 		t.Fatalf("reply %+v, %v", r, err)
 	}
 }
+
+func TestThoughtObjectThenAnswer(t *testing.T) {
+	r, err := parseReply(`{"thought": "All filled in.", "actions": []}` + "\n\n" + `{"done": true, "summary": "Filled it in."}`)
+	if err != nil || !r.Done || r.Summary != "Filled it in." || r.Thought != "All filled in." {
+		t.Fatalf("%+v, %v", r, err)
+	}
+}
+
+func TestFirstObjectIsTheAnswer(t *testing.T) {
+	for _, tail := range []string{"\n{\"done\": true, \"summary\": \"x\"}", "\n```\nThat fills the form.", " }"} {
+		r, err := parseReply(`{"actions": [{"kind": "press", "ref": "e1", "intent": "Open"}]}` + tail)
+		if err != nil || len(r.Actions) != 1 || r.Done {
+			t.Errorf("tail %q: %+v, %v", tail, r, err)
+		}
+	}
+}
+
+// Waiting on a page that isn't changing is sent back, and ends the task if it goes on.
+func TestWaitingOnALoadedPageStops(t *testing.T) {
+	e := newEnv(t, formPage())
+	wait := actions(`{"kind": "wait", "ms": 2000, "intent": "Wait for the page to load"}`)
+	for range 12 {
+		e.script(wait)
+	}
+	out := e.run()
+	if out.State != StateFailed || len(e.exec.batches) > 3 {
+		t.Fatalf("outcome %+v after %d batches, %d calls", out, len(e.exec.batches), len(e.llm.reqs))
+	}
+	told := false
+	for _, req := range e.llm.reqs {
+		told = told || strings.Contains(userText(req), "Waiting again changes nothing")
+	}
+	if !told {
+		t.Fatal("the model was never told the page had loaded")
+	}
+}

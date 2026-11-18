@@ -19,6 +19,7 @@ const (
 	Qwen3_4B    = "Qwen3_4B"              // small local models: its own name, so it can be tuned alone
 	Cloud       = "Cloud"                 // remote models (any vendor), native tools
 	Gemma4      = "Gemma4"                // Gemma 4: native tools, never the Qwen suffix (BuiltinPrefs)
+	Gemma4_12B  = "Gemma4_12B"            // Gemma 4 12B (a 12 GB card): its own name, so it can be tuned alone
 	thinkOpen   = "<think>"
 	thinkClose  = "</think>"
 	suffixThink = "/think"

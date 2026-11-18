@@ -90,9 +90,12 @@ func TestParseReplyTruncated(t *testing.T) {
 	if len(r.Actions) != 1 || r.Actions[0].Kind != "keypress" {
 		t.Fatalf("truncated reply parsed to %+v", r)
 	}
+	// Over-closed: the first whole object is the answer, whatever follows it.
+	if r, err := parseReply(`{"done": true, "summary": "s"}}`); err != nil || !r.Done || r.Summary != "s" {
+		t.Errorf("over-closed reply: %+v, %v", r, err)
+	}
 	for _, s := range []string{
 		`{"thought": "t", "actions": [{"kind": "type", "text": "mi`, // mid-string
-		`{"done": true, "summary": "s"}}`,                           // over-closed
 	} {
 		if _, err := parseReply(s); err == nil {
 			t.Errorf("parseReply(%q) = nil error, want one", s)

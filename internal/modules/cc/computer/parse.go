@@ -55,7 +55,12 @@ func parseReply(s string) (Reply, error) {
 		return Reply{}, errors.New("the answer is not a JSON object")
 	}
 	var r Reply
-	if err := json.Unmarshal([]byte(s[i:j+1]), &r); err != nil {
+	// The first whole object that says something is the answer. Gemma 4 12B writes its thought
+	// as one object ({"thought": ..., "actions": []}) and its answer as the next, or goes on
+	// after the answer with a code fence: every such answer was thrown away (2026-11-17).
+	if first, ok := firstAnswer(s[i:]); ok {
+		r = first
+	} else if err := json.Unmarshal([]byte(s[i:j+1]), &r); err != nil {
 		// The loop runs at temperature 0, so a retry reproduces the model's slip byte for byte
 		// (#528): the deterministic ones seen — a dropped "y" key in a coordinate pair, an
 		// action closed before its "intent", and an answer missing only its closing braces —
@@ -291,4 +296,27 @@ func salvageFirstAction(s string) (Reply, bool) {
 	}
 	r, err := parseReply(`{"thought": "(the answer was cut off: its first action only)", "actions": [` + string(first) + `]}`)
 	return r, err == nil && len(r.Actions) == 1
+}
+
+// firstAnswer reads the objects s starts with, one after another, and returns the first that
+// acts, is done or asks, with the thought of an empty one before it. ok is false when the
+// first object can't be read (parseReply's repairs then have their turn).
+func firstAnswer(s string) (Reply, bool) {
+	dec := json.NewDecoder(strings.NewReader(s))
+	var first Reply
+	for n := 0; ; n++ {
+		var r Reply
+		if dec.Decode(&r) != nil {
+			return first, n > 0
+		}
+		if n == 0 {
+			first = r
+		}
+		if len(r.Actions) > 0 || r.Done || strings.TrimSpace(r.Ask) != "" {
+			if r.Thought == "" {
+				r.Thought = first.Thought
+			}
+			return r, true
+		}
+	}
 }
