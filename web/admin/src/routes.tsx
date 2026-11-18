@@ -22,6 +22,7 @@ import HouseholdPage from '@/pages/HouseholdPage'
 import CallDetailsPage from '@/pages/CallDetailsPage'
 import HouseholdNodesPage from '@/pages/HouseholdNodesPage'
 import NowPlayingPage from '@/pages/NowPlayingPage'
+import StoredDataPage from '@/pages/StoredDataPage'
 import InboxItemPage from '@/pages/InboxItemPage'
 import InboxPage from '@/pages/InboxPage'
 import LoginPage from '@/pages/LoginPage'
@@ -116,6 +117,7 @@ export function shellRoutes() {
       <Route path="/call-details" element={<CallDetailsPage />} />
       <Route path="/nodes" element={<HouseholdNodesPage />} />
       <Route path="/now-playing" element={<NowPlayingPage />} />
+      <Route path="/nodes/:id/data" element={<StoredDataPage />} />
       {UiGalleryPage && (
         <Route
           path="/dev/ui"

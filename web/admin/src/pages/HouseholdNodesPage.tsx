@@ -64,7 +64,7 @@ export default function HouseholdNodesPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {nodes.map((n) => (
-            <NodeCard key={n.node_id} node={asNode(n, hh)} live={n} forge={false} />
+            <NodeCard key={n.node_id} node={asNode(n, hh)} live={n} forge={false} data />
           ))}
         </div>
       )}

@@ -2,6 +2,19 @@
   "fallback": "Scripted model: no rule matched that.",
   "rules": [
     {
+      "match": "(?i)add oat milk to the shopping list",
+      "tool_calls": [{"name": "shopping_list", "arguments": {"action": "add", "items": ["oat milk"]}}]
+    },
+    {
+      "after_tool": "shopping_list",
+      "match": "(?i)\"success\":\\s*true",
+      "reply": "Added oat milk to the shopping list."
+    },
+    {
+      "after_tool": "shopping_list",
+      "reply": "Sorry, oat milk was not added to the list."
+    },
+    {
       "match": "(?i)turn on the kitchen lights",
       "tool_calls": [{"name": "control_device", "arguments": {"device_name": "Kitchen Lights", "action": "turn_on"}}]
     },
