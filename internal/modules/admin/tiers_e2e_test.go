@@ -306,6 +306,22 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {
 		t.Fatalf("own recent commands: %d %v", code, out)
 	}
+	// Rooms: a member changes their own household's; another household's are refused.
+	rooms := base + "/api/cc/api/v0/households/"
+	rc, rout := call(t, "POST", rooms+h1+"/rooms", map[string]any{"name": "Pantry"}, bearer(m1)...)
+	if rc != 200 && rc != 201 {
+		t.Fatalf("member adds a room: %d %v", rc, rout)
+	}
+	roomID := fmt.Sprint(obj(t, rout)["id"])
+	if code, out := call(t, "POST", rooms+h2+"/rooms", map[string]any{"name": "Pantry"}, bearer(m1)...); code != 403 {
+		t.Fatalf("member adds a room to another household: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", rooms+h2+"/rooms/"+roomID, map[string]any{"name": "Larder"}, bearer(m2)...); code != 404 {
+		t.Fatalf("another household renames the room: %d %v", code, out)
+	}
+	if code, out := call(t, "DELETE", rooms+h1+"/rooms/"+roomID, nil, bearer(m1)...); code != 200 && code != 204 {
+		t.Fatalf("member deletes the room: %d %v", code, out)
+	}
 	// Memories and the phonebook: the member's own household works; another household's are
 	// refused (cc: not a member).
 	mem := base + "/api/cc/api/v0/mobile/memories"

@@ -7,7 +7,7 @@
     "/": { "tests": ["e2e/web/tests/roles.spec.ts"] },
     "/chat": { "tests": ["e2e/web/tests/chat.spec.ts", "e2e/web/tests/household.spec.ts"] },
     "/nodes": { "tests": ["e2e/web/tests/household-nodes.spec.ts", "e2e/web/tests/roles.spec.ts"] },
-    "/devices": { "tests": ["e2e/web/tests/devices.spec.ts", "e2e/web/tests/roles.spec.ts"] },
+    "/devices": { "tests": ["e2e/web/tests/devices.spec.ts", "e2e/web/tests/roles.spec.ts", "e2e/web/tests/rooms.spec.ts"] },
     "/addons": { "tests": ["e2e/web/tests/addons.spec.ts"] },
     "/inbox": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/household.spec.ts", "e2e/web/tests/inbox-alerts.spec.ts"] },
     "/errands": { "tests": ["e2e/web/tests/errands.spec.ts"] },

@@ -182,6 +182,10 @@ var passRoutes = []passRoute{
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/rooms"),
+	// Rooms (mobile's Rooms, the Devices page): cc lets any member of the household change them.
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/rooms"),
+	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/rooms/{room_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/households/{household_id}/rooms/{room_id}"),
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/devices"),
 	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/devices/import"),
 	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/devices/{device_id}"),

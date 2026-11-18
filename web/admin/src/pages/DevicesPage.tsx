@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, Plus, Radio, RefreshCw } from 'lucide-react'
+import { ChevronRight, DoorOpen, Plus, Radio, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { defaultDeviceNode, deviceNodeName, getDeviceConfig, listDeviceRooms, listDevices, requestDeviceJob } from '@/api/devices'
 import { Alert, Button, Card, EmptyState, ErrorState, Input, List, PageHeader, SkeletonList } from '@/components/ui'
 import DeviceDiscovery from '@/components/devices/DeviceDiscovery'
 import DeviceDetails from '@/components/devices/DeviceDetails'
+import RoomsDialog from '@/components/devices/RoomsDialog'
 import { errorMessage } from '@/lib/errors'
 
 export default function DevicesPage() {
@@ -21,6 +22,7 @@ function HouseholdDevices({ household, superuser }: { household: string; superus
   const [search, setSearch] = useState('')
   const [discover, setDiscover] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
+  const [roomsOpen, setRoomsOpen] = useState(false)
   const config = useQuery({ queryKey: ['devices', household, 'config'], queryFn: ({ signal }) => getDeviceConfig(household, signal), retry: false })
   const external = !!config.data?.use_external_devices
   const devices = useQuery({ queryKey: ['devices', household, 'registry'], queryFn: ({ signal }) => listDevices(household, signal), enabled: !!config.data && !external, retry: false })
@@ -40,7 +42,10 @@ function HouseholdDevices({ household, superuser }: { household: string; superus
       <PageHeader title="Devices" description="The lights, appliances and other devices in your household."
         actions={external
           ? <Button icon={<RefreshCw size={16} aria-hidden />} disabled={!node} loading={manager.isFetching} onClick={() => void manager.refetch()}>Refresh devices</Button>
-          : <Button variant="primary" icon={<Plus size={16} aria-hidden />} disabled={!config.data} onClick={() => setDiscover(true)}>Add devices</Button>} />
+          : <>
+              <Button icon={<DoorOpen size={16} aria-hidden />} disabled={!rooms.data} onClick={() => setRoomsOpen(true)}>Rooms</Button>
+              <Button variant="primary" icon={<Plus size={16} aria-hidden />} disabled={!config.data} onClick={() => setDiscover(true)}>Add devices</Button>
+            </>} />
       {external && <Alert title="Managed by your integrations">{node ? `Listed using ${deviceNodeName(node)}. ` : 'No household node is online. '}Manage these devices in their integration or the mobile app.</Alert>}
       <Input type="search" label="Search devices" placeholder="Name, room or type" value={search} onChange={(e) => setSearch(e.target.value)} />
       <Card flush>
@@ -66,6 +71,7 @@ function HouseholdDevices({ household, superuser }: { household: string; superus
         ? <Link className="text-primary underline underline-offset-4" to="/admin/store">Browse the Store</Link>
         : 'Use the mobile app or ask your household administrator to set up an integration.'}</p>}
       {discover && config.data && <DeviceDiscovery household={household} config={config.data} rooms={rooms.data ?? []} roomsError={rooms.isError} onClose={() => setDiscover(false)} onChanged={changed} onExisting={(id) => { changed(); setDiscover(false); setSelected(id) }} />}
+      {roomsOpen && rooms.data && <RoomsDialog household={household} rooms={rooms.data} onClose={() => setRoomsOpen(false)} />}
       {device && <DeviceDetails key={device.id} device={device} rooms={rooms.data ?? []} roomsError={rooms.isError} onClose={() => setSelected(null)} onChanged={changed} />}
     </div>
   )
