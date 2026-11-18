@@ -4,17 +4,47 @@ import { Alert, Card, CardHeader, Switch, toast } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { errorMessage } from '@/lib/errors'
 
-/** The household switches the web shows (cc's allowlist has more; the app edits those). */
+/**
+ * The household switches (mobile's Household settings), with each one's default when the
+ * household never set it. Learning from conversations needs memory on, as on mobile.
+ */
 const SWITCHES = [
+  {
+    key: 'web_search.enabled',
+    label: 'Web search',
+    help: 'Lets Jarvis search the internet for current events, prices and news. Off, it answers only from what it knows and nothing leaves your network.',
+    on: false,
+  },
+  {
+    key: 'pantry.enabled',
+    label: 'Pantry',
+    help: 'Browse and install packages from the Pantry. On, this app, your nodes and your server contact the Pantry, which sees your IP address and what you browse and install.',
+    on: false,
+  },
   {
     key: 'watches.enabled',
     label: 'Watches',
     help: 'Lets members ask Jarvis to watch a web page, a search or a signal and tell them when it changes.',
+    on: false,
   },
   {
     key: 'errands.autonomous_enabled',
     label: 'Errand autonomy',
     help: "Lets the household's rules run background errands without asking first.",
+    on: false,
+  },
+  {
+    key: 'memory.enabled',
+    label: 'Memory',
+    help: 'Lets Jarvis remember what you ask it to, recall it later and forget it on request. Off, it neither stores nor uses memories here.',
+    on: true,
+  },
+  {
+    key: 'memory.extraction_enabled',
+    label: 'Learn from conversations',
+    help: 'Lets Jarvis pick up useful facts from what you say, not only what you ask it to remember. Only for speakers it recognises.',
+    on: true,
+    needs: 'memory.enabled',
   },
 ] as const
 
@@ -64,9 +94,9 @@ export default function HouseholdSettings() {
             <Switch
               id={`hh-${s.key.replace(/\W/g, '-')}`}
               label={s.label}
-              description={`${s.help} Off by default.`}
-              checked={data?.[s.key] === true}
-              disabled={!canEdit || isLoading || !!error || write.isPending}
+              description={`${s.help} ${s.on ? 'On' : 'Off'} by default.`}
+              checked={(data?.[s.key] ?? s.on) === true}
+              disabled={!canEdit || isLoading || !!error || write.isPending || ('needs' in s && data?.[s.needs] === false)}
               onCheckedChange={(value) => write.mutate({ key: s.key, value })}
             />
           </li>

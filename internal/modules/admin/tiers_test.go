@@ -115,6 +115,8 @@ var wantTiers = map[string]tier{
 	// role to write.
 	"GET /api/cc/api/v0/mobile/household/{household_id}/settings":          tierUser,
 	"PUT /api/cc/api/v0/mobile/household/{household_id}/settings/{key...}": tierUser,
+	"GET /api/cc/api/v0/mobile/household/{household_id}/persona/presets":   tierUser,
+	"GET /api/cc/api/v0/mobile/household/{household_id}/timezone":          tierUser,
 	"GET /api/cc/api/v0/nodes/pairings":                                    tierUser,
 	"POST /api/cc/api/v0/nodes/pairings/approve":                           tierUser,
 	"POST /api/cc/api/v0/nodes/pairings/deny":                              tierUser,

@@ -5,8 +5,8 @@ import { apiClient } from './client'
  * (internal/modules/cc/household_settings.go) through the gateway's member routes. Any member
  * reads them; cc lets only a household admin (or owner) write.
  */
-const base = (householdId: string) =>
-  `/api/cc/api/v0/mobile/household/${encodeURIComponent(householdId)}/settings`
+const root = (householdId: string) => `/api/cc/api/v0/mobile/household/${encodeURIComponent(householdId)}`
+const base = (householdId: string) => `${root(householdId)}/settings`
 
 /** getHouseholdSettings is every allowlisted key's effective value for the household. */
 export async function getHouseholdSettings(householdId: string): Promise<Record<string, unknown>> {
@@ -84,4 +84,28 @@ export async function revokeInvite(id: string, inviteId: number): Promise<void> 
 /** joinHousehold joins another household with an invite code, as the caller, in the invite's role. */
 export async function joinHousehold(code: string): Promise<{ household_id: string; household_name: string; role: HouseholdRole }> {
   return (await apiClient.post(`/api/households/join`, { invite_code: code })).data
+}
+
+/** The persona starters (mobile's chips): load one into the editor, tweak, save. */
+export interface PersonaPresets {
+  presets: { id: string; label: string; text: string }[]
+  default_preset_id: string
+  default_text: string
+  max_chars: number
+}
+
+export async function getPersonaPresets(id: string): Promise<PersonaPresets> {
+  return (await apiClient.get<PersonaPresets>(`${root(id)}/persona/presets`)).data
+}
+
+/** The zone in effect: the setting, else the nodes' (source "node"), else UTC ("default"). */
+export interface HouseholdTimezone {
+  timezone: string
+  source: 'setting' | 'node' | 'default'
+  /** What the most recently seen node reported ("" = none). */
+  node_timezone: string
+}
+
+export async function getHouseholdTimezone(id: string): Promise<HouseholdTimezone> {
+  return (await apiClient.get<HouseholdTimezone>(`${root(id)}/timezone`)).data
 }
