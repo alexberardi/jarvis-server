@@ -14,7 +14,7 @@ const DELIVERY: { value: Delivery; label: string }[] = [
 
 const HINT: Record<Delivery, string> = {
   notification: 'Jarvis sends you a card to confirm before it acts.',
-  automatic: 'Jarvis acts the moment it happens. Anything sensitive, like unlocking a door, still asks first.',
+  automatic: 'Jarvis acts the moment it happens, without checking with you.',
 }
 
 /**
