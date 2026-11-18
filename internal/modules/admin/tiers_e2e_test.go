@@ -322,6 +322,14 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "DELETE", rooms+h1+"/rooms/"+roomID, nil, bearer(m1)...); code != 200 && code != 204 {
 		t.Fatalf("member deletes the room: %d %v", code, out)
 	}
+	// Now playing: the member's own household reads; another household's is refused.
+	pb := base + "/api/cc/api/v0/mobile/playback"
+	if code, out := call(t, "GET", pb+"?household_id="+h1, nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own household's playback: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", pb+"?household_id="+h2, nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's playback: %d %v", code, out)
+	}
 	// Memories and the phonebook: the member's own household works; another household's are
 	// refused (cc: not a member).
 	mem := base + "/api/cc/api/v0/mobile/memories"

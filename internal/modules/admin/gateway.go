@@ -216,6 +216,11 @@ var passRoutes = []passRoute{
 	// Signal automations (mobile's Automations): cc lets any member read, only a household admin write.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/signal-automations"),
 	ccUserRoute("PUT /api/cc/api/v0/mobile/household/{household_id}/signal-automations/{kind}"),
+	// Now playing (mobile's Now playing): cc checks membership of the household, or of the
+	// node's household for a cover or a control.
+	ccUserRoute("GET /api/cc/api/v0/mobile/playback"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/playback/cover"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/playback/control"),
 	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
 	// waits (never listing codes) plus the caller's own households, and approves a typed code
 	// only into one of those.
