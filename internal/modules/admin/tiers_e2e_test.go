@@ -272,7 +272,7 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	}
 	// The household's voice starters and time zone: any member of it reads; another household's
 	// are refused.
-	for _, path := range []string{"/persona/presets", "/timezone"} {
+	for _, path := range []string{"/persona/presets", "/timezone", "/signal-automations"} {
 		u := base + "/api/cc/api/v0/mobile/household/"
 		if code, out := call(t, "GET", u+h1+path, nil, bearer(m1)...); code != 200 {
 			t.Fatalf("own household %s: %d %v", path, code, out)
@@ -280,6 +280,18 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 		if code, out := call(t, "GET", u+h2+path, nil, bearer(m1)...); code != 403 {
 			t.Fatalf("another household's %s: %d %v", path, code, out)
 		}
+	}
+	// Signal automations: only a household admin writes; another household's are refused.
+	sa := base + "/api/cc/api/v0/mobile/household/"
+	rule := map[string]any{"instruction": "Lock the front door", "enabled": true, "delivery": "notification"}
+	if code, out := call(t, "PUT", sa+h1+"/signal-automations/presence.left", rule, bearer(m1)...); code != 403 {
+		t.Fatalf("member writes an automation: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", sa+h2+"/signal-automations/presence.left", rule, bearer(a1)...); code != 403 {
+		t.Fatalf("admin writes another household's automation: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", sa+h1+"/signal-automations/presence.left", rule, bearer(a1)...); code != 200 {
+		t.Fatalf("admin writes an automation: %d %v", code, out)
 	}
 	// Recent commands: the caller's own transcripts.
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {

@@ -19,6 +19,7 @@ import {
   type Member,
 } from '@/api/household'
 import HouseholdSettings from '@/components/account/HouseholdSettings'
+import SignalAutomations from '@/components/account/SignalAutomations'
 import { PlaceCard, VoiceCard } from '@/components/account/HouseholdVoiceAndPlace'
 import { Badge, Button, Card, CardHeader, Dialog, ErrorState, Input, PageHeader, Select, SkeletonList } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
@@ -61,6 +62,7 @@ export default function HouseholdPage() {
       <VoiceCard hh={hh} canEdit={isAdmin} />
       <PlaceCard hh={hh} canEdit={isAdmin} />
       <HouseholdSettings />
+      <SignalAutomations hh={hh} canEdit={isAdmin} />
       <JoinCard />
       {households.length > 1 && me && <LeaveCard id={hh} name={me.name} />}
     </div>
