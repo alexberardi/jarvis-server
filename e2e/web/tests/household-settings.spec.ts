@@ -1,4 +1,4 @@
-// The household switches on the Account page: watches and errand autonomy, off by default,
+// The household switches (Features on the Household page): watches and errand autonomy, off by default,
 // flipped by a household admin and only shown to a member.
 import { call, joinHousehold, must, newUser } from '../helpers/api'
 import { env } from '../helpers/env'
@@ -15,8 +15,8 @@ for (const s of SWITCHES) {
   test(`a household admin turns ${s.label} on and it stays on`, async ({ asUser }) => {
     const admin = await newUser('hhset')
     const page = await asUser(admin)
-    await page.goto('/account')
-    const section = page.getByRole('region', { name: /Household/ })
+    await page.goto('/household')
+    const section = page.getByRole('region', { name: 'Features' })
     const sw = section.getByRole('switch', { name: s.label })
     await expect(sw).toBeEnabled()
     await expect(sw).not.toBeChecked()
@@ -46,8 +46,8 @@ test('a member sees both switches but cannot change them', async ({ asUser }) =>
   const member = await joinHousehold(admin, await newUser('hhmem'))
 
   const page = await asUser(member)
-  await page.goto('/account')
-  const section = page.getByRole('region', { name: /Household/ })
+  await page.goto('/household')
+  const section = page.getByRole('region', { name: 'Features' })
   await expect(section.getByText('Only a household admin can change these.')).toBeVisible()
   await expect(section.getByRole('switch', { name: 'Watches' })).toBeChecked()
   await expect(section.getByRole('switch', { name: 'Errand autonomy' })).not.toBeChecked()

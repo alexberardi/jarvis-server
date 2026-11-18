@@ -222,6 +222,54 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
 		}
 	}
+	// A household's people: a member lists members and invites but can't invite, rename, change a
+	// role or remove anyone; a power user invites; an admin renames; another household's are refused.
+	p1, a1 := users["p1@example.com"], users["a1@example.com"]
+	hp := base + "/api/households/"
+	refused := func(code int) bool { return code == 403 || code == 404 }
+	for _, path := range []string{"/members", "/invites"} {
+		if code, out := call(t, "GET", hp+h1+path, nil, bearer(m1)...); code != 200 {
+			t.Fatalf("member lists own %s: %d %v", path, code, out)
+		}
+		if code, out := call(t, "GET", hp+h2+path, nil, bearer(m1)...); !refused(code) {
+			t.Fatalf("member lists another household's %s: %d %v", path, code, out)
+		}
+	}
+	invite := map[string]any{"default_role": "member", "expires_in_days": 7}
+	if code, out := call(t, "POST", hp+h1+"/invites", invite, bearer(m1)...); !refused(code) {
+		t.Fatalf("member creates an invite: %d %v", code, out)
+	}
+	invCode, inv := call(t, "POST", hp+h1+"/invites", invite, bearer(p1)...)
+	if invCode != 201 && invCode != 200 {
+		t.Fatalf("power user creates an invite: %d %v", invCode, inv)
+	}
+	// A member of another household joins with the code, as themself; a bad code is refused.
+	if code, out := call(t, "POST", base+"/api/households/join", map[string]any{"invite_code": obj(t, inv)["code"]}, bearer(m2)...); code != 200 && code != 201 {
+		t.Fatalf("join with a code: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", base+"/api/households/join", map[string]any{"invite_code": "NOPE-NOPE"}, bearer(m2)...); code < 400 || code >= 500 {
+		t.Fatalf("join with a bad code: %d %v", code, out)
+	}
+	// ... and leaves again (two households now, not the last admin), so the checks below still
+	// see m2 in H2 only.
+	if code, out := call(t, "POST", hp+h1+"/leave", map[string]any{}, bearer(m2)...); code != 200 && code != 204 {
+		t.Fatalf("leave after joining: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", hp+h1, map[string]any{"name": "Renamed"}, bearer(m1)...); !refused(code) {
+		t.Fatalf("member renames the household: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", hp+h1, map[string]any{"name": "H1"}, bearer(a1)...); code != 200 {
+		t.Fatalf("admin renames the household: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", hp+h1+"/members/"+fmt.Sprint(m1ID), map[string]any{"role": "admin"}, bearer(m1)...); !refused(code) {
+		t.Fatalf("member promotes themself: %d %v", code, out)
+	}
+	if code, out := call(t, "DELETE", hp+h2+"/members/"+fmt.Sprint(m1ID), nil, bearer(m1)...); !refused(code) {
+		t.Fatalf("member removes from another household: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", hp+h2+"/leave", map[string]any{}, bearer(m1)...); !refused(code) {
+		t.Fatalf("member leaves a household they're not in: %d %v", code, out)
+	}
 	// Recent commands: the caller's own transcripts.
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {
 		t.Fatalf("own recent commands: %d %v", code, out)
@@ -351,7 +399,6 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	}
 
 	// The household prompt: cc lets only an admin of that household in.
-	a1 := users["a1@example.com"]
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/households/"+h1+"/prompt", nil, bearer(a1)...); code != 200 {
 		t.Errorf("own prompt as a household admin: %d %v", code, out)
 	}

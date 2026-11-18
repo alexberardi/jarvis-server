@@ -87,6 +87,6 @@ test.describe('admin users', () => {
   })
 
   test('inviting, changing a role or disabling an account', async () => {
-    test.skip(true, 'the web admin has none of these in v1 (AccountPage.tsx: invites and households stay in the mobile app); docs/decisions/2026-10-17-e2e-admin-pages.md')
+    test.skip(true, 'the admin Users page has none of these: invites and household roles are on the member Household page (household-people.spec.ts); docs/decisions/2026-10-17-e2e-admin-pages.md')
   })
 })

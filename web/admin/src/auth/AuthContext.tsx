@@ -43,6 +43,8 @@ interface AuthContextValue {
   activeHouseholdId: string
   /** switchHousehold re-scopes the session to another of the caller's households (§4.4). */
   switchHousehold: (householdId: string) => Promise<void>
+  /** reloadHouseholds refetches the list after a rename, a leave or a join. */
+  reloadHouseholds: () => Promise<void>
   /** updateDisplayName saves the caller's display name (PATCH /auth/me). */
   updateDisplayName: (displayName: string) => Promise<void>
   login: (email: string, password: string) => Promise<void>
@@ -285,6 +287,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [state.isAuthenticated, mustChangePassword, userId])
 
+  const reloadHouseholds = useCallback(async () => {
+    setHouseholds(await authApi.listHouseholds())
+  }, [])
+
   const switchHousehold = useCallback(async (householdId: string) => {
     const res = await authApi.switchHousehold(householdId)
     localStorage.setItem(ACCESS_KEY, res.access_token)
@@ -310,13 +316,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       households,
       activeHouseholdId,
       switchHousehold,
+      reloadHouseholds,
       updateDisplayName,
       login,
       setup,
       changePassword,
       logout,
     }),
-    [state, mustChangePassword, households, activeHouseholdId, switchHousehold, updateDisplayName, login, setup, changePassword, logout],
+    [state, mustChangePassword, households, activeHouseholdId, switchHousehold, reloadHouseholds, updateDisplayName, login, setup, changePassword, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

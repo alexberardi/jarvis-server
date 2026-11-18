@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { AuthProvider } from '@/auth/AuthContext'
 import { refreshAccessToken } from '@/api/client'
 import AccountPage from './AccountPage'
+import HouseholdSettings from '@/components/account/HouseholdSettings'
 
 const auth = vi.hoisted(() => ({
   updateMe: vi.fn(),
@@ -21,7 +23,20 @@ function renderPage() {
   render(
     <QueryClientProvider client={qc}>
       <AuthProvider>
-        <AccountPage />
+        <MemoryRouter>
+          <AccountPage />
+        </MemoryRouter>
+      </AuthProvider>
+    </QueryClientProvider>,
+  )
+}
+
+function renderSettings() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={qc}>
+      <AuthProvider>
+        <HouseholdSettings />
       </AuthProvider>
     </QueryClientProvider>,
   )
@@ -54,15 +69,17 @@ describe('AccountPage', () => {
     expect(auth.updateMe).toHaveBeenCalledWith('Emma')
     expect(screen.getByTestId('account-name')).toHaveTextContent('Emma')
     expect(JSON.parse(localStorage.getItem('jarvis-admin:user') ?? '{}').display_name).toBe('Emma')
+    expect(screen.getByRole('link', { name: /Household/ })).toHaveAttribute('href', '/household')
   })
 })
 
-describe('AccountPage household settings', () => {
+// The switches moved to the Household page with the component (HouseholdPage.tsx).
+describe('HouseholdSettings', () => {
   it('lets a household admin turn watches and errand autonomy on', async () => {
     auth.listHouseholds.mockResolvedValue([{ id: 'h1', name: 'Home', role: 'admin' }])
     household.getHouseholdSettings.mockResolvedValue({ 'watches.enabled': false, 'errands.autonomous_enabled': false })
     household.putHouseholdSetting.mockResolvedValue(undefined)
-    renderPage()
+    renderSettings()
     const watches = await screen.findByRole('switch', { name: 'Watches' })
     const errands = screen.getByRole('switch', { name: 'Errand autonomy' })
     await waitFor(() => expect(watches).toBeEnabled())
@@ -86,7 +103,7 @@ describe('AccountPage household settings', () => {
   it('shows a member the values but not the switches to change them', async () => {
     auth.listHouseholds.mockResolvedValue([{ id: 'h1', name: 'Home', role: 'member' }])
     household.getHouseholdSettings.mockResolvedValue({ 'watches.enabled': true, 'errands.autonomous_enabled': false })
-    renderPage()
+    renderSettings()
     const watches = await screen.findByRole('switch', { name: 'Watches' })
     await waitFor(() => expect(watches).toBeChecked())
     expect(watches).toBeDisabled()
@@ -100,7 +117,7 @@ describe('AccountPage household settings', () => {
     auth.listHouseholds.mockResolvedValue([{ id: 'h1', name: 'Home', role: 'owner' }])
     household.getHouseholdSettings.mockResolvedValue({ 'watches.enabled': false, 'errands.autonomous_enabled': false })
     household.putHouseholdSetting.mockRejectedValue(new Error('nope'))
-    renderPage()
+    renderSettings()
     const watches = await screen.findByRole('switch', { name: 'Watches' })
     await waitFor(() => expect(watches).toBeEnabled())
     await act(async () => {

@@ -18,6 +18,7 @@ import RoutineEditPage from '@/pages/RoutineEditPage'
 import RoutinesPage from '@/pages/RoutinesPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
+import HouseholdPage from '@/pages/HouseholdPage'
 import InboxItemPage from '@/pages/InboxItemPage'
 import InboxPage from '@/pages/InboxPage'
 import LoginPage from '@/pages/LoginPage'
@@ -108,6 +109,7 @@ export function shellRoutes() {
       <Route path="/workflows/:id" element={<WorkflowEditPage />} />
       <Route path="/recordings" element={<RecordingsPage />} />
       <Route path="/account" element={<AccountPage />} />
+      <Route path="/household" element={<HouseholdPage />} />
       {UiGalleryPage && (
         <Route
           path="/dev/ui"

@@ -4,7 +4,7 @@ import { apiClient } from './client'
  * Recent commands (mobile's Recent Commands): the caller's own turns, newest first, what they
  * said, the tool calls the model made and its reply. cc selects by the caller's user id.
  */
-/** One command a node ran: name and parsed arguments (see toolCalls). */
+/** One command Jarvis ran: name and parsed arguments (see toolCalls). */
 export interface ToolCall {
   name: string
   arguments: Record<string, unknown>
@@ -16,8 +16,8 @@ export interface Transcript {
   user_message: string
   assistant_message: string | null
   /**
-   * As cc stores them, OpenAI-shaped: {function: {name, arguments: "<JSON>"}}. Only the commands
-   * a node ran are recorded (legacy parity), not the ones jarvisd handles itself (remember, …).
+   * As cc stores them, OpenAI-shaped: {function: {name, arguments: "<JSON>"}}: every call of the
+   * exchange, jarvisd's own (remember, …) and a node's (#699).
    */
   tool_calls: unknown[] | null
   created_at: string

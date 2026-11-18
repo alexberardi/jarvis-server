@@ -75,6 +75,20 @@ var passRoutes = []passRoute{
 	authRoute("POST /api/auth/change-password", tierUser),
 	// The caller's own households: auth lists only their memberships and switches only into one.
 	authRoute("GET /api/households", tierUser),
+	// One household's people (mobile's Household settings): auth checks membership and the
+	// caller's role per route (any member lists; power users invite and revoke; admins rename,
+	// change roles and remove; leaving refuses the last admin and an only household).
+	authRoute("PATCH /api/households/{household_id}", tierUser),
+	authRoute("GET /api/households/{household_id}/members", tierUser),
+	authRoute("PATCH /api/households/{household_id}/members/{user_id}", tierUser),
+	authRoute("DELETE /api/households/{household_id}/members/{user_id}", tierUser),
+	authRoute("POST /api/households/{household_id}/leave", tierUser),
+	authRoute("GET /api/households/{household_id}/invites", tierUser),
+	authRoute("POST /api/households/{household_id}/invites", tierUser),
+	authRoute("DELETE /api/households/{household_id}/invites/{invite_id}", tierUser),
+	// Joining another household with an invite code (auth checks the code; the caller joins as
+	// themself with the invite's role).
+	authRoute("POST /api/households/join", tierUser),
 	authRoute("POST /api/auth/switch-household", tierUser),
 
 	// Today's SPA paths for the cross-household views (G7: every user and email, and resetting

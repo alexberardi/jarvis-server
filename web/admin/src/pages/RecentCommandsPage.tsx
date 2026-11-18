@@ -7,7 +7,7 @@ import { formatServerTime, timeAgo } from '@/lib/time'
 
 /**
  * RecentCommandsPage is your last 50 requests to Jarvis (mobile's Recent Commands), by voice or
- * in chat: what you said and the command a node ran (or the reply); open one for every call's
+ * in chat: what you said and the command Jarvis ran (or the reply); open one for every call's
  * arguments and the reply. Mobile's thumbs ratings are left out: nothing reads them since the fine-tune pipeline
  * was cut (docs/decisions/2026-11-17-web-recent-commands-no-ratings.md).
  */
@@ -41,7 +41,7 @@ export default function RecentCommandsPage() {
 
 function Row({ t }: { t: Transcript }) {
   const calls = toolCalls(t)
-  // cc records only the commands a node ran; without one, the reply says what happened.
+  // A turn that ran no command (a question, small talk) shows the start of the reply.
   const second = calls.length ? `→ ${callSummary(calls[0])}${calls.length > 1 ? ` +${calls.length - 1}` : ''}` : (t.assistant_message ?? '')
   return (
     <details className="group">
