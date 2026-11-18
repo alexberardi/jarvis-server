@@ -367,8 +367,22 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "GET", cd, nil, bearer(m1)...); code != 403 {
 		t.Fatalf("another household's node records: %d %v", code, out)
 	}
-	if code, out := call(t, "PATCH", cd+"/milk", map[string]any{"walmart_item_id": "1"}, bearer(m1)...); code != 403 {
+	if code, out := call(t, "PATCH", cd+"/milk", map[string]any{"patch": map[string]any{"walmart_item_id": "1"}}, bearer(m1)...); code != 403 {
 		t.Fatalf("patch another household's node record: %d %v", code, out)
+	}
+	// The Stored data page: every other command-data route refuses another household's node too.
+	cdNode := base + "/api/cc/api/v0/mobile/command-data/nodes/node-h2/commands"
+	for _, c := range []struct{ method, path string }{
+		{"GET", cdNode}, {"GET", cdNode + "/export_shopping_list/schema"}, {"GET", cd + "/milk"},
+		{"POST", cd}, {"DELETE", cd + "/milk"},
+	} {
+		var body any
+		if c.method == "POST" {
+			body = map[string]any{"data": map[string]any{"name": "x"}}
+		}
+		if code, out := call(t, c.method, c.path, body, bearer(m1)...); code != 403 {
+			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
+		}
 	}
 	for _, n := range []string{"node-h1", "node-h2"} {
 		if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/nodes/"+n+"/browser/matches?pattern=(x)", nil, bearer(m1)...); code != 404 {

@@ -147,7 +147,14 @@ var passRoutes = []passRoute{
 	// Interactive lists (docs/webapp/03 step 3): a row's live record gate and a picked value saved
 	// onto it (cc checks membership of the node's household), and the owner's "Find ID" tab
 	// matches (cc: the member who paired the node only).
+	// The Stored data page (mobile's Stored data): cc checks the caller is a member of the node's
+	// household; the node keeps only editable fields and stamps the owner on a create.
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/schema"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
 	ccUserRoute("PATCH /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/nodes/{node_id}/browser/matches"),
 	// Scheduled errands: the household's one-time and recurring errands, and cancelling one
