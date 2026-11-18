@@ -35,7 +35,9 @@ type Checkout struct {
 // Reply is one parsed model answer: a batch of actions (with an optional checkout), done, or a
 // question.
 type Reply struct {
-	Thought  string               `json:"thought,omitempty"`
+	Thought string `json:"thought,omitempty"`
+	// Type is the shape as a schema-held answer names it (replySchema): "actions", "done", "ask".
+	Type     string               `json:"type,omitempty"`
 	Actions  []computeruse.Action `json:"actions,omitempty"`
 	Checkout *Checkout            `json:"checkout,omitempty"`
 	Done     bool                 `json:"done,omitempty"`
@@ -76,6 +78,7 @@ func parseReply(s string) (Reply, error) {
 			}
 		}
 	}
+	r.Done = r.Done || r.Type == "done"
 	if len(r.Actions) == 0 && !r.Done && strings.TrimSpace(r.Ask) == "" {
 		// One action sent bare, without the object around it ({"kind": "press", "ref": "a2",
 		// …}): it is the batch. Gemma 4 26B answered so twice running and the task ended as
@@ -312,7 +315,7 @@ func firstAnswer(s string) (Reply, bool) {
 		if n == 0 {
 			first = r
 		}
-		if len(r.Actions) > 0 || r.Done || strings.TrimSpace(r.Ask) != "" {
+		if len(r.Actions) > 0 || r.Done || r.Type == "done" || strings.TrimSpace(r.Ask) != "" {
 			if r.Thought == "" {
 				r.Thought = first.Thought
 			}
@@ -320,3 +323,11 @@ func firstAnswer(s string) (Reply, bool) {
 		}
 	}
 }
+
+// replySchema is a Reply as one flat object for an engine that holds an answer to a schema
+// (llm.ResponseSchema; decision 2026-11-17-engine-enforced-reply-schema): "type" says which
+// of the shapes it is before the fields it selects, and an action's "kind" comes first and
+// brings the fields that kind needs (a press its ref, a type its text): Gemma 4 12B lost two
+// good runs to a set_value with no ref and an empty action list. What it still can't say (a
+// done needs a summary) parseReply checks.
+var replySchema = json.RawMessage(`{"name": "reply", "schema": {"type": "object", "properties": {"thought": {"type": "string", "maxLength": 300}, "type": {"type": "string", "enum": ["actions", "done", "ask"]}, "actions": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"anyOf": [{"type": "object", "properties": {"kind": {"type": "string", "enum": ["press"]}, "intent": {"type": "string", "maxLength": 200}, "ref": {"type": "string"}, "name": {"type": "string"}}, "required": ["kind", "intent", "ref"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["set_value", "select"]}, "intent": {"type": "string", "maxLength": 200}, "ref": {"type": "string"}, "text": {"type": "string"}, "name": {"type": "string"}}, "required": ["kind", "intent", "ref", "text"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["type"]}, "intent": {"type": "string", "maxLength": 200}, "text": {"type": "string"}, "ref": {"type": "string"}, "name": {"type": "string"}}, "required": ["kind", "intent", "text"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["navigate"]}, "intent": {"type": "string", "maxLength": 200}, "url": {"type": "string"}}, "required": ["kind", "intent", "url"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["keypress"]}, "intent": {"type": "string", "maxLength": 200}, "keys": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "ref": {"type": "string"}, "name": {"type": "string"}}, "required": ["kind", "intent", "keys"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["wait"]}, "intent": {"type": "string", "maxLength": 200}, "ms": {"type": "integer"}}, "required": ["kind", "intent", "ms"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["click", "double_click", "move"]}, "intent": {"type": "string", "maxLength": 200}, "x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["kind", "intent", "x", "y"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["drag"]}, "intent": {"type": "string", "maxLength": 200}, "path": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}}}, "required": ["kind", "intent", "path"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["clipboard_write"]}, "intent": {"type": "string", "maxLength": 200}, "text": {"type": "string"}}, "required": ["kind", "intent", "text"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["screenshot", "clipboard_read"]}, "intent": {"type": "string", "maxLength": 200}}, "required": ["kind", "intent"]}, {"type": "object", "properties": {"kind": {"type": "string", "enum": ["scroll"]}, "intent": {"type": "string", "maxLength": 200}, "dx": {"type": "integer"}, "dy": {"type": "integer"}}, "required": ["kind", "intent"]}]}}, "checkout": {"type": "object", "properties": {"product": {"type": "string"}, "price": {"type": "string"}, "currency": {"type": "string"}, "seller": {"type": "string"}, "ship_to": {"type": "string"}, "card": {"type": "string"}}}, "summary": {"type": "string"}, "verify": {"type": "object", "properties": {"url_contains": {"type": "string"}, "text_present": {"type": "array", "items": {"type": "string"}}, "download": {"type": "object", "properties": {"name_like": {"type": "string"}, "min_bytes": {"type": "integer"}}}, "file": {"type": "object", "properties": {"path": {"type": "string"}, "contains": {"type": "string"}}}, "screen": {"type": "string"}}}, "ask": {"type": "string"}, "reason": {"type": "string", "enum": ["page_instructions", "unclear", "login_needed"]}}, "required": ["thought", "type"]}}`)

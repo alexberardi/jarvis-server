@@ -33,8 +33,8 @@ func (s stackResolver) Resolve(ctx context.Context, label string) (Endpoint, err
 		BaseURL: ep.BaseURL, APIKey: ep.APIKey, Model: ep.Model,
 		Vision: ep.Vision, Embeddings: ep.Embeddings, ContextLength: per, Remote: ep.Remote,
 		FoldSystemMessages: ep.FoldSystemMessages, API: ep.API, NoReasoningBudget: ep.NoReasoningBudget,
-		ThinkingControls: ep.ThinkingControls,
-		Timeout:          time.Duration(ep.TimeoutMS) * time.Millisecond, Fallback: ep.Fallback,
+		ThinkingControls: ep.ThinkingControls, Grammar: ep.Grammar,
+		Timeout: time.Duration(ep.TimeoutMS) * time.Millisecond, Fallback: ep.Fallback,
 	}, nil
 }
 

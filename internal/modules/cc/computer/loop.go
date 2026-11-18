@@ -348,7 +348,7 @@ type round struct {
 	// lastActs and sameActs are the same for the actions alone, whatever the screen showed.
 	lastActs string
 	sameActs int
-	// waits counts the wait-only batches in a row on a page that hasn't changed.
+	// waits counts the answers in a row that only wait or only look, on a page that hasn't changed.
 	waits int
 	// enterTried: this stuck batch's button was already confirmed with Enter instead, once.
 	enterTried bool
@@ -479,7 +479,7 @@ func (l *Loop) Run(ctx context.Context, t Task) Outcome {
 	maxRounds := l.int(ctx, SettingMaxRounds, sc, defaultMaxRounds)
 	// auto: a large model works better as a conversation, a small one loses its way in it.
 	loop := l.str(ctx, SettingLoop, sc, LoopAuto)
-	if r.turns = loop == LoopTurns || (loop == LoopAuto && pick.Fit == FitLarge); r.turns {
+	if r.turns = loop == LoopTurns || (loop == LoopAuto && (pick.Fit == FitLarge || conversational(pick.Model))); r.turns {
 		maxRounds *= 2 // a round is one action, not a batch of them
 	}
 	deadline := l.now().Add(time.Duration(l.int(ctx, SettingMaxMinutes, sc, defaultMaxMinutes)) * time.Minute)
@@ -655,6 +655,16 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 		actions = append(actions, l.toImage(r, a))
 	}
 	if len(actions) == 0 {
+		// Only a look, at a screen that hasn't changed: Gemma 4 12B had everything it needed
+		// and asked for "a final check" screenshot thirteen rounds running (2026-11-17).
+		if r.same {
+			if r.waits++; r.waits >= stuckGiveUp {
+				return Outcome{State: StateFailed, lost: true, Summary: stuckSummary(firstIntent(reply.Actions))}, true
+			}
+			if r.waits >= stuckAfter {
+				r.feedback = `you have already looked: the screen is exactly as it was, and another screenshot shows the same. If you have what the task needs, say done now and write what you found in "summary". If not, act on what is listed.`
+			}
+		}
 		return Outcome{}, false
 	}
 	if r.turns && len(actions) > 1 {
@@ -1325,6 +1335,7 @@ func (l *Loop) ask(ctx context.Context, r *round, obs Observation) (Reply, error
 		resp, err := l.LLM.Chat(cctx, llm.ChatRequest{
 			Label: r.pick.Label, Priority: llm.PriorityBackground, Temperature: &temp, MaxTokens: &mt,
 			ReasoningBudget: &think, Messages: msgs,
+			ResponseFormat: &llm.ResponseFormat{Type: llm.ResponseSchema, JSONSchema: replySchema},
 		})
 		cancel()
 		if err != nil {

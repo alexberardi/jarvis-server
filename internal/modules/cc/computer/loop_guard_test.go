@@ -2,6 +2,7 @@ package computer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -236,5 +237,55 @@ func TestWaitingOnALoadedPageStops(t *testing.T) {
 	}
 	if !told {
 		t.Fatal("the model was never told the page had loaded")
+	}
+}
+
+// A schema-held answer names its shape in "type"; the schema itself is valid JSON with the kinds.
+func TestSchemaHeldAnswer(t *testing.T) {
+	r, err := parseReply(`{"thought": "All set.", "type": "done", "summary": "Filled it in.", "verify": {"url_contains": "/apply"}}`)
+	if err != nil || !r.Done || r.Summary != "Filled it in." || r.Verify == nil {
+		t.Fatalf("%+v, %v", r, err)
+	}
+	var s struct {
+		Schema struct {
+			Required []string `json:"required"`
+		} `json:"schema"`
+	}
+	if err := json.Unmarshal(replySchema, &s); err != nil || len(s.Schema.Required) != 2 {
+		t.Fatalf("replySchema: %+v, %v", s, err)
+	}
+	e := newEnv(t, formPage())
+	e.script(`{"thought": "x", "type": "done", "summary": "Lavender soap is $4.", "verify": {"url_contains": "/apply"}}`)
+	e.run()
+	if rf := e.llm.reqs[0].ResponseFormat; rf == nil || rf.Type != llm.ResponseSchema || len(rf.JSONSchema) == 0 {
+		t.Fatalf("the loop sent response format %+v", rf)
+	}
+}
+
+func TestConversational(t *testing.T) {
+	for model, want := range map[string]bool{"gemma-4-12b": true, "qwen3-14b": true, "qwen3.5-9b": false, "live": false, "gemma-4-26b-a4b": true} {
+		if got := conversational(model); got != want {
+			t.Errorf("conversational(%q) = %v", model, got)
+		}
+	}
+}
+
+// Asking for one more screenshot of an unchanged page, again and again, is told so and ends.
+func TestOnlyLookingStops(t *testing.T) {
+	e := newEnv(t, formPage())
+	look := actions(`{"kind": "screenshot", "intent": "Final check"}`)
+	for range 12 {
+		e.script(look)
+	}
+	out := e.run()
+	if out.State != StateFailed || len(e.exec.batches) != 0 || len(e.llm.reqs) > 9 {
+		t.Fatalf("outcome %+v, %d batches, %d calls", out, len(e.exec.batches), len(e.llm.reqs))
+	}
+	told := false
+	for _, req := range e.llm.reqs {
+		told = told || strings.Contains(userText(req), "you have already looked")
+	}
+	if !told {
+		t.Fatal("never told")
 	}
 }

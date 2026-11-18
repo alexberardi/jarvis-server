@@ -47,6 +47,10 @@ type Endpoint struct {
 	// NoReasoningBudget: the engine refuses reasoning_budget (transformers serve answers 422);
 	// thinking goes by chat_template_kwargs alone.
 	NoReasoningBudget bool
+	// Grammar: the engine holds an answer to a JSON schema as it writes it (ResponseSchema).
+	// shortcut: local llama-server only; a remote Jarvis server or llama-server could take it
+	// too once its API accepts the field (decision 2026-11-17-engine-enforced-reply-schema).
+	Grammar bool
 	// ThinkingControls: a remote endpoint that takes llama-server's thinking controls
 	// (remote_thinking: another Jarvis server, a llama-server).
 	ThinkingControls bool
@@ -223,6 +227,12 @@ func (t *Tool) UnmarshalJSON(b []byte) error {
 	t.Raw = append(json.RawMessage(nil), b...)
 	return nil
 }
+
+// ResponseSchema is ResponseFormat.Type for an answer the engine itself holds to JSONSchema
+// ({"name", "schema"}) as it writes it. Unlike "json_object" (the legacy JSON mode: an
+// instruction, a repair, a retry) nothing is added to the prompt and nothing is repaired; an
+// engine that can't enforce a schema (Endpoint.Grammar false) answers as if none were asked.
+const ResponseSchema = "json_schema"
 
 // ResponseFormat is response_format. JSONSchema is the json_schema object (key order kept).
 type ResponseFormat struct {

@@ -55,6 +55,21 @@ const (
 	largeFromB     = 20.0    // billions of parameters, read from a model id like "foo-26b"
 )
 
+// turnsFromB is the size from which a model that isn't large still works as a conversation.
+// Gemma 4 12B waited on a loaded page round after round in the batch loop and finished the
+// same task in six as a conversation (one run each, 2026-11-17); the 9B is not moved on that.
+const turnsFromB = 12.0
+
+// conversational reports whether a model's id names a size of turnsFromB or more.
+func conversational(model string) bool {
+	m := sizeInID.FindStringSubmatch(model)
+	if m == nil {
+		return false
+	}
+	b, err := strconv.ParseFloat(m[1], 64)
+	return err == nil && b >= turnsFromB
+}
+
 // sizeInID is the parameter count in a model id: "gemma-4-26b-a4b" is 26, "qwen3.5-9b" is 9.
 var sizeInID = regexp.MustCompile(`(?i)(?:^|[-_:/])(\d+(?:\.\d+)?)b(?:[-_:.]|$)`)
 

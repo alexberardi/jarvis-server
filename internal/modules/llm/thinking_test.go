@@ -208,3 +208,29 @@ func TestToolCallsFinishReason(t *testing.T) {
 		t.Fatalf("chat: %+v %v", r, err)
 	}
 }
+
+// A schema is sent only as ResponseSchema and only to an engine that enforces it.
+func TestPayloadResponseSchema(t *testing.T) {
+	s := &Service{}
+	schema := &ResponseFormat{Type: ResponseSchema, JSONSchema: json.RawMessage(`{"name":"reply","schema":{"type":"object"}}`)}
+	for name, c := range map[string]struct {
+		ep   Endpoint
+		rf   *ResponseFormat
+		want bool
+	}{
+		"local llama-server":    {Endpoint{Model: "live", Grammar: true}, schema, true},
+		"an engine without one": {Endpoint{Model: "live"}, schema, false},
+		"a remote":              {Endpoint{Model: "gpt", Remote: true}, schema, false},
+		"the legacy JSON mode":  {Endpoint{Model: "live", Grammar: true}, &ResponseFormat{Type: "json_object", JSONSchema: schema.JSONSchema}, false},
+		"no response format":    {Endpoint{Model: "live", Grammar: true}, nil, false},
+	} {
+		req := &ChatRequest{Messages: []Message{{Role: "user", Content: TextContent("hi")}}, ResponseFormat: c.rf}
+		b, err := json.Marshal(s.payload(context.Background(), c.ep, LabelLive, req, req.Messages, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(b), `"response_format":{"type":"json_schema","json_schema":{"name":"reply"`); got != c.want {
+			t.Errorf("%s: response_format sent = %v, want %v: %s", name, got, c.want, b)
+		}
+	}
+}
