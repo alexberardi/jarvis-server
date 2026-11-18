@@ -222,6 +222,36 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
 		}
 	}
+	// Memories and the phonebook: the member's own household works; another household's are
+	// refused (cc: not a member).
+	mem := base + "/api/cc/api/v0/mobile/memories"
+	if code, out := call(t, "GET", mem+"?household_id="+h1, nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own memories: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", mem+"?household_id="+h1, map[string]any{"content": "likes oat milk"}, bearer(m1)...); code != 200 && code != 201 {
+		t.Fatalf("create own memory: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", mem+"?household_id="+h2, nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's memories: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", mem+"?household_id="+h2, map[string]any{"content": "x"}, bearer(m1)...); code != 403 {
+		t.Fatalf("create a memory in another household: %d %v", code, out)
+	}
+	pc := base + "/api/cc/api/v0/mobile/household/"
+	if code, out := call(t, "GET", pc+h1+"/phone-contacts", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own phonebook: %d %v", code, out)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/phone-contacts"}, {"POST", "/phone-contacts"}, {"PATCH", "/phone-contacts/c1"}, {"DELETE", "/phone-contacts/c1"},
+	} {
+		var body any
+		if c.method == "POST" || c.method == "PATCH" {
+			body = map[string]any{"name": "Tony's", "number": "+15551234567"}
+		}
+		if code, out := call(t, c.method, pc+h2+c.path, body, bearer(m1)...); code != 403 {
+			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
+		}
+	}
 
 	// Interactive lists: another household's node's records are refused (cc: not a member), and
 	// tab matches only answer the member who paired the node (an admin-key node has no owner).

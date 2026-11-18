@@ -2,6 +2,7 @@
 // Every one is shown in every state on the dev-only gallery, /dev/ui (pages/dev/UiGalleryPage).
 export { default as Alert, type AlertTone } from './Alert'
 export { default as Badge, type BadgeTone } from './Badge'
+export { default as ChoiceGroup } from './ChoiceGroup'
 export { default as Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button'
 export { buttonStyles } from './buttonStyles'
 export { default as Banner, type BannerTone } from './Banner'

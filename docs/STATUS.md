@@ -23,7 +23,8 @@ Done. Not ported, on purpose: audio cards and the callback-result page (see the 
 
 - [x] Scheduled errands on the web (mobile's Schedules screen): list and stop (#693)
 - [x] Recurrence: "every monday" was stored as daily (#694)
-- [ ] Routines on the web (`/routines`, mobile's Routines tab): list, run now, Simple and Advanced editor, schedules; scheduled errands move under it (`/routines/errands`)
+- [x] Routines on the web (#696)
+- [ ] Memories and the phonebook on the web (`/memories`, `/phonebook`)
 
 Next: full alarms, spec first.
 
