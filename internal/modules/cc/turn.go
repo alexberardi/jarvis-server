@@ -240,11 +240,12 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		utterance = prompts.OverheardFollowUp(utterance)
 	}
 	user := chatMsg{Role: "user", Content: prompts.UserMessage(utterance, hints, suffix)}
+	// Numbered now (commit would anyway): the transcript takes every tool call after it.
+	user.id = conv.newMsgID()
 	var imageMsgID uint64
 	if len(in.Images) > 0 {
 		user.images = in.Images
-		imageMsgID = conv.newMsgID()
-		user.id = imageMsgID
+		imageMsgID = user.id
 	}
 	msgs = append(msgs, user)
 
@@ -306,7 +307,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 	if res.Stop != stopNotForMe && res.Stop != stopError {
 		conv.answeredRounds++
 	}
-	m.noteTranscript(ctx, conv, withImageMarkers(in.VoiceCommand, len(in.Images)), res)
+	m.noteTranscript(ctx, conv, withImageMarkers(in.VoiceCommand, len(in.Images)), user.id, res)
 	return turnOutcome{res: res, conv: conv, imageMsgID: imageMsgID}, nil
 }
 
