@@ -148,6 +148,19 @@ var passRoutes = []passRoute{
 	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
 	ccUserRoute("DELETE /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
 	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/routines/{routine_id}/run-now"),
+	// Memories (mobile's Memories screens): the caller's own and, for power users and admins,
+	// the household's; cc resolves the caller's role in the household and who may edit what.
+	ccUserRoute("GET /api/cc/api/v0/mobile/memories"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/memories"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/memories/{memory_id}"),
+	ccUserRoute("PUT /api/cc/api/v0/mobile/memories/{memory_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/memories/{memory_id}"),
+	// The phonebook (mobile's Phonebook screens): businesses Jarvis may call; cc checks
+	// membership of the household.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/phone-contacts"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/household/{household_id}/phone-contacts"),
+	ccUserRoute("PATCH /api/cc/api/v0/mobile/household/{household_id}/phone-contacts/{contact_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/household/{household_id}/phone-contacts/{contact_id}"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.

@@ -10,6 +10,8 @@
     "/addons": { "tests": ["e2e/web/tests/addons.spec.ts"] },
     "/inbox": { "tests": ["e2e/web/tests/inbox.spec.ts", "e2e/web/tests/household.spec.ts", "e2e/web/tests/inbox-alerts.spec.ts"] },
     "/errands": { "tests": ["e2e/web/tests/errands.spec.ts"] },
+    "/memories": { "tests": ["e2e/web/tests/memories-phonebook.spec.ts"] },
+    "/phonebook": { "tests": ["e2e/web/tests/memories-phonebook.spec.ts"] },
     "/routines": { "tests": ["e2e/web/tests/routines.spec.ts"] },
     "/routines/new": { "tests": ["e2e/web/tests/routines.spec.ts"] },
     "/routines/:id": { "tests": ["e2e/web/tests/routines.spec.ts"] },

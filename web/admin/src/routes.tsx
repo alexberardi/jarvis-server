@@ -11,6 +11,8 @@ import ChatPage from '@/pages/ChatPage'
 import DevicesPage from '@/pages/DevicesPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import ErrandsPage from '@/pages/ErrandsPage'
+import MemoriesPage from '@/pages/MemoriesPage'
+import PhonebookPage from '@/pages/PhonebookPage'
 import RoutineEditPage from '@/pages/RoutineEditPage'
 import RoutinesPage from '@/pages/RoutinesPage'
 import DashboardPage from '@/pages/DashboardPage'
@@ -91,6 +93,8 @@ export function shellRoutes() {
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
       <Route path="/routines" element={<RoutinesPage />} />
+      <Route path="/memories" element={<MemoriesPage />} />
+      <Route path="/phonebook" element={<PhonebookPage />} />
       <Route path="/routines/new" element={<RoutineEditPage />} />
       <Route path="/routines/errands" element={<ErrandsPage />} />
       <Route path="/routines/:id" element={<RoutineEditPage />} />

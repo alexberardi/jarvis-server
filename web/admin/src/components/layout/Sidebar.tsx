@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
   Workflow,
+  Brain,
+  BookUser,
   LayoutDashboard,
   Settings,
   Link2,
@@ -41,6 +43,8 @@ const memberNav: NavItem[] = [
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
   // Scheduled errands live under Routines (/routines/errands), as on mobile.
   { label: 'Routines', icon: Workflow, path: '/routines' },
+  { label: 'Memories', icon: Brain, path: '/memories' },
+  { label: 'Phonebook', icon: BookUser, path: '/phonebook' },
   // Workflows and Recordings are shelved (docs/decisions/2026-11-15-taught-workflows-shelved.md):
   // their pages and routes stay, with no link to them.
 ]
