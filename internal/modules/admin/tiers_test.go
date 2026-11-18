@@ -94,6 +94,9 @@ var wantTiers = map[string]tier{
 	"GET /api/cc/api/v0/households/{household_id}/smart-home/config":                                 tierUser,
 	// Member Devices: CC retains household and node authorization.
 	"GET /api/cc/api/v0/households/{household_id}/rooms":                        tierUser,
+	"POST /api/cc/api/v0/households/{household_id}/rooms":                       tierUser,
+	"PATCH /api/cc/api/v0/households/{household_id}/rooms/{room_id}":            tierUser,
+	"DELETE /api/cc/api/v0/households/{household_id}/rooms/{room_id}":           tierUser,
 	"GET /api/cc/api/v0/households/{household_id}/devices":                      tierUser,
 	"POST /api/cc/api/v0/households/{household_id}/devices/import":              tierUser,
 	"PATCH /api/cc/api/v0/households/{household_id}/devices/{device_id}":        tierUser,

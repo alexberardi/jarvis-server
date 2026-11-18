@@ -39,7 +39,7 @@ export interface DiscoveredDevice extends DeviceIdentity {
 }
 
 export interface DeviceImport extends DeviceIdentity { source: 'direct'; room_id: string | null }
-export interface DeviceRoom { id: string; name: string }
+export interface DeviceRoom { id: string; name: string; parent_room_id?: string | null; device_count?: number }
 export interface DeviceNode { node_id: string; name: string | null; room: string | null; online: boolean; node_kind?: string | null }
 export interface DeviceConfig { primary_node_id: string; use_external_devices: boolean; nodes: DeviceNode[] }
 export interface DeviceInput { type: string; prompt: string; session_id: string; follow_up_action: string }
@@ -60,6 +60,18 @@ export async function listDevices(hh: string, signal?: AbortSignal): Promise<Dev
 }
 export async function listDeviceRooms(hh: string, signal?: AbortSignal): Promise<DeviceRoom[]> {
   return (await apiClient.get(`${household(hh)}/rooms`, { signal })).data
+}
+// Rooms (mobile's Rooms): any member of the household adds, renames, nests and deletes them.
+export async function createRoom(hh: string, room: { name: string; parent_room_id: string | null }): Promise<DeviceRoom> {
+  return (await apiClient.post(`${household(hh)}/rooms`, room)).data
+}
+/** updateRoom renames or moves a room; parent_room_id null puts it at the top. */
+export async function updateRoom(hh: string, id: string, room: { name: string; parent_room_id: string | null }): Promise<DeviceRoom> {
+  return (await apiClient.patch(`${household(hh)}/rooms/${encodeURIComponent(id)}`, room)).data
+}
+/** deleteRoom deletes the room and the rooms inside it; their devices stay, without a room. */
+export async function deleteRoom(hh: string, id: string): Promise<void> {
+  await apiClient.delete(`${household(hh)}/rooms/${encodeURIComponent(id)}`)
 }
 export async function importDevices(hh: string, node: string, devices: DeviceImport[], signal: AbortSignal): Promise<{ created: number; updated: number }> {
   return (await apiClient.post(`${household(hh)}/devices/import`, { node_id: node, devices }, { signal, timeout: 30000 })).data
