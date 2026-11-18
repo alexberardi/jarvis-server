@@ -10,6 +10,7 @@ const MEMBER_PAGES = [
   { label: 'Chat', path: '/chat' },
   { label: 'Devices', path: '/devices' },
   { label: 'Nodes', path: '/nodes' },
+  { label: 'Now playing', path: '/now-playing' },
   { label: 'Add-ons', path: '/addons' },
   { label: 'Inbox', path: '/inbox' },
   { label: 'Recent commands', path: '/recent' },

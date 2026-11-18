@@ -21,6 +21,7 @@ import {
   Phone,
   Store,
   Radio,
+  Music,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useInboxAlerts } from '@/hooks/useInbox'
@@ -42,6 +43,7 @@ const memberNav: NavItem[] = [
   { label: 'Chat', icon: MessageSquare, path: '/chat' },
   { label: 'Devices', icon: Radio, path: '/devices' },
   { label: 'Nodes', icon: Cpu, path: '/nodes' },
+  { label: 'Now playing', icon: Music, path: '/now-playing' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
   { label: 'Recent commands', icon: History, path: '/recent' },
