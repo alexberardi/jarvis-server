@@ -33,7 +33,7 @@ Done. Not ported, on purpose: audio cards and the callback-result page (see the 
 - [x] The household's nodes for every member (`/nodes`): state, settings, pairing approval (#706)
 - [x] Rooms on the web: the Devices page's Rooms (#707)
 - [x] Now playing on the web (`/now-playing`) (#705)
-- [ ] A node's stored data on the web (`/nodes/:id/data`); fixes interactive lists' "Find ID" save (#708)
+- [x] A node's stored data on the web (`/nodes/:id/data`); fixes interactive lists' "Find ID" save (#708)
 - [ ] Mobile: Recent Commands showed "tool"/"undefined", and the room delete warning was wrong (jarvis-node-mobile#170, held: a merge ships a build)
 
 Not ported, on purpose: voice profile enrollment (the phone records it well; the web would need the
