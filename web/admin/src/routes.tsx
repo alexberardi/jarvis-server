@@ -20,6 +20,7 @@ import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
 import HouseholdPage from '@/pages/HouseholdPage'
 import CallDetailsPage from '@/pages/CallDetailsPage'
+import HouseholdNodesPage from '@/pages/HouseholdNodesPage'
 import InboxItemPage from '@/pages/InboxItemPage'
 import InboxPage from '@/pages/InboxPage'
 import LoginPage from '@/pages/LoginPage'
@@ -112,6 +113,7 @@ export function shellRoutes() {
       <Route path="/account" element={<AccountPage />} />
       <Route path="/household" element={<HouseholdPage />} />
       <Route path="/call-details" element={<CallDetailsPage />} />
+      <Route path="/nodes" element={<HouseholdNodesPage />} />
       {UiGalleryPage && (
         <Route
           path="/dev/ui"
@@ -130,9 +132,12 @@ export function shellRoutes() {
         <Route path="services" element={<Navigate to="/admin/connections" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-      {adminPages.map((p) => (
-        <Route key={p.path} path={'/' + p.path} element={<ToAdmin />} />
-      ))}
+      {/* /nodes is now the household's own page (HouseholdNodesPage), not the old admin path. */}
+      {adminPages
+        .filter((p) => p.path !== 'nodes')
+        .map((p) => (
+          <Route key={p.path} path={'/' + p.path} element={<ToAdmin />} />
+        ))}
       <Route path="/services" element={<ToAdmin to="/admin/connections" />} />
       <Route path="*" element={<NotFoundPage />} />
     </>
