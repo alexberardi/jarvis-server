@@ -33,7 +33,7 @@ func (s stackResolver) Resolve(ctx context.Context, label string) (Endpoint, err
 		BaseURL: ep.BaseURL, APIKey: ep.APIKey, Model: ep.Model,
 		Vision: ep.Vision, Embeddings: ep.Embeddings, ContextLength: per, Remote: ep.Remote,
 		FoldSystemMessages: ep.FoldSystemMessages, API: ep.API, NoReasoningBudget: ep.NoReasoningBudget,
-		ThinkingControls: ep.ThinkingControls, Grammar: ep.Grammar,
+		ThinkingControls: ep.ThinkingControls, Grammar: enforcesSchema(ep),
 		Timeout: time.Duration(ep.TimeoutMS) * time.Millisecond, Fallback: ep.Fallback,
 	}, nil
 }
@@ -286,4 +286,13 @@ func (m *Module) RecentInstalls(ctx context.Context) []SetupInstall {
 		return nil
 	}
 	return out
+}
+
+// enforcesSchema reports whether ep holds an answer to a JSON schema (ResponseSchema): a local
+// llama-server, or a remote that takes llama-server's controls (remote_thinking: another
+// Jarvis server, which hands the schema to its own engine, or a llama-server). A Jarvis server
+// from before the schema ignores the field. OpenAI, Anthropic and Gemini are left out: their
+// own schema modes refuse this schema's optional fields.
+func enforcesSchema(ep engine.Endpoint) bool {
+	return ep.Grammar || (ep.Remote && ep.ThinkingControls && ep.API != engine.APIAnthropic)
 }

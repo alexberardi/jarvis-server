@@ -48,8 +48,7 @@ type Endpoint struct {
 	// thinking goes by chat_template_kwargs alone.
 	NoReasoningBudget bool
 	// Grammar: the engine holds an answer to a JSON schema as it writes it (ResponseSchema).
-	// shortcut: local llama-server only; a remote Jarvis server or llama-server could take it
-	// too once its API accepts the field (decision 2026-11-17-engine-enforced-reply-schema).
+	// A local llama-server, or a remote that takes its controls (enforcesSchema).
 	Grammar bool
 	// ThinkingControls: a remote endpoint that takes llama-server's thinking controls
 	// (remote_thinking: another Jarvis server, a llama-server).

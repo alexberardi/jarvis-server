@@ -34,3 +34,16 @@ the grammar to choose between. Rules a flat schema can't state (a `done` needs a
 
 **Order.** Before Gemma 4 12B is offered in the install wizard: a model recommended for a
 12 GB card should not depend on after-the-fact repairs to be read.
+
+**Built 2026-11-17.** `llm.ResponseSchema` (`response_format` type `json_schema`) goes to a
+local llama-server and, by the user's choice the same day, through to a remote that takes
+llama-server's controls (`remote_thinking`: another Jarvis server, which hands it to its own
+engine, or a llama-server). A Jarvis server from before this ignores the field and answers as
+it did (checked against prod's build). OpenAI, Anthropic and Gemini get no schema: their own
+schema modes refuse optional fields. The shape gained one thing over the flat object above: an
+action's `kind` comes first and brings the fields that kind needs, because the flat version
+still let through a `set_value` with no ref and an empty action list.
+
+**Not measured yet.** Gemma 4 26B-A4B has never run with the schema: this box can't hold it,
+and prod's build predates it. Check the form fill and the Craigslist sweep on prod as part of
+the release that carries this.

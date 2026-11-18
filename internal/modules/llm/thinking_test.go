@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/alexberardi/jarvis-server/internal/modules/llm/engine"
 	"time"
 )
 
@@ -231,6 +233,23 @@ func TestPayloadResponseSchema(t *testing.T) {
 		}
 		if got := strings.Contains(string(b), `"response_format":{"type":"json_schema","json_schema":{"name":"reply"`); got != c.want {
 			t.Errorf("%s: response_format sent = %v, want %v: %s", name, got, c.want, b)
+		}
+	}
+}
+
+func TestEnforcesSchema(t *testing.T) {
+	for name, c := range map[string]struct {
+		ep   engine.Endpoint
+		want bool
+	}{
+		"local llama-server":           {engine.Endpoint{Grammar: true}, true},
+		"local engine without grammar": {engine.Endpoint{}, false},
+		"another Jarvis server":        {engine.Endpoint{Remote: true, ThinkingControls: true}, true},
+		"OpenAI":                       {engine.Endpoint{Remote: true}, false},
+		"Anthropic":                    {engine.Endpoint{Remote: true, ThinkingControls: true, API: engine.APIAnthropic}, false},
+	} {
+		if got := enforcesSchema(c.ep); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
 		}
 	}
 }
