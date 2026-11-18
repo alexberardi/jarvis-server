@@ -171,7 +171,7 @@ function RoutineForm({ initial }: { initial: Routine | null }) {
     }))
 
   return (
-    <div className="mx-auto max-w-3xl pb-24">
+    <div className="mx-auto max-w-3xl">
       <BackLink />
       <PageHeader
         title={initial ? 'Edit routine' : 'New routine'}
@@ -386,7 +386,7 @@ function RoutineForm({ initial }: { initial: Routine | null }) {
           )}
         </Card>
 
-        <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-3 border-t border-border bg-background px-4 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
           {problem && (
             <p className="mr-auto text-small text-text-muted" role="status">
               {problem}
