@@ -222,6 +222,10 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
 		}
 	}
+	// Recent commands: the caller's own transcripts.
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own recent commands: %d %v", code, out)
+	}
 	// Memories and the phonebook: the member's own household works; another household's are
 	// refused (cc: not a member).
 	mem := base + "/api/cc/api/v0/mobile/memories"

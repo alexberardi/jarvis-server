@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Workflow,
+  History,
   Brain,
   BookUser,
   LayoutDashboard,
@@ -41,6 +42,7 @@ const memberNav: NavItem[] = [
   { label: 'Devices', icon: Radio, path: '/devices' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
+  { label: 'Recent commands', icon: History, path: '/recent' },
   // Scheduled errands live under Routines (/routines/errands), as on mobile.
   { label: 'Routines', icon: Workflow, path: '/routines' },
   { label: 'Memories', icon: Brain, path: '/memories' },

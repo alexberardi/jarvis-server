@@ -161,6 +161,9 @@ var passRoutes = []passRoute{
 	ccUserRoute("POST /api/cc/api/v0/mobile/household/{household_id}/phone-contacts"),
 	ccUserRoute("PATCH /api/cc/api/v0/mobile/household/{household_id}/phone-contacts/{contact_id}"),
 	ccUserRoute("DELETE /api/cc/api/v0/mobile/household/{household_id}/phone-contacts/{contact_id}"),
+	// Recent commands (mobile's Recent Commands): the caller's own transcripts, what was said,
+	// what ran and the reply; cc selects by the caller's user id.
+	ccUserRoute("GET /api/cc/api/v0/transcripts/recent"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.
