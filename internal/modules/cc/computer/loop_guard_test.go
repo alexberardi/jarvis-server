@@ -179,3 +179,26 @@ func TestOnSite(t *testing.T) {
 		}
 	}
 }
+
+// A lookup's done with nothing found in its summary goes back once: the summary is the answer.
+func TestLookupDoneWithoutFindingsAsksOnce(t *testing.T) {
+	e := newEnv(t, formPage())
+	e.script(`{"done": true, "summary": "Found the cheapest soaps.", "verify": {"url_contains": "/apply"}}`,
+		`{"done": true, "summary": "Lavender soap, $4.", "verify": {"url_contains": "/apply"}}`)
+	look := task()
+	look.Goal = "List the cheapest soaps with their prices"
+	out := e.loop.Run(context.Background(), look)
+	if out.State != StateDone || len(e.llm.reqs) != 2 || !strings.Contains(out.Summary, "$4") {
+		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
+	}
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, "your summary doesn't hold what you found") {
+		t.Fatalf("no feedback:\n%s", txt)
+	}
+}
+
+func TestLongIntentIsCut(t *testing.T) {
+	r, err := parseReply(`{"actions": [{"kind": "press", "ref": "e1", "intent": "` + strings.Repeat("x", 400) + `"}]}`)
+	if err != nil || len(r.Actions) != 1 || len([]rune(r.Actions[0].Intent)) != computeruse.MaxIntent {
+		t.Fatalf("reply %+v, %v", r, err)
+	}
+}

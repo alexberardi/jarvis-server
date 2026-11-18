@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
@@ -803,10 +804,11 @@ func (s *Service) composeErrandMessage(ctx context.Context, goal string, results
 	if s.LLM == nil {
 		return fallback, false
 	}
+	prompt := ComposePrompt(goal, results)
 	temp, maxTok, off := 0.3, 2000, 0 // room for a comparison; a short answer stays short
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
 		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &off,
-		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(ComposePrompt(goal, results))}},
+		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
 	})
 	if err != nil {
 		s.log().Warn("errands: result compose failed; using the plain summary", "err", err)
@@ -817,9 +819,51 @@ func (s *Service) composeErrandMessage(ctx context.Context, goal string, results
 		content = content[i+len("</think>"):]
 	}
 	if content = parse.PyStrip(content); content != "" {
+		if f := unbackedFigure(content, prompt); f != "" {
+			// The model made a number up: the plain roll-up says only what the steps said.
+			s.log().Warn("errands: the report has a figure no step found; using the plain summary", "figure", f)
+			return fallback, false
+		}
 		return content, true
 	}
 	return fallback, false
+}
+
+// figureRe is an amount of money, a number of four digits or more, or a number in thousands
+// ("193k"): what a report must not invent.
+var figureRe = regexp.MustCompile(`(?i)[$€£]\s?\d[\d,]*(?:\.\d+)?k?|\b\d[\d,]{3,}(?:\.\d+)?k?\b|\b\d+(?:\.\d+)?k\b`)
+
+// figures are text's figures, written one way ("$4,500", "4500" and "4.5k" are the same).
+func figures(text string) []string {
+	var out []string
+	for _, f := range figureRe.FindAllString(text, -1) {
+		f = strings.ToLower(strings.NewReplacer("$", "", "€", "", "£", "", ",", "", " ", "").Replace(f))
+		k := strings.HasSuffix(f, "k")
+		n, err := strconv.ParseFloat(strings.TrimSuffix(f, "k"), 64)
+		if err != nil {
+			continue
+		}
+		if k {
+			n *= 1000
+		}
+		out = append(out, strconv.FormatFloat(n, 'f', -1, 64))
+	}
+	return out
+}
+
+// unbackedFigure is the first figure in a report that source (the goal and what the steps
+// found) doesn't hold, "" when every one is there.
+func unbackedFigure(report, source string) string {
+	have := map[string]bool{}
+	for _, f := range figures(source) {
+		have[f] = true
+	}
+	for _, f := range figures(report) {
+		if !have[f] {
+			return f
+		}
+	}
+	return ""
 }
 
 // aggregateAndCompose is aggregate_and_compose: control steps leave the tally and the summary

@@ -99,6 +99,11 @@ func parseReply(s string) (Reply, error) {
 			thought = ""
 		}
 		for i, a := range r.Actions {
+			// An intent says what the action is for; one that runs on is cut, not a failed
+			// answer: a 9B's 20-round task ended on "intent is longer than 200 characters".
+			if rs := []rune(a.Intent); len(rs) > computeruse.MaxIntent {
+				r.Actions[i].Intent = string(rs[:computeruse.MaxIntent-1]) + "…"
+			}
 			if a.Kind == "click" && a.Ref != "" && a.X == nil && a.Y == nil {
 				r.Actions[i].Kind = "press" // a click on a listed element
 			}

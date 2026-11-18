@@ -430,3 +430,19 @@ func TestValidDocumentsFolder(t *testing.T) {
 		}
 	}
 }
+
+// A report's money and big numbers must be ones the steps found, however they are written.
+func TestUnbackedFigure(t *testing.T) {
+	source := "goal: under 15000 dollars\n2006 Honda CR-V 193k mi $4,500\nRoborock $139.99, 34,000 reviews"
+	for report, want := range map[string]string{
+		"The 2006 CR-V has 193,000 miles and costs $4500.":     "",
+		"Under $15,000: the Roborock at $139.99 (34k reviews)": "",
+		"A 2008 CR-V with 142,500 miles for $8,900":            "2008",
+		"The Roborock is $129.99":                              "129.99",
+		"Three were found, the best rated 4.3 stars":           "",
+	} {
+		if got := unbackedFigure(report, source); got != want {
+			t.Errorf("%q: unbacked %q, want %q", report, got, want)
+		}
+	}
+}

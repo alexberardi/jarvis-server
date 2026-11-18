@@ -365,6 +365,8 @@ type round struct {
 	wrote   string // the answer's one action as the model wrote it (actOf)
 	// downloadsSeen are the files in Downloads at the last outcome, so the next can name new ones.
 	downloadsSeen map[string]bool
+	// foundAsked: a lookup's done whose summary held no findings was sent back, once.
+	foundAsked bool
 	// buyAsked counts the dones of an order on a page that still has its pay button (at most 2).
 	buyAsked int
 }
@@ -586,6 +588,13 @@ func (l *Loop) round(ctx context.Context, r *round) (Outcome, bool) {
 	}
 	switch {
 	case reply.Done:
+		// A lookup's summary is all the user and the errand's report get: one that only says
+		// "found them" left the report to make five listings up (Qwen3.5-9B, 2026-11-17).
+		if !r.foundAsked && lookupRe.MatchString(r.task.Goal) && !strings.ContainsAny(reply.Summary, "0123456789") {
+			r.foundAsked = true
+			r.feedback = `you said done, but your summary doesn't hold what you found: the user sees only the summary, not the page. Say done again with the findings written out in "summary", each item with its figures (price, year, rating, whatever was asked for).`
+			return Outcome{}, false
+		}
 		// A task that says not to send or order is done with the button still there.
 		unsent := !noSendRe.MatchString(r.task.Goal + "\n" + r.task.Request)
 		if btn := unsentForm(r.run.History, obs); unsent && btn != nil && r.sendAsked < 2 {
@@ -917,6 +926,7 @@ func alreadySelected(obs Observation, actions []computeruse.Action) string {
 var (
 	noCheckoutRe = regexp.MustCompile(`(?i)\b(before|don'?t|do not|without|not|no)\b[^.;\n]{0,30}\bcheck(ing)? ?out\b`)
 	noSendRe     = regexp.MustCompile(`(?i)\b(before|don'?t|do not|without|not|no)\b[^.;\n]{0,30}\b(submit|send|order|plac|pay|buy|purchas)`)
+	lookupRe     = regexp.MustCompile(`(?i)\b(list|compare|cheapest|prices?|costs?|how (much|many)|ratings?|best)\b`)
 	checkoutRe   = regexp.MustCompile(`(?i)\bcheck ?out\b`)
 	addressRe    = regexp.MustCompile(`(?i)\b(street|address|apt|apartment|suite|city|zip|postal|postcode)\b`)
 	phoneRe      = regexp.MustCompile(`(?i)\b(phone|mobile|tel|telephone)\b`)
