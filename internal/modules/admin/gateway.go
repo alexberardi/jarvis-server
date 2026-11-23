@@ -75,6 +75,20 @@ var passRoutes = []passRoute{
 	authRoute("POST /api/auth/change-password", tierUser),
 	// The caller's own households: auth lists only their memberships and switches only into one.
 	authRoute("GET /api/households", tierUser),
+	// One household's people (mobile's Household settings): auth checks membership and the
+	// caller's role per route (any member lists; power users invite and revoke; admins rename,
+	// change roles and remove; leaving refuses the last admin and an only household).
+	authRoute("PATCH /api/households/{household_id}", tierUser),
+	authRoute("GET /api/households/{household_id}/members", tierUser),
+	authRoute("PATCH /api/households/{household_id}/members/{user_id}", tierUser),
+	authRoute("DELETE /api/households/{household_id}/members/{user_id}", tierUser),
+	authRoute("POST /api/households/{household_id}/leave", tierUser),
+	authRoute("GET /api/households/{household_id}/invites", tierUser),
+	authRoute("POST /api/households/{household_id}/invites", tierUser),
+	authRoute("DELETE /api/households/{household_id}/invites/{invite_id}", tierUser),
+	// Joining another household with an invite code (auth checks the code; the caller joins as
+	// themself with the invite's role).
+	authRoute("POST /api/households/join", tierUser),
 	authRoute("POST /api/auth/switch-household", tierUser),
 
 	// Today's SPA paths for the cross-household views (G7: every user and email, and resetting
@@ -133,17 +147,52 @@ var passRoutes = []passRoute{
 	// Interactive lists (docs/webapp/03 step 3): a row's live record gate and a picked value saved
 	// onto it (cc checks membership of the node's household), and the owner's "Find ID" tab
 	// matches (cc: the member who paired the node only).
+	// The Stored data page (mobile's Stored data): cc checks the caller is a member of the node's
+	// household; the node keeps only editable fields and stamps the owner on a create.
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/schema"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
 	ccUserRoute("PATCH /api/cc/api/v0/mobile/command-data/nodes/{node_id}/commands/{command_name}/records/{key}"),
 	ccUserRoute("GET /api/cc/api/v0/mobile/nodes/{node_id}/browser/matches"),
 	// Scheduled errands: the household's one-time and recurring errands, and cancelling one
 	// (mobile's Schedules screen); cc checks membership of the household.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/schedules"),
 	ccUserRoute("POST /api/cc/api/v0/mobile/household/{household_id}/schedules/{schedule_id}/cancel"),
+	// Routines (mobile's Routines tab): the household's routines, editing them and run-now (cc
+	// holds run-now open until the node reports, up to 60 s); cc checks membership.
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/routines"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/routines"),
+	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
+	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/households/{household_id}/routines/{routine_id}"),
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/routines/{routine_id}/run-now"),
+	// Memories (mobile's Memories screens): the caller's own and, for power users and admins,
+	// the household's; cc resolves the caller's role in the household and who may edit what.
+	ccUserRoute("GET /api/cc/api/v0/mobile/memories"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/memories"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/memories/{memory_id}"),
+	ccUserRoute("PUT /api/cc/api/v0/mobile/memories/{memory_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/memories/{memory_id}"),
+	// The phonebook (mobile's Phonebook screens): businesses Jarvis may call; cc checks
+	// membership of the household.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/phone-contacts"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/household/{household_id}/phone-contacts"),
+	ccUserRoute("PATCH /api/cc/api/v0/mobile/household/{household_id}/phone-contacts/{contact_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/mobile/household/{household_id}/phone-contacts/{contact_id}"),
+	// Recent commands (mobile's Recent Commands): the caller's own transcripts, what was said,
+	// what ran and the reply; cc selects by the caller's user id.
+	ccUserRoute("GET /api/cc/api/v0/transcripts/recent"),
 	// The household's primary node for the picker's default (§3.3).
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/smart-home/config"),
 	// Devices: member operations, with household/node checks in CC.
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/rooms"),
+	// Rooms (mobile's Rooms, the Devices page): cc lets any member of the household change them.
+	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/rooms"),
+	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/rooms/{room_id}"),
+	ccUserRoute("DELETE /api/cc/api/v0/households/{household_id}/rooms/{room_id}"),
 	ccUserRoute("GET /api/cc/api/v0/households/{household_id}/devices"),
 	ccUserRoute("POST /api/cc/api/v0/households/{household_id}/devices/import"),
 	ccUserRoute("PATCH /api/cc/api/v0/households/{household_id}/devices/{device_id}"),
@@ -164,6 +213,21 @@ var passRoutes = []passRoute{
 	// Household settings (Account page): cc lets any member read, only a household admin write.
 	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/settings"),
 	ccUserRoute("PUT /api/cc/api/v0/mobile/household/{household_id}/settings/{key...}"),
+	// The Household page's voice and time zone (mobile's Household settings): the persona
+	// starters and the zone in effect with where it came from; any member reads.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/persona/presets"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/timezone"),
+	// Call details (mobile's Call details): the caller's own; cc keys them by the user.
+	ccUserRoute("GET /api/cc/api/v0/mobile/call-context"),
+	ccUserRoute("PUT /api/cc/api/v0/mobile/call-context"),
+	// Signal automations (mobile's Automations): cc lets any member read, only a household admin write.
+	ccUserRoute("GET /api/cc/api/v0/mobile/household/{household_id}/signal-automations"),
+	ccUserRoute("PUT /api/cc/api/v0/mobile/household/{household_id}/signal-automations/{kind}"),
+	// Now playing (mobile's Now playing): cc checks membership of the household, or of the
+	// node's household for a cover or a control.
+	ccUserRoute("GET /api/cc/api/v0/mobile/playback"),
+	ccUserRoute("GET /api/cc/api/v0/mobile/playback/cover"),
+	ccUserRoute("POST /api/cc/api/v0/mobile/playback/control"),
 	// Device-code pairing approval (install plan 1.1; webapp 01 §2.2 Add-ons row): cc counts what
 	// waits (never listing codes) plus the caller's own households, and approves a typed code
 	// only into one of those.

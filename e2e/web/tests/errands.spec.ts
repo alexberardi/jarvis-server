@@ -10,7 +10,7 @@ test('an errand scheduled in chat is listed, and Stop cancels it', async ({ asUs
   const u = await newUser('errands')
   await provisionNode(u.token, u.householdId, { id: unique('kitchen'), name: 'Kitchen', room: 'kitchen' })
   const page = await asUser(u)
-  await page.goto('/errands')
+  await page.goto('/errands') // the old address redirects to /routines/errands
   await expect(page.getByText('No scheduled errands')).toBeVisible()
 
   await sidebar(page).getByRole('link', { name: 'Chat' }).click()
@@ -18,7 +18,8 @@ test('an errand scheduled in chat is listed, and Stop cancels it', async ({ asUs
   await page.getByRole('button', { name: 'Send' }).click()
   await expect(page.locator('[data-role="assistant"]').last()).toContainText("Okay — I'll do that every day at 8am")
 
-  await sidebar(page).getByRole('link', { name: 'Errands' }).click()
+  await sidebar(page).getByRole('link', { name: 'Routines' }).click()
+  await page.getByRole('link', { name: 'Scheduled errands' }).click()
   const goal = 'Check the e2e weather and say if I need an umbrella'
   await expect(page.getByText(goal)).toBeVisible()
   await expect(page.getByText(/every day/)).toBeVisible()

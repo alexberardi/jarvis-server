@@ -198,6 +198,168 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "POST", base+"/api/cc/api/v0/mobile/household/"+h2+"/schedules/s1/cancel", map[string]any{}, bearer(m1)...); code != 403 {
 		t.Fatalf("cancel another household's errand: %d %v", code, out)
 	}
+	// Routines: the member's household lists and creates; another household's list, create,
+	// read, edit, delete and run-now are refused.
+	rt := base + "/api/cc/api/v0/households/"
+	if code, out := call(t, "GET", rt+h1+"/routines", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own routines: %d %v", code, out)
+	}
+	newRoutine := map[string]any{"name": "Tier check", "trigger_phrases": []any{"tier check"},
+		"steps":                []any{map[string]any{"command": "get_weather", "args": []any{}, "label": "get_weather"}},
+		"response_instruction": "", "response_length": "short", "schedule": nil}
+	if code, out := call(t, "POST", rt+h1+"/routines", newRoutine, bearer(m1)...); code != 200 && code != 201 {
+		t.Fatalf("create own routine: %d %v", code, out)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/routines"}, {"POST", "/routines"}, {"GET", "/routines/r1"}, {"PATCH", "/routines/r1"},
+		{"DELETE", "/routines/r1"}, {"POST", "/routines/r1/run-now"},
+	} {
+		var body any
+		if c.method == "POST" || c.method == "PATCH" {
+			body = newRoutine
+		}
+		if code, out := call(t, c.method, rt+h2+c.path, body, bearer(m1)...); code != 403 {
+			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
+		}
+	}
+	// A household's people: a member lists members and invites but can't invite, rename, change a
+	// role or remove anyone; a power user invites; an admin renames; another household's are refused.
+	p1, a1 := users["p1@example.com"], users["a1@example.com"]
+	hp := base + "/api/households/"
+	refused := func(code int) bool { return code == 403 || code == 404 }
+	for _, path := range []string{"/members", "/invites"} {
+		if code, out := call(t, "GET", hp+h1+path, nil, bearer(m1)...); code != 200 {
+			t.Fatalf("member lists own %s: %d %v", path, code, out)
+		}
+		if code, out := call(t, "GET", hp+h2+path, nil, bearer(m1)...); !refused(code) {
+			t.Fatalf("member lists another household's %s: %d %v", path, code, out)
+		}
+	}
+	invite := map[string]any{"default_role": "member", "expires_in_days": 7}
+	if code, out := call(t, "POST", hp+h1+"/invites", invite, bearer(m1)...); !refused(code) {
+		t.Fatalf("member creates an invite: %d %v", code, out)
+	}
+	invCode, inv := call(t, "POST", hp+h1+"/invites", invite, bearer(p1)...)
+	if invCode != 201 && invCode != 200 {
+		t.Fatalf("power user creates an invite: %d %v", invCode, inv)
+	}
+	// A member of another household joins with the code, as themself; a bad code is refused.
+	if code, out := call(t, "POST", base+"/api/households/join", map[string]any{"invite_code": obj(t, inv)["code"]}, bearer(m2)...); code != 200 && code != 201 {
+		t.Fatalf("join with a code: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", base+"/api/households/join", map[string]any{"invite_code": "NOPE-NOPE"}, bearer(m2)...); code < 400 || code >= 500 {
+		t.Fatalf("join with a bad code: %d %v", code, out)
+	}
+	// ... and leaves again (two households now, not the last admin), so the checks below still
+	// see m2 in H2 only.
+	if code, out := call(t, "POST", hp+h1+"/leave", map[string]any{}, bearer(m2)...); code != 200 && code != 204 {
+		t.Fatalf("leave after joining: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", hp+h1, map[string]any{"name": "Renamed"}, bearer(m1)...); !refused(code) {
+		t.Fatalf("member renames the household: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", hp+h1, map[string]any{"name": "H1"}, bearer(a1)...); code != 200 {
+		t.Fatalf("admin renames the household: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", hp+h1+"/members/"+fmt.Sprint(m1ID), map[string]any{"role": "admin"}, bearer(m1)...); !refused(code) {
+		t.Fatalf("member promotes themself: %d %v", code, out)
+	}
+	if code, out := call(t, "DELETE", hp+h2+"/members/"+fmt.Sprint(m1ID), nil, bearer(m1)...); !refused(code) {
+		t.Fatalf("member removes from another household: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", hp+h2+"/leave", map[string]any{}, bearer(m1)...); !refused(code) {
+		t.Fatalf("member leaves a household they're not in: %d %v", code, out)
+	}
+	// The household's voice starters and time zone: any member of it reads; another household's
+	// are refused.
+	for _, path := range []string{"/persona/presets", "/timezone", "/signal-automations"} {
+		u := base + "/api/cc/api/v0/mobile/household/"
+		if code, out := call(t, "GET", u+h1+path, nil, bearer(m1)...); code != 200 {
+			t.Fatalf("own household %s: %d %v", path, code, out)
+		}
+		if code, out := call(t, "GET", u+h2+path, nil, bearer(m1)...); code != 403 {
+			t.Fatalf("another household's %s: %d %v", path, code, out)
+		}
+	}
+	// Signal automations: only a household admin writes; another household's are refused.
+	sa := base + "/api/cc/api/v0/mobile/household/"
+	rule := map[string]any{"instruction": "Lock the front door", "enabled": true, "delivery": "notification"}
+	if code, out := call(t, "PUT", sa+h1+"/signal-automations/presence.left", rule, bearer(m1)...); code != 403 {
+		t.Fatalf("member writes an automation: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", sa+h2+"/signal-automations/presence.left", rule, bearer(a1)...); code != 403 {
+		t.Fatalf("admin writes another household's automation: %d %v", code, out)
+	}
+	if code, out := call(t, "PUT", sa+h1+"/signal-automations/presence.left", rule, bearer(a1)...); code != 200 {
+		t.Fatalf("admin writes an automation: %d %v", code, out)
+	}
+	// Call details: each member's own; another member never sees them.
+	cctx := base + "/api/cc/api/v0/mobile/call-context"
+	detail := map[string]any{"fields": []any{map[string]any{"label": "Rewards number", "value": "9982-4471", "category": "dining", "tier": "if_asked"}}}
+	if code, out := call(t, "PUT", cctx, detail, bearer(m1)...); code != 200 {
+		t.Fatalf("own call details: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", cctx, nil, bearer(p1)...); code != 200 || strings.Contains(fmt.Sprint(out), "9982-4471") {
+		t.Fatalf("another member's call details: %d %v", code, out)
+	}
+	// Recent commands: the caller's own transcripts.
+	if code, out := call(t, "GET", base+"/api/cc/api/v0/transcripts/recent?limit=5", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own recent commands: %d %v", code, out)
+	}
+	// Rooms: a member changes their own household's; another household's are refused.
+	rooms := base + "/api/cc/api/v0/households/"
+	rc, rout := call(t, "POST", rooms+h1+"/rooms", map[string]any{"name": "Pantry"}, bearer(m1)...)
+	if rc != 200 && rc != 201 {
+		t.Fatalf("member adds a room: %d %v", rc, rout)
+	}
+	roomID := fmt.Sprint(obj(t, rout)["id"])
+	if code, out := call(t, "POST", rooms+h2+"/rooms", map[string]any{"name": "Pantry"}, bearer(m1)...); code != 403 {
+		t.Fatalf("member adds a room to another household: %d %v", code, out)
+	}
+	if code, out := call(t, "PATCH", rooms+h2+"/rooms/"+roomID, map[string]any{"name": "Larder"}, bearer(m2)...); code != 404 {
+		t.Fatalf("another household renames the room: %d %v", code, out)
+	}
+	if code, out := call(t, "DELETE", rooms+h1+"/rooms/"+roomID, nil, bearer(m1)...); code != 200 && code != 204 {
+		t.Fatalf("member deletes the room: %d %v", code, out)
+	}
+	// Now playing: the member's own household reads; another household's is refused.
+	pb := base + "/api/cc/api/v0/mobile/playback"
+	if code, out := call(t, "GET", pb+"?household_id="+h1, nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own household's playback: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", pb+"?household_id="+h2, nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's playback: %d %v", code, out)
+	}
+	// Memories and the phonebook: the member's own household works; another household's are
+	// refused (cc: not a member).
+	mem := base + "/api/cc/api/v0/mobile/memories"
+	if code, out := call(t, "GET", mem+"?household_id="+h1, nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own memories: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", mem+"?household_id="+h1, map[string]any{"content": "likes oat milk"}, bearer(m1)...); code != 200 && code != 201 {
+		t.Fatalf("create own memory: %d %v", code, out)
+	}
+	if code, out := call(t, "GET", mem+"?household_id="+h2, nil, bearer(m1)...); code != 403 {
+		t.Fatalf("another household's memories: %d %v", code, out)
+	}
+	if code, out := call(t, "POST", mem+"?household_id="+h2, map[string]any{"content": "x"}, bearer(m1)...); code != 403 {
+		t.Fatalf("create a memory in another household: %d %v", code, out)
+	}
+	pc := base + "/api/cc/api/v0/mobile/household/"
+	if code, out := call(t, "GET", pc+h1+"/phone-contacts", nil, bearer(m1)...); code != 200 {
+		t.Fatalf("own phonebook: %d %v", code, out)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/phone-contacts"}, {"POST", "/phone-contacts"}, {"PATCH", "/phone-contacts/c1"}, {"DELETE", "/phone-contacts/c1"},
+	} {
+		var body any
+		if c.method == "POST" || c.method == "PATCH" {
+			body = map[string]any{"name": "Tony's", "number": "+15551234567"}
+		}
+		if code, out := call(t, c.method, pc+h2+c.path, body, bearer(m1)...); code != 403 {
+			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
+		}
+	}
 
 	// Interactive lists: another household's node's records are refused (cc: not a member), and
 	// tab matches only answer the member who paired the node (an admin-key node has no owner).
@@ -205,8 +367,22 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	if code, out := call(t, "GET", cd, nil, bearer(m1)...); code != 403 {
 		t.Fatalf("another household's node records: %d %v", code, out)
 	}
-	if code, out := call(t, "PATCH", cd+"/milk", map[string]any{"walmart_item_id": "1"}, bearer(m1)...); code != 403 {
+	if code, out := call(t, "PATCH", cd+"/milk", map[string]any{"patch": map[string]any{"walmart_item_id": "1"}}, bearer(m1)...); code != 403 {
 		t.Fatalf("patch another household's node record: %d %v", code, out)
+	}
+	// The Stored data page: every other command-data route refuses another household's node too.
+	cdNode := base + "/api/cc/api/v0/mobile/command-data/nodes/node-h2/commands"
+	for _, c := range []struct{ method, path string }{
+		{"GET", cdNode}, {"GET", cdNode + "/export_shopping_list/schema"}, {"GET", cd + "/milk"},
+		{"POST", cd}, {"DELETE", cd + "/milk"},
+	} {
+		var body any
+		if c.method == "POST" {
+			body = map[string]any{"data": map[string]any{"name": "x"}}
+		}
+		if code, out := call(t, c.method, c.path, body, bearer(m1)...); code != 403 {
+			t.Fatalf("%s another household's %s: %d %v", c.method, c.path, code, out)
+		}
 	}
 	for _, n := range []string{"node-h1", "node-h2"} {
 		if code, out := call(t, "GET", base+"/api/cc/api/v0/mobile/nodes/"+n+"/browser/matches?pattern=(x)", nil, bearer(m1)...); code != 404 {
@@ -293,7 +469,6 @@ func TestMemberTiersEndToEnd(t *testing.T) {
 	}
 
 	// The household prompt: cc lets only an admin of that household in.
-	a1 := users["a1@example.com"]
 	if code, out := call(t, "GET", base+"/api/cc/api/v0/households/"+h1+"/prompt", nil, bearer(a1)...); code != 200 {
 		t.Errorf("own prompt as a household admin: %d %v", code, out)
 	}

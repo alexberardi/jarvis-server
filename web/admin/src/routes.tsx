@@ -11,8 +11,18 @@ import ChatPage from '@/pages/ChatPage'
 import DevicesPage from '@/pages/DevicesPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import ErrandsPage from '@/pages/ErrandsPage'
+import MemoriesPage from '@/pages/MemoriesPage'
+import PhonebookPage from '@/pages/PhonebookPage'
+import RecentCommandsPage from '@/pages/RecentCommandsPage'
+import RoutineEditPage from '@/pages/RoutineEditPage'
+import RoutinesPage from '@/pages/RoutinesPage'
 import DashboardPage from '@/pages/DashboardPage'
 import HomeRedirect from '@/pages/HomeRedirect'
+import HouseholdPage from '@/pages/HouseholdPage'
+import CallDetailsPage from '@/pages/CallDetailsPage'
+import HouseholdNodesPage from '@/pages/HouseholdNodesPage'
+import NowPlayingPage from '@/pages/NowPlayingPage'
+import StoredDataPage from '@/pages/StoredDataPage'
 import InboxItemPage from '@/pages/InboxItemPage'
 import InboxPage from '@/pages/InboxPage'
 import LoginPage from '@/pages/LoginPage'
@@ -88,13 +98,26 @@ export function shellRoutes() {
       <Route path="/devices" element={<DevicesPage />} />
       <Route path="/addons" element={<AddonsPage />} />
       <Route path="/inbox" element={<InboxPage />} />
-      <Route path="/errands" element={<ErrandsPage />} />
+      <Route path="/routines" element={<RoutinesPage />} />
+      <Route path="/memories" element={<MemoriesPage />} />
+      <Route path="/phonebook" element={<PhonebookPage />} />
+      <Route path="/recent" element={<RecentCommandsPage />} />
+      <Route path="/routines/new" element={<RoutineEditPage />} />
+      <Route path="/routines/errands" element={<ErrandsPage />} />
+      <Route path="/routines/:id" element={<RoutineEditPage />} />
+      {/* Scheduled errands moved under Routines (as on mobile). */}
+      <Route path="/errands" element={<Navigate to="/routines/errands" replace />} />
       <Route path="/inbox/suppressed" element={<SuppressedSuggestionsPage />} />
       <Route path="/inbox/:id" element={<InboxItemPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />
       <Route path="/workflows/:id" element={<WorkflowEditPage />} />
       <Route path="/recordings" element={<RecordingsPage />} />
       <Route path="/account" element={<AccountPage />} />
+      <Route path="/household" element={<HouseholdPage />} />
+      <Route path="/call-details" element={<CallDetailsPage />} />
+      <Route path="/nodes" element={<HouseholdNodesPage />} />
+      <Route path="/now-playing" element={<NowPlayingPage />} />
+      <Route path="/nodes/:id/data" element={<StoredDataPage />} />
       {UiGalleryPage && (
         <Route
           path="/dev/ui"
@@ -113,9 +136,12 @@ export function shellRoutes() {
         <Route path="services" element={<Navigate to="/admin/connections" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-      {adminPages.map((p) => (
-        <Route key={p.path} path={'/' + p.path} element={<ToAdmin />} />
-      ))}
+      {/* /nodes is now the household's own page (HouseholdNodesPage), not the old admin path. */}
+      {adminPages
+        .filter((p) => p.path !== 'nodes')
+        .map((p) => (
+          <Route key={p.path} path={'/' + p.path} element={<ToAdmin />} />
+        ))}
       <Route path="/services" element={<ToAdmin to="/admin/connections" />} />
       <Route path="*" element={<NotFoundPage />} />
     </>

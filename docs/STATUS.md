@@ -21,10 +21,25 @@ Plan: [webapp/03-inbox-parity.md](webapp/03-inbox-parity.md).
 
 Done. Not ported, on purpose: audio cards and the callback-result page (see the plan).
 
-- [ ] Scheduled errands on the web (`/errands`, mobile's Schedules screen): list and stop
-- [ ] Recurrence: "every monday" was stored as daily (fix: #694)
+- [x] Scheduled errands on the web (mobile's Schedules screen): list and stop (#693)
+- [x] Recurrence: "every monday" was stored as daily (#694)
+- [x] Routines on the web (#696)
+- [x] Memories and the phonebook on the web (#697)
+- [x] Recent commands on the web (#698), every tool call recorded (#699); no ratings ([decision](decisions/2026-11-17-web-recent-commands-no-ratings.md))
+- [x] Household page (`/household`): name, members and roles, invites, join, leave, the feature switches (#700)
+- [x] The household's other settings on the web: voice, town, time zone, web search, Pantry, memory (#701); location and presence stay on the phone
+- [x] Signal automations on the web: the Household page's "When something happens" (mobile's Automations screen) (#703)
+- [x] Call details on the web (`/call-details`, from Account): what Jarvis may tell a business on a call (#704)
+- [x] The household's nodes for every member (`/nodes`): state, settings, pairing approval (#706)
+- [x] Rooms on the web: the Devices page's Rooms (#707)
+- [x] Now playing on the web (`/now-playing`) (#705)
+- [x] A node's stored data on the web (`/nodes/:id/data`); fixes interactive lists' "Find ID" save (#708)
+- [ ] Mobile: Recent Commands showed "tool"/"undefined", and the room delete warning was wrong (jarvis-node-mobile#170, held: a merge ships a build)
 
-Next: full alarms, spec first.
+Not ported, on purpose: voice profile enrollment (the phone records it well; the web would need the
+microphone for little gain).
+
+Next: full alarms. Spec and question queue: [ALARMS.md](ALARMS.md).
 
 ### Touch display (2026-10-23)
 

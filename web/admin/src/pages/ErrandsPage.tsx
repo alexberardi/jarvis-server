@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { CalendarClock, Hourglass } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft, CalendarClock, Hourglass } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { cancelSchedule, listSchedules } from '@/api/schedules'
@@ -38,6 +39,9 @@ export default function ErrandsPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
+      <Link to="/routines" className="inline-flex min-h-10 items-center gap-1 rounded-control text-small text-text-muted transition-colors duration-(--duration-hover) hover:text-text">
+        <ArrowLeft size={16} aria-hidden /> Routines
+      </Link>
       <PageHeader title="Scheduled errands" description="What Jarvis will do later, once or on repeat." />
       <Card flush className="overflow-hidden">
         {list.isError ? (

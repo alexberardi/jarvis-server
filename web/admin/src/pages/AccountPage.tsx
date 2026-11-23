@@ -1,15 +1,15 @@
 import { type FormEvent, useState } from 'react'
-import HouseholdSettings from '@/components/account/HouseholdSettings'
+import { Link } from 'react-router-dom'
+import { ChevronRight } from 'lucide-react'
 import { Alert, Button, Card, Input, PageHeader, toast } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { errorMessage } from '@/lib/errors'
 import { nameOf } from '@/lib/session'
 
 /**
- * AccountPage is the v1 account view (webapp 01 §4.4): who you are, the name Jarvis calls you,
- * and the active household's feature switches (a household admin flips them). The password is
- * changed from the header's key button (/change-password); household and invite management stay
- * in the mobile app for v1.
+ * AccountPage is the account view (webapp 01 §4.4): who you are and the name Jarvis calls you,
+ * with a link to the Household page (members, invites, the household's switches). The password
+ * is changed from the header's key button (/change-password).
  */
 export default function AccountPage() {
   const { state, updateDisplayName } = useAuth()
@@ -39,7 +39,7 @@ export default function AccountPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeader title="Account" description="Who you are to Jarvis, and your household's features." />
+      <PageHeader title="Account" description="Who you are to Jarvis." />
       <div className="space-y-4">
         <Card as="section" aria-labelledby="account-profile">
           <h2 id="account-profile" className="sr-only">
@@ -72,7 +72,26 @@ export default function AccountPage() {
             </Alert>
           )}
         </Card>
-        <HouseholdSettings />
+        <Link
+          to="/household"
+          className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-5 py-4 text-body text-text transition-colors duration-(--duration-hover) hover:bg-surface-alt"
+        >
+          <span>
+            <span className="block font-medium">Household</span>
+            <span className="block text-small text-text-muted">Members, invites and the household’s features</span>
+          </span>
+          <ChevronRight size={18} aria-hidden className="text-text-muted" />
+        </Link>
+        <Link
+          to="/call-details"
+          className="flex items-center justify-between gap-3 rounded-card border border-border bg-surface px-5 py-4 text-body text-text transition-colors duration-(--duration-hover) hover:bg-surface-alt"
+        >
+          <span>
+            <span className="block font-medium">Call details</span>
+            <span className="block text-small text-text-muted">What Jarvis can tell a business when it calls for you</span>
+          </span>
+          <ChevronRight size={18} aria-hidden className="text-text-muted" />
+        </Link>
       </div>
     </div>
   )

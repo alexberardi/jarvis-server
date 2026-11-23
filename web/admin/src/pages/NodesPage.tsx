@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Cpu, FlaskConical, Laptop, RefreshCw, Trash2 } from 'lucide-react'
+import { Cpu, Database, FlaskConical, Laptop, RefreshCw, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import NodeSettings from '@/components/nodes/NodeSettings'
 import DisplaySettings from '@/components/display/DisplaySettings'
@@ -119,7 +119,11 @@ function RemoveNode({ nodeId, name, desktop }: { nodeId: string; name: string; d
   )
 }
 
-function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
+/**
+ * NodeCard is one node: its state, settings and removal. forge adds the Forge test link (an admin
+ * page); data the Stored data link (the household's own nodes only: cc checks membership).
+ */
+export function NodeCard({ node, live, forge = true, data = false }: { node: AdminNode; live?: NodeLiveness; forge?: boolean; data?: boolean }) {
   const desktop = live?.node_kind === 'desktop'
   const ext = extensionState(live)
   // Website access off: the browser is connected but Jarvis can't read or act on its pages.
@@ -188,7 +192,13 @@ function NodeCard({ node, live }: { node: AdminNode; live?: NodeLiveness }) {
       {(node.is_active || removable) && (
         <div className="mt-4 flex flex-wrap items-start gap-2">
           {node.is_active && <NodeSettings nodeId={node.node_id} name={node.name} online={live?.online === true} desktop={desktop} />}
-          {node.is_active && (
+          {node.is_active && data && (
+            <Link to={`/nodes/${encodeURIComponent(node.node_id)}/data`} className={buttonStyles({ size: 'sm' })}>
+              <Database size={14} aria-hidden="true" />
+              Stored data
+            </Link>
+          )}
+          {node.is_active && forge && (
             <Link to={`/admin/nodes/${encodeURIComponent(node.node_id)}/test`} className={buttonStyles({ size: 'sm' })}>
               <FlaskConical size={14} aria-hidden="true" />
               Test a Forge command

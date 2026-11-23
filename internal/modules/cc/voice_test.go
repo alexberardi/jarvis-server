@@ -431,17 +431,27 @@ func TestVoiceTranscriptsD19D50(t *testing.T) {
 	if len(rows) != 2 || rows[1]["user"] != "weather" || rows[1]["assistant"] != "Rainy." || !strings.Contains(rows[1]["tool_calls"].(string), `"name": "get_weather"`) {
 		t.Fatalf("tool exchange transcript %v", rows)
 	}
+	// A tool jarvisd runs itself is logged too (legacy logged only a node's, so Recent commands
+	// showed nothing for "remember that ...").
+	ve.eng.say(`<tool_call>{"name": "remember", "arguments": {"content": "the plumber comes Thursday"}}</tool_call>`)
+	ve.eng.say("Got it.")
+	ve.turn("/api/v0/voice/command", "t2", "remember the plumber comes thursday", nil).want(200)
+	rows = ve.transcripts()
+	if len(rows) != 3 || rows[2]["user"] != "remember the plumber comes thursday" ||
+		!strings.Contains(rows[2]["tool_calls"].(string), `"name": "remember"`) || strings.Contains(rows[2]["tool_calls"].(string), "get_weather") {
+		t.Fatalf("server tool transcript %v", rows)
+	}
 	// The speaker persists within the conversation (D3): a turn without a fresh match keeps it.
 	ve.eng.say("Bye.")
 	ve.turn("/api/v0/voice/command", "t2", "goodbye", nil).want(200)
-	if rows = ve.transcripts(); len(rows) != 3 || rows[2]["user_id"] != int64(7) {
+	if rows = ve.transcripts(); len(rows) != 4 || rows[3]["user_id"] != int64(7) || rows[3]["tool_calls"] != "" {
 		t.Fatalf("follow-up transcript %v", rows)
 	}
 	// A new conversation never inherits it (D3).
 	ve.start("t3", weatherTool)
 	ve.eng.say("Hi.")
 	ve.turn("/api/v0/voice/command", "t3", "hello", nil).want(200)
-	if len(ve.transcripts()) != 3 {
+	if len(ve.transcripts()) != 4 {
 		t.Fatal("a new conversation inherited the previous speaker")
 	}
 	// memory.extraction_enabled off: nothing is logged.
@@ -449,7 +459,7 @@ func TestVoiceTranscriptsD19D50(t *testing.T) {
 	ve.transcribe("t3", false)
 	ve.eng.say("Hi again.")
 	ve.turn("/api/v0/voice/command", "t3", "hello again", nil).want(200)
-	if len(ve.transcripts()) != 3 {
+	if len(ve.transcripts()) != 4 {
 		t.Fatal("extraction off still logged")
 	}
 }

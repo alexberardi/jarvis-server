@@ -1,6 +1,10 @@
 import { NavLink } from 'react-router-dom'
 import {
-  CalendarClock,
+  Workflow,
+  History,
+  Brain,
+  BookUser,
+  House,
   LayoutDashboard,
   Settings,
   Link2,
@@ -17,6 +21,7 @@ import {
   Phone,
   Store,
   Radio,
+  Music,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useInboxAlerts } from '@/hooks/useInbox'
@@ -37,9 +42,16 @@ interface NavItem {
 const memberNav: NavItem[] = [
   { label: 'Chat', icon: MessageSquare, path: '/chat' },
   { label: 'Devices', icon: Radio, path: '/devices' },
+  { label: 'Nodes', icon: Cpu, path: '/nodes' },
+  { label: 'Now playing', icon: Music, path: '/now-playing' },
   { label: 'Add-ons', icon: Puzzle, path: '/addons' },
   { label: 'Inbox', icon: Inbox, path: '/inbox' },
-  { label: 'Errands', icon: CalendarClock, path: '/errands' },
+  { label: 'Recent commands', icon: History, path: '/recent' },
+  // Scheduled errands live under Routines (/routines/errands), as on mobile.
+  { label: 'Routines', icon: Workflow, path: '/routines' },
+  { label: 'Memories', icon: Brain, path: '/memories' },
+  { label: 'Phonebook', icon: BookUser, path: '/phonebook' },
+  { label: 'Household', icon: House, path: '/household' },
   // Workflows and Recordings are shelved (docs/decisions/2026-11-15-taught-workflows-shelved.md):
   // their pages and routes stay, with no link to them.
 ]
@@ -53,7 +65,8 @@ const adminNav: NavItem[] = [
   { label: 'Connections', icon: Link2, path: '/admin/connections' },
   { label: 'Logs', icon: ScrollText, path: '/admin/logs' },
   { label: 'Traces', icon: Activity, path: '/admin/traces' },
-  { label: 'Nodes', icon: Cpu, path: '/admin/nodes' },
+  // The household's are under Nodes above; this is every household's.
+  { label: 'All nodes', icon: Cpu, path: '/admin/nodes' },
   { label: 'Users', icon: Users, path: '/admin/users' },
   { label: 'Phone', icon: Phone, path: '/admin/phone' },
   // /update used to be reachable ONLY via the dashboard's UpdateBanner, which

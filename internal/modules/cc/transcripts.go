@@ -21,19 +21,21 @@ import (
 // pendingTranscript is an exchange waiting for its continue.
 type pendingTranscript struct {
 	userMessage string
-	toolCalls   any // ordered tool call list
+	startID     uint64 // the exchange's user message (conversation.messages id)
+	toolCalls   any    // ordered tool call list so far, for a flush
 }
 
-// noteTranscript records a finished turn.
-func (m *Module) noteTranscript(ctx context.Context, conv *conversation, utterance string, res engineResult) {
+// noteTranscript records a finished turn. startID is the id of the turn's user message: every
+// tool call after it is the exchange's, jarvisd's own (remember, errands, ...) and a node's.
+func (m *Module) noteTranscript(ctx context.Context, conv *conversation, utterance string, startID uint64, res engineResult) {
 	switch res.Stop {
 	case stopNotForMe, stopError:
 		return
 	case stopToolCalls:
-		conv.pendingTranscript = &pendingTranscript{userMessage: utterance, toolCalls: toolCallsJSON(res)}
+		conv.pendingTranscript = &pendingTranscript{userMessage: utterance, startID: startID, toolCalls: exchangeToolCalls(conv.messages, startID)}
 		return
 	}
-	m.writeTranscript(ctx, conv, utterance, res.Message, nil)
+	m.writeTranscript(ctx, conv, utterance, res.Message, exchangeToolCalls(conv.messages, startID))
 }
 
 // completeTranscript finishes the pending exchange with the continue's answer.
@@ -49,7 +51,7 @@ func (m *Module) completeTranscript(ctx context.Context, conv *conversation, res
 	if res.Stop == stopNotForMe || res.Stop == stopError {
 		res.Message = ""
 	}
-	m.writeTranscript(ctx, conv, p.userMessage, res.Message, p.toolCalls)
+	m.writeTranscript(ctx, conv, p.userMessage, res.Message, exchangeToolCalls(conv.messages, p.startID))
 }
 
 // flushPendingTranscript writes an exchange whose continue never came.
@@ -60,10 +62,23 @@ func (m *Module) flushPendingTranscript(ctx context.Context, conv *conversation)
 	}
 }
 
-func toolCallsJSON(res engineResult) any {
+// exchangeToolCalls is every tool call the model made after the message with id start, in
+// order: the ones jarvisd ran itself and the ones it handed to a node (legacy logged only the
+// node's, so Recent commands missed remember, errands, ...). Empty when start isn't there.
+func exchangeToolCalls(msgs []chatMsg, start uint64) any {
 	var list []any
-	for _, c := range res.ToolCalls {
-		list = append(list, toolCallObject(c.ID, c.Function.Name, c.Function.Arguments, c.FailureMessage))
+	after := false
+	for _, mm := range msgs {
+		if mm.id == start {
+			after = true
+			continue
+		}
+		if !after {
+			continue
+		}
+		for _, c := range mm.ToolCalls {
+			list = append(list, toolCallObject(c.ID, c.Function.Name, c.Function.Arguments, c.FailureMessage))
+		}
 	}
 	return list
 }

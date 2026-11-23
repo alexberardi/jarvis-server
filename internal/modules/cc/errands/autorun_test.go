@@ -228,6 +228,11 @@ func TestAutorunStopWhileRunning(t *testing.T) {
 	}
 	e.waitFor("the first step", func() bool { return e.nodes.entered.Load() == 1 })
 	p := e.onlyPlan()
+	// The plan names its card while the first step runs (it was saved after launch: a Stop then
+	// found no card, the CI flake of 2026-11-18).
+	if p.InboxItemID == "" {
+		t.Fatal("the plan has no card while its first step runs")
+	}
 	r := e.tap(CallbackStop, map[string]any{"workflow_id": p.WorkflowID, "revision": 1})
 	ib, _ := r.ContextData["inbox"].(map[string]any)
 	if !r.Success || ib["title"] != "🛑 Stopping the errand" || ib["summary"] != "I'll stop “Weather and news” before its next step." {

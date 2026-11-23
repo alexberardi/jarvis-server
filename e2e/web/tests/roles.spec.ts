@@ -9,10 +9,15 @@ import { expect, sidebar, test } from '../helpers/fixtures'
 const MEMBER_PAGES = [
   { label: 'Chat', path: '/chat' },
   { label: 'Devices', path: '/devices' },
+  { label: 'Nodes', path: '/nodes' },
+  { label: 'Now playing', path: '/now-playing' },
   { label: 'Add-ons', path: '/addons' },
   { label: 'Inbox', path: '/inbox' },
-  { label: 'Workflows', path: '/workflows' },
-  { label: 'Recordings', path: '/recordings' },
+  { label: 'Recent commands', path: '/recent' },
+  { label: 'Routines', path: '/routines' },
+  { label: 'Memories', path: '/memories' },
+  { label: 'Phonebook', path: '/phonebook' },
+  { label: 'Household', path: '/household' },
 ]
 
 // label in the sidebar, path, the page's heading, and an API call the page makes (when one
@@ -26,7 +31,7 @@ const ADMIN_PAGES: { label: string; path: string; heading: string; api?: string 
   { label: 'Connections', path: '/admin/connections', heading: 'Connections', api: '/api/connections' },
   { label: 'Logs', path: '/admin/logs', heading: 'Logs', api: '/api/logs?limit=1' },
   { label: 'Traces', path: '/admin/traces', heading: 'Traces', api: '/api/traces?limit=1' },
-  { label: 'Nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
+  { label: 'All nodes', path: '/admin/nodes', heading: 'Nodes', api: '/api/admin/nodes' },
   { label: 'Users', path: '/admin/users', heading: 'Users', api: '/api/admin/users' },
   { label: 'Phone', path: '/admin/phone', heading: 'Phone', api: '/api/phone/sip' },
   { label: 'Updates', path: '/admin/update', heading: 'Updates', api: '/api/update' },
@@ -54,7 +59,9 @@ test.describe('superuser', () => {
   }
 
   test('old top-level admin paths forward to /admin', async ({ page }) => {
-    for (const p of [...ADMIN_PAGES.map((a) => a.path.replace('/admin', '')), '/traces/abc', '/store/abc', '/nodes/abc/test']) {
+    // /nodes is the household's own Nodes page now, so it isn't an old admin path.
+    const old = ADMIN_PAGES.map((a) => a.path.replace('/admin', '')).filter((p) => p !== '/nodes')
+    for (const p of [...old, '/traces/abc', '/store/abc', '/nodes/abc/test']) {
       await page.goto(p + '?q=1')
       await expect(page, p).toHaveURL(new RegExp(`/admin${p}\\?q=1$`))
     }
