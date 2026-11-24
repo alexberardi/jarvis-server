@@ -87,6 +87,28 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
   - **Testing is quiet:** the lab Pi is near a sleeping child. Before any sound plays, set the
     node's volume to a quiet level and check it; full-volume runs wait for the user's go-ahead.
 
+- **D2 (Q2, 2026-11-23): first-release features.** Beyond the core in D1:
+  - **In the first release:**
+    - **Gradual volume**, if it's easy.
+    - **"What alarms do I have?"** by voice.
+    - **Alarms in the app's command data**, like reminders: listed and edited under the node.
+    - **The next alarm on the touch display** and on the app's **node detail screen**, not the
+      app's home screen, where it would take too much space.
+    - **A node secret `DEFAULT_SNOOZE_LENGTH`** for all of the node's alarms.
+    - **An opt-in push to the phone when an alarm rings**, with Snooze and Stop buttons, turned on
+      by a node secret, like `REMINDER_PUSH_NOTIFICATIONS`. This replaces the phone-fallback
+      options in Q12.
+  - **Later:**
+    - choosing a sound (built-in tones only to start);
+    - snooze length per alarm.
+  - **Not wanted:**
+    - **Holiday or vacation skips.** You cancel a day explicitly instead: "Hey Jarvis, cancel my
+      6:50 alarm tomorrow" (this is skip-next by voice).
+    - **Built-in pre-alarm lights.** That stays generic, as a routine that turns the lights up step
+      by step. Routines can't wait between steps yet; a delay between steps would be a separate
+      routines enhancement.
+  - **Open:** the "good morning" routine after stopping an alarm wasn't answered; Q10 covers timers.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
