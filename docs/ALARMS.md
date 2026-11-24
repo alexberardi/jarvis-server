@@ -168,6 +168,14 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
     off without deleting it.
   - **Not supported:** every two weeks, monthly or yearly.
 
+- **D9 (Q10, 2026-11-23): timers.**
+  - **Everywhere:** timers work on every node kind, not only the Pi; desktops are included.
+  - **The sound:** the user doesn't mind whether timers use the alarm's ringing.
+    - My call: in a follow-up after alarms ship, timers move to the same ringing engine, which
+      rings in bursts and stops on voice, the button or the app.
+    - Timers have no snooze.
+  - **Reminders** stay spoken once.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
