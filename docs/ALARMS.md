@@ -109,6 +109,16 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
       routines enhancement.
   - **Open:** the "good morning" routine after stopping an alarm wasn't answered; Q10 covers timers.
 
+- **D3 (Q3, 2026-11-23): the node owns its alarms, decoupled from the server.**
+  - **Storage:** alarms are node command data, like reminders. The app and the web's stored-data
+    page list, create, edit and delete them through the existing command-data routes.
+  - **Scheduling:** the node schedules and rings them itself. A server or network outage changes
+    nothing.
+  - **Time zone:** comes from the node's own setting, so no server call is needed at alarm time.
+    Cache `household.timezone` on the node; don't use the computer's clock zone.
+  - **Who can set one:** anyone in the room. No recognised speaker is needed.
+  - **No server alarm table and no server schedule:** this supersedes option (a) in Q3.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
