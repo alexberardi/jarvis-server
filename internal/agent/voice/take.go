@@ -17,6 +17,9 @@ type Take struct {
 	Secs    float64       // then this many seconds are recorded
 
 	sayOnly bool // Say's: the cue is all, and failing to say it is the error
+
+	ring *Ring           // Ring's: an alarm rings instead (ring.go)
+	rang chan RingAction // how the ring ended, sent before the take's result
 }
 
 // ErrMicUnavailable: no voice pipeline is listening (voice off, or the microphone is being
@@ -82,11 +85,18 @@ func (p *Pipeline) takes() chan *takeReq {
 // take records t on the pipeline goroutine: the cue, the preroll skipped, then t.Secs of
 // audio. A microphone silent for 1 s fails the take.
 func (p *Pipeline) take(ctx context.Context, chunks <-chan []int16, t Take) ([]int16, error) {
-	if !t.sayOnly {
+	if !t.sayOnly && t.ring == nil {
 		p.Log.Info("voice: recording a take", "secs", t.Secs)
 	}
 	defer p.cue(CueIdle, 0)
 	defer p.holdCapture()()
+	if t.ring != nil {
+		a, err := p.ring(ctx, chunks, *t.ring)
+		if err == nil {
+			t.rang <- a
+		}
+		return nil, err
+	}
 	if t.sayOnly {
 		p.cue(CueSpeaking, 0)
 		_, err := p.speak(ctx, t.Cue, nil)
