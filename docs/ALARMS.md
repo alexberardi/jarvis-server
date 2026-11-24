@@ -124,8 +124,10 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
     speaking. Anyone the node hears, or any household member in the app or on the web, can manage
     its alarms. "My 6:50 alarm" means this node's 6:50 alarm.
   - **The push (D2):** when the node secret is on, the push goes to the node's household members.
-    It isn't tied to whoever set the alarm. This is my assumption from the answer; the user didn't
-    state the recipient.
+    It isn't tied to whoever set the alarm.
+  - **Push recipient (2026-11-23):** a user-picker node secret, `NOTIFICATION_USER` (value type
+    `user`; mobile already shows its picker). When it is set, the push goes to that member. When it
+    is empty, the push goes to the whole household.
 
 ## Questions
 
