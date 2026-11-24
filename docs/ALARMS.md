@@ -1,7 +1,7 @@
 # Alarms: wake-up alarms that ring until you stop them
 
-Status: **spec in progress, 2026-11-18.** Nothing here is built. Questions are asked one at a time;
-the queue is at the end, each with a recommendation. Answers go into **Decided** as they come.
+Status: **spec decided, 2026-11-23** (D1-D11). Nothing is built yet; see **Build order**. The
+questions below are kept for their context; Decided supersedes them where they differ.
 
 ## Goal (user, 2026-11-15)
 
@@ -183,6 +183,37 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
     push (D2) is the backup.
   - **No button.** It stops by voice, from the app or web, or from a Snooze/Stop window the
     desktop agent shows on screen.
+
+- **D11 (Q12, 2026-11-23): an offline node means no alarm, accepted.**
+  - **What still works:** a node that lost the network or the server still rings. Its push waits
+    until it reconnects.
+  - **What doesn't:** a node that is off or crashed neither rings nor pushes. The user's point: if
+    a node is off, there's a fair chance someone unplugged it because of the alarm.
+  - **Not built:** the server safety net (the node reports its next alarm time and the server
+    pushes if the node goes quiet). It stays an idea only.
+
+## Build order (proposed)
+
+1. **Ringing engine (agent), shared by every node kind:**
+   - built-in burst tone;
+   - gradual volume;
+   - 4-minute limit, then an inbox note;
+   - stop and snooze state.
+   - It plays quietly during development (the lab Pi is near a sleeping child: low volume, read back first).
+2. **Alarms as node command data:**
+   - schedule: weekday set, skip next, enabled;
+   - the household time zone cached on the node;
+   - voice tools to set, list, cancel and skip;
+   - create allowed from the app and web;
+   - `DEFAULT_SNOOZE_LENGTH`.
+3. **Controls while ringing:**
+   - Pi button: press snoozes, double press stops, no power-off;
+   - voice in the gaps: fixed words, then the LLM;
+   - Snooze and Stop in the app, the web, the touch display and a desktop window.
+4. **The push:** `NOTIFICATION_USER` (or the household), with Snooze and Stop buttons that act on
+   the node.
+5. **Next alarm** on the touch display and the app's node detail screen; the desktop "awake" note.
+6. **Follow-ups:** timers on every node, ringing like alarms (D9); an offline keyword spotter (D6).
 
 ## Questions
 
