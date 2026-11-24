@@ -192,6 +192,12 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
   - **Not built:** the server safety net (the node reports its next alarm time and the server
     pushes if the node goes quiet). It stays an idea only.
 
+- **D12 (2026-11-23): a minimum loudness.** While an alarm rings, the node's volume is raised to
+  at least 40%, then set back to what it was.
+  - **Why:** on the lab Pi the ring was inaudible at 15% and clearly heard at 50%. A node turned
+    down for music must not ring silently.
+  - **Ramp:** the D2 ramp (15% to full of the tone) works within that volume.
+
 ## Build order (proposed)
 
 1. **Ringing engine (agent), shared by every node kind:**
