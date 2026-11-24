@@ -129,6 +129,26 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
     `user`; mobile already shows its picker). When it is set, the push goes to that member. When it
     is empty, the push goes to the whole household.
 
+- **D5 (Q5, Q6, 2026-11-23): sound and ringing.** These follow from D1 and D2 with no new choice:
+  - built-in tones only;
+  - rings in bursts;
+  - gradual volume if easy;
+  - the 4-minute limit, after which it stops and leaves an inbox note, such as "Bedroom alarm 6:50
+    rang for 4 minutes and wasn't stopped".
+- **D6 (Q7, 2026-11-23): voice while ringing.**
+  - **When it listens:** in the gaps between bursts, with no wake word, and only while ringing.
+  - **Where the speech goes:** to the server for speech-to-text, like any command. A Pi only
+    spots the wake word itself and has no local speech-to-text, so "matched on the node" in the
+    draft was wrong.
+  - **Fixed words act right away:**
+    - Stop: "stop", "turn it off", "shut up".
+    - Snooze: "snooze", "five more minutes" or "ten more minutes". Plain "snooze" uses
+      `DEFAULT_SNOOZE_LENGTH`.
+  - **Anything else** goes to the LLM, which chooses stop, snooze for N minutes, or ignore. On
+    ignore, it keeps ringing.
+  - **Server down:** voice doesn't work; the button and the app still do (D1).
+  - **Later:** an on-node keyword spotter for the fixed words, so voice works offline.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
