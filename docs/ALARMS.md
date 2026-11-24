@@ -119,6 +119,14 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
   - **Who can set one:** anyone in the room. No recognised speaker is needed.
   - **No server alarm table and no server schedule:** this supersedes option (a) in Q3.
 
+- **D4 (Q4, 2026-11-23): an alarm is the node's, with no speaker recognition.**
+  - **Who it is for:** setting, listing, cancelling and stopping an alarm never checks who is
+    speaking. Anyone the node hears, or any household member in the app or on the web, can manage
+    its alarms. "My 6:50 alarm" means this node's 6:50 alarm.
+  - **The push (D2):** when the node secret is on, the push goes to the node's household members.
+    It isn't tied to whoever set the alarm. This is my assumption from the answer; the user didn't
+    state the recipient.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
