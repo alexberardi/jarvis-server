@@ -149,6 +149,16 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
   - **Server down:** voice doesn't work; the button and the app still do (D1).
   - **Later:** an on-node keyword spotter for the fixed words, so voice works offline.
 
+- **D7 (Q8, 2026-11-23): the Pi's button while ringing.**
+  - **Short press:** snooze for `DEFAULT_SNOOZE_LENGTH`.
+  - **Short double press:** stop.
+  - **Waiting for a second press:** a single press snoozes only after the double-press window
+    (about 400 ms) passes with no second press.
+  - **Hold:** the user didn't say. Default: while ringing, a hold neither shows the shutdown
+    warning nor powers the Pi off, so a sleepy hold can't turn the node off.
+  - **After ringing:** the button goes back to its normal jobs: read alerts on a short press,
+    power off on a 3 s hold.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
