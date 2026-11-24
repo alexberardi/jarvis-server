@@ -1,14 +1,14 @@
 # Alarms: wake-up alarms that ring until you stop them
 
-Status: **spec in progress, 2026-11-18.** Nothing here is built. Questions are asked one at a time;
-the queue is at the end, each with a recommendation. Answers go into **Decided** as they come.
+Status: **spec decided, 2026-11-23** (D1-D11). Nothing is built yet; see **Build order**. The
+questions below are kept for their context; Decided supersedes them where they differ.
 
 ## Goal (user, 2026-11-15)
 
 "Full-fledged alarms with plenty of features." Only plain timers exist today. Web notification
 parity came first and is done (STATUS, "Web parity").
 
-## Intent (draft, to confirm: Q1)
+## Intent (confirmed with changes, Q1)
 
 - **Outcome:** a household sets alarms by voice, in the app or on the web ("wake me at 6:30 on
   weekdays in the bedroom"). At the time, a node **rings until someone stops it** (a sound, not one
@@ -73,7 +73,147 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
 
 ## Decided
 
-Nothing yet.
+- **D1 (Q1, 2026-11-23): the core.** An alarm is a room's, set by voice, app or web, and rings until
+  stopped, with these changes from the draft:
+  - It rings in **bursts** with a gap of about a second between them. The node listens for "stop"
+    and "snooze" only in the gaps. The user's reason: wake-word detection already struggles while
+    sound plays, such as music.
+  - **Voice is a convenience, not the guaranteed way out.** The button, the app, the web and a
+    touch display always stop or snooze it, and the app, web and display show **Snooze** and
+    **Stop** prominently while it rings.
+  - **Ring limit: 4 minutes** to start, then it stops by itself and leaves an inbox note.
+  - **Voice ships only if it works:** the lab test measures voice stop and snooze while it rings.
+    If they fail, the first release ships with the button and the app only.
+  - **Testing is quiet:** the lab Pi is near a sleeping child. Before any sound plays, set the
+    node's volume to a quiet level and check it; full-volume runs wait for the user's go-ahead.
+
+- **D2 (Q2, 2026-11-23): first-release features.** Beyond the core in D1:
+  - **In the first release:**
+    - **Gradual volume**, if it's easy.
+    - **"What alarms do I have?"** by voice.
+    - **Alarms in the app's command data**, like reminders: listed and edited under the node.
+    - **The next alarm on the touch display** and on the app's **node detail screen**, not the
+      app's home screen, where it would take too much space.
+    - **A node secret `DEFAULT_SNOOZE_LENGTH`** for all of the node's alarms.
+    - **An opt-in push to the phone when an alarm rings**, with Snooze and Stop buttons, turned on
+      by a node secret, like `REMINDER_PUSH_NOTIFICATIONS`. This replaces the phone-fallback
+      options in Q12.
+  - **Later:**
+    - choosing a sound (built-in tones only to start);
+    - snooze length per alarm.
+  - **Not wanted:**
+    - **Holiday or vacation skips.** You cancel a day explicitly instead: "Hey Jarvis, cancel my
+      6:50 alarm tomorrow" (this is skip-next by voice).
+    - **Built-in pre-alarm lights.** That stays generic, as a routine that turns the lights up step
+      by step. Routines can't wait between steps yet; a delay between steps would be a separate
+      routines enhancement.
+  - **Open:** the "good morning" routine after stopping an alarm wasn't answered; Q10 covers timers.
+
+- **D3 (Q3, 2026-11-23): the node owns its alarms, decoupled from the server.**
+  - **Storage:** alarms are node command data, like reminders. The app and the web's stored-data
+    page list, create, edit and delete them through the existing command-data routes.
+  - **Scheduling:** the node schedules and rings them itself. A server or network outage changes
+    nothing.
+  - **Time zone:** comes from the node's own setting, so no server call is needed at alarm time.
+    Cache `household.timezone` on the node; don't use the computer's clock zone.
+  - **Who can set one:** anyone in the room. No recognised speaker is needed.
+  - **No server alarm table and no server schedule:** this supersedes option (a) in Q3.
+
+- **D4 (Q4, 2026-11-23): an alarm is the node's, with no speaker recognition.**
+  - **Who it is for:** setting, listing, cancelling and stopping an alarm never checks who is
+    speaking. Anyone the node hears, or any household member in the app or on the web, can manage
+    its alarms. "My 6:50 alarm" means this node's 6:50 alarm.
+  - **The push (D2):** when the node secret is on, the push goes to the node's household members.
+    It isn't tied to whoever set the alarm.
+  - **Push recipient (2026-11-23):** a user-picker node secret, `NOTIFICATION_USER` (value type
+    `user`; mobile already shows its picker). When it is set, the push goes to that member. When it
+    is empty, the push goes to the whole household.
+
+- **D5 (Q5, Q6, 2026-11-23): sound and ringing.** These follow from D1 and D2 with no new choice:
+  - built-in tones only;
+  - rings in bursts;
+  - gradual volume if easy;
+  - the 4-minute limit, after which it stops and leaves an inbox note, such as "Bedroom alarm 6:50
+    rang for 4 minutes and wasn't stopped".
+- **D6 (Q7, 2026-11-23): voice while ringing.**
+  - **When it listens:** in the gaps between bursts, with no wake word, and only while ringing.
+  - **Where the speech goes:** to the server for speech-to-text, like any command. A Pi only
+    spots the wake word itself and has no local speech-to-text, so "matched on the node" in the
+    draft was wrong.
+  - **Fixed words act right away:**
+    - Stop: "stop", "turn it off", "shut up".
+    - Snooze: "snooze", "five more minutes" or "ten more minutes". Plain "snooze" uses
+      `DEFAULT_SNOOZE_LENGTH`.
+  - **Anything else** goes to the LLM, which chooses stop, snooze for N minutes, or ignore. On
+    ignore, it keeps ringing.
+  - **Server down:** voice doesn't work; the button and the app still do (D1).
+  - **Later:** an on-node keyword spotter for the fixed words, so voice works offline.
+
+- **D7 (Q8, 2026-11-23): the Pi's button while ringing.**
+  - **Short press:** snooze for `DEFAULT_SNOOZE_LENGTH`.
+  - **Short double press:** stop.
+  - **Waiting for a second press:** a single press snoozes only after the double-press window
+    (about 400 ms) passes with no second press.
+  - **Hold:** the user didn't say. Default: while ringing, a hold neither shows the shutdown
+    warning nor powers the Pi off, so a sleepy hold can't turn the node off.
+  - **After ringing:** the button goes back to its normal jobs: read alerts on a short press,
+    power off on a 3 s hold.
+
+- **D8 (Q9, 2026-11-23): repeat works like the iOS Clock app.**
+  - **The rule:** an alarm has a set of weekdays, Sunday to Saturday.
+    - An empty set means once: the next time that time comes round.
+    - Otherwise it rings on each chosen day, in the household's time zone.
+  - **Voice:** "weekdays", "weekends" and "every day" are just shorthand for those sets.
+  - **Kept from D2:** skipping the next one ("cancel my 6:50 alarm tomorrow") and turning an alarm
+    off without deleting it.
+  - **Not supported:** every two weeks, monthly or yearly.
+
+- **D9 (Q10, 2026-11-23): timers.**
+  - **Everywhere:** timers work on every node kind, not only the Pi; desktops are included.
+  - **The sound:** the user doesn't mind whether timers use the alarm's ringing.
+    - My call: in a follow-up after alarms ship, timers move to the same ringing engine, which
+      rings in bursts and stops on voice, the button or the app.
+    - Timers have no snooze.
+  - **Reminders** stay spoken once.
+
+- **D10 (Q11, 2026-11-23): computers ring alarms too**, using the same engine as their timers
+  (D9). Two accepted limits:
+  - **It must be awake.** A shut, sleeping or muted computer can't ring. When an alarm is set on a
+    computer, the app and web say "Rings only if this computer is awake and not muted". The opt-in
+    push (D2) is the backup.
+  - **No button.** It stops by voice, from the app or web, or from a Snooze/Stop window the
+    desktop agent shows on screen.
+
+- **D11 (Q12, 2026-11-23): an offline node means no alarm, accepted.**
+  - **What still works:** a node that lost the network or the server still rings. Its push waits
+    until it reconnects.
+  - **What doesn't:** a node that is off or crashed neither rings nor pushes. The user's point: if
+    a node is off, there's a fair chance someone unplugged it because of the alarm.
+  - **Not built:** the server safety net (the node reports its next alarm time and the server
+    pushes if the node goes quiet). It stays an idea only.
+
+## Build order (proposed)
+
+1. **Ringing engine (agent), shared by every node kind:**
+   - built-in burst tone;
+   - gradual volume;
+   - 4-minute limit, then an inbox note;
+   - stop and snooze state.
+   - It plays quietly during development (the lab Pi is near a sleeping child: low volume, read back first).
+2. **Alarms as node command data:**
+   - schedule: weekday set, skip next, enabled;
+   - the household time zone cached on the node;
+   - voice tools to set, list, cancel and skip;
+   - create allowed from the app and web;
+   - `DEFAULT_SNOOZE_LENGTH`.
+3. **Controls while ringing:**
+   - Pi button: press snoozes, double press stops, no power-off;
+   - voice in the gaps: fixed words, then the LLM;
+   - Snooze and Stop in the app, the web, the touch display and a desktop window.
+4. **The push:** `NOTIFICATION_USER` (or the household), with Snooze and Stop buttons that act on
+   the node.
+5. **Next alarm** on the touch display and the app's node detail screen; the desktop "awake" note.
+6. **Follow-ups:** timers on every node, ringing like alarms (D9); an offline keyword spotter (D6).
 
 ## Questions
 
@@ -97,7 +237,7 @@ Each is one decision. Context and the recommendation are with it; ask in order.
    tones first; a stream ("wake me with the radio") through the playback hub later, with the tone
    as the fallback when the stream doesn't start.
 6. **How it rings.** Loop until stopped, start quiet and ramp to the node's volume over about a
-   minute, stop by itself after a ring limit (10 minutes?) and leave an inbox note. Recommendation:
+   minute, stop by itself after the ring limit (4 minutes, D1) and leave an inbox note. Recommendation:
    that, with the ramp and limit per alarm later if asked.
 7. **Snooze and stop by voice while ringing.** Listen without the wake word for "stop", "snooze",
    "five more minutes" while it rings (the ring pauses for the words), or only with the wake word.
