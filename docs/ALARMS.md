@@ -176,6 +176,14 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
     - Timers have no snooze.
   - **Reminders** stay spoken once.
 
+- **D10 (Q11, 2026-11-23): computers ring alarms too**, using the same engine as their timers
+  (D9). Two accepted limits:
+  - **It must be awake.** A shut, sleeping or muted computer can't ring. When an alarm is set on a
+    computer, the app and web say "Rings only if this computer is awake and not muted". The opt-in
+    push (D2) is the backup.
+  - **No button.** It stops by voice, from the app or web, or from a Snooze/Stop window the
+    desktop agent shows on screen.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
