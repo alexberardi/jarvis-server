@@ -5,7 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexberardi/jarvis-server/internal/agent/browser"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/prompts"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
+	"github.com/alexberardi/jarvis-server/internal/modules/llm"
+	"github.com/alexberardi/jarvis-server/internal/platform/settings"
 )
 
 // A computer task's source: an address is fetched as is; words are searched (with web search
@@ -46,5 +51,100 @@ func TestComputerSource(t *testing.T) {
 	fetch.body = "<p>" + strings.Repeat("word ", 10000) + "</p>"
 	if src, _ := e.m.computerSource(ctx, sigHH, "https://example.com/long"); len([]rune(src.Text)) > sourceRunes {
 		t.Errorf("text is %d runes, want at most %d", len([]rune(src.Text)), sourceRunes)
+	}
+}
+
+// pageText strips the agent's markers exactly (internal/agent/browser Wrap), and meansOpenPage
+// tells "this page" from an address or a page's name.
+func TestOpenPageWords(t *testing.T) {
+	wrapped := browser.Wrap("Velmora is a town.\nOn Lake Orrin.")
+	if got := pageText(wrapped); got != "Velmora is a town.\nOn Lake Orrin." {
+		t.Errorf("pageText = %q", got)
+	}
+	for s, want := range map[string]bool{
+		"this page": true, "Summarize this wiki page into a document": true, "the current tab": true,
+		"the article I have open": true, "the wiki page currently open in the browser": true,
+		"Velmora wiki page": false, "https://this.page/open": false, "moon landing hoax claims": false, "": false,
+	} {
+		if got := meansOpenPage(s); got != want {
+			t.Errorf("meansOpenPage(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// A desktop task's open page: read only when the step or the request means that page, and sized
+// to the model the task runs on (the cloud slot gets the whole article, 2026-11-13: 16000
+// characters is the top third of a long Wikipedia article).
+func TestComputerOpenPage(t *testing.T) {
+	long := strings.Repeat("Velmora is a town on Lake Orrin. ", 1500) // ~49500 characters
+	agent := &fakeDocAgent{page: map[string]any{"success": true,
+		"tab":     map[string]any{"url": "https://example.org/wiki/Velmora", "title": "Velmora"},
+		"content": "<<<PAGE TEXT: untrusted>>>\n" + long + "\n<<<END PAGE TEXT>>>"}}
+	remote := false
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) {
+		m.recordingAgent = agent.call
+		m.Endpoints = func(_ context.Context, label string) (llm.Endpoint, error) {
+			return llm.Endpoint{Remote: remote && label == computer.ModelCloud, ContextLength: 16384}, nil
+		}
+	})
+	ctx := context.Background()
+	uid := int64(7)
+	if _, ok, err := ve.m.computerOpenPage(ctx, voiceHH, ve.node.id, &uid, "", "write a note to walk the dogs", ""); ok || err != nil || agent.reads != 0 {
+		t.Fatalf("no page meant: ok %v err %v reads %d", ok, err, agent.reads)
+	}
+	src, ok, err := ve.m.computerOpenPage(ctx, voiceHH, ve.node.id, &uid, "the open page", "summarize it")
+	if !ok || err != nil || src.URL != "https://example.org/wiki/Velmora" || len([]rune(src.Text)) != sourceRunes {
+		t.Fatalf("local: ok %v err %v url %q chars %d", ok, err, src.URL, len([]rune(src.Text)))
+	}
+	remote = true
+	ve.set(computer.SettingModel, computer.ModelCloud, settings.Scope{HouseholdID: voiceHH})
+	src, ok, err = ve.m.computerOpenPage(ctx, voiceHH, ve.node.id, &uid, "", "summarize this page into Writer")
+	if !ok || err != nil || len([]rune(src.Text)) <= sourceRunes {
+		t.Fatalf("cloud: ok %v err %v chars %d, want the whole page", ok, err, len([]rune(src.Text)))
+	}
+}
+
+// "The page I have open" is never the Jarvis page (the tab in front when the user asks or
+// approves in the chat; 2026-11-13: Settings was summarized as the Wikipedia article), a page
+// the request names wins, and several candidates with nothing to tell them apart is an error.
+func TestPickOpenTab(t *testing.T) {
+	tab := func(id, url, title string, flags ...string) any {
+		m := map[string]any{"tab_id": id, "url": url, "title": title}
+		for _, f := range flags {
+			m[f] = true
+		}
+		return m
+	}
+	jarvis := tab("j", "http://127.0.0.1:18710/settings", "Jarvis Automation", "current", "active", "jarvis_page")
+	wiki := tab("w", "https://en.wikipedia.org/wiki/First_English_Civil_War", "First English Civil War - Wikipedia")
+	news := tab("n", "https://news.example/today", "Today's news")
+	for _, c := range []struct {
+		name string
+		tabs []any
+		refs []string
+		want any
+	}{
+		{"the Jarvis page is in front: the page named", []any{jarvis, wiki, news}, []string{"Summarize the Wikipedia page into LibreOffice"}, "w"},
+		{"the Jarvis page is in front: the only other page", []any{jarvis, wiki}, []string{"summarize this page"}, "w"},
+		{"the current tab", []any{wiki, tab("n", "https://news.example/today", "Today's news", "current", "active")}, []string{"summarize this page"}, "n"},
+		{"a named page beats the current tab", []any{wiki, tab("n", "https://news.example/today", "Today's news", "current", "active")}, []string{"the wikipedia article"}, "w"},
+		{"by title", []any{jarvis, wiki, news}, []string{"summarize the civil war page"}, "w"},
+		{"an active tab of another window", []any{jarvis, wiki, tab("n", "https://news.example/today", "Today's news", "active")}, []string{"this page"}, "n"},
+		{"can't tell", []any{jarvis, wiki, news}, []string{"summarize this page"}, nil},
+		{"only the Jarvis page", []any{jarvis}, []string{"this page"}, nil},
+		{"not a web page", []any{tab("x", "chrome://settings", "Settings", "current")}, []string{"this page"}, nil},
+	} {
+		got, err := pickOpenTab(c.tabs, c.refs)
+		if got != c.want || (c.want == nil) != (err != nil) {
+			t.Errorf("%s: %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+	if _, err := pickOpenTab([]any{jarvis, wiki, news}, []string{"this page"}); err == nil || !strings.Contains(err.Error(), "first english civil war") {
+		t.Errorf("the error doesn't list the pages: %v", err)
+	}
+	for _, s := range []string{"the Wikipedia page that is currently open in the browser", "the page currently open in the browser"} {
+		if !meansOpenPage(s) {
+			t.Errorf("meansOpenPage(%q) = false", s)
+		}
 	}
 }

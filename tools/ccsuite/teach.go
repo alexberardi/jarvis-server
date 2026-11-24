@@ -316,3 +316,49 @@ func (e *Env) teacher() (*teacher, error) {
 		sitesRaw: e.sitesRaw, sites: e.Sites, household: e.Household, clk: realClock, settle: 1500 * time.Millisecond,
 	}, nil
 }
+
+// OpenTab opens the fixture sites' path in a new tab in front, as the page the user has open,
+// and waits for it to load; close closes the tab.
+func (e *Env) OpenTab(ctx context.Context, path string) (close func(context.Context), err error) {
+	tc, err := e.teacher()
+	if err != nil {
+		return nil, err
+	}
+	return tc.openTab(ctx, strings.TrimRight(tc.sites, "/")+path)
+}
+
+func (tc *teacher) openTab(ctx context.Context, url string) (func(context.Context), error) {
+	raw, err := tc.cdp.Call(ctx, "Target.createTarget", map[string]any{"url": "about:blank"})
+	if err != nil {
+		return nil, err
+	}
+	var target struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := json.Unmarshal(raw, &target); err != nil {
+		return nil, err
+	}
+	close := func(ctx context.Context) {
+		tc.cdp.Call(ctx, "Target.closeTarget", map[string]any{"targetId": target.TargetID})
+	}
+	if raw, err = tc.cdp.Call(ctx, "Target.attachToTarget", map[string]any{"targetId": target.TargetID, "flatten": true}); err != nil {
+		close(ctx)
+		return nil, err
+	}
+	var att struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(raw, &att); err != nil {
+		close(ctx)
+		return nil, err
+	}
+	page := &demoPage{cdp: tc.cdp, session: att.SessionID, clk: tc.clk, settle: tc.settle}
+	if _, err := page.call(ctx, "Page.bringToFront", nil); err == nil {
+		err = page.open(ctx, url)
+	}
+	if err != nil {
+		close(ctx)
+		return nil, err
+	}
+	return close, nil
+}

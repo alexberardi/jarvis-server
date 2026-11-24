@@ -313,6 +313,7 @@ point_llm() {
   set_setting "$llm" llm.live.remote_model "\"$INSTALLED_LLM_LABEL\""
   set_setting "$llm" llm.live.context "$ctx"
   set_setting "$llm" llm.live.remote_vision "$vision"
+  set_setting "$llm" llm.live.remote_thinking true # a jarvisd: it takes the thinking controls
   set_setting "$llm" llm.live.fold_system_messages '"off"'
   if [ -n "${INSTALLED_LLM_BACKGROUND_LABEL:-}" ]; then
     set_setting "$llm" llm.background.engine '"remote"'
@@ -320,6 +321,7 @@ point_llm() {
     set_setting "$llm" llm.background.remote_api '"openai"'
     set_setting "$llm" llm.background.context "$ctx"
     set_setting "$llm" llm.background.remote_vision "$vision"
+    set_setting "$llm" llm.background.remote_thinking true
     set_setting "$llm" llm.background.fold_system_messages '"off"'
     set_setting "$llm" llm.background.remote_model "\"$INSTALLED_LLM_BACKGROUND_LABEL\""
     say "llm: background → installed jarvisd's $INSTALLED_LLM_BACKGROUND_LABEL label"

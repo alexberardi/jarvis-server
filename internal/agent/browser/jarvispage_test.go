@@ -134,3 +134,31 @@ func TestHubFocusedTab(t *testing.T) {
 		t.Fatalf("%q %q %v", u, title, ok)
 	}
 }
+
+// browser_list_tabs marks this agent's own server's tabs, so "the page I have open" is never
+// the chat (cc's pickOpenTab; 2026-11-13: Settings was summarized as the article).
+func TestListTabsMarksTheJarvisPage(t *testing.T) {
+	h, path := startHub(t)
+	handle, _ := tabsExt(3)
+	connectExt(t, h, path, "Firefox", true, handle)
+	ts := NewTools(h)
+	ts.Origins = pageOrigins()
+	out, _ := ts.Call(context.Background(), ToolListTabs, map[string]any{}, node.Request{})
+	list, _ := out["tabs"].([]any)
+	marked, plain := 0, 0
+	for _, e := range list {
+		m := e.(map[string]any)
+		u, _ := m["url"].(string)
+		switch {
+		case m["jarvis_page"] == true && ts.Origins.MatchURL(u):
+			marked++
+		case m["jarvis_page"] == nil && !ts.Origins.MatchURL(u):
+			plain++
+		default:
+			t.Errorf("tab %v", m)
+		}
+	}
+	if marked == 0 || plain == 0 {
+		t.Fatalf("marked %d, plain %d: %v", marked, plain, list)
+	}
+}

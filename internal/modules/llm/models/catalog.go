@@ -102,7 +102,7 @@ func (e Entry) Template() (string, error) {
 
 // KeptPromptProviders are the providers jarvisd ports (PLAN Appendix B, D11: an unknown
 // provider is a hard error).
-var KeptPromptProviders = []string{"Qwen3_14B_Compressed", "Qwen3_8B_Compressed", "Qwen3_5_9B_Compressed", "Gemma4"}
+var KeptPromptProviders = []string{"Qwen3_14B_Compressed", "Qwen3_8B_Compressed", "Qwen3_5_9B_Compressed", "Gemma4", "Gemma4_12B"}
 
 // Catalog returns the built-in catalog.
 func Catalog() []Entry {

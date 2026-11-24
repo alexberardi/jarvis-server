@@ -227,6 +227,7 @@ func (m *Module) processTurn(ctx context.Context, n *nodeCtx, in turnInput) (tur
 		m.desktopAppHint(conv, in.VoiceCommand),
 		sameDeviceHint(conv, in),
 		m.computerControlHint(ctx, conv, in.VoiceCommand),
+		pageSummaryHint(conv, in.VoiceCommand),
 		computerActivityHint(in.Computer, in.VoiceCommand),
 		m.pendingConfirmHint(conv),
 	}
@@ -362,6 +363,7 @@ func (m *Module) toolTurn(conv *conversation, utterance string) servertools.Turn
 		Speaker: servertools.Speaker{UserID: conv.speakerID, Name: conv.speakerName, RecognitionOff: conv.recognitionOff,
 			SignedOutComputer: conv.signedOutComputer()},
 		ComputerStopped: conv.computer.stoppedHere(),
+		DesktopVoice:    conv.desktopVoice,
 	}
 }
 

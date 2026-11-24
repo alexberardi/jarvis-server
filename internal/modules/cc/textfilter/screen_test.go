@@ -21,6 +21,13 @@ func TestClaimsScreenAction(t *testing.T) {
 		"It's 9:46 PM.",
 		"Should I scroll down?",
 		"I'm not able to open that.",
+		// What a page or an article says, not something done on the computer (2026-11-13: a
+		// summary of a football season, "when they went up", was nudged and written twice).
+		"This page covers Notts County's 2022-23 season, when they went up from the fifth tier.",
+		"The club moved to a new stadium in 1910.",
+		"Notts County went up through the play-offs.",
+		"He switched to a back three after Christmas.",
+		"The museum opened in 1887 and closed during the war.",
 	}
 	for _, s := range yes {
 		if !ClaimsScreenAction(s) {

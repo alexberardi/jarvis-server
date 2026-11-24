@@ -83,6 +83,15 @@ func TestSwitchAndRecorderToolsNeverOffered(t *testing.T) {
 	}
 }
 
+// A task goes to a connected computer before one that is off with its switch still on.
+func TestComputerTargetsPreferAConnectedComputer(t *testing.T) {
+	cc := computerControl{on: []computerNode{{id: "asleep"}, {id: "desk", reachable: true}, {id: "off"}, {id: "den", reachable: true}}}
+	reachableFirst(cc.on)
+	if got := strings.Join(cc.targets(), " "); got != "desk den asleep off" {
+		t.Fatalf("targets %q", got)
+	}
+}
+
 func TestComputerTargets(t *testing.T) {
 	ve := newVoiceEnv(t, prompts.Qwen3_8B)
 	ctx := context.Background()
@@ -126,20 +135,23 @@ func TestComputerControlOffMessage(t *testing.T) {
 
 func TestNeedsComputer(t *testing.T) {
 	for s, want := range map[string]bool{
-		"order me a phone case":                                       true,
-		"Order a phone case":                                          true,
-		"buy a new phone case on amazon":                              true,
-		"can you purchase the blue mug":                               true,
-		"check out my cart":                                           true,
-		"add the charger to my cart":                                  true,
-		"fill out the passport renewal form":                          true,
-		"what's the weather":                                          false,
-		"put the movies in order":                                     false,
-		"what did I order last week":                                  false,
-		"call Joe's pizza and order a large pepperoni":                false,
-		"remind me to buy milk tomorrow":                              false,
-		"add buy batteries to my shopping list":                       false,
-		"research the best smart watch":                               false,
+		"order me a phone case":                        true,
+		"Order a phone case":                           true,
+		"buy a new phone case on amazon":               true,
+		"can you purchase the blue mug":                true,
+		"check out my cart":                            true,
+		"add the charger to my cart":                   true,
+		"fill out the passport renewal form":           true,
+		"what's the weather":                           false,
+		"put the movies in order":                      false,
+		"what did I order last week":                   false,
+		"call Joe's pizza and order a large pepperoni": false,
+		"remind me to buy milk tomorrow":               false,
+		"add buy batteries to my shopping list":        false,
+		"research the best smart watch":                false,
+		"On cars.com, find used Honda CR-Vs under $20,000 within 50 miles of 19103 and list the five cheapest": true,
+		"what's the top story on cnn.com":                                     false,
+		"On philadelphia.craigslist.org, find used Honda CR-Vs under $20,000": true,
 		"open steam":                                                  false,
 		"Open Neovim and Typeello World.":                             false, // desktop tools, not an errand
 		"download my card statement for september":                    true,
@@ -163,6 +175,12 @@ func TestNeedsComputer(t *testing.T) {
 		"add a row for internet to my budget spreadsheet":                                                                                               true,
 		"type hello world into the document":                                                                                                            false,
 		"remind me to update the spreadsheet":                                                                                                           false,
+		// Work in a named app, saved: a task in the app (the 9B called remember and said "saved").
+		"In the Jarvis Test Notes app, make a new note titled Groceries with milk, eggs and bread in it, and save it.": true,
+		"open my notes app, add a note about the plumber and save it":                                                  true,
+		"type hello into the notes app and save it":                                                                    false,
+		"save this recipe":        false,
+		"what's a good notes app": false,
 	} {
 		if got := needsComputer(s); got != want {
 			t.Errorf("needsComputer(%q) = %v, want %v", s, got, want)

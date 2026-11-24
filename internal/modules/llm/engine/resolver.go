@@ -63,12 +63,18 @@ type Endpoint struct {
 	// API is the dialect a remote endpoint speaks: APIOpenAI or APIAnthropic (remote_api).
 	// Local engines leave it empty (OpenAI-compatible).
 	API string `json:"api,omitempty"`
+	// ThinkingControls: a remote endpoint that takes llama-server's thinking controls
+	// (remote_thinking); a local engine always does.
+	ThinkingControls bool `json:"thinking_controls,omitempty"`
 	// TimeoutMS bounds one request to a remote endpoint (remote_timeout_ms; 0 = the caller's).
 	TimeoutMS int `json:"timeout_ms,omitempty"`
 	// Fallback is a remote stt label's fallback setting (FallbackOff, FallbackCPU: ResolveCPU).
 	Fallback string `json:"fallback,omitempty"`
 	// NoReasoningBudget: the engine refuses a request with reasoning_budget (Transformers).
 	NoReasoningBudget bool `json:"-"`
+	// Grammar: the engine holds an answer to a JSON schema as it writes it (a local
+	// llama-server's response_format json_schema).
+	Grammar bool `json:"-"`
 }
 
 // ErrNotConfigured is returned for a label with no model (or engine=off): 01 §3.9 "not
@@ -396,6 +402,7 @@ func describe(c LabelConfig) (ep Endpoint, local bool, err error) {
 		}
 		ep.Remote, ep.BaseURL, ep.APIKey, ep.Model = true, NormalizeBaseURL(c.RemoteURL), c.RemoteAPIKey, c.RemoteModel
 		ep.Vision, ep.FoldSystemMessages, ep.API = c.RemoteVision, c.FoldSystemMessages, api
+		ep.ThinkingControls = c.RemoteThinking && api != APIAnthropic
 		ep.TimeoutMS = c.RemoteTimeoutMS
 		ep.Fallback = c.Fallback
 		// A remote's window is what the operator says it is (llm.<slot>.context; 0 = unknown):
@@ -579,6 +586,7 @@ func (r *Resolver) fill(ep Endpoint, c LabelConfig, inst *instance) Endpoint {
 	ep.FoldSystemMessages = c.FoldSystemMessages
 	ep.ContextLength, ep.Parallel = inst.key.Context, inst.key.Parallel
 	ep.Vision = inst.key.MMProj != "" || inst.key.Vision
+	ep.Grammar = c.Kind == KindLlama
 	if e, ok := c.Kind.Python(); ok {
 		ep.Model = e.RequestModel
 		if ep.Model == "" {

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +127,15 @@ func TestPassMark(t *testing.T) {
 		if got := passMark(runs); got != want {
 			t.Errorf("passMark(%d) = %d, want %d", runs, got, want)
 		}
+	}
+}
+
+// A cloud run has no tap to count model calls from: its rounds read "–", not 0.
+func TestReportCloudRoundsUnknown(t *testing.T) {
+	r := &Report{Run: "r", LLM: "cloud", Model: "claude-sonnet-5-5", Label: "cloud", Cases: []CaseResult{
+		{Name: "notes_wlroots", Phase: "desktop-wlroots", CaseStatus: "required", Status: "passed", Runs: 1, Passed: 1, Seconds: 22.5},
+	}}
+	if got := r.Markdown(); !strings.Contains(got, "| notes_wlroots | desktop-wlroots | required | passed | 1/1 | – | 22.5 s |") {
+		t.Fatalf("rounds not unknown:\n%s", got)
 	}
 }

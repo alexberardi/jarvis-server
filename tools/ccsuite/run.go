@@ -32,14 +32,14 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 	casesDir := fs.String("cases", "tools/ccsuite/cases", "the case files' directory (relative to --root)")
 	filter := fs.String("filter", "", "only cases whose name matches this regexp")
 	repeat := fs.Int("repeat", 1, "runs of each case")
-	llm := fs.String("llm", "shared", "the sandbox's model: shared (the installed jarvisd's, through the tap) or scripted")
+	llm := fs.String("llm", "shared", "the sandbox's model: shared (the installed jarvisd's, through the tap), scripted, or cloud (Anthropic from JARVIS_TEST_ANTHROPIC_KEY or ~/.config/jarvis-harness/cloud.env)")
 	label := fs.String("label", "", "shared: the installed jarvisd's label to use, live or background (default: as the harness env file says)")
 	includePending := fs.Bool("include-pending", false, "run pending cases too (they never fail the run)")
 	out := fs.String("out", "", "the run's directory (default .ccsuite/<run>)")
 	rel := fs.String("rel", "", "prefix for the paths in results.json (scripts/e2e: the suite's dir in its run)")
 	keep := fs.Bool("keep", false, "leave it all running afterwards, a desktop session with the agent and the browser included (ccsuite down --run DIR)")
 	chromium := fs.String("chromium", "", "the Chromium binary (default: $CCSUITE_CHROMIUM, else Playwright's newest)")
-	settle := fs.Duration("settle", time.Minute, "an errand is over once nothing happened for this long after the chat's answer")
+	settle := fs.Duration("settle", 3*time.Minute, "an errand is over once nothing happened for this long after the chat's answer")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -47,8 +47,8 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 	switch {
-	case *llm != "shared" && *llm != "scripted":
-		return errors.New("--llm: shared or scripted")
+	case *llm != "shared" && *llm != "scripted" && *llm != "cloud":
+		return errors.New("--llm: shared, scripted or cloud")
 	case *label != "" && *label != "live" && *label != "background":
 		return errors.New("--label: live or background")
 	case *label != "" && *llm != "shared":
@@ -75,6 +75,15 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var cl *cloud
+	if *llm == "cloud" {
+		c, err := cloudConfig()
+		if err != nil {
+			return err
+		}
+		cl = &c
+	}
+
 	run := runID()
 	dir := *out
 	if dir == "" {
@@ -90,7 +99,7 @@ func runCmd(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	env := &Env{Root: rootAbs, Dir: dir, Name: "ccsuite-" + run, LLM: *llm, Label: *label, Chromium: *chromium, Keep: *keep, Settle: *settle, Log: stdout}
+	env := &Env{Root: rootAbs, Dir: dir, Name: "ccsuite-" + run, LLM: *llm, Label: *label, Cloud: cl, Chromium: *chromium, Keep: *keep, Settle: *settle, Log: stdout}
 	fmt.Fprintf(stdout, "ccsuite: run %s in %s\n", run, dir)
 	start := time.Now()
 	rep := &Report{Run: run, LLM: *llm}
@@ -218,6 +227,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	if err := e.Block(cctx, c.Setup.Block); err != nil {
 		return fail("block: " + err.Error())
 	}
+	if err := e.api(cctx, "PUT", e.Sbx["SBX_CC"]+"/settings/web_search.enabled", map[string]any{"value": c.Setup.WebSearch}, nil); err != nil {
+		return fail("web search: " + err.Error())
+	}
 	if err := e.Login(cctx, c.Setup.Login); err != nil {
 		return fail("login: " + err.Error())
 	}
@@ -261,10 +273,23 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 			}
 		}
 	}
+	// What the task opens and leaves open (Writer, its Save dialog) isn't the next run's.
+	defer e.CloseLeftoverApps()
+	if c.Setup.Open != "" {
+		closeTab, err := e.OpenTab(cctx, c.Setup.Open)
+		if err != nil {
+			return fail("open: " + err.Error())
+		}
+		defer closeTab(context.WithoutCancel(ctx))
+	}
 	if strings.HasPrefix(c.Phase, "desktop-") {
 		if err := e.StartNotes(cctx, c); err != nil {
 			return fail("notes app: " + err.Error())
 		}
+	}
+	if strings.HasPrefix(c.Phase, "desktop-") || c.Target == "desktop" {
+		// A browser-phase case that works in a desktop app needs someone there too: it passed
+		// only when a desktop case had run in the few minutes before it.
 		if err := e.UserInput(cctx); err != nil {
 			return fail("user input: " + err.Error())
 		}
@@ -281,6 +306,9 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	offset := fileSize(llmLog)
 	defer func() { r.Rounds = copyLines(llmLog, offset, filepath.Join(dir, "llm.jsonl")) }()
 
+	stopWatch := e.Watch(ctx, c.Interrupt) // ctx: it outlives the errand, to see how the indicator is left
+	defer stopWatch()
+
 	// Say it, from the seeded user to the agent node, as the app's chat does.
 	var (
 		mu      sync.Mutex
@@ -290,7 +318,11 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 	chatDone := make(chan struct{})
 	go func() {
 		defer close(chatDone)
-		texts, err := e.chat(cctx, node, c.Message(e.Sites))
+		say := e.chat
+		if c.Via == "voice" {
+			say = e.voice
+		}
+		texts, err := say(cctx, node, c.Message(e.Sites))
 		mu.Lock()
 		replies, chatErr = texts, err
 		mu.Unlock()
@@ -309,8 +341,11 @@ func runOnce(ctx context.Context, e *Env, c Case, i int) (r RunResult) {
 		}
 	}
 
+	watch := stopWatch()
+
 	// The state, from the fixtures themselves.
 	st, err := e.gather(ctx, cards)
+	st.Watch = watch
 	mu.Lock()
 	st.Replies = append(replies, st.Replies...)
 	mu.Unlock()
@@ -489,7 +524,8 @@ func answerFor(answers []Answer, c Card) (Answer, bool) {
 }
 
 // reset puts the fixtures back: the sites' state (orders, downloads, forms, sessions), the
-// fake relay's pushes, the agent's ~/Documents/Jarvis and what its browser downloaded.
+// fake relay's pushes, the agent's ~/Documents (its Jarvis folder left empty) and what its
+// browser downloaded.
 func (e *Env) reset(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, "POST", e.Sites+"/control/reset", nil)
 	if err := doJSON(req, nil); err != nil {
@@ -502,7 +538,7 @@ func (e *Env) reset(ctx context.Context) error {
 		}
 	}
 	docs := e.path("agent-home", "Documents", "Jarvis")
-	if err := os.RemoveAll(docs); err != nil {
+	if err := os.RemoveAll(filepath.Dir(docs)); err != nil {
 		return err
 	}
 	// The files only: the browser may hold the directory.
@@ -542,6 +578,9 @@ func (e *Env) gather(ctx context.Context, cards []Card) (State, error) {
 	if st.Docs, err = readDocs(e.path("agent-home", "Documents", "Jarvis")); err != nil {
 		return st, err
 	}
+	if st.Documents, err = readDocs(e.path("agent-home", "Documents")); err != nil {
+		return st, err
+	}
 	switch d := e.desk; {
 	case d == nil:
 	case d.kind == "mac":
@@ -575,6 +614,67 @@ func (e *Env) gather(ctx context.Context, cards []Card) (State, error) {
 	return st, nil
 }
 
+// voice says message as a voice turn of the agent node itself (the node's own credentials:
+// /conversation/start, /voice/command, /conversation/end), as if spoken at that computer with
+// message as what speech-to-text heard, and returns Jarvis's reply. The turn offers no client
+// tools: what it starts runs on the real agent over MQTT, as an errand's steps do.
+func (e *Env) voice(ctx context.Context, node, message string) ([]string, error) {
+	var creds struct {
+		NodeID  string `json:"node_id"`
+		NodeKey string `json:"node_key"`
+	}
+	b, err := os.ReadFile(e.creds)
+	if err == nil {
+		err = json.Unmarshal(b, &creds)
+	}
+	if err != nil || creds.NodeID != node || creds.NodeKey == "" {
+		return nil, fmt.Errorf("voice: the agent's credentials for node %s aren't readable (%v)", node, err)
+	}
+	post := func(path string, body map[string]any, out any) error {
+		b, _ := json.Marshal(body)
+		req, err := http.NewRequestWithContext(ctx, "POST", e.Sbx["SBX_CC"]+path, bytes.NewReader(b))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", creds.NodeID+":"+creds.NodeKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		rb, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s: %d %s", path, resp.StatusCode, strings.TrimSpace(string(rb[:min(len(rb), 300)])))
+		}
+		if out == nil {
+			return nil
+		}
+		return json.Unmarshal(rb, out)
+	}
+	cid := fmt.Sprintf("ccsuite-voice-%d", time.Now().UnixNano())
+	if err := post("/api/v0/conversation/start", map[string]any{"conversation_id": cid,
+		"node_context": map[string]any{"timezone": "UTC"}, "available_commands": []any{}, "client_tools": []any{}}, nil); err != nil {
+		return nil, err
+	}
+	defer post("/api/v0/conversation/end", map[string]any{"conversation_id": cid}, nil) //nolint:errcheck // the turn is over either way
+	var turn struct {
+		StopReason       string            `json:"stop_reason"`
+		AssistantMessage *string           `json:"assistant_message"`
+		ToolCalls        []json.RawMessage `json:"tool_calls"`
+	}
+	if err := post("/api/v0/voice/command", map[string]any{"voice_command": message, "conversation_id": cid}, &turn); err != nil {
+		return nil, err
+	}
+	if len(turn.ToolCalls) > 0 {
+		return nil, fmt.Errorf("voice: the turn asked the node for %d tool call(s); it offered none", len(turn.ToolCalls))
+	}
+	if turn.AssistantMessage == nil || strings.TrimSpace(*turn.AssistantMessage) == "" {
+		return nil, fmt.Errorf("voice: no reply (stop_reason %s)", turn.StopReason)
+	}
+	return []string{*turn.AssistantMessage}, nil
+}
+
 // chat sends message as the app's chat does (POST /api/v0/mobile/chat, server-sent events) to
 // node, and returns the answers it gave.
 func (e *Env) chat(ctx context.Context, node, message string) ([]string, error) {
@@ -584,7 +684,7 @@ func (e *Env) chat(ctx context.Context, node, message string) ([]string, error) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.Sbx["SBX_TOKEN"])
+	req.Header.Set("Authorization", "Bearer "+e.token(ctx))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

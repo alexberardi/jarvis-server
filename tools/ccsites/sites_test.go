@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newSites(t *testing.T, dir string) (*Server, *httptest.Server) {
@@ -162,7 +163,7 @@ func TestStoreCheckout(t *testing.T) {
 		t.Fatal("cart has no checkout button")
 	}
 	code, _, body = get(t, c, hs.URL+"/store/checkout")
-	for _, want := range []string{"•••• 4242", "Place order", `value="Avery Quinn"`} {
+	for _, want := range []string{"•••• 4242", "Place order", `value="Jordan Quinn"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("checkout (%d) lacks %q", code, want)
 		}
@@ -170,7 +171,7 @@ func TestStoreCheckout(t *testing.T) {
 	if n := len(state(t, hs.URL).Orders); n != 0 {
 		t.Fatalf("%d orders before Place order", n)
 	}
-	form := url.Values{"name": {"Avery Quinn"}, "street": {"12 Orchard Lane"}, "city": {"Springfield"}, "zip": {"62704"}, "card": {"4242"}}
+	form := url.Values{"name": {"Jordan Quinn"}, "street": {"12 Orchard Lane"}, "city": {"Springfield"}, "zip": {"62704"}, "card": {"4242"}}
 	code, h, _ := post(t, c, hs.URL+"/store/checkout", form)
 	if code != http.StatusSeeOther {
 		t.Fatalf("place order: %d", code)
@@ -182,7 +183,7 @@ func TestStoreCheckout(t *testing.T) {
 		t.Fatalf("orders: %+v", st.Orders)
 	}
 	o := st.Orders[0]
-	if len(o.Items) != 1 || o.Items[0].ID != BestUnder300 || o.Card != "•••• 4242" || o.ShipTo.Name != "Avery Quinn" {
+	if len(o.Items) != 1 || o.Items[0].ID != BestUnder300 || o.Card != "•••• 4242" || o.ShipTo.Name != "Jordan Quinn" {
 		t.Errorf("order: %+v", o)
 	}
 	if !strings.Contains(body, o.Number) {
@@ -472,5 +473,46 @@ func TestControlLayout(t *testing.T) {
 	login(t, c, hs.URL, "bank")
 	if after := ids(); !slices.Equal(after, before) {
 		t.Fatalf("buttons %q after a reset, want %q", after, before)
+	}
+}
+
+// Statements run from 2026-04 to the clock's last month, newest first: "last month" always has
+// one, and the months the replay cases name (2026-09, 2026-08) stay.
+func TestStatementMonths(t *testing.T) {
+	for _, tc := range []struct {
+		now   time.Time
+		first string
+		n     int
+	}{
+		{time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), "2026-09", 6},
+		{time.Date(2026, 11, 12, 4, 0, 0, 0, time.UTC), "2026-10", 7},
+		{time.Date(2026, 12, 31, 23, 0, 0, 0, time.UTC), "2026-11", 8},
+		{time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC), "2027-02", 11},
+	} {
+		got := statementMonths(tc.now)
+		if len(got) != tc.n || got[0] != tc.first || got[len(got)-1] != "2026-04" ||
+			!slices.Contains(got, "2026-09") || !slices.Contains(got, "2026-08") {
+			t.Errorf("%s: %v", tc.now.Format("2006-01-02"), got)
+		}
+	}
+}
+
+// The wiki's article is in <main>, which is what write_document reads from a page; an unknown
+// article is a 404.
+func TestWikiArticle(t *testing.T) {
+	_, hs := newSites(t, "")
+	c := browser(t)
+	code, _, body := get(t, c, hs.URL+"/wiki/Velmora")
+	if code != 200 {
+		t.Fatalf("article: %d", code)
+	}
+	main := body[strings.Index(body, "<main"):strings.Index(body, "</main>")]
+	for _, want := range []string{"<h1>Velmora</h1>", "Lake Orrin", "Brassfeather Festival", "1287", "Tessaly Bridge"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("article's main has no %q", want)
+		}
+	}
+	if code, _, _ := get(t, c, hs.URL+"/wiki/Atlantis"); code != http.StatusNotFound {
+		t.Errorf("unknown article: %d", code)
 	}
 }

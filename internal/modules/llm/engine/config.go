@@ -143,6 +143,10 @@ var fields = []field{
 			"with the model set here: install one from the Models page; nothing is downloaded for you)",
 		opts: []any{FallbackOff, FallbackCPU}, only: []string{ModelSTT}},
 	{name: "remote_vision", typ: settings.Bool, def: false, desc: "Whether the remote model accepts images", only: []string{ModelLLM}, remote: true},
+	{name: "remote_thinking", typ: settings.Bool, def: false,
+		desc: "Whether the remote endpoint takes llama-server's thinking controls (another Jarvis server or a llama-server): " +
+			"a feature can then turn the model's thinking on or off. Leave off for OpenAI, Anthropic and Gemini, which refuse them",
+		only: []string{ModelLLM}, remote: true},
 }
 
 // sttFields overrides a field's description, options and default on the stt label, whose
@@ -363,6 +367,8 @@ type LabelConfig struct {
 	RemoteModel  string `json:"remote_model"`
 	RemoteAPIKey string `json:"-"`
 	RemoteVision bool   `json:"remote_vision"`
+	// RemoteThinking: the remote takes llama-server's thinking controls (remote_thinking).
+	RemoteThinking bool `json:"remote_thinking"`
 	// RemoteAPIMode is the remote_api setting (auto, openai, anthropic) and RemoteAPI its
 	// effect for RemoteURL (openai or anthropic).
 	RemoteAPIMode string `json:"remote_api"`
@@ -495,6 +501,9 @@ func (s SettingsSource) label(ctx context.Context, label string, forceLocal bool
 	}
 	c.RemoteTimeoutMS = num("remote_timeout_ms")
 	c.Fallback = strings.ToLower(str("fallback"))
+	if has("remote_thinking") {
+		c.RemoteThinking = s.Settings.Bool(ctx, p+"remote_thinking", settings.Scope{})
+	}
 	if has("remote_vision") {
 		c.RemoteVision = s.Settings.Bool(ctx, p+"remote_vision", settings.Scope{})
 	}

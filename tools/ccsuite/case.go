@@ -23,12 +23,21 @@ type Case struct {
 	Status string `json:"status"`
 	// Say is the chat message, from the seeded user to the agent node. {{sites}} is the fixture
 	// sites' base URL, {{layout}} "?layout=moved" when setup.layout is moved (else empty).
-	Say        string   `json:"say"`
+	Say string `json:"say"`
+	// Via is how Say reaches Jarvis: "" or chat (the app's chat, aimed at the agent node), or
+	// voice: a voice turn of the agent node itself, as if spoken at that computer, with Say as
+	// what speech-to-text heard. Spoken at the computer, work in an app starts in its window at
+	// once, with no plan card (decisions/2026-11-13-voice-at-the-computer-works-in-the-app.md):
+	// a voice case gives no answer for a plan card, so one posted fails it by timing out.
+	Via        string   `json:"via,omitempty"`
 	Target     string   `json:"target"` // browser or desktop
 	Setup      Setup    `json:"setup"`
 	Answers    []Answer `json:"answers"`
 	Checks     []Check  `json:"checks"`
 	MaxMinutes float64  `json:"max_minutes"`
+	// Interrupt is the user stepping in mid-task (interrupt.go): the suite watches the agent's
+	// activity and actions in every case, and fires this once its actions have landed.
+	Interrupt *Interrupt `json:"interrupt,omitempty"`
 
 	File string `json:"-"` // the file it came from, relative to the repo
 }
@@ -39,10 +48,16 @@ type Setup struct {
 	// browser profile, standing in for a saved login.
 	Login       []string `json:"login"`
 	Layout      string   `json:"layout,omitempty"`       // ccsites pages: default or moved
-	NotesLayout string   `json:"notes_layout,omitempty"` // the notes app: default or moved
+	NotesLayout string   `json:"notes_layout,omitempty"` // the notes app: default, moved or pointer (click-only New and Save)
 	// Block lists the sites (hosts, e.g. 127.0.0.1) the household blocks for computer tasks
 	// during the case: a household rule of cc's (policy.Rule, effect block) per site.
 	Block []string `json:"block,omitempty"`
+	// WebSearch turns the household's web search on for the case, so the planner may research
+	// with quick_search before a computer task (real web: for trial cases, not the required ones).
+	WebSearch bool `json:"web_search,omitempty"`
+	// Open is a fixture sites path (e.g. /wiki/Velmora) the suite opens in a browser tab in front
+	// before Say: the page the user means by "this page", whose address Say doesn't give.
+	Open string `json:"open,omitempty"`
 	// Demonstrate names a scripted demonstration (teach.go demonstrations, e.g. bank_download)
 	// the suite plays in the browser while the agent records it, before Say: jarvisd learns a
 	// workflow from it, which the suite saves as-is. The fixtures are reset afterwards, and a
@@ -65,13 +80,17 @@ type Check struct {
 	// at most MaxTotal when set.
 	Product  string  `json:"product,omitempty"`
 	MaxTotal float64 `json:"max_total,omitempty"`
-	// download: a statement downloaded from Site (bank, card) for Month (YYYY-MM, optional).
+	// download: a statement downloaded from Site (bank, card) for Month (YYYY-MM, or "last" for the clock's last month; optional).
 	Site  string `json:"site,omitempty"`
 	Month string `json:"month,omitempty"`
 	// spreadsheet_has: a file in the agent's ~/Documents/Jarvis matching File (a glob, default
 	// every file) whose text contains each of Contains (case-insensitive).
+	// document_has: a file anywhere in the agent's ~/Documents whose name matches File (a glob,
+	// required), whose text contains each of Contains and runs to at most MaxWords words (when
+	// set: a summary, not the page pasted whole).
 	File     string   `json:"file,omitempty"`
 	Contains []string `json:"contains,omitempty"`
+	MaxWords int      `json:"max_words,omitempty"`
 	// form_submitted: a submission with these fields (case-insensitive, trimmed).
 	Fields map[string]string `json:"fields,omitempty"`
 	// note_exists: a saved note titled Title whose body contains Body.
@@ -86,8 +105,9 @@ var (
 	phases = []string{"tests", "browser", "desktop-mac", "desktop-wlroots", "desktop-x11", "teach"}
 	// checkKinds lists every check kind with the field it needs ("" for none).
 	checkKinds = map[string]string{
-		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains",
+		"order_placed": "", "no_order": "", "download": "site", "spreadsheet_has": "contains", "document_has": "file",
 		"form_submitted": "fields", "note_exists": "title", "reply_matches": "pattern", "asked": "", "refused": "",
+		"stopped": "", "paused": "", "indicator": "", "no_note": "",
 	}
 	loginSites = []string{"store", "bank", "card"}
 	answerWhen = []string{"confirm", "plan"}
@@ -116,6 +136,8 @@ func (c *Case) Validate() error {
 		return fmt.Errorf("status %q: pending or required", c.Status)
 	case strings.TrimSpace(c.Say) == "":
 		return errors.New("say is empty")
+	case !oneOf(c.Via, "", "chat", "voice"):
+		return fmt.Errorf("via %q: chat or voice", c.Via)
 	case !oneOf(c.Target, "browser", "desktop"):
 		return fmt.Errorf("target %q: browser or desktop", c.Target)
 	case c.MaxMinutes <= 0 || c.MaxMinutes > 60:
@@ -124,8 +146,21 @@ func (c *Case) Validate() error {
 		return errors.New("no checks")
 	case !oneOf(c.Setup.Layout, "", "default", "moved"):
 		return fmt.Errorf("setup.layout %q: default or moved", c.Setup.Layout)
-	case !oneOf(c.Setup.NotesLayout, "", "default", "moved"):
-		return fmt.Errorf("setup.notes_layout %q: default or moved", c.Setup.NotesLayout)
+	case !oneOf(c.Setup.NotesLayout, "", "default", "moved", "pointer"):
+		return fmt.Errorf("setup.notes_layout %q: default, moved or pointer", c.Setup.NotesLayout)
+	}
+	if _, browser := c.needs(); c.Setup.Open != "" && (!strings.HasPrefix(c.Setup.Open, "/") || !browser) {
+		return fmt.Errorf("setup.open %q: a path from /, in a phase with a browser", c.Setup.Open)
+	}
+	if in := c.Interrupt; in != nil {
+		switch {
+		case !oneOf(in.Do, "stop", "user_mouse", "user_input"):
+			return fmt.Errorf("interrupt.do %q: stop, user_mouse or user_input", in.Do)
+		case in.AfterActions < 0:
+			return fmt.Errorf("interrupt.after_actions %d: 0 (1) or more", in.AfterActions)
+		case in.Do != "stop" && c.Target != "desktop":
+			return errors.New("interrupt " + in.Do + " needs target desktop (the input guard is the desktop's)")
+		}
 	}
 	if d := c.Setup.Demonstrate; d != "" {
 		if _, ok := demonstrations[d]; !ok {
@@ -176,6 +211,8 @@ func (ch Check) Validate() error {
 		missing = ch.Site == ""
 	case "contains":
 		missing = len(ch.Contains) == 0
+	case "file":
+		missing = ch.File == ""
 	case "fields":
 		missing = len(ch.Fields) == 0
 	case "title":
@@ -189,8 +226,8 @@ func (ch Check) Validate() error {
 	if ch.Site != "" && !oneOf(ch.Site, "bank", "card") {
 		return fmt.Errorf("site %q: bank or card", ch.Site)
 	}
-	if ch.Month != "" && !monthRE.MatchString(ch.Month) {
-		return fmt.Errorf("month %q: YYYY-MM", ch.Month)
+	if ch.Month != "" && ch.Month != "last" && !monthRE.MatchString(ch.Month) {
+		return fmt.Errorf("month %q: YYYY-MM or last", ch.Month)
 	}
 	if ch.File != "" {
 		if _, err := filepath.Match(ch.File, ""); err != nil {

@@ -319,7 +319,7 @@ func TestCheckoutCardThenApprove(t *testing.T) {
 	if len(c.comp.acted()) != 0 {
 		t.Fatal("the order ran before the OK")
 	}
-	if up, _ := c.cards.update("item-1"); up.Metadata["steps"].([]any)[0].(map[string]any)["result"] != "Waiting for you in "+shopSite {
+	if up, _ := c.cards.update("item-1"); up.Metadata["steps"].([]any)[0].(map[string]any)["result"] != "Needs your OK to go on in "+shopSite+": see the card that asks" {
 		t.Fatalf("progress card while waiting = %#v", up.Metadata["steps"])
 	}
 	if !card.Push {
@@ -551,7 +551,10 @@ func TestProgressCardUpdates(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		intent := "Look at item " + string(rune('0'+i))
 		intents = append(intents, intent)
-		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "e3", "intent": "`+intent+`"}]}`)
+		// Two elements in turn: the same press on the same screen three rounds running would be
+		// sent back as stuck (computer.TestStuckBatchIsSentBack).
+		ref := []string{"e3", "e2"}[i%2]
+		replies = append(replies, `{"thought": "x", "actions": [{"kind": "press", "ref": "`+ref+`", "intent": "`+intent+`"}]}`)
 	}
 	c.llm.say("computer", append(replies, doneReply)...)
 	var seen []Card
@@ -897,6 +900,22 @@ func TestComputerTaskStartsAtTheGoalsAddress(t *testing.T) {
 	}
 }
 
+// A browser task that names no website starts on a web search, not on nothing: "the task has
+// no window yet" ended a real "find the cheapest listing and add it to my cart".
+func TestComputerTaskWithNoSiteStartsOnASearch(t *testing.T) {
+	c := newComputerEnv(t)
+	c.llm.say("plan", planJSON("Add a watch to the cart", step(policy.ToolComputerTask, "Find and add it",
+		`{"goal": "find the cheapest running watch and add it to my cart", "target": "browser"}`)))
+	c.llm.say("computer", doneReply)
+	c.draft("find the cheapest running watch and add it to my cart", ptr(7), []MenuEntry{computerEntry()})
+	c.idle()
+	c.comp.mu.Lock()
+	defer c.comp.mu.Unlock()
+	if len(c.comp.observes) == 0 || c.comp.observes[0].StartURL != searchStart {
+		t.Fatalf("observes %+v", c.comp.observes)
+	}
+}
+
 // The replan after the downloads that reads them and writes the spreadsheet stops at a
 // checkpoint in the spreadsheet's place, for what the reads find.
 func TestReplanSpreadsheetAfterReadIsACheckpoint(t *testing.T) {
@@ -1001,5 +1020,80 @@ func TestComputerStepReadsItsSource(t *testing.T) {
 	if w := c.wf("wf_c"); w.State != "failed" || len(w.Results) != 1 || w.Results[0].Error != "I couldn't read the source page: HTTP 404" ||
 		len(c.comp.acted()) > 0 {
 		t.Fatalf("run = %s %+v", w.State, w.Results)
+	}
+}
+
+// A plan is checked against the request before it runs: what it left out goes back to the
+// planner once. A plan that covers it, and a check that can't be read, leave the plan alone.
+func TestPlanErrandChecksThePlanAgainstTheRequest(t *testing.T) {
+	c := newComputerEnv(t)
+	download := step(policy.ToolComputerTask, "Download", `{"goal": "download the statement", "target": "browser", "site": "`+shopSite+`"}`)
+	c.llm.say("plan", planJSON("Budget", download),
+		planJSON("Budget", download, step("write_spreadsheet", "Budget sheet", `{"name": "Budget"}`)))
+	c.llm.say("check", `{"covered": false, "missing": "the spreadsheet of spending"}`, `{"covered": true}`)
+	menu := []MenuEntry{computerEntry(), {Command: "write_spreadsheet"}}
+	p, err := c.s.PlanErrand(context.Background(), "download my statement and make a budget spreadsheet", menu)
+	if err != nil || len(p.Steps) != 2 {
+		t.Fatalf("plan = %+v %v, want the spreadsheet step added", p, err)
+	}
+	var again string
+	for _, r := range c.llm.reqs {
+		if q := *r.Messages[0].Content.Text; promptKind(q) == "plan" {
+			again = q
+		}
+	}
+	if !strings.Contains(again, "left out: the spreadsheet of spending") {
+		t.Errorf("the second planning call doesn't say what was left out")
+	}
+}
+
+// A replan whose answer has more after its object (a step closed early) is still read, and one
+// that leaves the errand ending short of the request is planned again.
+func TestReplanReadsASlipAndChecksWhatIsLeft(t *testing.T) {
+	c := newComputerEnv(t)
+	menu := []MenuEntry{computerEntry(), {Command: "write_spreadsheet"}}
+	c.llm.say("replan", `{"summary": "Make the sheet", "steps": [{"command": "write_spreadsheet", "args": {"name": "Budget"}, "computer": "Jarvis"}], "label": "write it"}]}`)
+	c.llm.say("check", `{"covered": true}`)
+	p, err := c.s.ReplanFromProgress(context.Background(), "make a budget spreadsheet", nil, nil, "the files are read", menu)
+	if err != nil || len(p.Steps) != 1 || p.Steps[0].Command != "write_spreadsheet" {
+		t.Fatalf("replan with a slip = %+v %v", p, err)
+	}
+
+	c = newComputerEnv(t)
+	c.llm.say("replan", `{"summary": "Nothing more", "steps": []}`,
+		`{"summary": "Make the sheet", "steps": [{"command": "write_spreadsheet", "args": {"name": "Budget"}, "label": "write it"}]}`)
+	c.llm.say("check", `{"covered": false, "missing": "the budget spreadsheet"}`)
+	p, err = c.s.ReplanFromProgress(context.Background(), "make a budget spreadsheet", nil, nil, "the files are read", menu)
+	if err != nil || len(p.Steps) != 1 {
+		t.Fatalf("replan that ended short = %+v %v, want the spreadsheet step", p, err)
+	}
+}
+
+// A failed lookup doesn't stop lookups on other sites or the write-up; anything else does.
+func TestCarriesOn(t *testing.T) {
+	look := func(site, goal string) Step {
+		return Step{Command: cmdComputer, Args: servertools.Obj("goal", goal, "target", "browser", "site", site)}
+	}
+	doc := Step{Command: cmdWriteDoc}
+	ok := []Result{{Success: true}, {}}
+	for name, c := range map[string]struct {
+		steps   []Step
+		failed  int
+		results []Result
+		want    bool
+	}{
+		"other shops then write-up": {[]Step{look("a.example", "find vacuums"), look("b.example", "find vacuums"), doc}, 0, []Result{{}}, true},
+		"last shop, one found":      {[]Step{look("a.example", "find"), look("b.example", "find"), doc}, 1, ok, true},
+		"nothing found to write":    {[]Step{look("a.example", "find"), doc}, 0, []Result{{}}, false},
+		"last step":                 {[]Step{look("a.example", "find")}, 0, []Result{{}}, false},
+		"same site next":            {[]Step{look("a.example", "find"), look("https://a.example/x", "find more"), doc}, 0, []Result{{}}, false},
+		"a later step orders":       {[]Step{look("a.example", "find"), look("b.example", "order the cheapest"), doc}, 0, []Result{{}}, false},
+		"failed step was an order":  {[]Step{look("a.example", "buy a mug"), look("b.example", "find"), doc}, 0, []Result{{}}, false},
+		"a later step sends":        {[]Step{look("a.example", "find"), look("b.example", "find"), {Command: "send_email"}}, 0, []Result{{}}, false},
+		"no site":                   {[]Step{look("", "find"), look("b.example", "find"), doc}, 0, []Result{{}}, false},
+	} {
+		if got := carriesOn(c.steps, c.failed, c.results); got != c.want {
+			t.Errorf("%s: carriesOn = %v, want %v", name, got, c.want)
+		}
 	}
 }

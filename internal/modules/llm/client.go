@@ -44,6 +44,8 @@ type chatPayload struct {
 	ReasoningBudgetTokens *int `json:"reasoning_budget_tokens,omitempty"`
 	// ReasoningEffort is OpenAI's thinking control for its reasoning models (fixedSampling).
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// ResponseFormat is sent only as ResponseSchema, to an engine that enforces it.
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
 type streamOptions struct {
@@ -77,7 +79,9 @@ func (p *chatPayload) applyThinking(budget *int, ep Endpoint) {
 			}
 			p.Messages = withThoughtSignatures(p.Messages)
 		}
-		return
+		if !ep.ThinkingControls || ep.API == APIAnthropic {
+			return
+		}
 	}
 	if budget == nil {
 		return

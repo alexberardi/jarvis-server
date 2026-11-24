@@ -11,7 +11,8 @@
 // Roles are AT-SPI's, reported under these names (stable; the deny check and the risk
 // classifier read them): button, togglebutton, switch, checkbox, radio, combobox, textbox,
 // passwordtext, spinbutton, slider, menuitem, menuitemcheckbox, menuitemradio, link, listitem,
-// treeitem, cell, row, tab. A passwordtext's text is never read or set.
+// treeitem, cell, row, tab, and document (a word processor's page: typing goes there, and its
+// value is how its text starts). A passwordtext's text is never read or set.
 package atspi
 
 import (
@@ -37,6 +38,9 @@ const (
 // RolePassword is the snapshot role of an AT-SPI password text (ROLE_PASSWORD_TEXT).
 const RolePassword = "passwordtext"
 
+// RoleDocument is the role of a word processor's page.
+const RoleDocument = "document"
+
 // Error codes, as in computer_act's results.
 const (
 	CodeStaleRef      = "stale_ref"
@@ -59,7 +63,16 @@ var ErrUnsupported = &Error{Code: CodeUnsupported, Msg: "AT-SPI snapshots are on
 // Snapshot walks the active window (else the first window) of the app with this pid, depth-first,
 // and returns at most max interactive elements (DefaultMax when max <= 0) under a new generation.
 func Snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
-	return snapshotOf(ctx, pid, max, false)
+	return snapshotOf(ctx, pid, max, false, "")
+}
+
+// SnapshotWindow is Snapshot of the app's window titled title, when it has one: the window the
+// compositor says has the focus, which the app's own "active" state doesn't always name. Found
+// in the suite 2026-11-13: with LibreOffice's Save dialog in front, the snapshot was the main
+// window's (88 menu items and none of the dialog's controls), and a model working by elements
+// pressed "Save As..." again every round. No such window: the active one, as Snapshot.
+func SnapshotWindow(ctx context.Context, pid int, title string, max int) (computeruse.Snapshot, error) {
+	return snapshotOf(ctx, pid, max, false, title)
 }
 
 // Press performs ref's first action (Action.DoAction(0)) from snapshot generation gen.
@@ -67,7 +80,7 @@ func Snapshot(ctx context.Context, pid int, max int) (computeruse.Snapshot, erro
 // (a closed menu, a hidden panel) is skipped whole. Voice reads this one: live, LibreOffice's
 // closed menus filled a full snapshot's cap before its toolbars (ELEMENT-LAYER-WORK.md 4b).
 func SnapshotShowing(ctx context.Context, pid int, max int) (computeruse.Snapshot, error) {
-	return snapshotOf(ctx, pid, max, true)
+	return snapshotOf(ctx, pid, max, true, "")
 }
 
 // Peek is SnapshotShowing for a reader that acts on nothing (a desktop recording's results):
@@ -85,6 +98,9 @@ func SetValue(gen int, ref, text string) error { return setValue(gen, ref, text)
 
 // Focus moves keyboard focus to ref (Component.GrabFocus).
 func Focus(gen int, ref string) error { return focus(gen, ref) }
+
+// Text is ref's text now: a text field's, or a document's (its paragraphs, a line each).
+func Text(gen int, ref string) (string, error) { return textOf(gen, ref) }
 
 // Element is what the deny check and the risk classifier know about ref.
 func Element(gen int, ref string) (*computeruse.Element, error) { return element(gen, ref) }

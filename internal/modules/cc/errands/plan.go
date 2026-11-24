@@ -44,6 +44,11 @@ type DraftRequest struct {
 	// schedule fired it). A desktop computer task runs on its own only right after a turn on
 	// that computer (attended, C9).
 	TurnAt time.Time
+	// Live: the user asked by voice at NodeID, a computer (user, 2026-11-13). Work in an app
+	// (a note, a document) is then done in the app's window while they watch, at once, and not
+	// written to a file behind a plan card; a request typed in chat keeps the plan card. Only
+	// while the turn is recent and that computer has computer control on (attended).
+	Live bool
 }
 
 type planJob struct {
@@ -53,6 +58,7 @@ type planJob struct {
 	Goal        string          `json:"goal"`
 	Menu        json.RawMessage `json:"menu,omitempty"`
 	TurnAt      time.Time       `json:"turn_at,omitzero"`
+	Live        bool            `json:"live,omitempty"`
 }
 
 func planDedupPrefix(uid *int64) string {
@@ -120,7 +126,7 @@ func (s *Service) DraftErrand(ctx context.Context, r DraftRequest) error {
 		return ErrDisabled
 	}
 	payload, err := json.Marshal(planJob{HouseholdID: r.HouseholdID, NodeID: r.NodeID, UserID: r.UserID,
-		Goal: r.Goal, Menu: menuJSON(r.Menu), TurnAt: r.TurnAt})
+		Goal: r.Goal, Menu: menuJSON(r.Menu), TurnAt: r.TurnAt, Live: r.Live})
 	if err != nil {
 		return err
 	}
@@ -150,7 +156,12 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 	if menu == nil {
 		menu = s.resolveNodeMenu(ctx, r.NodeID, r.HouseholdID, r.UserID)
 	}
-	plan, err := s.PlanErrand(ctx, r.Goal, menu)
+	// Asked by voice at a computer a moment ago: work in an app is done in its window.
+	live := r.Live && menuHas(menu, cmdComputer) && s.attended(ctx, r)
+	if live {
+		menu = liveMenu(menu)
+	}
+	plan, err := s.planErrand(ctx, r.Goal, menu, live)
 	if err != nil {
 		return nil, err
 	}
@@ -174,13 +185,19 @@ func (s *Service) CreatePlan(ctx context.Context, r DraftRequest) (*planRow, err
 		// A desktop task runs on its own only when attended (C9), below.
 		return s.startComputerPlan(ctx, row)
 	}
+	if live && !autonomous && isComputerPlan(plan.Steps) {
+		// No rules decide plans here (autonomy off): the user asked for it aloud at this
+		// computer and is watching. The task's own actions still go through the household's
+		// rules, and a risky moment still asks (C2, C8).
+		return s.autorunPlan(ctx, row, "asked for by voice at this computer")
+	}
 	if autonomous {
 		ok, reason := IsAutorunEligible(plan.Steps, verdicts)
 		if ok && desktop && !s.attended(ctx, r) {
 			ok, reason = false, "a desktop task runs on its own only when you ask for it at that computer"
 		}
 		if ok {
-			return s.autorunPlan(ctx, row)
+			return s.autorunPlan(ctx, row, "every step is allowed by the household's rules")
 		}
 		asked = &policy.Event{Effect: policy.Ask, Outcome: policy.OutcomeAsked, Reason: reason}
 		for i, v := range verdicts {
@@ -257,7 +274,7 @@ func (s *Service) blockPlan(ctx context.Context, p *planRow, verdicts []policy.V
 
 // autorunPlan launches a plan the household's rules allow at once, reporting on a "Ran on its
 // own" card (through the attention gate, which may withhold it; the run goes ahead either way).
-func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error) {
+func (s *Service) autorunPlan(ctx context.Context, p *planRow, reason string) (*planRow, error) {
 	if err := s.insertPlan(ctx, p); err != nil {
 		return nil, err
 	}
@@ -284,7 +301,7 @@ func (s *Service) autorunPlan(ctx context.Context, p *planRow) (*planRow, error)
 	}
 	raced, err := s.launch(ctx, p, wfID, KindAutorun, cardID, &policy.Event{HouseholdID: p.HouseholdID, UserID: p.UserID,
 		Source: policy.SourceErrandPlan, SourceID: p.ID, Effect: policy.Allow, Outcome: policy.OutcomeLaunched,
-		Reason: "every step is allowed by the household's rules", Detail: map[string]any{"workflow_id": wfID, "steps": cmds}})
+		Reason: reason, Detail: map[string]any{"workflow_id": wfID, "steps": cmds}})
 	if err != nil {
 		w.InboxItemID = cardID
 		rc.State = "failed"
@@ -355,7 +372,7 @@ func (s *Service) runPlanJob(ctx context.Context, job queue.Job) ([]byte, error)
 		return nil, queue.Permanent(err)
 	}
 	_, err := s.CreatePlan(ctx, DraftRequest{HouseholdID: r.HouseholdID, NodeID: r.NodeID, UserID: r.UserID,
-		Goal: r.Goal, Menu: menuFromJSON(r.Menu), TurnAt: r.TurnAt})
+		Goal: r.Goal, Menu: menuFromJSON(r.Menu), TurnAt: r.TurnAt, Live: r.Live})
 	switch {
 	case err == nil:
 	case ctx.Err() != nil:

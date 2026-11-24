@@ -144,7 +144,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 	}
 	req := e.llm.requests("plan")[0]
 	// Label: unset (auto) keeps planning on background, as it was hardcoded before errands.model.
-	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != defaultPlannerMaxTokens || req.ReasoningBudget != nil {
+	if req.Label != "background" || *req.Temperature != 0 || *req.MaxTokens != defaultPlannerMaxTokens || !thinksAsSet(req) {
 		t.Fatalf("planner request = %+v", req)
 	}
 
@@ -163,7 +163,7 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("retry: %+v %v", plan, err)
 	}
 	reqs := e.llm.requests("plan")[n:]
-	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
+	if len(reqs) != 2 || !thinksAsSet(reqs[0]) || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
 		t.Fatalf("retry requests: %+v", reqs)
 	}
 	// Thinking ran past its wall-clock budget (the demo dry run: 105 s of thinking on a shared
@@ -175,8 +175,17 @@ func TestPlanValidatesAndStripsThink(t *testing.T) {
 		t.Fatalf("time-capped retry: %+v %v", plan, err)
 	}
 	reqs = e.llm.requests("plan")[n:]
-	if len(reqs) != 2 || reqs[0].ReasoningBudget != nil || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
+	if len(reqs) != 2 || !thinksAsSet(reqs[0]) || reqs[1].ReasoningBudget == nil || *reqs[1].ReasoningBudget != 0 {
 		t.Fatalf("time-capped requests: %+v", reqs)
+	}
+	// Having thought past its time once, it plans the next ones without thinking.
+	n = len(e.llm.requests("plan"))
+	e.llm.say("plan", planJSON("Timer", step("get_weather", "Weather", "")))
+	if _, err := e.s.PlanErrand(context.Background(), "goal", nil); err != nil {
+		t.Fatalf("the plan after a time-capped one: %v", err)
+	}
+	if reqs = e.llm.requests("plan")[n:]; len(reqs) != 1 || reqs[0].ReasoningBudget == nil || *reqs[0].ReasoningBudget != 0 {
+		t.Fatalf("the plan after a time-capped one thought: %+v", reqs)
 	}
 	// A job that is itself cancelled (shutdown) is not a budget overrun: no retry.
 	n = len(e.llm.requests("plan"))
@@ -429,4 +438,28 @@ func TestPlannerModelSlot(t *testing.T) {
 	if got := (&Service{}).modelSlot(context.Background()); got != llm.LabelBackground {
 		t.Errorf("no settings: %s", got)
 	}
+}
+
+// A step's skipped "}" is put back: the replan could not be read and the errand never wrote
+// its spreadsheet.
+func TestBalanceJSONPutsBackASkippedCloser(t *testing.T) {
+	got, ok := balanceJSON(`{"steps": [{"command": "a", "args": {"rows": [[1, "x]"]], "computer": "J"}]}`)
+	want := `{"steps": [{"command": "a", "args": {"rows": [[1, "x]"]], "computer": "J"}}]}`
+	if !ok || got != want {
+		t.Fatalf("balanceJSON = %q, %v; want %q", got, ok, want)
+	}
+	if _, err := pyjson.Loads(got); err != nil {
+		t.Fatalf("still unreadable: %v", err)
+	}
+	if got, ok := balanceJSON(`{"a": [1]}`); ok || got != `{"a": [1]}` {
+		t.Fatalf("a whole value was changed: %q", got)
+	}
+	if _, ok := balanceJSON(`{"a": "cut off`); ok {
+		t.Fatal("a value cut off inside a string was closed")
+	}
+}
+
+// thinksAsSet reports whether a planning request thinks for the allowance's default.
+func thinksAsSet(r llm.ChatRequest) bool {
+	return r.ReasoningBudget != nil && *r.ReasoningBudget == defaultPlannerThinkTokens
 }

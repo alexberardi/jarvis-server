@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/tools/ccsites/notesapp"
 )
@@ -26,16 +27,21 @@ const sitesJSON = `{
 // xlsx writes a minimal spreadsheet: shared strings and one sheet with an inline string and a
 // number.
 func xlsx(t *testing.T, path string) {
+	zipFile(t, path, map[string]string{
+		"xl/sharedStrings.xml":     `<sst><si><t>Category</t></si><si><t>Dining</t></si><si><r><t>Groc</t></r><r><t>eries</t></r></si></sst>`,
+		"xl/worksheets/sheet1.xml": `<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="inlineStr"><is><t>Travel</t></is></c><c><v>312.5</v></c></row></sheetData></worksheet>`,
+		"xl/workbook.xml":          `<workbook><sheets><sheet name="Budget"/></sheets></workbook>`,
+	})
+}
+
+// zipFile writes a zip at path with these members, as an office file is one.
+func zipFile(t *testing.T, path string, members map[string]string) {
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	zw := zip.NewWriter(f)
-	for name, body := range map[string]string{
-		"xl/sharedStrings.xml":     `<sst><si><t>Category</t></si><si><t>Dining</t></si><si><r><t>Groc</t></r><r><t>eries</t></r></si></sst>`,
-		"xl/worksheets/sheet1.xml": `<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="inlineStr"><is><t>Travel</t></is></c><c><v>312.5</v></c></row></sheetData></worksheet>`,
-		"xl/workbook.xml":          `<workbook><sheets><sheet name="Budget"/></sheets></workbook>`,
-	} {
+	for name, body := range members {
 		w, _ := zw.Create(name)
 		w.Write([]byte(body))
 	}
@@ -57,6 +63,16 @@ func fixtureState(t *testing.T) State {
 	if st.Docs, err = readDocs(docs); err != nil {
 		t.Fatal(err)
 	}
+	home := t.TempDir() // ~/Documents: a summary in Writer's format, one in Word's, in a folder
+	zipFile(t, filepath.Join(home, "Velmora.odt"), map[string]string{"content.xml": `<office:document-content xmlns:office="o" xmlns:text="t">` +
+		`<office:body><office:text><text:h>Velmora</text:h><text:p>A lake town on Lake <text:span>Orrin</text:span>, founded in 1287.</text:p>` +
+		`<text:p>Known for the Brassfeather Festival.</text:p></office:text></office:body></office:document-content>`})
+	os.MkdirAll(filepath.Join(home, "Notes"), 0o755)
+	zipFile(t, filepath.Join(home, "Notes", "Rome.docx"), map[string]string{"word/document.xml": `<w:document xmlns:w="w"><w:body>` +
+		`<w:p><w:r><w:t>Rome</w:t></w:r></w:p><w:p><w:r><w:t>Capital of </w:t></w:r><w:r><w:t>Italy.</w:t></w:r></w:p></w:body></w:document>`})
+	if st.Documents, err = readDocs(home); err != nil {
+		t.Fatal(err)
+	}
 	notes := filepath.Join(t.TempDir(), "notes.json")
 	os.WriteFile(notes, []byte(`{"notes": [{"title": "Groceries", "body": "milk, eggs, bread"}]}`), 0o644)
 	if st.Notes, err = notesapp.NotesState(notes); err != nil {
@@ -76,6 +92,16 @@ func fixtureState(t *testing.T) State {
 func TestChecks(t *testing.T) {
 	st := fixtureState(t)
 	empty := State{}
+	t0 := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	// The stop case: one action, the stop, the indicator off. The take-over case: paused at once.
+	stopped := State{Watch: &Watch{Interrupt: "stop", Interrupted: at(3), Actions: []time.Time{at(2)},
+		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(3), "idle"}}}}
+	paused := State{Watch: &Watch{Interrupt: "user_input", Interrupted: at(3), Actions: []time.Time{at(2), at(9)},
+		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(4), "paused: New note"}, {at(8), "controlling: Save"}}}}
+	// The action that was under way when the stop fired lands a moment after it.
+	inFlight := State{Watch: &Watch{Interrupt: "stop", Interrupted: at(2), After: 1, Actions: []time.Time{at(3)},
+		Activity: []Sample{{at(0), "idle"}, {at(1), "controlling: New note"}, {at(4), "idle"}}}}
 	tests := []struct {
 		name  string
 		check Check
@@ -92,6 +118,20 @@ func TestChecks(t *testing.T) {
 		{"download", Check{Kind: "download", Site: "bank", Month: "2026-09"}, &st, ""},
 		{"download any month", Check{Kind: "download", Site: "card"}, &st, ""},
 		{"download wrong month", Check{Kind: "download", Site: "card", Month: "2026-09"}, &st, "no card statement for 2026-09 downloaded (downloads: bank 2026-09, card 2026-08)"},
+		{"document_has odt", Check{Kind: "document_has", File: "Velmora.*", Contains: []string{"velmora", "Lake Orrin", "1287", "Brassfeather"}, MaxWords: 20}, &st, ""},
+		{"document_has docx in a folder", Check{Kind: "document_has", File: "*.docx", Contains: []string{"Capital of Italy"}}, &st, ""},
+		{"document_has missing term", Check{Kind: "document_has", File: "Velmora.odt", Contains: []string{"Tessaly"}}, &st, `Velmora.odt has not all of ["Tessaly"]`},
+		{"document_has too long", Check{Kind: "document_has", File: "Velmora.odt", MaxWords: 10}, &st, "has 15 words, more than 10: not a summary"},
+		{"document_has no file", Check{Kind: "document_has", File: "Atlantis.odt"}, &st, "no file in ~/Documents matching Atlantis.odt"},
+		{"no_note", Check{Kind: "no_note"}, &empty, ""},
+		{"no_note fails", Check{Kind: "no_note"}, &st, "a note was saved: Groceries"},
+		{"stopped", Check{Kind: "stopped"}, &stopped, ""},
+		{"stopped, an action after", Check{Kind: "stopped"}, &paused, "1 actions landed after the stop"},
+		{"stopped, the action under way lands", Check{Kind: "stopped"}, &inFlight, ""},
+		{"paused", Check{Kind: "paused"}, &paused, ""},
+		{"paused never", Check{Kind: "paused"}, &stopped, "never showed paused"},
+		{"indicator", Check{Kind: "indicator"}, &stopped, ""},
+		{"indicator left on", Check{Kind: "indicator"}, &paused, `still shows "controlling: Save"`},
 		{"spreadsheet_has xlsx", Check{Kind: "spreadsheet_has", Contains: []string{"dining", "Groceries", "Travel", "312.5"}}, &st, ""},
 		{"spreadsheet_has csv by glob", Check{Kind: "spreadsheet_has", File: "*.csv", Contains: []string{"Utilities"}}, &st, ""},
 		{"spreadsheet_has glob excludes", Check{Kind: "spreadsheet_has", File: "*.csv", Contains: []string{"Dining"}}, &st, "(files: spending-2026-09.csv)"},
@@ -186,6 +226,33 @@ func TestAnswers(t *testing.T) {
 	for tap, want := range map[string]string{"approve": "approve_errand_plan", "cancel": "discard_errand_plan"} {
 		if el, ok := it.button(tap); !ok || el.Callback != want {
 			t.Errorf("button(%s) = %v, %v; want %s", tap, el.Callback, ok, want)
+		}
+	}
+}
+
+// A download check's month "last" is the month before the clock's.
+func TestDownloadLastMonth(t *testing.T) {
+	last := lastMonth(time.Now())
+	st := &State{}
+	st.Sites.Downloads = append(st.Sites.Downloads, struct {
+		Site     string `json:"site"`
+		Month    string `json:"month"`
+		Filename string `json:"filename"`
+		Rows     int    `json:"rows"`
+	}{Site: "bank", Month: last})
+	if got := (Check{Kind: "download", Site: "bank", Month: "last"}).Eval(st); got != "" {
+		t.Errorf("last month's download not found: %s", got)
+	}
+	if got := (Check{Kind: "download", Site: "bank", Month: "2026-04"}).Eval(st); got == "" {
+		t.Error("a fixed month matched last month's download")
+	}
+	for now, want := range map[time.Time]string{
+		time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC): "2026-10",
+		time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC):  "2026-02",
+		time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC):   "2026-12",
+	} {
+		if got := lastMonth(now); got != want {
+			t.Errorf("lastMonth(%s) = %s, want %s", now.Format("2006-01-02"), got, want)
 		}
 	}
 }

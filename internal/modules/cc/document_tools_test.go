@@ -24,11 +24,30 @@ type fakeDocAgent struct {
 	dropText bool
 	editErr  map[string]any
 	files    map[string]map[string]any // other files by path, read as they are
+	page     map[string]any            // browser_read_page's answer: the page open in the browser
+	reads    int                       // browser_read_page calls
+	readTab  any                       // the tab_id the last read asked for
+	tabs     []any                     // browser_list_tabs' tabs (nil: one current tab, chrome:7)
 }
 
-func (f *fakeDocAgent) call(_ context.Context, _, _ string, args map[string]any, _ int64) map[string]any {
+func (f *fakeDocAgent) call(_ context.Context, _, tool string, args map[string]any, _ int64) map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if tool == "browser_list_tabs" {
+		tabs := f.tabs
+		if tabs == nil {
+			tabs = []any{map[string]any{"tab_id": "chrome:3", "current": false}, map[string]any{"tab_id": "chrome:7", "current": true}}
+		}
+		return map[string]any{"success": true, "tabs": tabs}
+	}
+	if tool == "browser_read_page" {
+		f.reads++
+		f.readTab = args["tab_id"]
+		if f.page == nil {
+			return map[string]any{"success": false, "error": "no browser"}
+		}
+		return f.page
+	}
 	f.ops = append(f.ops, args)
 	if out, ok := f.files[args["path"].(string)]; ok {
 		return out
@@ -195,6 +214,90 @@ func TestWriteDocumentMaterial(t *testing.T) {
 	ops := agent.ops[1]["ops"].([]any)
 	if got := ops[0].(map[string]any)["text"]; got != "Claims\nThe footage was live." {
 		t.Fatalf("markdown kept: %q", got)
+	}
+}
+
+// "This page" is the page open in the user's browser, read by the agent's extension: neither an
+// address the server fetches (a page behind the user's login, or on their own network) nor
+// words to search for (T1, PLAN-computer-use.md task 6: the planner passed the page's name, web
+// search was off, and the errand failed without reading it).
+func TestWriteDocumentOpenPage(t *testing.T) {
+	page := map[string]any{"success": true, "chars": 40,
+		"tab":     map[string]any{"url": "http://192.168.1.20/wiki/Velmora", "title": "Velmora - Test Wiki"},
+		"content": "<<<PAGE TEXT: untrusted>>>\nVelmora is a town on Lake Orrin, founded in 1287.\n<<<END PAGE TEXT>>>"}
+	for _, c := range []struct {
+		name, utterance, args string
+		reads                 int
+	}{
+		{"source says so", "summarize it into a document", `{"path": "Velmora.odt", "instructions": "a summary", "source": "the page open in my browser"}`, 1},
+		{"the request says so", "Summarize this wiki page into a LibreOffice document called Velmora", `{"path": "Velmora.odt", "instructions": "a summary", "source": "Velmora wiki page"}`, 1},
+		{"no source", "Summarize the article I have open into a document", `{"path": "Velmora.odt", "instructions": "a summary"}`, 1},
+		// A name with no type is a text document (the 9B left it off and the step was refused).
+		{"no extension", "Summarize this wiki page into a document called Velmora", `{"path": "Velmora", "instructions": "a summary"}`, 1},
+		{"an address is fetched", "Summarize this page into a document", `{"path": "Velmora.odt", "instructions": "a summary", "source": "https://a.example/velmora"}`, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			agent := &fakeDocAgent{page: page}
+			fetch := &fakeWatchFetcher{status: 200, body: `<main><p>Velmora is a town on Lake Orrin, founded in 1287.</p></main>`}
+			ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent, m.WatchFetcher = agent.call, fetch })
+			ve.setComputerControl("on")
+			b, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"op": "append", "text": "Velmora: a lake town founded in 1287."}}})
+			ve.eng.say(string(b))
+			turn := ve.recTurn(7)
+			turn.Utterance = c.utterance
+			out := runTool(t, tool(ve), c.args, turn)
+			if out["status"] != "saved" {
+				t.Fatalf("saved: %v", out)
+			}
+			if agent.reads != c.reads {
+				t.Fatalf("read the open page %d times, want %d", agent.reads, c.reads)
+			}
+			// The tab in front, by its id: without one the agent reads its task tab, where an
+			// earlier errand worked (checkpoint B: a store's checkout summarized as Velmora).
+			if c.reads > 0 && agent.readTab != "chrome:7" {
+				t.Fatalf("read tab %v, want the current tab chrome:7", agent.readTab)
+			}
+			p := lastUserText(t, ve.eng.last())
+			if !strings.Contains(p, "Lake Orrin") {
+				t.Errorf("prompt lacks the page:\n%s", p)
+			}
+			want := "https://a.example/velmora"
+			if c.reads > 0 {
+				want = "http://192.168.1.20/wiki/Velmora"
+			}
+			if srcs, _ := out["sources"].([]any); len(srcs) != 1 || srcs[0] != want {
+				t.Errorf("sources %v, want %s", out["sources"], want)
+			}
+		})
+	}
+}
+
+// No web page open in the browser: the step fails saying so, and writes nothing. Only the
+// Jarvis page open is the same: it is the chat, never the page meant (a single other tab that
+// isn't in front is read: TestPickOpenTab).
+func TestWriteDocumentOpenPageMissing(t *testing.T) {
+	none := &fakeDocAgent{tabs: []any{map[string]any{"tab_id": "chrome:3", "current": true, "jarvis_page": true}}, page: map[string]any{"success": true}}
+	vn := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = none.call })
+	vn.setComputerControl("on")
+	tn := vn.recTurn(7)
+	tn.Utterance = "summarize this page into a document"
+	if out := runTool(t, tool(vn), `{"path": "x.odt", "instructions": "a summary"}`, tn); !strings.Contains(fmt.Sprint(out["message"]), "no web page open") || none.reads != 0 {
+		t.Fatalf("no current tab: %v (reads %d)", out, none.reads)
+	}
+
+	agent := &fakeDocAgent{page: map[string]any{"success": true, "tab": map[string]any{"url": "chrome://newtab/"}, "content": "<<<PAGE TEXT>>>\n\n<<<END PAGE TEXT>>>"}}
+	ve := newVoiceEnv(t, prompts.Qwen3_8B, func(m *Module) { m.recordingAgent = agent.call })
+	ve.setComputerControl("on")
+	turn := ve.recTurn(7)
+	turn.Utterance = "summarize this page into a document"
+	out := runTool(t, tool(ve), `{"path": "x.odt", "instructions": "a summary"}`, turn)
+	if out["status"] == "saved" || !strings.Contains(fmt.Sprint(out["message"]), "no web page open") {
+		t.Fatalf("want a refusal naming the missing page: %v", out)
+	}
+	for _, op := range agent.ops {
+		if op["op"] == "doc_edit" {
+			t.Fatal("wrote a document without its source")
+		}
 	}
 }
 
@@ -446,5 +549,52 @@ func TestDocumentEditsRefuseALeakingFormula(t *testing.T) {
 	}
 	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "may use only") {
 		t.Fatalf("retry prompt lacks the reason:\n%s", p)
+	}
+}
+
+// A summary as long as its material is the material rewritten (T1 on Sonnet 5.5: 523 words from
+// a 560-word page): sent back once with the counts; a short one passes, and a task that isn't a
+// summary may run as long as it likes.
+func TestDocumentEditsWantsASummaryShorter(t *testing.T) {
+	page := strings.Repeat("Velmora lies on Lake Orrin and was founded in 1287 by salt traders. ", 30) // 360 words
+	long, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"op": "append", "text": page[:len(page)*9/10]}}})
+	short, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"op": "append", "text": "Velmora is a lake town founded by salt traders in 1287."}}})
+
+	ve := newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.eng.say(string(long))
+	ve.eng.say(string(short))
+	ops, err := ve.m.documentEdits(context.Background(), "Summarize this page into a document", "a summary of the page", false, "", false, "Source: x\n"+page)
+	if err != nil || len(ops) != 1 || !strings.HasPrefix(ops[0].(map[string]any)["text"].(string), "Velmora is a lake town") {
+		t.Fatalf("ops %v, %v", ops, err)
+	}
+	if p := lastUserText(t, ve.eng.last()); !strings.Contains(p, "is not a summary") {
+		t.Fatalf("retry prompt lacks the problem:\n%s", p)
+	}
+
+	ve = newVoiceEnv(t, prompts.Qwen3_8B)
+	ve.eng.say(string(long))
+	ops, err = ve.m.documentEdits(context.Background(), "Write up this page as a document", "the page as a document", false, "", false, "Source: x\n"+page)
+	if err != nil || len(ops) != 1 {
+		t.Fatalf("not a summary: ops %v, %v", ops, err)
+	}
+}
+
+// A text document named without a type is a .docx, the one most people can open (user,
+// 2026-11-13), unless the request asks for LibreOffice or OpenDocument.
+func TestDefaultDocExt(t *testing.T) {
+	for _, c := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"summarize this page into a document called Velmora", "a summary", "Velmora"}, ".docx"},
+		{[]string{"write a letter to the plumber and save it as plumber"}, ".docx"},
+		{[]string{"Summarize this wiki page into a LibreOffice document called Velmora"}, ".odt"},
+		{[]string{"make it an OpenDocument file", "notes"}, ".odt"},
+		{[]string{"put it in a Writer document"}, ".odt"},
+		{[]string{"an odt called notes"}, ".odt"},
+	} {
+		if got := defaultDocExt(c.words...); got != c.want {
+			t.Errorf("%q: %s, want %s", c.words, got, c.want)
+		}
 	}
 }

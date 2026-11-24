@@ -3,6 +3,8 @@ package cc
 import (
 	"context"
 	"path"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -22,7 +24,10 @@ const (
 )
 
 // computerNode is one of the household's computers (a desktop agent).
-type computerNode struct{ id, name string }
+type computerNode struct {
+	id, name  string
+	reachable bool // connected now (targets puts these first)
+}
 
 // computerControl is a household's computers by their switch.
 type computerControl struct{ on, off []computerNode }
@@ -42,12 +47,22 @@ func (m *Module) computerControl(ctx context.Context, hh string) (computerContro
 	for _, c := range all {
 		n := computerNode{id: c.row.nodeID, name: c.name}
 		if c.row.computerOn() {
+			n.reachable = m.nodeReachable(c.row)
 			out.on = append(out.on, n)
 		} else {
 			out.off = append(out.off, n)
 		}
 	}
+	// A task goes to the first: a computer that is on and connected comes before one that is
+	// asleep or shut down with its switch still on (found live: the errand went to an offline
+	// computer while another was waiting).
+	reachableFirst(out.on)
 	return out, nil
+}
+
+// reachableFirst puts the connected computers first, each group in its own order.
+func reachableFirst(on []computerNode) {
+	sort.SliceStable(on, func(i, j int) bool { return on[i].reachable && !on[j].reachable })
 }
 
 // targets are the node ids a computer task may run on: the computers with the switch on.
@@ -169,6 +184,12 @@ func needsComputer(s string) bool {
 		}
 		return false
 	}
+	// A search on a website the user names ("on cars.com, find used CR-Vs under $20,000 …") is
+	// work on that site: a web search answered it with "I couldn't pull a specific list"
+	// (Gemma 26B, 2026-11-17). Before the list rule: "list the five cheapest" is no shopping list.
+	if onSiteRE.MatchString(s) && (has("find") || has("list") || has("search") || has("compare")) && !has("type") && !has("write") && !has("dictate") && !has("call") && !has("remind") {
+		return true
+	}
 	if has("call") || has("ring") || has("dial") || has("remind") || has("reminder") || has("list") {
 		return false // a phone call, a reminder or a list item about buying something
 	}
@@ -183,6 +204,12 @@ func needsComputer(s string) bool {
 		if documentWords[compactName(w)] || documentExts[path.Ext(w)] {
 			return true
 		}
+	}
+	// Work in an app the user names, then saved ("in the notes app, make a new note … and save
+	// it"): a task in that app, not a memory or a typed line. Suite on Qwen3.5-9B, 2026-11-13:
+	// it called remember and said the note was saved.
+	if (has("save") || has("saved")) && !has("type") && !has("dictate") && appWorkRE.MatchString(s) {
+		return true
 	}
 	for i, w := range ws {
 		next := ""
@@ -222,6 +249,12 @@ func needsComputer(s string) bool {
 	}
 	return false
 }
+
+// onSiteRE finds a website named as where to look ("on cars.com", "go to rei.com").
+var onSiteRE = regexp.MustCompile(`(?i)\b(on|to|at)\s+([a-z0-9-]+\.)+(com|org|net|io|co|gov|edu|us|uk|ca)\b`)
+
+// appWorkRE finds an app named as where the work happens ("in the Jarvis Test Notes app").
+var appWorkRE = regexp.MustCompile(`(?i)\b(in|into|inside|using|open)\s+(the\s+|my\s+)?([\w'&.-]+\s+){1,5}app\b`)
 
 // documentWords and documentExts mark a request about a document or spreadsheet file.
 var (

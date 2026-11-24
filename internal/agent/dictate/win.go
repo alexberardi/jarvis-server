@@ -50,7 +50,7 @@ func unicodeInputs(text string) []KeyInput {
 	return out
 }
 
-var winKeys = map[Key]uint16{KeyEnter: vkReturn, KeyEscape: vkEscape, KeyTab: vkTab, KeyShiftTab: vkTab, KeySpace: vkSpace,
+var winKeys = map[Key]uint16{KeyEnter: vkReturn, KeyShiftEnter: vkReturn, KeyEscape: vkEscape, KeyTab: vkTab, KeyShiftTab: vkTab, KeySpace: vkSpace,
 	KeyUp: vkUp, KeyDown: vkDown, KeyLeft: vkLeft, KeyRight: vkRight}
 
 func keyInputs(k Key) ([]KeyInput, error) {
@@ -63,7 +63,7 @@ func keyInputs(k Key) ([]KeyInput, error) {
 		flags = keyeventfExtended // the arrow keys, not the keypad's
 	}
 	in := []KeyInput{{VK: vk, Flags: flags}, {VK: vk, Flags: flags | keyeventfKeyUp}}
-	if k == KeyShiftTab {
+	if k.shifted() {
 		in = append([]KeyInput{{VK: vkShift}}, append(in, KeyInput{VK: vkShift, Flags: keyeventfKeyUp})...)
 	}
 	return in, nil

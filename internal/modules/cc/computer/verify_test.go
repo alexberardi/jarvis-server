@@ -143,14 +143,14 @@ func TestVerifyFile(t *testing.T) {
 	}
 }
 
-const doneThanks = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/thanks"}}`
+const doneThanks = `{"done": true, "summary": "Added the soap to the cart.", "verify": {"url_contains": "/thanks"}}`
 
 func TestVerifyFailsThenRecovers(t *testing.T) {
 	e := newEnv(t, shopPage(), shopPage(), shopPage(), thanksPage())
 	e.script(doneThanks, actions(press("e4", "Open the cart")), doneThanks)
 	out := e.run()
 	if out.State != StateDone || out.Checked != `the address contains "/thanks"` ||
-		out.Summary != `Ordered the soap. Checked: the address contains "/thanks".` || out.Rounds != 3 {
+		out.Summary != `Added the soap to the cart. Checked: the address contains "/thanks".` || out.Rounds != 3 {
 		t.Fatalf("outcome %+v", out)
 	}
 	// The failed check is the next round's feedback.
@@ -206,7 +206,7 @@ func TestVerifyBudgetSurvivesResume(t *testing.T) {
 func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 	t.Run("then gives one", func(t *testing.T) {
 		e := newEnv(t)
-		e.script(`{"done": true, "summary": "Ordered the soap."}`, doneAnswer)
+		e.script(`{"done": true, "summary": "Added the soap to the cart."}`, doneAnswer)
 		out := e.run()
 		if out.State != StateDone || out.Rounds != 2 {
 			t.Fatalf("outcome %+v", out)
@@ -217,7 +217,7 @@ func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 	})
 	t.Run("twice fails", func(t *testing.T) {
 		e := newEnv(t)
-		e.script(`{"done": true, "summary": "Ordered the soap."}`, `{"done": true, "summary": "Really done."}`)
+		e.script(`{"done": true, "summary": "Added the soap to the cart."}`, `{"done": true, "summary": "Really done."}`)
 		out := e.run()
 		if out.State != StateFailed || out.Rounds != 2 ||
 			out.Summary != "I couldn't confirm the task was finished: there was no way to check it." {
@@ -228,7 +228,7 @@ func TestDoneWithoutCheckAsksOnce(t *testing.T) {
 		e := newEnv(t, thanksPage())
 		tk := task()
 		tk.Success = &SuccessCheck{TextPresent: []string{"Order 1234"}}
-		e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/nowhere"}}`)
+		e.script(`{"done": true, "summary": "Added the soap to the cart.", "verify": {"url_contains": "/nowhere"}}`)
 		out := e.loop.Run(context.Background(), tk)
 		if out.State != StateDone || out.Checked != `the page shows "Order 1234"` || out.Rounds != 1 {
 			t.Fatalf("the task's check comes first: %+v", out)
@@ -271,6 +271,10 @@ func TestDoneScreenTaskCheckedWithModelChecks(t *testing.T) {
 	out = e.loop.Run(context.Background(), tk)
 	if out.State != StateDone || out.Checked != `the address contains "/thanks"; an order confirmation page: yes` {
 		t.Fatalf("outcome %+v", out)
+	}
+	// The screen question carries what the model said it did or found.
+	if q := userText(e.llm.reqs[len(e.llm.reqs)-1]); !strings.Contains(q, "an order confirmation page (Jarvis reports: ") {
+		t.Fatalf("the report wasn't in the screen question:\n%s", q)
 	}
 }
 
@@ -341,5 +345,38 @@ func TestDoneNamesDownloads(t *testing.T) {
 	e.script(doneAnswer)
 	if out := e.run(); out.State != StateDone || strings.Contains(out.Summary, "Downloaded:") {
 		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// A screen question about something a screenshot can't show (a finished download, a saved file)
+// is asked after the concrete checks, with what they found: the planner's "the statement file is
+// downloaded" failed beside a download check that had found the file (budget_last_month on
+// Sonnet 5.5, 2026-11-12). A failing concrete check fails first, without the vision call.
+func TestVerifyScreenAfterConcreteChecks(t *testing.T) {
+	e := newEnv(t, thanksPage())
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {Entries: []FileEntry{
+		{Name: "statement-2026-10.csv", Bytes: 3 << 10},
+	}}}
+	check := &SuccessCheck{Screen: "The October 2026 statement file is downloaded to the computer",
+		Download: &DownloadCheck{NameLike: "2026-10"}}
+	e.script("Yes. Jarvis found the statement in Downloads.")
+	v := e.verify(check)
+	if !v.OK || v.Checked != "statement-2026-10.csv is in Downloads (3 KB); The October 2026 statement file is downloaded to the computer: yes" {
+		t.Fatalf("verify %+v", v)
+	}
+	if len(e.llm.reqs) != 1 {
+		t.Fatalf("screen calls %d", len(e.llm.reqs))
+	}
+	txt := e.llm.reqs[0].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(txt, "Jarvis already checked: statement-2026-10.csv is in Downloads (3 KB)") {
+		t.Fatalf("screen question without the checks' findings:\n%s", txt)
+	}
+
+	e.exec.files = map[string]FileInfo{"list ~/Downloads": {}}
+	if v := e.verify(check); v.OK || v.Why != `there's no file like "2026-10" in Downloads` {
+		t.Fatalf("verify %+v", v)
+	}
+	if len(e.llm.reqs) != 1 {
+		t.Fatalf("a failed download still asked the screen: %d calls", len(e.llm.reqs))
 	}
 }

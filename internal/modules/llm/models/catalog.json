@@ -184,6 +184,40 @@
     "sha256": "418a6d8723067cd712235facbbc5cba6c8fbbd413fc1292d2aace5a027d5a42f"
   },
   {
+    "id": "gemma-4-12b",
+    "display": "Gemma 4 12B (Q4_K_M, vision)",
+    "kind": "llm",
+    "repo": "unsloth/gemma-4-12b-it-GGUF",
+    "revision": "fc034cfff751157913579611efad8462ac1be606",
+    "file": "gemma-4-12b-it-Q4_K_M.gguf",
+    "size": 7121861440,
+    "sha256": "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
+    "mmproj": "gemma-4-12b-mmproj",
+    "context_default": 32768,
+    "context_max": 262144,
+    "kv_bytes_per_token": 16384,
+    "prompt_provider": "Gemma4_12B",
+    "chat_template": "gemma4.jinja",
+    "chat_template_sha256": "845f1ee48e39fc942fe190da9df6a1c5db229e17a96ea08966ad1c9274e73d1b",
+    "no_recommend": true,
+    "tags": [
+      "live",
+      "background",
+      "vision"
+    ],
+    "notes": "For a 12 GB card: about 8.5 GB at 32768 tokens. Offered beside the Qwen 3.5 9B rather than recommended over it: it has done browser tasks the 9B could not (forms, a listing search, two-shop research), but its voice and chat turns have not been measured yet."
+  },
+  {
+    "id": "gemma-4-12b-mmproj",
+    "display": "Gemma 4 12B vision projector (F16)",
+    "kind": "mmproj",
+    "repo": "unsloth/gemma-4-12b-it-GGUF",
+    "revision": "fc034cfff751157913579611efad8462ac1be606",
+    "file": "mmproj-F16.gguf",
+    "size": 175115840,
+    "sha256": "91f086971e56d7a7d8d39e271873fccdb49541bd259d6e02c401a4f1cb7a219e"
+  },
+  {
     "id": "gemma-4-31b",
     "display": "Gemma 4 31B (Q4_K_M, vision)",
     "kind": "llm",

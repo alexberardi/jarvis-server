@@ -55,7 +55,8 @@ func (l *Loop) Replay(ctx context.Context, t Task, wf *Workflow, params map[stri
 	if err != nil {
 		return l.end(ctx, run, Outcome{State: StateFailed, Summary: err.Error()})
 	}
-	run.Model = pick.Model
+	run.Model, run.fit = pick.Model, FitLarge // a replay runs its steps directly: its failure isn't the model's
+	pick.Adapter = l.adapter(ctx, sc, pick)
 	// A replay's direct steps have no model to read a checkout from the page: a purchase holds
 	// for the user as recorded, without sending the step back for one.
 	r := &round{run: run, task: t, pick: pick, seen: map[string]bool{}, resume: paused, checkoutAsked: true,
@@ -306,6 +307,9 @@ func offSite(sites []string, raw string) string {
 // awaitingCheck reports whether step wstep ran and is waiting on its failed check.
 func awaitingCheck(h []Entry, wstep int) bool {
 	n := len(h)
+	for n > 0 && h[n-1].Kind == "ask" {
+		n-- // the question the run then asked the user is recorded after the check (end)
+	}
 	return n > 0 && h[n-1].Kind == entryCheck && h[n-1].WStep == wstep && !h[n-1].StepDone
 }
 

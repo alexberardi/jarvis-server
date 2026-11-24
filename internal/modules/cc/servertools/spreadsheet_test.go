@@ -15,12 +15,20 @@ func TestSpreadsheetName(t *testing.T) {
 		" budget.xlsx ":         "budget",
 		"Budget: Sept?":         "Budget- Sept-",
 		strings.Repeat("a", 90): strings.Repeat("a", maxNameRunes),
+		// A path keeps its last part, a slash in a name becomes a dash: either way the file
+		// stays in the documents folder, which is what the rule is for.
+		"~/Documents/Jarvis/October budget.xlsx": "October budget",
+		"/home/u/Documents/Budget":               "Budget",
+		`C:\Users\u\Budget`:                      "Budget",
+		"Budget 10/2026":                         "Budget 10-2026",
+		"a/b":                                    "a-b",
+		`a\b`:                                    "a-b",
 	} {
 		if got, err := SpreadsheetName(in); err != nil || got != want {
 			t.Errorf("SpreadsheetName(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "  ", ".xlsx", "../x", "a/b", `a\b`, "..", "..."} {
+	for _, bad := range []string{"", "  ", ".xlsx", "../x", "~/../x", "..", "...", "~/Documents/"} {
 		if got, err := SpreadsheetName(bad); err == nil {
 			t.Errorf("SpreadsheetName(%q) = %q, want an error", bad, got)
 		}

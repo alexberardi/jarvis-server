@@ -87,6 +87,8 @@ func TestClassify(t *testing.T) {
 		{"submit form", press, &Element{Role: "button", Type: "submit", Name: "Submit"}, web, CatSubmitThirdParty, LevelConfirm},
 		{"sign up", press, btn("Sign up"), web, CatSubmitThirdParty, LevelConfirm},
 		{"register", press, btn("Register"), web, CatSubmitThirdParty, LevelConfirm},
+		{"apply now", press, btn("Apply now"), web, CatSubmitThirdParty, LevelConfirm},
+		{"apply a filter", press, btn("apply"), web, "", LevelNone},
 		{"enter on submit", Action{Kind: "keypress", Intent: "x", Keys: []string{"Enter"}}, &Element{Role: "button", Type: "submit", Name: "Submit application"}, web, CatSubmitThirdParty, LevelConfirm},
 		{"log in", press, &Element{Role: "button", Type: "submit", Name: "Log in"}, web, "", LevelNone},
 		{"sign in", press, btn("Sign in"), web, "", LevelNone},
@@ -138,5 +140,30 @@ func TestMatchPhrase(t *testing.T) {
 		if got := hasPhrase(words(c.text), c.phrase); got != c.want {
 			t.Errorf("hasPhrase(%q, %q) = %v", c.text, c.phrase, got)
 		}
+	}
+}
+
+// "Order now" starts an order on a restaurant's home page and places one at a checkout: it asks
+// only where the page's address says checkout, or says nothing.
+func TestOrderNowAsksOnlyAtCheckout(t *testing.T) {
+	btn := &Element{Role: "button", Name: "ORDER NOW"}
+	press := Action{Kind: "press", Ref: "e2"}
+	tgt := Target{Kind: "browser", Site: "www.dominos.com"}
+	for page, want := range map[string]string{
+		"https://www.dominos.com/?type=order_carryout":   LevelNone,
+		"https://www.dominos.com/en/pages/order/menu":    LevelNone,
+		"https://www.dominos.com/en/pages/order/payment": LevelConfirm,
+		"https://shop.example/checkout/review":           LevelConfirm,
+		"https://shop.example/cart":                      LevelConfirm,
+		"https://shop.example/#/checkout":                LevelConfirm,
+		"":                                               LevelConfirm,
+	} {
+		if got := ClassifyOn(press, btn, tgt, page).Level; got != want {
+			t.Errorf("order now on %q: %s, want %s", page, got, want)
+		}
+	}
+	// A button that only ever buys asks wherever it is.
+	if got := ClassifyOn(press, &Element{Role: "button", Name: "Place order"}, tgt, "https://www.dominos.com/"); got.Level != LevelConfirm || got.Category != CatPay {
+		t.Errorf("place order on a home page: %+v", got)
 	}
 }

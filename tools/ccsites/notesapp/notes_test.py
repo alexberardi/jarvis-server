@@ -94,5 +94,28 @@ class NotesAppTest(unittest.TestCase):
         self.assertEqual(moved.new_button.master.winfo_name(), "bottom_right")
         self.assertEqual(moved.save_button.master.winfo_name(), "top_left")
 
+    def test_pointer_layout_needs_the_pointer(self):
+        # --layout pointer: New and Save are drawn on canvases and take only a click, with no
+        # menu, no Ctrl+N/Ctrl+S and no shortcut text, and nothing starts focused, so a
+        # screenshot-only model has to find and click them (notes_pointer_* cases).
+        app = notes.NotesApp(self.root, state_path=self.state, layout="pointer")
+        self.root.update()
+        self.assertEqual(self.root["menu"], "")
+        self.assertEqual(self.root.bind("<Control-s>"), "")
+        self.assertEqual(self.root.bind("<Control-n>"), "")
+        for button, label in ((app.new_button, "New"), (app.save_button, "Save")):
+            self.assertIsInstance(button, tk.Canvas)
+            self.assertEqual(button.label, label)
+            self.assertEqual(str(button["takefocus"]), "0")
+        self.assertNotEqual(self.root.focus_get(), app.title_entry)
+
+        self.type_note(app, "Groceries", "milk, eggs")
+        app.save_button.click()
+        self.root.update()
+        self.assertEqual(self.read_state(), {"notes": [{"title": "Groceries", "body": "milk, eggs"}]})
+        app.new_button.click()
+        self.assertEqual(app.title_entry.get(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -42,9 +42,43 @@ func Sanitize(s string) (string, error) {
 		return "", fmt.Errorf("%w: text is empty", errBadArgs)
 	}
 	if n := len([]rune(out)); n > MaxText {
-		return "", fmt.Errorf("%w: text is %d characters; at most %d can be typed at once", errBadArgs, n, MaxText)
+		return "", tooLongError{n}
 	}
 	return out, nil
+}
+
+// SanitizeLines is Sanitize keeping the text's line breaks: the lines to type, one after
+// another, with a line break between each (an empty line is a paragraph break; more than one in
+// a row is one). Every line is cleaned as Sanitize cleans text, and the whole, line breaks
+// counted, is at most MaxText characters.
+func SanitizeLines(s string) ([]string, error) {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	s = strings.NewReplacer("\u2028", "\n", "\u2029", "\n\n").Replace(s)
+	var lines []string
+	n := 0
+	for _, raw := range strings.Split(s, "\n") {
+		line, err := Sanitize(raw) // empty is a blank line here, not an error
+		var long tooLongError
+		if errors.As(err, &long) {
+			return nil, tooLongError{len([]rune(strings.TrimSpace(s)))}
+		}
+		if line == "" && (len(lines) == 0 || lines[len(lines)-1] == "") {
+			continue
+		}
+		lines = append(lines, line)
+		n += len([]rune(line)) + 1
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+		n--
+	}
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("%w: text is empty", errBadArgs)
+	}
+	if n--; n > MaxText {
+		return nil, tooLongError{n}
+	}
+	return lines, nil
 }
 
 // Key is a key desktop_press_key may press: a closed set, enough to answer a dialog or move
@@ -61,6 +95,9 @@ const (
 	KeyDown     Key = "down"
 	KeyLeft     Key = "left"
 	KeyRight    Key = "right"
+	// KeyShiftEnter is the line break typed text uses in chat apps (a new line, not a send):
+	// typing presses it between lines (lineBreakKey), so it is not in Keys and no tool offers it.
+	KeyShiftEnter Key = "shift+enter"
 )
 
 // Keys is every Key, in the order the tool lists them.
@@ -139,3 +176,12 @@ func ClassifyAnswer(s string) Answer {
 	}
 	return AnswerUnclear
 }
+
+// tooLongError is text over MaxText: bad arguments, which the model fixes by typing it in parts.
+type tooLongError struct{ n int }
+
+func (e tooLongError) Error() string {
+	return fmt.Sprintf("%v: text is %d characters; at most %d can be typed at once", errBadArgs, e.n, MaxText)
+}
+
+func (tooLongError) Is(target error) bool { return target == errBadArgs }

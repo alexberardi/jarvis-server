@@ -117,3 +117,39 @@ func TestNilActivity(t *testing.T) {
 		t.Fatal("a nil Activity does nothing")
 	}
 }
+
+// An action that began before a stop doesn't light the indicator again after it (checkpoint B,
+// stop_midtask_x11: the stop at .113, "controlling: Focus the title field" at .116, and the
+// island said Jarvis was controlling the computer with nothing running).
+func TestSetSinceAStop(t *testing.T) {
+	a := &Activity{}
+	var r recorder
+	a.Show(r.show)
+	gen := a.Gen()
+	if !a.SetSince(gen, Controlling, "Working on your computer", nil) {
+		t.Fatal("no stop since: set")
+	}
+	a.Stop()
+	if a.SetSince(gen, Controlling, "Focus the title field", nil) {
+		t.Fatal("set after a stop")
+	}
+	if k, _ := a.Status(); k != Idle {
+		t.Fatalf("after the stop: %s", a)
+	}
+	// The next task's actions light it again.
+	if !a.SetSince(a.Gen(), Controlling, "Start a new note", func(k Kind) bool { return k == Idle || k == Controlling }) {
+		t.Fatal("a new task: not set")
+	}
+	// ok says no: a recording shows, not the task.
+	a.Set(Recording, "Watching what you do")
+	if a.SetSince(a.Gen(), Controlling, "x", func(k Kind) bool { return k == Idle || k == Controlling }) {
+		t.Fatal("set over a recording")
+	}
+	if got := r.all(); got != `idle "", controlling "Working on your computer", idle "", controlling "Start a new note", recording "Watching what you do"` {
+		t.Fatalf("shown %s", got)
+	}
+	var nilA *Activity
+	if nilA.SetSince(nilA.Gen(), Controlling, "x", nil) {
+		t.Fatal("a nil Activity does nothing")
+	}
+}

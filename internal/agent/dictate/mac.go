@@ -22,7 +22,7 @@ type MacKeyboard struct {
 }
 
 // macKeys are kVK_* virtual key codes (HIToolbox Events.h).
-var macKeys = map[Key]uint16{KeyEnter: 36, KeyTab: 48, KeyShiftTab: 48, KeySpace: 49, KeyEscape: 53,
+var macKeys = map[Key]uint16{KeyEnter: 36, KeyShiftEnter: 36, KeyTab: 48, KeyShiftTab: 48, KeySpace: 49, KeyEscape: 53,
 	KeyLeft: 123, KeyRight: 124, KeyDown: 125, KeyUp: 126}
 
 func (*MacKeyboard) Name() string { return "CGEvent" }
@@ -60,5 +60,5 @@ func (m *MacKeyboard) Press(ctx context.Context, k Key) error {
 	if !ok {
 		return fmt.Errorf("%w: unknown key %q", errBadArgs, k)
 	}
-	return m.Post.Key(code, k == KeyShiftTab)
+	return m.Post.Key(code, k.shifted())
 }

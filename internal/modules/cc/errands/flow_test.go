@@ -168,7 +168,7 @@ func TestRunNodeAndServerStepsToCompletion(t *testing.T) {
 		t.Fatalf("completion = %+v", last)
 	}
 	compose := e.llm.requests("compose")[0]
-	if compose.Label != "background" || *compose.MaxTokens != 800 || *compose.ReasoningBudget != 0 || *compose.Temperature != 0.3 {
+	if compose.Label != "background" || *compose.MaxTokens != 2000 || *compose.ReasoningBudget != 0 || *compose.Temperature != 0.3 {
 		t.Fatalf("compose req = %+v", compose)
 	}
 	cp := *compose.Messages[0].Content.Text

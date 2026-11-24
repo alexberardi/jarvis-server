@@ -11,6 +11,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/errands"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/phone"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
 	"github.com/alexberardi/jarvis-server/internal/platform/settings"
@@ -46,7 +47,9 @@ func (m *Module) computerTasks() *errands.ComputerTasks {
 	if m.autonomy != nil {
 		loop.Audit = m.autonomy
 	}
-	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}, Source: m.computerSource}
+	loop.Details = m.computerDetails
+	return &errands.ComputerTasks{Loop: loop, Targets: m.computerTargets, Taught: taughtWorkflows{m}, Source: m.computerSource,
+		OpenPage: m.computerOpenPage}
 }
 
 // computerTargets are the computers a computer task may run on (computer control on), or why
@@ -76,6 +79,43 @@ func computerDefinitions() []settings.Definition {
 			Description: "Most rounds (look, decide, act) one computer task may take before it gives up."},
 		{Key: computer.SettingMaxMinutes, Category: "computer", Type: settings.Int, Default: int64(20), Validate: positive,
 			Description: "Most minutes one computer task may run before it gives up."},
+		{Key: computer.SettingThinkTokens, Category: "computer", Type: settings.Int, Default: int64(0),
+			Validate: func(v any) error {
+				if n, _ := v.(int64); n < 0 || n > 8192 {
+					return errors.New("must be between 0 and 8192")
+				}
+				return nil
+			},
+			Description: "Most tokens the model may think before each round of a computer task (0 = it answers at once). " +
+				"Thinking makes each round slower and can make a local model more careful."},
+		{Key: computer.SettingLoop, Category: "computer", Type: settings.String, Default: computer.LoopAuto,
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != computer.LoopAuto && s != computer.LoopRounds && s != computer.LoopTurns {
+					return errors.New(`must be "auto", "rounds" or "turns"`)
+				}
+				return nil
+			},
+			Description: "How a computer task talks to its model: auto (turns for a large model, about 20B and up or the cloud one; rounds for any other), rounds (a fresh prompt each round, with a line per past action) or " +
+				"turns (one conversation for the task: the plan, then each answer and what it changed on the screen, one action an answer)."},
+		{Key: computer.SettingModelSize, Category: "computer", Type: settings.String, Default: "auto",
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != "auto" && s != "large" && s != "small" {
+					return errors.New(`must be "auto", "large" or "small"`)
+				}
+				return nil
+			},
+			Description: "How large the model that drives computer tasks is: auto (from the model catalogue or the size in the model's name), " +
+				"large (about 20B and up) or small. Set it when the model runs elsewhere under a name that doesn't say. " +
+				"It picks the loop and click placing on auto, and whether a failed task says the model may be too small."},
+		{Key: computer.SettingLocateClicks, Category: "computer", Type: settings.String, Default: "auto",
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != "auto" && s != "on" && s != "off" {
+					return errors.New(`must be "auto", "on" or "off"`)
+				}
+				return nil
+			},
+			Description: "Whether a click aimed from a screenshot is placed by a question of its own (on) or taken from the round's answer (off); auto is on for a small model only. " +
+				"On makes a small local model's clicks land, at two short model calls a click."},
 		llm.SlotSetting(computer.SettingModel, "computer",
 			"Which model drives computer tasks: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider)."),
@@ -83,6 +123,19 @@ func computerDefinitions() []settings.Definition {
 			"Which model runs a workflow you taught: auto (the largest local vision model), live, background or cloud "+
 				"(the optional cloud slot: page contents and screenshots go to its provider). Learning a workflow "+
 				"has its own setting."),
+		{Key: computer.SettingCoordinates, Category: "computer", Type: settings.String, Default: "auto",
+			Options: []any{"auto", "pixels", "norm1000", "unit"},
+			Description: "How the model's click coordinates are read: auto (by the model's name: Qwen3.5 and 3.8 answer in " +
+				"thousandths of the screenshot, others in pixels), or pixels, norm1000 or unit for a model served under " +
+				"another name or one that answers differently.",
+			Validate: func(v any) error {
+				if s, _ := v.(string); s != "auto" {
+					if _, ok := computeruse.AdapterNamed(s); !ok {
+						return errors.New("must be auto, pixels, norm1000 or unit")
+					}
+				}
+				return nil
+			}},
 		{Key: computer.SettingAutoApproveCents, Category: "computer", Type: settings.Int, Default: int64(0),
 			Description: "Spend limit in cents: a computer task's checkout at most this much is approved without " +
 				"asking (the progress card says so). 0 = always ask.",
@@ -322,4 +375,37 @@ func (e computerExec) Stop(ctx context.Context, runID string) {
 	if err := nodeFailure(out); err != nil {
 		e.m.deps.Log.Warn("cc: computer_stop", "run", runID, "node", run.NodeID, "err", err)
 	}
+}
+
+// formDetails are the saved details a website's form may get (COMPUTER-CONTROL.md C13): who the
+// user is and how to reach them. Anything else (medical, a vehicle, a custom field) is asked
+// for on the phone when a form wants it.
+var formDetails = map[string]bool{"full_name": true, "email": true, "callback_number": true,
+	"street": true, "city": true, "state": true, "postal_code": true}
+
+// computerDetails are userID's saved details a browser task may type by placeholder. PII:
+// the values go to the computer only, never to a model or a log.
+func (m *Module) computerDetails(ctx context.Context, userID *int64) []computer.Detail {
+	if userID == nil {
+		return nil
+	}
+	v, err := m.settings.Get(ctx, phone.SettingCallContext, settings.Scope{UserID: *userID})
+	if err != nil {
+		return nil
+	}
+	var out []computer.Detail
+	for _, f := range phone.ParseCallContext(v.Value) {
+		if !formDetails[f.Key] {
+			continue
+		}
+		out = append(out, computer.Detail{Key: f.Key, Label: f.Label, Value: f.Value})
+		if f.Key == "full_name" {
+			// Forms ask for the name in two fields as often as one.
+			if i := strings.LastIndex(f.Value, " "); i > 0 {
+				out = append(out, computer.Detail{Key: "given_name", Label: "First name", Value: f.Value[:i]},
+					computer.Detail{Key: "family_name", Label: "Last name", Value: f.Value[i+1:]})
+			}
+		}
+	}
+	return out
 }

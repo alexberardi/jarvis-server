@@ -6,10 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -25,18 +28,39 @@ type scriptLLM struct {
 	mu      sync.Mutex
 	answers []string
 	reqs    []llm.ChatRequest
+	// cut: the answers (by call index) that end with finish_reason length.
+	cut map[int]bool
+	// orders answers the order check (orderDiffers), apart from the queue: the last repeats,
+	// none is "yes". orderReqs are its requests.
+	orders    []string
+	orderReqs []llm.ChatRequest
 }
 
 func (s *scriptLLM) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if req.Messages[0].Content.Text != nil && strings.HasPrefix(*req.Messages[0].Content.Text, "You check an order") {
+		s.orderReqs = append(s.orderReqs, req)
+		ans := "yes"
+		if len(s.orders) > 0 {
+			ans = s.orders[0]
+			if len(s.orders) > 1 {
+				s.orders = s.orders[1:]
+			}
+		}
+		return &llm.ChatResponse{Content: ans}, nil
+	}
 	s.reqs = append(s.reqs, req)
 	if len(s.answers) == 0 {
 		return nil, errors.New("script ran out")
 	}
 	a := s.answers[0]
 	s.answers = s.answers[1:]
-	return &llm.ChatResponse{Content: a}, nil
+	resp := &llm.ChatResponse{Content: a}
+	if s.cut[len(s.reqs)-1] {
+		resp.FinishReason = "length"
+	}
+	return resp, nil
 }
 
 // fakeExec serves the same page (or a queue of pages) and records what it was asked.
@@ -162,7 +186,7 @@ func newEnv(t *testing.T, pages ...Observation) *tenv {
 		pages = []Observation{shopPage()}
 	}
 	e := &tenv{t: t, db: d, llm: &scriptLLM{}, exec: &fakeExec{pages: pages}, mint: &fakeMint{},
-		clock: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), setts: fakeSettings{}}
+		clock: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), setts: fakeSettings{SettingLoop: LoopRounds}} // the rounds loop unless a test asks: the fixture's model is a large one
 	now := func() time.Time { e.clock = e.clock.Add(e.tick); return e.clock }
 	e.rules = &policy.Store{DB: d, Now: now}
 	e.loop = &Loop{
@@ -188,7 +212,7 @@ func (e *tenv) run() Outcome {
 func task() Task {
 	uid := int64(7)
 	return Task{HouseholdID: "hh-1", UserID: &uid, NodeID: "n1", WorkflowID: "wf_1", Step: 2,
-		Goal: "Order the lavender soap", Target: computeruse.Target{Kind: "browser"}}
+		Goal: "Add the lavender soap to the cart", Target: computeruse.Target{Kind: "browser"}}
 }
 
 func (e *tenv) events() []policy.Event {
@@ -238,7 +262,7 @@ func buying(acts ...string) string {
 	return `{"checkout": {"product": "Lavender soap", "price": "4.99"}, "actions": [` + strings.Join(acts, ",") + `]}`
 }
 
-const doneAnswer = `{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`
+const doneAnswer = `{"done": true, "summary": "Added the soap to the cart.", "verify": {"url_contains": "/soap"}}`
 
 // --- tests ---
 
@@ -246,7 +270,7 @@ func TestLoopDone(t *testing.T) {
 	e := newEnv(t)
 	e.script(actions(press("e3", "Add the soap to the cart")), doneAnswer)
 	out := e.run()
-	if out.State != StateDone || out.Summary != `Ordered the soap. Checked: the address contains "/soap".` || out.Checked != `the address contains "/soap"` || out.Rounds != 2 {
+	if out.State != StateDone || out.Summary != `Added the soap to the cart. Checked: the address contains "/soap".` || out.Checked != `the address contains "/soap"` || out.Rounds != 2 {
 		t.Fatalf("outcome %+v", out)
 	}
 	if out.Verify == nil || out.Verify.URLContains != "/soap" {
@@ -267,8 +291,9 @@ func TestLoopDone(t *testing.T) {
 	if req.Priority != llm.PriorityBackground || *req.MaxTokens != 1024 || *req.Temperature != 0 || req.Label != llm.LabelBackground {
 		t.Fatalf("request %+v", req)
 	}
-	// The second round's prompt carries the first round's action and its result.
-	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `- round 1: press e3 "Add the soap to the cart": ok`) {
+	// The second round's prompt carries the first round's action and its result, naming the
+	// element and not its ref: a ref means another element on the next page.
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `- round 1: press button "Add to cart" "Add the soap to the cart": ok`) {
 		t.Fatalf("history not in the prompt:\n%s", txt)
 	}
 }
@@ -277,8 +302,10 @@ func TestLoopStopsAtBudget(t *testing.T) {
 	t.Run("rounds", func(t *testing.T) {
 		e := newEnv(t)
 		e.setts[SettingMaxRounds] = 3
-		for range 5 {
-			e.script(actions(press("e1", "Go home")))
+		// A different element each round: the same one on the same screen would be sent back as
+		// stuck (TestStuckBatchIsSentBack) before the budget ran out.
+		for _, ref := range []string{"e1", "e2", "e3", "e1", "e2"} {
+			e.script(actions(press(ref, "Go on")))
 		}
 		out := e.run()
 		if out.State != StateFailed || out.Rounds != 3 || !strings.Contains(out.Summary, "3 rounds") {
@@ -625,6 +652,24 @@ func TestHistoryHasNoImages(t *testing.T) {
 	}
 }
 
+// A browser task's screenshot is for the look it was asked on: the next look, taken without
+// one, doesn't show the model the page as it was.
+func TestBrowserScreenshotIsNotCarriedOn(t *testing.T) {
+	p := shopPage()
+	p.Image = &Image{MIME: "image/png", Data: []byte{'1'}, CaptureID: "c", Width: 100, Height: 100}
+	e := newEnv(t, p)
+	e.script(`{"thought": "look", "actions": [{"kind": "screenshot", "intent": "See the page"}]}`,
+		actions(press("e3", "Add it")), doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 3 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	for i, want := range []int{0, 1, 0} {
+		if got := images(e.llm.reqs[i]); got != want {
+			t.Errorf("call %d: %d images, want %d", i, got, want)
+		}
+	}
+}
+
 func TestImagePruning(t *testing.T) {
 	var pages []Observation
 	for i := range 5 {
@@ -883,10 +928,12 @@ func formPage() Observation {
 // A done right after filling in a form that wasn't sent goes back once: press its button.
 func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
 	doneForm := `{"done": true, "summary": "Sent it.", "verify": {"text_present": ["Submit application"]}}`
+	apply := task()
+	apply.Goal = "Apply as Avery" // the name typed is the request's own (madeUpDetail)
 	e := newEnv(t, formPage())
 	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm,
 		actions(press("e3", "Send the application")), doneForm)
-	out := e.loop.Run(context.Background(), task())
+	out := e.loop.Run(context.Background(), apply)
 	if len(e.llm.reqs) != 3 {
 		t.Fatalf("%d calls", len(e.llm.reqs))
 	}
@@ -902,7 +949,7 @@ func TestDoneOnUnsentFormAsksOnce(t *testing.T) {
 	// say not to send it).
 	e = newEnv(t, formPage())
 	e.script(actions(`{"kind": "set_value", "ref": "e1", "text": "Avery", "intent": "Name"}`), doneForm, doneForm, doneForm)
-	if out := e.loop.Run(context.Background(), task()); out.State != StateDone || len(e.llm.reqs) != 4 {
+	if out := e.loop.Run(context.Background(), apply); out.State != StateDone || len(e.llm.reqs) != 4 {
 		t.Fatalf("outcome %+v, %d calls", out, len(e.llm.reqs))
 	}
 	if txt := userText(e.llm.reqs[3]); !strings.Contains(txt, `{"actions": [{"kind": "press", "ref": "e3", "intent": "Send the form"}]}`) {
@@ -925,5 +972,452 @@ func TestBrowserRunEndsOnComputer(t *testing.T) {
 	e.script(actions(press("e1", "Go home")), actions(press("e1", "Go home")))
 	if out := e.run(); out.State != StateFailed || len(e.exec.stops) != 1 {
 		t.Fatalf("failed: outcome %+v, stops %v", out, e.exec.stops)
+	}
+}
+
+// A question the model asked stays in the run's history, so the round after the user's answer
+// knows what was answered: without it, "Carry on." answered nothing the model could see and it
+// asked the same question until the round limit (checkpoint B, store_order_approve).
+func TestAnswerKnowsTheQuestion(t *testing.T) {
+	e := newEnv(t)
+	e.script(`{"ask": "The saved address is Jordan Quinn's. Ship there?", "reason": "unclear"}`, doneAnswer)
+	out := e.run()
+	if out.State != StateAsk {
+		t.Fatalf("outcome %+v", out)
+	}
+	tk := task()
+	tk.RunID, tk.Answer = out.RunID, "Yes, go ahead as you suggested."
+	if out = e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("resumed outcome %+v", out)
+	}
+	txt := userText(e.llm.reqs[len(e.llm.reqs)-1])
+	for _, want := range []string{`ask "The saved address is Jordan Quinn's. Ship there?"`, "The user answered your question: Yes, go ahead as you suggested."} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("resumed prompt lacks %q:\n%s", want, txt)
+		}
+	}
+}
+
+// The task's day is in the prompt: "last month" in a goal is a month only once the model knows
+// today's date (checkpoint B, budget_last_month: "Which one is last month: 2026-10 or 2026-09?").
+func TestPromptHasToday(t *testing.T) {
+	e := newEnv(t)
+	e.script(doneAnswer)
+	tk := task()
+	tk.Today = "Thursday, November 12, 2026"
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("outcome %+v", out)
+	}
+	if txt := userText(e.llm.reqs[0]); !strings.Contains(txt, "Today is Thursday, November 12, 2026.") {
+		t.Fatalf("no date in the prompt:\n%s", txt)
+	}
+}
+
+// An answer cut off inside its thought is not shown to the model again: on a real site the
+// house model argued with itself for the whole budget, and with that in front of it did so twice.
+func TestThoughtCutOffIsNotSentBack(t *testing.T) {
+	e := newEnv(t)
+	e.llm.cut = map[int]bool{0: true}
+	e.script(`{"thought": "The scroll failed. Wait, maybe the link is not listed. Wait, maybe`, doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	retry := e.llm.reqs[1].Messages
+	if last := *retry[len(retry)-1].Content.Text; !strings.Contains(last, "one short sentence") {
+		t.Fatalf("retry says %q", last)
+	}
+	for _, m := range retry {
+		if m.Role == "assistant" {
+			t.Fatalf("the cut-off thought was sent back: %+v", m)
+		}
+	}
+}
+
+// A task that writes from a source has room for a long typed text, and an answer cut off at the
+// budget is asked for again with more (2026-11-13: a typed summary was cut at 1024 tokens, the
+// cut JSON couldn't be read, and the task failed in its first round). Text over a type action's
+// limit is told how to split.
+func TestWritingTasksHaveRoom(t *testing.T) {
+	e := newEnv(t)
+	e.llm.cut = map[int]bool{0: true}
+	e.script(`{"thought": "type it", "actions": [{"kind": "type", "intent": "Type", "text": "The war beg`, doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v calls %d", out, len(e.llm.reqs))
+	}
+	if a, b := *e.llm.reqs[0].MaxTokens, *e.llm.reqs[1].MaxTokens; a != maxTokens || b != writeMaxTokens {
+		t.Fatalf("budgets %d then %d", a, b)
+	}
+	if msg := *e.llm.reqs[1].Messages[3].Content.Text; !strings.Contains(msg, "cut off") {
+		t.Fatalf("retry says %q", msg)
+	}
+
+	e = newEnv(t)
+	e.script(doneAnswer)
+	tk := task()
+	tk.Source = &Source{URL: "https://example.org/wiki/Velmora", Text: "Velmora is a town."}
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone || *e.llm.reqs[0].MaxTokens != writeMaxTokens {
+		t.Fatalf("with a source: %+v, budget %d", out, *e.llm.reqs[0].MaxTokens)
+	}
+	if p := e.llm.reqs[0].Messages[1].Content.Parts[0].Text; !strings.Contains(p, "at most 2000 characters") {
+		t.Fatalf("the prompt doesn't give the type limit:\n%s", p)
+	}
+
+	// Typed text over the limit isn't sent back at all: the loop splits it (TestLongTypeIsSplit).
+	e = newEnv(t)
+	long := strings.Repeat("a", computeruse.MaxText+1)
+	e.script(`{"thought": "t", "actions": [{"kind": "type", "intent": "Type", "text": "`+long+`"}]}`, doneAnswer)
+	if out := e.run(); out.State != StateDone || len(e.llm.reqs) != 2 || len(e.exec.batches) != 1 || len(e.exec.batches[0].Actions) != 2 {
+		t.Fatalf("too long: %+v, calls %d, batches %+v", out, len(e.llm.reqs), len(e.exec.batches))
+	}
+}
+
+// Two type actions with nothing moving the focus are a title and a body meant for two fields,
+// unless the first is a long text: then they are one text typed in parts (2026-11-13: a summary
+// in two parts was sent back four rounds running and never typed).
+func TestBlindSecondTypeLetsALongTextContinue(t *testing.T) {
+	ty := func(n int) computeruse.Action {
+		return computeruse.Action{Kind: "type", Intent: "Type", Text: strings.Repeat("a", n)}
+	}
+	if a, b := blindSecondType([]computeruse.Action{ty(12), ty(200)}); a == nil || b == nil {
+		t.Fatal("a title then a body weren't caught")
+	}
+	if a, _ := blindSecondType([]computeruse.Action{ty(1900), ty(700)}); a != nil {
+		t.Fatal("a long text typed in two parts was sent back")
+	}
+	if a, _ := blindSecondType([]computeruse.Action{ty(1900), ty(1900), ty(300)}); a != nil {
+		t.Fatal("three parts were sent back")
+	}
+}
+
+// The same actions on the same screen round after round aren't working: the third time the
+// model is told so instead of the batch running again (suite on Qwen3.5-9B, 2026-11-13: one
+// button pressed 26 rounds running). A changed screen, or waiting and scrolling, isn't stuck.
+func TestStuckBatchIsSentBack(t *testing.T) {
+	press := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e1", "intent": "Close the dialog"}]}`
+	e := newEnv(t)
+	e.script(press, press, press, doneAnswer)
+	out := e.run()
+	if out.State != StateDone || len(e.exec.batches) != 2 {
+		t.Fatalf("outcome %+v, batches %d (want the third sent back)", out, len(e.exec.batches))
+	}
+	last := e.llm.reqs[3].Messages[1].Content.Parts[0].Text
+	if !strings.Contains(last, "exactly these actions 3 times") || !strings.Contains(last, "Try something different") {
+		t.Fatalf("the round after isn't told:\n%s", last)
+	}
+
+	obs := Observation{Title: "A", Elements: []Element{{Ref: "e1", Role: "button", Name: "Close"}}}
+	a := []computeruse.Action{{Kind: "press", Ref: "e1", Intent: "one", CaptureID: "c1"}}
+	b := []computeruse.Action{{Kind: "press", Ref: "e1", Intent: "another wording", CaptureID: "c2"}}
+	if batchKey(obs, a) != batchKey(obs, b) {
+		t.Error("the intent or capture id makes a batch different")
+	}
+	changed := obs
+	changed.Title = "B"
+	if batchKey(obs, a) == batchKey(changed, a) {
+		t.Error("a changed screen is the same batch")
+	}
+	if batchKey(obs, []computeruse.Action{{Kind: "scroll", DY: 300}, {Kind: "wait", MS: 500}}) != "" {
+		t.Error("scrolling and waiting count as stuck")
+	}
+}
+
+// A type action over the limit is split into several, in order, by the loop itself: its parts
+// join back to the text, each within the limit, ending at paragraph or sentence ends.
+func TestLongTypeIsSplit(t *testing.T) {
+	para := strings.Repeat("Velmora is a town on Lake Orrin. ", 40) // 1320 characters
+	text := para + "\n" + para + "\n" + para
+	r, err := parseReply(`{"thought": "type it", "actions": [{"kind": "click", "x": 5, "y": 5, "intent": "Focus"}, {"kind": "type", "intent": "Type the summary", "text": ` + strconv.Quote(text) + `}, {"kind": "keypress", "keys": ["ctrl", "s"], "intent": "Save"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var joined strings.Builder
+	types := 0
+	for _, a := range r.Actions {
+		if a.Kind == "type" {
+			types++
+			joined.WriteString(a.Text)
+			if n := utf8.RuneCountInString(a.Text); n > computeruse.MaxText || n == 0 {
+				t.Errorf("a part of %d characters", n)
+			}
+			if a.Intent != "Type the summary" {
+				t.Errorf("intent %q", a.Intent)
+			}
+		}
+	}
+	if types < 2 || joined.String() != text || r.Actions[0].Kind != "click" || r.Actions[len(r.Actions)-1].Kind != "keypress" {
+		t.Fatalf("%d type parts, order %v, text kept %v", types, len(r.Actions), joined.String() == text)
+	}
+	if got := splitText(strings.Repeat("a", 4500), 2000); len(got) != 3 || len(got[0]) != 2000 {
+		t.Errorf("no break to cut at: %d parts", len(got))
+	}
+	// The parts aren't then taken for a title and a body typed into one field.
+	if a, _ := blindSecondType(r.Actions); a != nil {
+		t.Error("the split parts were sent back as two fields")
+	}
+	// A value set on a named element isn't split: it still fails as too long.
+	if _, err := parseReply(`{"actions": [{"kind": "type", "ref": "e1", "intent": "x", "text": "` + strings.Repeat("a", computeruse.MaxText+1) + `"}]}`); err == nil {
+		t.Error("a too-long value for an element passed")
+	}
+}
+
+// Told it is stuck and still answering the same, the task ends saying what it was stuck on
+// rather than burning its rounds (suite on Qwen3.5-9B, 2026-11-13: 16 more rounds).
+// What a look adds to the last one is told: a form's complaint appears in the text near its
+// fields, and the house model pressed Continue three times without reading it.
+func TestPageNews(t *testing.T) {
+	before := Observation{Text: "Start your order", Elements: []Element{
+		{Ref: "e6", Role: "textbox", Name: "Street Address", Context: "Delivery Form Use my location Address Type House"},
+		{Ref: "e12", Role: "button", Name: "CONTINUE FOR DELIVERY"},
+	}}
+	after := before
+	after.Elements = []Element{
+		{Ref: "e6", Role: "textbox", Name: "Street Address", Context: "Delivery Form Use my location Address Type House Street address required City required"},
+		{Ref: "e12", Role: "button", Name: "CONTINUE FOR DELIVERY"},
+	}
+	prev := map[string]bool{}
+	for _, l := range pageLines(before) {
+		prev[l] = true
+	}
+	if got := pageNews(prev, pageLines(after)); len(got) != 1 || got[0] != "Street address required City required" {
+		t.Fatalf("news %q", got)
+	}
+	if got := pageNews(prev, pageLines(before)); len(got) != 0 || obsKey(before) == obsKey(after) {
+		t.Fatalf("the same page has news %q, or the changed one the same key", got)
+	}
+	p := renderPrompt(promptInput{Goal: "order", Obs: after, News: []string{"Street address required City required"}})
+	if !strings.Contains(p, `new since you last looked (often why an action didn't go through): "Street address required City required"`) {
+		t.Fatalf("prompt:\n%s", p)
+	}
+	if p := renderPrompt(promptInput{Goal: "order", Obs: before, Same: true}); !strings.Contains(p, "nothing here changed since you last looked") {
+		t.Fatalf("prompt:\n%s", p)
+	}
+}
+
+// The element an action names is the one it acts on, whatever ref the model wrote beside it.
+func TestMatchNames(t *testing.T) {
+	obs := Observation{Elements: []Element{
+		{Ref: "e1", Role: "button", Name: "Close"},
+		{Ref: "e2", Role: "button", Name: "Delivery, Get your order delivered to you, or to your door."},
+		{Ref: "e3", Role: "button", Name: "Carryout, Pick-up your order at a nearby Domino's."},
+		{Ref: "e8", Role: "button", Name: "9 Lanes Mill Road, Brick, NJ 08724"},
+		{Ref: "e9", Role: "link", Name: "Help"},
+		{Ref: "e10", Role: "link", Name: "Help"},
+	}}
+	act := func(ref, name string) []computeruse.Action {
+		return []computeruse.Action{{Kind: "press", Ref: ref, Name: name, Intent: "x"}}
+	}
+	for _, c := range []struct{ ref, name, want, wrong string }{
+		{"e3", "Carryout, Pick-up your order at a nearby Domino's.", "e3", ""},
+		{"e3", "carryout", "e3", ""}, // cut short, another case
+		{"e2", "Carryout", "e3", ""}, // the name is another element's: it goes there
+		{"e8", "Build Your Pizza", "", `nothing on this page is named "Build Your Pizza", and e8 is button "9 Lanes Mill Road, Brick, NJ 08724"`},
+		{"e40", "ZIP Code", "", `nothing on this page is named "ZIP Code", and e40 isn't on this page`},
+		{"e1", "Help", "", `"Help" is the name of e9, e10, not of e1`},
+		{"e9", "Help", "e9", ""}, // one of two with the name
+		{"e1", "", "e1", ""},     // no name given: as before
+	} {
+		got, wrong := matchNames(obs, act(c.ref, c.name))
+		if c.wrong != "" {
+			if !strings.Contains(wrong, c.wrong) {
+				t.Errorf("%s %q: told %q, want %q", c.ref, c.name, wrong, c.wrong)
+			}
+			continue
+		}
+		if wrong != "" || got[0].Ref != c.want || got[0].Name != "" {
+			t.Errorf("%s %q: %+v, told %q", c.ref, c.name, got[0], wrong)
+		}
+	}
+}
+
+// A press of what is already selected is answered with what comes next, not run again.
+func TestAlreadySelected(t *testing.T) {
+	obs := Observation{Elements: []Element{
+		{Ref: "e7", Role: "tab", Name: "Carryout", State: []string{"selected"}},
+		{Ref: "e9", Role: "textbox", Name: "ZIP Code"},
+		{Ref: "e3", Role: "checkbox", Name: "Extra cheese", State: []string{"checked"}},
+	}}
+	press := func(ref string) []computeruse.Action { return []computeruse.Action{{Kind: "press", Ref: ref}} }
+	got := alreadySelected(obs, press("e7"))
+	for _, want := range []string{`tab "Carryout" (e7) is already selected`, `e9 textbox "ZIP Code"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message lacks %q: %s", want, got)
+		}
+	}
+	if m := alreadySelected(obs, press("e9")); m != "" {
+		t.Errorf("an unselected element: %q", m)
+	}
+	if m := alreadySelected(obs, press("e3")); m != "" {
+		t.Errorf("a ticked checkbox may be unticked: %q", m)
+	}
+	if got := stuckSummary("The overlay is still open. I need to close it by clicking the X."); !strings.Contains(got, `couldn't get past it ("The overlay`) {
+		t.Errorf("a thought as the intent: %s", got)
+	}
+	if m := alreadySelected(obs, append(press("e7"), press("e9")...)); m != "" {
+		t.Errorf("a batch that goes on: %q", m)
+	}
+}
+
+func TestStuckTaskGivesUp(t *testing.T) {
+	press := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e1", "intent": "Close the dialog"}]}`
+	e := newEnv(t)
+	for range 12 {
+		e.script(press)
+	}
+	out := e.run()
+	if out.State != StateFailed || !strings.Contains(out.Summary, "I got stuck: I kept trying to close the dialog") {
+		t.Fatalf("outcome %+v", out)
+	}
+	if n := len(e.llm.reqs); n != stuckGiveUp+1 || len(e.exec.batches) != stuckAfter {
+		t.Fatalf("calls %d, batches %d", n, len(e.exec.batches))
+	}
+}
+
+// A desktop dialog's button whose press does nothing is confirmed with Enter instead, once,
+// before the model is told it is stuck (user, 2026-11-13).
+func TestStuckDialogButtonGetsEnter(t *testing.T) {
+	obs := Observation{Title: "Save", App: "soffice", Elements: []Element{
+		{Ref: "a2", Role: "button", Name: "Save"}, {Ref: "a3", Role: "textbox", Value: "Velmora"}, {Ref: "a13", Role: "togglebutton", Name: "Documents"}}}
+	press := []computeruse.Action{{Kind: "press", Ref: "a2", Intent: "Save the document"}}
+	enter, ok := enterInstead("desktop", obs, press)
+	if !ok || len(enter) != 1 || enter[0].Kind != "keypress" || !slices.Equal(enter[0].Keys, []string{"enter"}) ||
+		!strings.HasPrefix(enter[0].Intent, "Save the document (with Enter") {
+		t.Fatalf("enter %+v %v", enter, ok)
+	}
+	if err := computeruse.ValidateBatch(enter); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		target  string
+		actions []computeruse.Action
+	}{
+		"a browser page":    {"browser", press},
+		"a text field":      {"desktop", []computeruse.Action{{Kind: "press", Ref: "a3", Intent: "x"}}},
+		"a toggle":          {"desktop", []computeruse.Action{{Kind: "press", Ref: "a13", Intent: "x"}}},
+		"more than a press": {"desktop", append([]computeruse.Action{{Kind: "type", Text: "Velmora", Intent: "x"}}, press...)},
+	} {
+		if _, ok := enterInstead(c.target, obs, c.actions); ok {
+			t.Errorf("%s got Enter", name)
+		}
+	}
+
+	// In the loop: the press runs twice, the third round runs Enter in its place.
+	e := newEnv(t, obs)
+	tk := task()
+	tk.Target = computeruse.Target{Kind: "desktop", App: "LibreOffice Writer"}
+	reply := `{"thought": "save", "actions": [{"kind": "press", "ref": "a2", "intent": "Save the document"}]}`
+	e.script(reply, reply, reply, reply)
+	e.loop.Run(context.Background(), tk) // however it ends: what ran is the point
+	if b := e.exec.batches; len(b) < 3 || b[2].Actions[0].Kind != "keypress" || b[1].Actions[0].Kind != "press" {
+		t.Fatalf("batches %+v", b)
+	}
+}
+
+// computer.coordinates overrides the adapter the model's name gives: a Qwen served under a
+// label by another server answers in thousandths, which the name "live" doesn't say.
+func TestCoordinatesSetting(t *testing.T) {
+	e := newEnv(t)
+	pick := Pick{Model: "live", Adapter: computeruse.Pixels}
+	sc := settings.Scope{HouseholdID: "hh-1"}
+	if a := e.loop.adapter(context.Background(), sc, pick); a.Name != "pixels" {
+		t.Fatalf("auto: %s", a.Name)
+	}
+	e.setts[SettingCoordinates] = "norm1000"
+	if a := e.loop.adapter(context.Background(), sc, pick); a.Name != "norm1000" {
+		t.Fatalf("set: %s", a.Name)
+	}
+	e.setts[SettingCoordinates] = "auto"
+	if a := e.loop.adapter(context.Background(), sc, Pick{Adapter: computeruse.Norm1000}); a.Name != "norm1000" {
+		t.Fatalf("auto keeps the model's: %s", a.Name)
+	}
+}
+
+// An order is checked against the request before the user is asked: one that differs goes back
+// to the model to be put right, and one still different after that is asked with a warning.
+func TestOrderIsCheckedAgainstTheRequest(t *testing.T) {
+	buy := `{"checkout": {"product": "Lavender soap", "price": "9.98", "warning": "the model's own"}, "actions": [` + press("e5", "Place the order") + `]}`
+	e := newEnv(t)
+	e.llm.orders = []string{"no, the cart holds two bars and one was asked for.", "yes"}
+	e.script(buy, buy)
+	out := e.run()
+	if out.State != StateNeedsApproval || out.Checkout == nil || out.Checkout.Warning != "" || len(e.llm.reqs) != 2 {
+		t.Fatalf("outcome %+v (checkout %+v), %d calls: want it sent back once, then asked", out, out.Checkout, len(e.llm.reqs))
+	}
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, "isn't what was asked for: the cart holds two bars") {
+		t.Fatalf("no order feedback:\n%s", txt)
+	}
+	if q := *e.llm.orderReqs[0].Messages[1].Content.Text; !strings.Contains(q, "Lavender soap") || !strings.Contains(q, "9.98") {
+		t.Errorf("the check wasn't given the order:\n%s", q)
+	}
+
+	e = newEnv(t)
+	e.llm.orders = []string{"no, the cart holds two bars."}
+	e.script(buy, buy)
+	out = e.run()
+	if out.State != StateNeedsApproval || out.Checkout == nil || out.Checkout.Warning != "the cart holds two bars" {
+		t.Fatalf("outcome %+v (checkout %+v): want it asked with the difference", out, out.Checkout)
+	}
+}
+
+// A desktop task told to save under a name isn't done while nothing has that name: the model's
+// own check (the name is on screen, in the Save dialog) doesn't stand in for the file.
+func TestDoneNeedsTheSavedFile(t *testing.T) {
+	done := `{"done": true, "summary": "Saved it.", "verify": {"text_present": ["Velmora"]}}`
+	dialog := Observation{Title: "Save", Elements: []Element{{Ref: "a3", Role: "textbox", Name: "Name", Value: "Velmora"}}}
+	e := newEnv(t, dialog)
+	e.exec.files = map[string]FileInfo{"list " + DocumentsDir: {Entries: []FileEntry{{Name: "Jarvis", Dir: true}}}}
+	e.script(done, done)
+	tk := task()
+	tk.Goal, tk.Target = "Summarize this page into LibreOffice and save it as Velmora.", computeruse.Target{Kind: "desktop", App: "LibreOffice Writer"}
+	e.loop.Run(context.Background(), tk)
+	if txt := userText(e.llm.reqs[1]); !strings.Contains(txt, `nothing is saved as "Velmora" yet`) || !strings.Contains(txt, "Save dialog is still open") {
+		t.Fatalf("a done with the Save dialog open wasn't sent back:\n%s", txt)
+	}
+
+	// The file is there: the model's check decides.
+	e = newEnv(t, dialog)
+	e.exec.files = map[string]FileInfo{"list " + DocumentsDir: {Entries: []FileEntry{{Name: "Velmora.odt", Bytes: 9000}}}}
+	e.script(done)
+	if out := e.loop.Run(context.Background(), tk); out.State != StateDone {
+		t.Fatalf("outcome %+v, want done with the file saved", out)
+	}
+	for g, want := range map[string]string{"make a note titled Groceries and save it": "",
+		"save the page as a PDF called report in Documents": "report", "Save it as Velmora.": "Velmora"} {
+		if got := saveName(g); got != want {
+			t.Errorf("saveName(%q) = %q, want %q", g, got, want)
+		}
+	}
+}
+
+// A done on the checkout page is not an order: the 9B said "ordered" with Place order still on
+// the page.
+func TestUnplacedOrder(t *testing.T) {
+	checkout := Observation{Elements: []Element{{Ref: "e9", Role: "radio", Name: "Saved Visa"}, {Ref: "e10", Role: "button", Name: "Place order"}}}
+	confirmed := Observation{Elements: []Element{{Ref: "e1", Role: "link", Name: "Continue shopping"}}}
+	buy := Task{Goal: "find the watch", Request: "order the best-rated smart watch under $300"}
+	if btn := unplacedOrder(buy, "", checkout); btn == nil || btn.Ref != "e10" {
+		t.Fatalf("the pay button isn't found: %+v", btn)
+	}
+	if unplacedOrder(buy, "Ordered the watch", confirmed) != nil {
+		t.Fatal("a confirmation page is taken for an unplaced order")
+	}
+	if unplacedOrder(Task{Goal: "tell me the total in my cart"}, "The total is $249", checkout) != nil {
+		t.Fatal("a task that buys nothing is held at the checkout page")
+	}
+}
+
+// The loop sends such a done back and says which button places the order.
+func TestDoneWithThePayButtonStillThereIsSentBack(t *testing.T) {
+	e := newEnv(t)
+	e.script(`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`,
+		`{"done": true, "summary": "Ordered the soap.", "verify": {"url_contains": "/soap"}}`,
+		`{"ask": "Should I place the order?", "reason": "unclear"}`)
+	tk := task()
+	tk.Goal = "Order the lavender soap"
+	out := e.loop.Run(context.Background(), tk)
+	if out.State != StateAsk {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(e.llm.reqs) != 3 || !strings.Contains(userText(e.llm.reqs[1]), `nothing is ordered yet: the page still has "Place order" (e5)`) {
+		t.Fatalf("the done wasn't sent back: %d calls", len(e.llm.reqs))
 	}
 }

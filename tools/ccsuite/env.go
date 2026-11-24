@@ -13,13 +13,18 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/agent/browser"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/macax"
+	"github.com/alexberardi/jarvis-server/internal/computeruse"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/platform/config"
 	"github.com/alexberardi/jarvis-server/internal/platform/db"
@@ -32,10 +37,13 @@ import (
 // away again (or, with Keep, leaves it all running for `ccsuite down`); every process it starts
 // is in its own process group.
 type Env struct {
-	Root     string        // the jarvis-server checkout
+	Root     string // the jarvis-server checkout
+	tokenMu  sync.Mutex
+	tokenAt  time.Time     // when SBX_TOKEN was issued (zero: at sandbox start)
 	Dir      string        // the run dir (absolute): bin/, logs/, agent-home/, browser/, ...
 	Name     string        // the sandbox: ccsuite-<run>
-	LLM      string        // shared or scripted
+	LLM      string        // shared, scripted or cloud
+	Cloud    *cloud        // cloud: the provider (cloud.go)
 	Label    string        // shared: the installed jarvisd's label (live, background); "" = as configured
 	Chromium string        // the browser binary; "" = Playwright's newest Chromium
 	Keep     bool          // leave it all running at the end (kept.json; ccsuite down --run DIR)
@@ -70,6 +78,79 @@ type desktop struct {
 	notes   *proc
 	notesSt string          // the notes app's state file (not on the Mac: Notes.app has none)
 	macSeen map[string]bool // mac: the notes there before the case, so the checks see only new ones
+}
+
+// leftoverApps are apps a task may open in the session and leave open (process names): a Writer
+// left with its Save dialog up covered the notes app in the next case, which then failed 0/3
+// (cloud, 2026-11-13).
+var leftoverApps = map[string]bool{"soffice.bin": true, "oosplash": true, "soffice": true}
+
+// CloseLeftoverApps ends the leftoverApps running in the suite's own session (Linux: those
+// whose XDG_RUNTIME_DIR is the session's, so never the user's own LibreOffice), after a run.
+func (e *Env) CloseLeftoverApps() {
+	d := e.desk
+	if d == nil || d.rt == "" || runtime.GOOS != "linux" {
+		return
+	}
+	dirs, _ := filepath.Glob("/proc/[0-9]*")
+	for _, dir := range dirs {
+		comm, err := os.ReadFile(filepath.Join(dir, "comm"))
+		if err != nil || !leftoverApps[strings.TrimSpace(string(comm))] {
+			continue
+		}
+		env, err := os.ReadFile(filepath.Join(dir, "environ"))
+		if err != nil || !slices.Contains(strings.Split(string(env), "\x00"), "XDG_RUNTIME_DIR="+d.rt) {
+			continue
+		}
+		if pid, err := strconv.Atoi(filepath.Base(dir)); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill() //nolint:errcheck // gone already is fine
+			}
+			e.logf("closed a leftover %s (pid %d)", strings.TrimSpace(string(comm)), pid)
+		}
+	}
+	// A killed LibreOffice opens on its recovery dialog next time, and a task waiting for a
+	// Writer window never sees one: the next case starts from a fresh profile and no locks.
+	// The fresh profile is one already past LibreOffice's first run: its Welcome dialog and
+	// Tip of the Day, which a computer in use doesn't show, cost a local model 15 of its 40
+	// rounds (Gemma 4 26B, 2026-11-15).
+	e.freshOfficeProfile()
+	locks, _ := filepath.Glob(e.path("agent-home", "Documents", ".~lock.*#"))
+	for _, l := range locks {
+		os.Remove(l) //nolint:errcheck // absent is fine
+	}
+}
+
+// tokenLife is how long the suite uses a sign-in before taking a new one: well inside the
+// access token's life, which a three-run pass outlasts.
+const tokenLife = 10 * time.Minute
+
+// token is the test user's access token, renewed by signing in again once it is tokenLife
+// old. A failed sign-in keeps the old token, and the call that uses it reports the 401.
+func (e *Env) token(ctx context.Context) string {
+	e.tokenMu.Lock()
+	defer e.tokenMu.Unlock()
+	if e.tokenAt.IsZero() {
+		e.tokenAt = time.Now() // the sandbox signed in when it came up
+	}
+	if time.Since(e.tokenAt) < tokenLife || e.Sbx["SBX_AUTH"] == "" {
+		return e.Sbx["SBX_TOKEN"]
+	}
+	b, _ := json.Marshal(map[string]string{"email": e.Sbx["SBX_EMAIL"], "password": e.Sbx["SBX_PASSWORD"]})
+	req, err := http.NewRequestWithContext(ctx, "POST", e.Sbx["SBX_AUTH"]+"/auth/login", strings.NewReader(string(b)))
+	if err != nil {
+		return e.Sbx["SBX_TOKEN"]
+	}
+	req.Header.Set("Content-Type", "application/json")
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := doJSON(req, &out); err != nil || out.AccessToken == "" {
+		e.logf("sign-in to renew the token failed: %v", err)
+		return e.Sbx["SBX_TOKEN"]
+	}
+	e.Sbx["SBX_TOKEN"], e.tokenAt = out.AccessToken, time.Now()
+	return out.AccessToken
 }
 
 // sessionAlive is whether the session is still there; the Mac's is the user's own, which the
@@ -145,6 +226,7 @@ func (e *Env) Up(ctx context.Context) error {
 			return err
 		}
 	}
+	e.freshOfficeProfile() // the first case too starts past LibreOffice's first run
 	if err := installNotesEntry(e.path("agent-home"), e.notesLauncher()); err != nil {
 		return err
 	}
@@ -167,7 +249,11 @@ var tapLine = regexp.MustCompile(`llm: tap .*\((live|background) = ([^)]*)\)`)
 
 func (e *Env) sandbox(ctx context.Context) error {
 	e.logf("sandbox %s up (--llm %s; logs/sandbox.log)", e.Name, e.LLM)
-	cmd := exec.CommandContext(ctx, filepath.Join(e.Root, "scripts", "sandbox"), "up", "--name", e.Name, "--llm", e.LLM)
+	sbxLLM := e.LLM
+	if e.LLM == "cloud" {
+		sbxLLM = "none" // the labels are pointed at the provider once it is up (useCloud)
+	}
+	cmd := exec.CommandContext(ctx, filepath.Join(e.Root, "scripts", "sandbox"), "up", "--name", e.Name, "--llm", sbxLLM)
 	cmd.Dir, cmd.Env = e.Root, os.Environ()
 	if e.LLM == "shared" && e.Label != "" {
 		// The label is read from the harness env file: a file of ours that sources it and
@@ -213,6 +299,14 @@ func (e *Env) sandbox(ctx context.Context) error {
 		}
 	}
 	e.Model, e.Label = "scripted", "scripted"
+	if e.LLM == "cloud" {
+		if e.Cloud == nil {
+			return errors.New("--llm cloud without a provider")
+		}
+		if err := e.useCloud(ctx, *e.Cloud); err != nil {
+			return err
+		}
+	}
 	if e.LLM == "shared" {
 		e.Model, e.Label = "unknown", firstNonEmpty(e.Label, "live")
 		if b, err := os.ReadFile(e.path("logs", "sandbox.log")); err == nil {
@@ -220,6 +314,42 @@ func (e *Env) sandbox(ctx context.Context) error {
 				e.Label, e.Model = m[1], strings.TrimSpace(m[2])
 			}
 		}
+		// The sandbox reaches the shared model under its label, so cc can't tell from the
+		// name how it gives click coordinates (Qwen3.5: thousandths); the suite knows the name.
+		if a := computeruse.AdapterFor(e.Model); a.Name != computeruse.Pixels.Name {
+			if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.coordinates", map[string]any{"value": a.Name}, nil); err != nil {
+				return fmt.Errorf("computer.coordinates: %w", err)
+			}
+			e.logf("coordinates: %s (%s)", a.Name, e.Model)
+		}
+	}
+	// The same goes for the model's size, which picks the loop and click placing on auto.
+	if fit := computer.FitOf(e.Model); fit != computer.FitUnknown && e.Model != "scripted" {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.model_size", map[string]any{"value": string(fit)}, nil); err != nil {
+			return fmt.Errorf("computer.model_size: %w", err)
+		}
+		e.logf("model size: %s (%s)", fit, e.Model)
+	}
+	// CCSUITE_THINK_TOKENS runs the pass with the model thinking before each round.
+	if n, err := strconv.Atoi(os.Getenv("CCSUITE_THINK_TOKENS")); err == nil && n > 0 {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.think_tokens", map[string]any{"value": n}, nil); err != nil {
+			return fmt.Errorf("computer.think_tokens: %w", err)
+		}
+		e.logf("thinking: %d tokens a round", n)
+	}
+	// CCSUITE_LOOP=turns runs the pass with each task as one conversation with its model.
+	if v := os.Getenv("CCSUITE_LOOP"); v != "" {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.loop", map[string]any{"value": v}, nil); err != nil {
+			return fmt.Errorf("computer.loop: %w", err)
+		}
+		e.logf("loop: %s", v)
+	}
+	// CCSUITE_LOCATE_CLICKS=on runs the pass with each screenshot click placed by its own question.
+	if v := os.Getenv("CCSUITE_LOCATE_CLICKS"); v != "" {
+		if err := e.api(ctx, "PUT", e.Sbx["SBX_CC"]+"/settings/computer.locate_clicks", map[string]any{"value": v}, nil); err != nil {
+			return fmt.Errorf("computer.locate_clicks: %w", err)
+		}
+		e.logf("locate clicks: %s", v)
 	}
 	var hhs []struct {
 		ID   string `json:"id"`
@@ -319,7 +449,7 @@ func (e *Env) api(ctx context.Context, method, url string, body, out any) error 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if e.Sbx != nil {
-		req.Header.Set("Authorization", "Bearer "+e.Sbx["SBX_TOKEN"])
+		req.Header.Set("Authorization", "Bearer "+e.token(ctx))
 	}
 	return doJSON(req, out)
 }
@@ -374,6 +504,12 @@ func (e *Env) Desktop(ctx context.Context, kind string, wantBrowser bool) (*desk
 			return nil, err
 		}
 	}
+	if !wantBrowser && e.desk.browser != nil {
+		// A desktop case starts from a desktop without the browser: its windows, one per earlier
+		// browser errand, tile over the app under test (sway) or cover it (Xvfb). The next
+		// browser case starts it again; its logins come back with every reset anyway.
+		e.desk.stopBrowser()
+	}
 	if wantBrowser && (e.desk.browser == nil || !e.desk.browser.alive()) {
 		if err := e.startBrowser(ctx, e.desk); err != nil {
 			return nil, err
@@ -388,14 +524,56 @@ func (e *Env) stopDesktop() {
 		return
 	}
 	e.desk = nil
+	d.notes.stop()
+	d.stopBrowser()
+	d.agent.stop()
+	d.session.stop()
+	unmountUnder(d.rt)
+	os.RemoveAll(d.rt)
+}
+
+// unmountUnder lazily unmounts the FUSE mounts under dir: the session's D-Bus starts the
+// document portal and gvfsd-fuse on demand, which mount $XDG_RUNTIME_DIR/doc and /gvfs and die
+// with the session, leaving stale mounts that RemoveAll can't remove. Linux only (mountinfo).
+func unmountUnder(dir string) {
+	b, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return
+	}
+	fm, err := exec.LookPath("fusermount3")
+	if err != nil {
+		if fm, err = exec.LookPath("fusermount"); err != nil {
+			return
+		}
+	}
+	for _, m := range mountsUnder(string(b), dir) {
+		exec.Command(fm, "-uz", m).Run()
+	}
+}
+
+// mountsUnder is the mount points in mountinfo (proc(5): the fifth field) inside dir, deepest first.
+func mountsUnder(mountinfo, dir string) []string {
+	var out []string
+	for _, line := range strings.Split(mountinfo, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 4 && strings.HasPrefix(f[4], filepath.Clean(dir)+"/") {
+			out = append(out, f[4])
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
+}
+
+// stopBrowser stops the session's browser and closes its DevTools pipe.
+func (d *desktop) stopBrowser() {
 	if d.cdp != nil {
 		d.cdp.Close()
 	}
-	d.notes.stop()
 	d.browser.stop()
-	d.agent.stop()
-	d.session.stop()
-	os.RemoveAll(d.rt)
+	if d.cdpR != nil {
+		d.cdpR.Close() // the reader has seen EOF once the browser is gone
+	}
+	d.browser, d.cdp, d.cdpW, d.cdpR = nil, nil, nil, nil
 }
 
 // enroll makes the agent a node of the sandbox's household, once a run (its own HOME).
@@ -943,14 +1121,8 @@ func (e *Env) UserInput(ctx context.Context) error {
 	if d == nil {
 		return errors.New("no desktop session")
 	}
-	self, err := os.Executable()
-	if err != nil {
+	if err := e.pressKey(ctx); err != nil {
 		return err
-	}
-	cmd := exec.CommandContext(ctx, self, userInputCmd)
-	cmd.Env = d.env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %s", err, lastOutputLine(out))
 	}
 	// The idle notification comes a second after the input (idlenotify.Timeout).
 	time.Sleep(1500 * time.Millisecond)
@@ -966,6 +1138,34 @@ func userInput(ctx context.Context) error {
 		return errors.New(why)
 	}
 	return in.Keys(ctx, []string{"shift"})
+}
+
+// userMouseCmd is ccsuite's own subcommand that moves the pointer 60 px (where the pointer can't
+// be read, to the screen's far corner), as a hand on the mouse.
+const userMouseCmd = "__user-mouse"
+
+func userMouse(ctx context.Context) error {
+	in := input.Native()
+	if in == nil {
+		return errors.New("no input backend here")
+	}
+	if ok, why := in.Available(ctx); !ok {
+		return errors.New(why)
+	}
+	x, y, err := in.Cursor(ctx)
+	if err != nil {
+		// wlroots tells no client where the pointer is: the hand lands in the screen's far
+		// corner, away from anything a case clicks.
+		return in.Move(ctx, 1270, 790)
+	}
+	dx, dy := 60, 60
+	if x > 600 { // stay on the 1280x800 session's screen
+		dx = -60
+	}
+	if y > 400 {
+		dy = -60
+	}
+	return in.Move(ctx, x+dx, y+dy)
 }
 
 // lastLine is a log's last non-empty line, for an error message.
@@ -1002,3 +1202,22 @@ func (e *Env) Screenshot(ctx context.Context, path string) error {
 	}
 	return nil
 }
+
+// freshOfficeProfile replaces the agent's LibreOffice profile with officeProfile.
+func (e *Env) freshOfficeProfile() {
+	os.RemoveAll(e.path("agent-home", ".config", "libreoffice")) //nolint:errcheck // absent is fine
+	user := e.path("agent-home", ".config", "libreoffice", "4", "user")
+	if err := os.MkdirAll(user, 0o755); err == nil {
+		os.WriteFile(filepath.Join(user, "registrymodifications.xcu"), []byte(officeProfile), 0o644) //nolint:errcheck // a first-run dialog then shows, as before
+	}
+}
+
+// officeProfile is a LibreOffice profile's settings after its first run.
+const officeProfile = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Setup/Product"><prop oor:name="ooSetupLastVersion" oor:op="fuse"><value>26.8</value></prop></item>
+</oor:items>
+`

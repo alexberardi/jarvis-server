@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/agent/apps"
 	"github.com/alexberardi/jarvis-server/internal/agent/ax"
+	"github.com/alexberardi/jarvis-server/internal/agent/dictate"
 	"github.com/alexberardi/jarvis-server/internal/agent/host"
 	"github.com/alexberardi/jarvis-server/internal/agent/input"
 	"github.com/alexberardi/jarvis-server/internal/agent/screen"
@@ -186,7 +187,7 @@ func (t *Tools) attended(ctx context.Context, lockOnly bool) error {
 
 // begin starts (or resumes) run id on the desktop: refused while the user isn't there; then the
 // guard watches from now on and the island shows Jarvis in control.
-func (t *Tools) begin(ctx context.Context, id string, resume bool) (code string, err error) {
+func (t *Tools) begin(ctx context.Context, id string, resume bool, gen uint64) (code string, err error) {
 	run := t.runs().Get(id)
 	if run.attended && !resume {
 		// A run going on: the user may be watching it work, but not with the screen locked.
@@ -213,9 +214,7 @@ func (t *Tools) begin(ctx context.Context, id string, resume bool) (code string,
 		go g.Run(gctx)
 	}
 	t.desk.mu.Unlock()
-	if k, _ := t.Activity.Status(); k == Idle {
-		t.Activity.Set(Controlling, "Working on your computer")
-	}
+	t.Activity.SetSince(gen, Controlling, "Working on your computer", func(k Kind) bool { return k == Idle })
 	t.touchDesktop()
 	return "", nil
 }
@@ -334,7 +333,7 @@ func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 	}
 	for _, w := range ws {
 		if w.normal() && (app == "" || sameApp([]string{w.App}, app)) {
-			return w, true
+			return dialogOf(ws, w), true
 		}
 	}
 	for _, w := range ws {
@@ -343,6 +342,22 @@ func findWindow(ws []DesktopWindow, app string) (DesktopWindow, bool) {
 		}
 	}
 	return DesktopWindow{}, false
+}
+
+// dialogOf is the window of w's process that has the keyboard focus, when that is another one:
+// the app's own dialog (LibreOffice's Save dialog is app "soffice", a window of Writer's
+// process), which is where the task is now. Else w. Found live 2026-11-13: each look focused
+// Writer's main window again, over its Save dialog, and the task never saw the dialog.
+func dialogOf(ws []DesktopWindow, w DesktopWindow) DesktopWindow {
+	if w.PID <= 0 || w.Focused {
+		return w
+	}
+	for _, f := range ws {
+		if f.Focused && f.normal() && f.PID == w.PID && f.ID != w.ID {
+			return f
+		}
+	}
+	return w
 }
 
 // window is app's front window, launching the app through desktop_open's catalogue when it has
@@ -418,6 +433,7 @@ func firstNonEmpty(ss ...string) string {
 }
 
 func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]any {
+	gen := t.Activity.Gen()
 	if t.Desktop == nil {
 		return failCode("unsupported", "desktop tasks aren't supported on this computer yet")
 	}
@@ -432,7 +448,7 @@ func (t *Tools) observeDesktop(ctx context.Context, a observeArgs) map[string]an
 			return failCode(code, "%v", err)
 		}
 	}
-	if code, err := t.begin(ctx, a.RunID, false); err != nil {
+	if code, err := t.begin(ctx, a.RunID, false, gen); err != nil {
 		return failCode(code, "%v", err)
 	}
 	w, code, err := t.window(ctx, app)
@@ -516,7 +532,7 @@ func (t *Tools) actDesktop(ctx context.Context, a actArgs) map[string]any {
 	if t.runs().Get(a.RunID).Stopped {
 		return failCode("stopped", "the task was stopped")
 	}
-	if code, err := t.begin(ctx, a.RunID, a.Resume); err != nil {
+	if code, err := t.begin(ctx, a.RunID, a.Resume, a.gen); err != nil {
 		return failCode(code, "%v", err)
 	}
 	results := []map[string]any{}
@@ -676,7 +692,7 @@ func (t *Tools) desktopStep(ctx context.Context, a actArgs, i int, action comput
 	if secureFocus {
 		return fail("password_field", "the focused field is a password field: Jarvis doesn't type passwords; the user enters it")
 	}
-	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt); !ok {
+	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt, ""); !ok {
 		return r
 	}
 	if why := t.pasteBlocked(ctx, a.RunID, action, el); why != "" {
@@ -694,7 +710,7 @@ func (t *Tools) desktopStep(ctx context.Context, a actArgs, i int, action comput
 			}
 		})
 	}
-	t.showing(action.Intent)
+	t.showing(a.gen, action.Intent)
 	text, code, err := t.doDesktop(ctx, action, run, pts)
 	if err != nil {
 		return Result{I: i, Code: code, Error: err.Error(), NewApp: newApp}
@@ -760,6 +776,142 @@ func (t *Tools) focusedApp(ctx context.Context) (names []string, rec *ax.Recorde
 	return names, rec
 }
 
+// typeLines types text, its line breaks as the key dictation would use in the app with the
+// focus (dictate.LineBreakKey: Enter in an editor, Shift+Enter in a chat, spaces in a terminal
+// or when the app can't be told). The keyboards refuse a line break as a control character
+// (2026-11-13: a multi-paragraph summary failed to type and was retried as one paragraph).
+func (t *Tools) typeLines(ctx context.Context, in input.Input, text string) error {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	text = strings.ReplaceAll(text, "\t", " ")
+	if !strings.Contains(text, "\n") {
+		return in.Type(ctx, text)
+	}
+	names, _ := t.focusedApp(ctx)
+	var keys []string
+	switch dictate.LineBreakKey(names) {
+	case dictate.KeyEnter:
+		keys = []string{"enter"}
+	case dictate.KeyShiftEnter:
+		keys = []string{"shift", "enter"}
+	default:
+		return in.Type(ctx, strings.Join(strings.Fields(text), " "))
+	}
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			if err := in.Keys(ctx, keys); err != nil {
+				return err
+			}
+		}
+		if line != "" {
+			if err := in.Type(ctx, line); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// typedAX is an AX that can say what an element is and read its text back, so typing into an
+// element can be real keystrokes and then checked (Linux). An element action that reported ok
+// while nothing changed sent a local model in circles: a summary "typed" into the Paragraph
+// Style box, a file name set on a dialog that never took it (suite on Gemma 4 26B, 2026-11-15).
+type typedAX interface {
+	Role(gen int, ref string) (string, error)
+	Text(gen int, ref string) (string, error)
+}
+
+// settleTries and settleEvery bound the wait for an app to show what was typed.
+const (
+	settleTries = 10
+	settleEvery = 100 * time.Millisecond
+)
+
+// settled reads ref's text until ok accepts it or the tries run out; it is the last read.
+func (t *Tools) settled(ctx context.Context, ta typedAX, gen int, ref string, ok func(string) bool) (string, bool) {
+	var got string
+	for i := range settleTries {
+		if i > 0 {
+			t.sleep(ctx, settleEvery)
+		}
+		s, err := ta.Text(gen, ref)
+		if err != nil {
+			return got, true // it can't be read back: no word against the action
+		}
+		if got = s; ok(got) {
+			return got, true
+		}
+	}
+	return got, false
+}
+
+func sameText(a, b string) bool { return strings.TrimSpace(a) == strings.TrimSpace(b) }
+
+func clipText(s string) string {
+	if r := []rune(s); len(r) > 60 {
+		return string(r[:60]) + "…"
+	}
+	return s
+}
+
+// typeInto types action.Text into the element action.Ref with the keyboard: the element takes
+// the focus, a text field's old text is selected so the new replaces it, a document's stays
+// (text is added where its cursor is), and the element's text is read back. Anything else isn't
+// somewhere to type. code "" with an error is the accessibility layer's own.
+func (t *Tools) typeInto(ctx context.Context, in input.Input, ta typedAX, gen int, action computeruse.Action) (string, error) {
+	d := t.Desktop
+	role, err := ta.Role(gen, action.Ref)
+	if err != nil {
+		return "", err
+	}
+	replace := true
+	switch role {
+	case "textbox", "combobox", "spinbutton":
+	case "document":
+		replace = false
+	case "passwordtext":
+		return "", d.AX.SetValue(gen, action.Ref, action.Text) // refused there, in its words
+	default:
+		return "not_editable", fmt.Errorf("%s is a %s, not somewhere to type: type into a textbox or the document, or click where the text goes and type without a ref", action.Ref, role)
+	}
+	before, _ := ta.Text(gen, action.Ref)
+	if err := d.AX.Focus(gen, action.Ref); err != nil {
+		if !replace {
+			return "", err
+		}
+		// It won't take the focus: its text is set outright, and checked the same way.
+		if err := d.AX.SetValue(gen, action.Ref, action.Text); err != nil {
+			return "", err
+		}
+	} else {
+		if replace {
+			if err := in.Keys(ctx, []string{"ctrl", "a"}); err != nil {
+				return typeCode(err), err
+			}
+		}
+		if err := t.typeLines(ctx, in, action.Text); err != nil {
+			return typeCode(err), err
+		}
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(action.Text), "\n")
+	took := func(s string) bool {
+		if replace {
+			return strings.Contains(s, strings.TrimSpace(first))
+		}
+		return s != before
+	}
+	if got, ok := t.settled(ctx, ta, gen, action.Ref, took); !ok {
+		return "no_effect", fmt.Errorf("typed into %s, but its text didn't change (it shows %q): click where the text goes, then type without a ref", action.Ref, clipText(got))
+	}
+	return "", nil
+}
+
+func typeCode(err error) string {
+	if errors.Is(err, ErrPaused) {
+		return "paused"
+	}
+	return "failed"
+}
+
 // doDesktop runs one checked action. text is clipboard_read's.
 func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Run, pts [][2]int) (text, code string, err error) {
 	d := t.Desktop
@@ -817,12 +969,21 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 		}
 	case "type":
 		if action.Ref != "" {
+			if ta, ok := d.AX.(typedAX); ok {
+				if code, err := t.typeInto(ctx, in, ta, gen, action); err != nil {
+					if code == "" {
+						return axErr(err)
+					}
+					return "", code, err
+				}
+				break
+			}
 			if err := d.AX.SetValue(gen, action.Ref, action.Text); err != nil {
 				return axErr(err)
 			}
 			break
 		}
-		if err := in.Type(ctx, action.Text); err != nil {
+		if err := t.typeLines(ctx, in, action.Text); err != nil {
 			return inErr(err)
 		}
 	case "press":
@@ -838,6 +999,14 @@ func (t *Tools) doDesktop(ctx context.Context, action computeruse.Action, run Ru
 		}
 		if err := d.AX.SetValue(gen, action.Ref, action.Text); err != nil {
 			return axErr(err)
+		}
+		// A text field that took the call and shows something else didn't take the value.
+		if ta, ok := d.AX.(typedAX); ok && action.Kind == "set_value" {
+			if role, _ := ta.Role(gen, action.Ref); role == "textbox" {
+				if got, shows := t.settled(ctx, ta, gen, action.Ref, func(s string) bool { return sameText(s, action.Text) }); !shows {
+					return "", "no_effect", fmt.Errorf("%s still shows %q after set_value: type into it instead", action.Ref, clipText(got))
+				}
+			}
 		}
 	case "clipboard_read", "clipboard_write":
 		if d.Clipboard == nil {

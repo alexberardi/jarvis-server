@@ -431,7 +431,7 @@ extension (background) ⇄ native messaging (stdin/stdout, 4-byte length + JSON)
 | `browser_switch_tab` (tab_id) | `switch_tab` | activates the tab and focuses its window |
 | `browser_close_tab` (tab_id) | `close_tab` | `is_risky`; no confirmation (same policy as closing windows) |
 | `browser_navigate` (action, tab_id?) | `navigate` | back / forward / reload |
-| `browser_read_page` (tab_id?, max_chars?) | `read_page` | visible text, main/article first; 4000 chars default, 20000 max |
+| `browser_read_page` (tab_id?, max_chars?) | `read_page` | visible text, main/article first; 4000 chars default, 50000 max (the extension's cap); the server sizes it to the model (whole article for a cloud model) |
 | `browser_media` (action, seconds?, tab_id?) | `media` | play, pause, mute, unmute, skip_forward, skip_back, restart, status |
 | `browser_scroll` (direction, tab_id?) | `scroll` | up/down a screen, top, bottom (inner scroll panes too) |
 | `browser_find` (text, tab_id?) | `find` | highlights + scrolls to the first match; count and context |
@@ -1840,11 +1840,23 @@ the node's own microphone. No new route.
 
 ### Safety summary
 
-At most 2000 characters a call (refused, never cut); tabs and line breaks become spaces (a line
-break would press Enter); control and format characters are dropped (escape sequences, bidi
-overrides, zero-width); Enter only as the separate `submit` step; keys from a closed set without
-modifiers other than Shift+Tab; nothing typed into a window whose focus wasn't confirmed; text
-never in logs or results; password fields only when named.
+At most 2000 characters a call, line breaks counted (refused, never cut); tabs become spaces;
+line breaks are typed by the rule below; control and format characters are dropped (escape
+sequences, bidi overrides, zero-width); Enter as a send only as the separate `submit` step; keys
+from a closed set without modifiers other than Shift+Tab; nothing typed into a window whose focus
+wasn't confirmed; text never in logs or results; password fields only when named.
+
+**Line breaks** (2026-11-13; `dictate/linebreak.go`). The key between lines is chosen by the
+agent from the app that has the focus, after focus is confirmed, never by the model: the model
+writes the text from pages it has just read, and a wrong guess would press Enter in a chat (a
+half message sent) or a terminal (a command run). Text editors and word processors (gedit, GNOME
+Text Editor, Kate, LibreOffice, TextEdit, Word, …) get Enter, so paragraphs are paragraphs.
+Terminals get no key: the lines are joined with spaces, as before (Shift+Enter is Enter in most
+terminals). Anything else, chat apps, browsers and apps on neither list, gets Shift+Enter, a new
+line that doesn't send in Slack, Discord, Messages or web chats. When the window backend can't
+tell which app has the focus, lines are joined with spaces. Blank lines collapse to one paragraph
+break. Shift+Enter is typing's own key: `desktop_press_key`'s closed set doesn't offer it. The
+result's `line_breaks` says which was used (`enter`, `shift+enter`, `spaces`).
 
 **Typing is keystrokes: a terminal app in a modal mode runs them as commands** (noted
 2026-10-14 from a user's test, behaviour unchanged). Dictation presses keys in whatever has

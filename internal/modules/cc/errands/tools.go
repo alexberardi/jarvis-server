@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
 	"github.com/alexberardi/jarvis-server/internal/modules/llm/pyjson"
@@ -45,6 +47,31 @@ type RunErrandTool struct {
 	// NeedsComputer, when set, says whether goal is a task on a computer: with computer_task on
 	// the menu, such an errand starts at once (startComputerPlan) and the ack says so.
 	NeedsComputer func(goal string) bool
+	// MeansOpenPage, when set, says whether words mean the page open in the user's browser
+	// ("this page"): the goal of such a request keeps no address the user didn't give.
+	MeansOpenPage func(s string) bool
+}
+
+// hintEchoRE is a turn hint the model copied into the goal ("… save it as Velmora. [computer
+// control: on.]"): the goal then ended on "on" and read as cut off (Gemma 4 26B, 2026-11-14).
+var hintEchoRE = regexp.MustCompile(`\s*\[[a-z][a-z ]*:[^\]]*\]`)
+
+var goalURLRE = regexp.MustCompile(`https?://\S+`)
+
+// relayedGoal is the model's goal for run_errand without what it added to the user's request:
+// a turn hint it echoed, and, when the user meant the page they have open and gave no address,
+// an address it made up ("Summarize this wiki page" became "…: https://en.wikipedia.org/wiki/
+// Velmora", a page that doesn't exist; the document step fetched it and got a 404, Gemma 4 26B,
+// 2026-11-14). The server reads the open page itself; the model only has to pass the words on.
+func (t *RunErrandTool) relayedGoal(goal, utterance string) string {
+	goal = strings.TrimSpace(hintEchoRE.ReplaceAllString(goal, ""))
+	if t.MeansOpenPage == nil || !t.MeansOpenPage(utterance) || strings.Contains(utterance, "://") {
+		return goal
+	}
+	if cleaned := goalURLRE.ReplaceAllString(goal, ""); cleaned != goal {
+		goal = strings.TrimRight(strings.Join(strings.Fields(cleaned), " "), " :;,-(")
+	}
+	return goal
 }
 
 // cutOffRE is a goal STT clipped mid-sentence: a trailing ellipsis, or one ending on a word
@@ -59,12 +86,18 @@ func cutOffGoal(goal string) bool { return cutOffRE.MatchString(goal) }
 const computerAck = "On it — I'll do that on your computer and check with you on your phone before " +
 	"anything that needs your OK. If it needs more than the browser, I'll send you the plan to review first."
 
+// liveAck is run_errand's ack for a request spoken at a computer with computer control on: work
+// in an app starts in its window at once (DraftRequest.Live). True whatever the plan turns out
+// to be: anything else still sends its plan.
+const liveAck = "On it. If it's something in an app, I'll do it on your screen now: say stop or take the mouse " +
+	"any time. Anything else, I'll send you the plan first."
+
 func (*RunErrandTool) Name() string { return "run_errand" }
 
 func (*RunErrandTool) Definition() *pyjson.Object { return servertools.LegacyDefinition("run_errand") }
 
 func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn servertools.Turn) (any, error) {
-	goal := parse.PyStrip(call.Str("goal"))
+	goal := t.relayedGoal(parse.PyStrip(call.Str("goal")), turn.Utterance)
 	if goal == "" {
 		return errObj("missing_goal", "I need to know what the errand should do."), nil
 	}
@@ -90,6 +123,14 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	if !s.Enabled(ctx, turn.HouseholdID) {
 		return disabledResult(), nil
 	}
+	// A date the user gave that the model's goal dropped goes back in, worked out: "do my
+	// budget for last month" became "download bank and card statements", and the task downloaded
+	// every month (suite on Qwen3.5-9B, 2026-11-13).
+	if dc := dates.New(s.now(), turn.Timezone); dc.Explain(goal) == "" {
+		if said := dc.Explain(turn.Utterance); said != "" {
+			goal += " (" + said + ")"
+		}
+	}
 	speaker := speakerPtr(turn)
 	var available []*pyjson.Object
 	if t.Commands != nil {
@@ -97,10 +138,13 @@ func (t *RunErrandTool) Execute(ctx context.Context, call servertools.Call, turn
 	}
 	menu := s.FullMenu(ctx, available, turn.HouseholdID, speaker)
 	if err := s.DraftErrand(ctx, DraftRequest{HouseholdID: turn.HouseholdID, NodeID: turn.NodeID, UserID: speaker,
-		Goal: goal, Menu: menu, TurnAt: s.now()}); err != nil {
+		Goal: goal, Menu: menu, TurnAt: s.now(), Live: turn.DesktopVoice}); err != nil {
 		return errObj("task_failed", "I couldn't start planning that errand: "+err.Error()), nil
 	}
 	s.log().Info("errands: draft started", "household", turn.HouseholdID, "node", turn.NodeID, "goal", goal)
+	if turn.DesktopVoice && menuHas(menu, cmdComputer) {
+		return servertools.Obj("status", "accepted", "message", liveAck), nil
+	}
 	if t.NeedsComputer != nil && t.NeedsComputer(goal) && menuHas(menu, cmdComputer) {
 		return servertools.Obj("status", "accepted", "message", computerAck), nil
 	}

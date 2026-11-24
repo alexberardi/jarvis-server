@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -214,6 +215,8 @@ type actArgs struct {
 	// Resume continues a desktop task paused because the user used the computer (the
 	// server's Paused card's Continue).
 	Resume bool `json:"resume"`
+
+	gen uint64 // the activity's stops when the call began (act): a stop since ends what it shows
 }
 
 func decodeArgs(args map[string]any, v any) error {
@@ -282,11 +285,14 @@ func (t *Tools) observe(ctx context.Context, a observeArgs) map[string]any {
 		if run.Opening {
 			s, err = t.settledSnapshot(ctx, run.Tab, s, err)
 		}
+		if run.Acted && err == nil {
+			s, err = t.quietSnapshot(ctx, run.Tab, s)
+		}
 		if err != nil {
 			return failCode(errorCode(err), "%v", err)
 		}
 		t.runs().With(a.RunID, func(r *Run) {
-			r.Snap, r.Opening = &s, false
+			r.Snap, r.Opening, r.Acted = &s, false, false
 			if s.URL != "" {
 				r.URL = s.URL
 			}
@@ -336,6 +342,54 @@ var (
 	settleFor  = 10 * time.Second
 	settlePoll = 300 * time.Millisecond
 )
+
+// actSettle, actPoll and actSettleMax are how observe waits out the page after an action: a
+// first pause, then a snapshot every actPoll until two in a row are the same, for at most
+// actSettleMax in all (vars for the tests).
+var (
+	actSettle    = 700 * time.Millisecond
+	actPoll      = 400 * time.Millisecond
+	actSettleMax = 4 * time.Second
+)
+
+// quietSnapshot snapshots a page an action just ran on once it has stopped changing, from the
+// first try's s. The extension waits for a navigation, not for what a press fetches: a store
+// search's results arrived after a snapshot taken 15 ms after the press, the model saw the page
+// without them, and took the search for broken (2026-11-16).
+func (t *Tools) quietSnapshot(ctx context.Context, tab string, s computeruse.Snapshot) (computeruse.Snapshot, error) {
+	deadline := time.Now().Add(actSettleMax)
+	wait := actSettle
+	for {
+		select {
+		case <-ctx.Done():
+			return s, nil
+		case <-time.After(wait):
+		}
+		next, err := t.Browser.Snapshot(ctx, tab, 0)
+		if err != nil {
+			return s, nil // the last good one: the page may be between two documents
+		}
+		same := sameSnapshot(s, next)
+		s, wait = next, actPoll
+		if same || !time.Now().Before(deadline) {
+			return s, nil
+		}
+	}
+}
+
+// sameSnapshot reports whether two snapshots show the same page: its address and its elements.
+func sameSnapshot(a, b computeruse.Snapshot) bool {
+	if a.URL != b.URL || a.Title != b.Title || len(a.Elements) != len(b.Elements) {
+		return false
+	}
+	for i := range a.Elements {
+		x, y := a.Elements[i], b.Elements[i]
+		if x.Role != y.Role || x.Name != y.Name || x.Value != y.Value || x.Context != y.Context || !slices.Equal(x.State, y.State) {
+			return false
+		}
+	}
+	return true
+}
 
 // settledSnapshot snapshots a task window just opened on a web address (by observe's url or a
 // navigate action) until its page has loaded, from the first try's s and err: the new tab is
@@ -416,6 +470,7 @@ func (r Result) out() map[string]any {
 }
 
 func (t *Tools) act(ctx context.Context, a actArgs) map[string]any {
+	a.gen = t.Activity.Gen()
 	switch {
 	case a.RunID == "":
 		return failCode("invalid_argument", "run_id is required")
@@ -435,6 +490,9 @@ func (t *Tools) act(ctx context.Context, a actArgs) map[string]any {
 	for i, action := range a.Actions {
 		r := t.step(ctx, a, i, action)
 		results = append(results, r.out())
+		if r.OK && action.Kind != "wait" && action.Kind != "screenshot" && action.Kind != "navigate" {
+			t.runs().With(a.RunID, func(r *Run) { r.Acted = true })
+		}
 		if !r.OK {
 			out["success"] = false
 			out["stopped_at"] = i
@@ -489,11 +547,11 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 	if (action.Kind == "set_value" || action.Kind == "type") && el != nil && el.Secure {
 		return fail("password_field", "%s is a password field: Jarvis doesn't type passwords; the user enters it", action.Ref)
 	}
-	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt); !ok {
+	if r, ok := t.checkRisk(ctx, a.RunID, i, action, el, tgt, run.URL); !ok {
 		return r
 	}
 
-	t.showing(action.Intent)
+	t.showing(a.gen, action.Intent)
 	if code, err := t.do(ctx, a, action, run); err != nil {
 		return fail(code, "%v", err)
 	}
@@ -502,11 +560,11 @@ func (t *Tools) step(ctx context.Context, a actArgs, i int, action computeruse.A
 
 // checkRisk classifies action i (on el, or nil, in tgt): ok when it may run, else its failed
 // result. A risky one runs only with a valid approval token for exactly it.
-func (t *Tools) checkRisk(ctx context.Context, runID string, i int, action computeruse.Action, el *computeruse.Element, tgt computeruse.Target) (Result, bool) {
+func (t *Tools) checkRisk(ctx context.Context, runID string, i int, action computeruse.Action, el *computeruse.Element, tgt computeruse.Target, pageURL string) (Result, bool) {
 	fail := func(code, format string, args ...any) Result {
 		return Result{I: i, Code: code, Error: fmt.Sprintf(format, args...)}
 	}
-	risk := computeruse.Classify(action, el, tgt)
+	risk := computeruse.ClassifyOn(action, el, tgt, pageURL)
 	switch risk.Level {
 	case computeruse.LevelDeny:
 		r := fail("denied", "%s", risk.Reason)
@@ -546,14 +604,10 @@ func (t *Tools) verify(ctx context.Context, token, digest string) error {
 }
 
 // showing shows the action's intent on the island and the tray, unless they show something
-// else (a recording, a paused desktop task).
-func (t *Tools) showing(intent string) {
-	if t.Activity == nil {
-		return
-	}
-	if k, _ := t.Activity.Status(); k == Idle || k == Controlling {
-		t.Activity.Set(Controlling, intent)
-	}
+// else (a recording, a paused desktop task) or a stop came since the call began (gen): an action
+// that started as the user stopped the task never lights the indicator again.
+func (t *Tools) showing(gen uint64, intent string) {
+	t.Activity.SetSince(gen, Controlling, intent, func(k Kind) bool { return k == Idle || k == Controlling })
 }
 
 // browserKeys are the keypress names the extension's keys op sends.
@@ -608,6 +662,10 @@ func (t *Tools) do(ctx context.Context, a actArgs, action computeruse.Action, ru
 		}
 	case "screenshot":
 		return "", nil // the next computer_observe takes it
+	}
+	if action.Kind == "scroll" {
+		return "browser_window", errors.New("a browser task doesn't scroll: every element of the page is already listed, " +
+			"whichever part is on screen. Press the one you need by its ref; if it isn't listed, open the section or search that leads to it")
 	}
 	return "browser_window", fmt.Errorf("a browser task acts on page elements by ref (press, set_value, select, "+
 		"keypress with a ref and Enter, Escape, Tab or arrows; navigate); %s by coordinates or at the focus is for desktop tasks", action.Kind)

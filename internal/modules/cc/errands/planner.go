@@ -1,7 +1,9 @@
 package errands
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -290,16 +292,44 @@ const budgetRule = "BUDGETS: for a budget or a spending report from statements, 
 // task no longer knew what the first had found.
 const websiteRule = "COMPUTER TASKS: everything the user wants done on one website or in one app (find, " +
 	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
-	"request for that site, with every detail they gave. Start the site at the web address they gave.\n\n"
+	"request for that site, with every detail they gave. Start the site at the web address they gave. " +
+	"When they name no website (research the best one, find the cheapest listing, add it to my cart), it is still ONE " +
+	"computer_task with no site: it starts on a web search. With quick_search on the menu, put ONE quick_search step " +
+	"before it for the research (what to buy and why); the computer_task is given what it found.\n\n"
 
 // documentRule is the computer rules' line for documents (ELEMENT-LAYER-WORK.md C27): typing a
 // document through Writer's window took 15+ rounds and failed at the Save dialog; the file is
 // written directly instead.
 const documentRule = "DOCUMENTS: to write, summarize into, or change a document or spreadsheet (Writer, Calc, " +
 	"Word, Excel), plan ONE write_document step with the file's path, everything the user asked for as its " +
-	"instructions and the web page to write from as its source (or search words: it reads the top results " +
+	"instructions and the web page to write from as its source (\"the open page\" when the user means the page they " +
+	"have open, e.g. \"this page\"; or search words: it reads the top results " +
 	"itself, so research for a document needs no deep_research step); never a computer_task that types in the app. " +
 	"A write_document step after other steps (a search, a file read, a computer task) writes from their results.\n\n"
+
+// liveDocumentRule replaces documentRule for a request spoken at the computer (user,
+// 2026-11-13: "write a note in LibreOffice and save it" became a write_document plan card on the
+// phone; they expected to watch it happen). write_document is off that menu (liveMenu), so work
+// in an app is a desktop computer_task in the app's window, which the vision-first loop can do.
+const liveDocumentRule = "IN AN APP: the user is at the computer, watching. To write a note or a document, " +
+	"summarize into one or change one in an app (LibreOffice Writer, a notes app, a text editor), plan ONE " +
+	"computer_task step with target desktop, app the app they named (LibreOffice Writer for a document when " +
+	"they named none) and goal their whole request with every detail: what to write, the file's name, and to " +
+	"save it. When it writes from a web page, give that page as source: \"the open page\" when the user means " +
+	"the page they have open (\"this page\", \"the article\"), else its address or words to search for.\n\n"
+
+// liveMenu is menu for a request spoken at the computer: without write_document, so documents
+// are written in the app's window (liveDocumentRule). Spreadsheets keep write_spreadsheet: its
+// totals are formulas the file tool checks.
+func liveMenu(menu []MenuEntry) []MenuEntry {
+	out := make([]MenuEntry, 0, len(menu))
+	for _, e := range menu {
+		if e.Command != cmdWriteDoc {
+			out = append(out, e)
+		}
+	}
+	return out
+}
 
 // emailFilesRule is the line for work on an email's attachments (ELEMENT-LAYER-WORK.md C28):
 // node step args are fixed when the errand is planned, so both email steps name the same email
@@ -436,7 +466,7 @@ func attachmentWork(goal string, steps []Step, menu []MenuEntry) []Step {
 			name := path.Base(strings.TrimSpace(strings.Split(truthyStr(st.Args, "attachments"), ",")[0]))
 			ext := strings.ToLower(path.Ext(name))
 			if ext != ".odt" && ext != ".docx" && ext != ".ods" && ext != ".xlsx" {
-				ext = ".odt"
+				ext = ".docx" // the type most people can open (user, 2026-11-13)
 				if g := strings.ToLower(goal); strings.Contains(g, "spreadsheet") || strings.Contains(g, "sheet") || strings.Contains(g, "xlsx") || strings.Contains(g, "excel") {
 					ext = ".xlsx"
 				}
@@ -512,6 +542,60 @@ func dropUnaskedRemember(goal string, steps []Step) []Step {
 	}
 	if len(out) == 0 {
 		return steps
+	}
+	return out
+}
+
+// appJobRE finds the app a goal names as where the work happens ("in the Jarvis Test Notes app",
+// "using my notes app"); appDocRE the words that make it a document file after all.
+var (
+	appJobRE = regexp.MustCompile(`(?i)\b(?:in|into|inside|with|using|open)\s+(?:the\s+|my\s+)?((?:[\w'&.-]+\s+){0,4}?[\w'&.-]+)\s+app\b`)
+	appDocRE = regexp.MustCompile(`(?i)\b(document|spreadsheet|workbook|libreoffice|writer|calc|word|excel|\.odt|\.docx|\.ods|\.xlsx)\b`)
+)
+
+// appMakeRE: the goal makes or changes something in the app it names (a note, an entry), which
+// only working in that app can do.
+var appMakeRE = regexp.MustCompile(`(?i)\b(add|adds|create|make|new|write|save|enter|fill|jot|put|edit|change|rename|delete)\b`)
+
+// appWorkNotDocument repairs a plan for work in an app the goal names ("in the Jarvis Test
+// Notes app, add a note …") that the planner gave to something else: the house model plans it
+// as a document file ("I can write .odt … not plain text notes"), a to-do item or a memory
+// (suite on Qwen3.5-9B, 2026-11-13: six notes cases over two runs). A write_document step
+// becomes a desktop computer_task in that app; a plan that makes something in the app with no
+// computer step at all becomes that one task. Goals about a document or an office app keep the
+// file step, as does a menu without computer_task.
+func appWorkNotDocument(goal string, steps []Step, menu []MenuEntry) []Step {
+	if !menuHas(menu, cmdComputer) || appDocRE.MatchString(goal) || len(steps) == 0 {
+		return steps
+	}
+	m := appJobRE.FindStringSubmatch(goal)
+	if m == nil {
+		return steps
+	}
+	task := func(st Step) Step {
+		return Step{Command: cmdComputer, Label: st.Label, IsRisky: st.IsRisky,
+			Args: servertools.Obj("goal", goal, "target", "desktop", "app", strings.TrimSpace(m[1]))}
+	}
+	computer, doc := false, false
+	for _, st := range steps {
+		computer = computer || isComputerStep(strings.TrimSpace(st.Command))
+		doc = doc || st.Command == cmdWriteDoc
+	}
+	if !computer && !doc && appMakeRE.MatchString(goal) {
+		return []Step{task(steps[0])} // nothing in the plan works in the app: the task does
+	}
+	var out []Step
+	done := false
+	for _, st := range steps {
+		if st.Command != cmdWriteDoc {
+			out = append(out, st)
+			continue
+		}
+		if done {
+			continue // one task does the whole job in the app
+		}
+		done = true
+		out = append(out, task(st))
 	}
 	return out
 }
@@ -608,6 +692,94 @@ func closeJSON(s string) (string, bool) {
 	return string(b), true
 }
 
+// balanceJSON is s with a closer put in wherever one was skipped, and whether any was: Gemma 4
+// 26B left out a step's "}" in a long replan ('"computer": "Jarvis"}]}'), the answer couldn't be
+// read and the errand never wrote its spreadsheet (2026-11-15). A closer that matches nothing
+// open is dropped, and what is still open at the end is closed.
+func balanceJSON(s string) (string, bool) {
+	var open []byte
+	out := make([]byte, 0, len(s)+4)
+	inStr, esc, changed := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			open = append(open, '}')
+		case c == '[':
+			open = append(open, ']')
+		case c == '}' || c == ']':
+			at := bytes.LastIndexByte(open, c)
+			if at < 0 {
+				changed = true
+				continue
+			}
+			for j := len(open) - 1; j > at; j-- {
+				out = append(out, open[j])
+				changed = true
+			}
+			open = open[:at]
+		}
+		out = append(out, c)
+	}
+	if inStr {
+		return s, false
+	}
+	for j := len(open) - 1; j >= 0; j-- {
+		out = append(out, open[j])
+		changed = true
+	}
+	return string(out), changed
+}
+
+// firstJSON is the first whole JSON value s starts with, when more follows it: Gemma 4 26B
+// closed a replan's step early and left "]}" after the object, the answer couldn't be read, and
+// the errand ended without its spreadsheet step (2026-11-15).
+func firstJSON(s string) (string, bool) {
+	var raw json.RawMessage
+	if err := json.NewDecoder(strings.NewReader(s)).Decode(&raw); err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+// planGap asks the planner's model whether a plan delivers everything goal asks for: done are
+// the steps already run, next the ones planned (none: the errand would end here). It is what the
+// plan leaves out, in a few words, or "" (covered, or the check itself failed: a plan is never
+// held up by its check). A plan that ends at a checkpoint is decided later and isn't checked.
+func (s *Service) planGap(ctx context.Context, goal string, done, next []Step) string {
+	if n := len(next); n > 0 && next[n-1].Command == cmdReplan {
+		return ""
+	}
+	planned := "none: the errand would end here"
+	if len(next) > 0 {
+		planned = stepsDumps(next)
+	}
+	think := planCheckThinkTokens
+	data, err := s.runPlannerThinking(ctx, "You check an errand plan for Jarvis before it runs.\n\n"+
+		"The user's goal: "+goal+"\n"+
+		"Steps already run: "+stepsDumps(done)+"\n"+
+		"Steps planned next: "+planned+"\n\n"+
+		"Does every result the user asked for have a step, run or planned, that produces it? Judge only "+
+		"results the user asked for outright (a file to make, a message to send, a thing to buy, order or "+
+		"look up, a change to make). How a step does its work is not your concern, one step may produce "+
+		"several results, and a computer_task does everything its goal says. When in doubt, it is covered.\n\n"+
+		`Answer with a JSON object only: {"covered": true} or {"covered": false, "missing": "<the result no step produces, in a few words>"}.`, &think)
+	if err != nil {
+		return ""
+	}
+	if v, _ := data.Get("covered"); v != false {
+		return ""
+	}
+	return parse.PyStrip(truthyStr(data, "missing"))
+}
+
 // splitComputerSteps makes a computer task whose goal names more than one web address (another
 // host or path; a query or a trailing slash is the same one) one task per address, in order, each
 // starting at its own: the house model wrote one task for the bank's and the card's statements, and
@@ -684,12 +856,19 @@ func menuText(menu []MenuEntry) string {
 }
 
 // BuildPrompt is _build_prompt.
-func BuildPrompt(goal string, menu []MenuEntry) string {
+func BuildPrompt(goal string, menu []MenuEntry) string { return buildPrompt(goal, menu, false) }
+
+// buildPrompt is BuildPrompt; live adds liveDocumentRule (a request spoken at the computer).
+func buildPrompt(goal string, menu []MenuEntry, live bool) string {
+	rules := computerRulesFor(menu)
+	if live {
+		rules += liveDocumentRule
+	}
 	return "You are Jarvis's errand planner. Turn the user's goal into an ordered " +
 		"list of steps, choosing ONLY from the available commands below. Fill each " +
 		"step's args from that command's arg spec, using the user's own words, and " +
 		"give each step a short human-readable label.\n\n" +
-		decompositionRule + computerRulesFor(menu) +
+		decompositionRule + rules +
 		replanCheckpointRule +
 		"Available commands:\n" + menuText(menu) + "\n\n" +
 		"User's goal: " + goal + "\n\n" +
@@ -812,13 +991,54 @@ func stripFences(text string) string {
 // thinking left to the label: LD8), parsed to a JSON object. Planning failures wrap ErrPlan;
 // an LLM error is returned as-is (infra).
 func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object, error) {
+	return s.runPlannerThinking(ctx, prompt, nil)
+}
+
+// planCheckThinkTokens is the plan check's thinking allowance: a yes/no answer left to think as
+// long as it liked ran into the planner's time limit on every call and was asked again without.
+const planCheckThinkTokens = 512
+
+// defaultPlannerThinkTokens is errands.planner_think_tokens' default. Measured on Qwen3.5-9B
+// with a computer errand's planning prompt (2026-11-16): no thinking 1.7 s; 1024 tokens of it
+// 11 s, and a plan; unlimited 117 s to the end of the 12,000-token budget, and no plan.
+const defaultPlannerThinkTokens = 1024
+
+// plannerThinkTokens is a planning call's thinking allowance: nil for no limit.
+func (s *Service) plannerThinkTokens(ctx context.Context) *int {
+	n := int64(defaultPlannerThinkTokens)
+	if s.Settings != nil {
+		if v := s.Settings.Int(ctx, SettingPlannerThinkTokens, settings.Scope{}); v != 0 {
+			n = v
+		}
+	}
+	if n < 0 {
+		return nil
+	}
+	v := int(n)
+	return &v
+}
+
+// thinkOffFor is how long the planner plans without thinking after a plan thought past its time.
+const thinkOffFor = 30 * time.Minute
+
+// runPlannerThinking is runPlanner with a set thinking allowance (nil = left to the label).
+func (s *Service) runPlannerThinking(ctx context.Context, prompt string, think *int) (*pyjson.Object, error) {
 	if s.LLM == nil {
 		return nil, errors.New("errands: no LLM")
 	}
 	temp, maxTok := 0.0, s.plannerMaxTokens(ctx)
 	start := time.Now()
+	if think == nil {
+		think = s.plannerThinkTokens(ctx)
+	}
+	if (think == nil || *think != 0) && s.now().Unix() < s.thinkOffUntil.Load() {
+		// It thought past its time on a plan a little while ago, and would again: the house
+		// model spent 30 s on every errand before its 5 s plan (2026-11-16).
+		off := 0
+		think = &off
+	}
 	req := llm.ChatRequest{
-		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok,
+		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: think,
 		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
 	}
 	// The thinking attempt gets a wall-clock cap as well as max_tokens: the background label
@@ -839,6 +1059,7 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 		s.log().Warn("errands: planner thought past its time budget; retrying without thinking",
 			"budget", s.plannerThinkTimeout(ctx), "elapsed", time.Since(start).Round(100*time.Millisecond))
 		resp = &llm.ChatResponse{FinishReason: "length"}
+		s.thinkOffUntil.Store(s.now().Add(thinkOffFor).Unix())
 	} else {
 		s.log().Info("errands: planner call", "completion_tokens", resp.Usage.CompletionTokens,
 			"prompt_tokens", resp.Usage.PromptTokens, "max_tokens", maxTok, "finish", resp.FinishReason,
@@ -867,6 +1088,13 @@ func (s *Service) runPlanner(ctx context.Context, prompt string) (*pyjson.Object
 	if err != nil {
 		if closed, ok := closeJSON(text); ok {
 			v, err = pyjson.Loads(closed)
+		} else if first, ok := firstJSON(text); ok {
+			v, err = pyjson.Loads(first)
+		}
+		if err != nil {
+			if fixed, ok := balanceJSON(text); ok {
+				v, err = pyjson.Loads(fixed)
+			}
 		}
 	}
 	if err != nil {
@@ -945,17 +1173,38 @@ func allowedOf(menu []MenuEntry) (allowed, risky, free map[string]bool) {
 
 // PlanErrand is plan_errand. An empty menu falls back to the static menu.
 func (s *Service) PlanErrand(ctx context.Context, goal string, menu []MenuEntry) (Plan, error) {
+	return s.planErrand(ctx, goal, menu, false)
+}
+
+// planErrand is PlanErrand; live plans a request spoken at the computer (buildPrompt).
+func (s *Service) planErrand(ctx context.Context, goal string, menu []MenuEntry, live bool) (Plan, error) {
 	if len(menu) == 0 {
 		menu = commandMenu()
 	}
-	data, err := s.runPlanner(ctx, BuildPrompt(goal, menu))
-	if err != nil {
-		return Plan{}, err
+	once := func(prompt string) (Plan, error) {
+		data, err := s.runPlanner(ctx, prompt)
+		if err != nil {
+			return Plan{}, err
+		}
+		allowed, risky, free := allowedOf(menu)
+		plan, err := planFromData(data, allowed, goal, risky, free, true)
+		plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))))
+		return plan, err
 	}
-	allowed, risky, free := allowedOf(menu)
-	plan, err := planFromData(data, allowed, goal, risky, free, true)
-	plan.Steps = checkpointSpreadsheet(splitComputerSteps(mergeComputerSteps(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))))
-	return plan, err
+	prompt := buildPrompt(goal, menu, live)
+	plan, err := once(prompt)
+	if err != nil || live {
+		return plan, err // spoken at the computer, the work starts at once: no second look
+	}
+	// The plan is checked against the request before it runs, and planned once more with what it
+	// left out: a plan missing a part of the request ran as it was.
+	if gap := s.planGap(ctx, goal, nil, plan.Steps); gap != "" {
+		s.log().Info("errands: plan left something out; planning again", "missing", gap)
+		if again, err := once(prompt + "\n\nAn earlier plan for this goal left out: " + gap + ". Include a step that produces it."); err == nil {
+			return again, nil
+		}
+	}
+	return plan, nil
 }
 
 // RefinePlan is refine_errand_plan: the allowed set also keeps the plan's own commands, so a
@@ -984,17 +1233,32 @@ func (s *Service) ReplanFromProgress(ctx context.Context, goal string, done []St
 		menu = commandMenu()
 	}
 	progress := summarizeProgress(done, results)
-	data, err := s.runPlanner(ctx, BuildReplanPrompt(goal, done, progress, reason, menu))
-	if err != nil {
-		return Plan{}, err
+	once := func(reason string) (Plan, error) {
+		data, err := s.runPlanner(ctx, BuildReplanPrompt(goal, done, progress, reason, menu))
+		if err != nil {
+			return Plan{}, err
+		}
+		allowed, risky, free := allowedOf(menu)
+		fallback := truthyStr(data, "summary")
+		if fallback == "" {
+			fallback = "continue"
+		}
+		plan, err := planFromData(data, allowed, fallback, risky, free, false)
+		plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, appWorkNotDocument(goal, plan.Steps, menu))), menu))))
+		return plan, err
 	}
-	allowed, risky, free := allowedOf(menu)
-	fallback := truthyStr(data, "summary")
-	if fallback == "" {
-		fallback = "continue"
+	plan, err := once(reason)
+	if err != nil && !errors.Is(err, ErrPlan) {
+		return plan, err
 	}
-	plan, err := planFromData(data, allowed, fallback, risky, free, false)
-	plan.Steps = checkpointSpreadsheet(foldResearchIntoDocument(sheetFromResults(goal, attachmentWork(goal, dropAttachmentReads(dropUnaskedRemember(goal, plan.Steps)), menu))))
+	// What is left of the plan is checked against the request, an answer that couldn't be read
+	// or had no steps too: the errand would end there with a part of the request undone.
+	if gap := s.planGap(ctx, goal, done, plan.Steps); gap != "" {
+		s.log().Info("errands: replan left something out; planning again", "missing", gap)
+		if again, aerr := once(reason + ". An earlier answer left out: " + gap + ": include a step that produces it"); aerr == nil && len(again.Steps) > 0 {
+			return again, nil
+		}
+	}
 	return plan, err
 }
 

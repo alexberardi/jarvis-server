@@ -8,7 +8,7 @@ import (
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 )
 
-func snapshotOf(context.Context, int, int, bool) (computeruse.Snapshot, error) {
+func snapshotOf(context.Context, int, int, bool, string) (computeruse.Snapshot, error) {
 	return computeruse.Snapshot{}, ErrUnsupported
 }
 
@@ -17,6 +17,7 @@ func peek(context.Context, int, int) ([]computeruse.SnapElement, error) { return
 func press(int, string) error                                       { return ErrUnsupported }
 func setValue(int, string, string) error                            { return ErrUnsupported }
 func focus(int, string) error                                       { return ErrUnsupported }
+func textOf(int, string) (string, error)                            { return "", ErrUnsupported }
 func element(int, string) (*computeruse.Element, error)             { return nil, ErrUnsupported }
 func elementAt(int, int, int, uint32) (*computeruse.Element, error) { return nil, ErrUnsupported }
 func focused(int) (*computeruse.Element, error)                     { return nil, ErrUnsupported }

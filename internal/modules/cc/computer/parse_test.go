@@ -1,6 +1,9 @@
 package computer
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A click on a listed element (a ref, no coordinates) is a press: the house model writes it so.
 func TestParseClickOnRefIsPress(t *testing.T) {
@@ -87,9 +90,12 @@ func TestParseReplyTruncated(t *testing.T) {
 	if len(r.Actions) != 1 || r.Actions[0].Kind != "keypress" {
 		t.Fatalf("truncated reply parsed to %+v", r)
 	}
+	// Over-closed: the first whole object is the answer, whatever follows it.
+	if r, err := parseReply(`{"done": true, "summary": "s"}}`); err != nil || !r.Done || r.Summary != "s" {
+		t.Errorf("over-closed reply: %+v, %v", r, err)
+	}
 	for _, s := range []string{
 		`{"thought": "t", "actions": [{"kind": "type", "text": "mi`, // mid-string
-		`{"done": true, "summary": "s"}}`,                           // over-closed
 	} {
 		if _, err := parseReply(s); err == nil {
 			t.Errorf("parseReply(%q) = nil error, want one", s)
@@ -112,5 +118,56 @@ func TestParseReplyDroppedY(t *testing.T) {
 	r, err = parseReply(`{"thought":"t","actions":[{"kind":"click","x":1,"y":2,"intent":"i"}]}`)
 	if err != nil || *r.Actions[0].X != 1 || *r.Actions[0].Y != 2 {
 		t.Fatalf("intact pair: %+v, %v", r.Actions, err)
+	}
+}
+
+func TestParseReplyEarlyClose(t *testing.T) {
+	r, err := parseReply("```json\n" + `{"thought": "t", "actions": [{"kind": "click", "x": 72, "y": 56}, "intent": "Click the \"New\" button"}]}` + "\n```")
+	if err != nil {
+		t.Fatalf("early-close reply: %v", err)
+	}
+	if a := r.Actions[0]; len(r.Actions) != 1 || a.X == nil || *a.X != 72 || a.Intent != `Click the "New" button` {
+		t.Fatalf("early-close reply parsed to %+v", r.Actions)
+	}
+}
+
+func TestParseReplyBareAction(t *testing.T) {
+	r, err := parseReply("```json\n" + `{"kind": "press", "ref": "a2", "intent": "Click the Save button"}` + "\n```")
+	if err != nil || len(r.Actions) != 1 || r.Actions[0].Kind != "press" || r.Actions[0].Ref != "a2" {
+		t.Fatalf("bare action = %+v, %v", r.Actions, err)
+	}
+}
+
+func TestParseReplySaysWhatToDoAboutAnAskAction(t *testing.T) {
+	_, err := parseReply(`{"thought": "paying is risky", "actions": [{"kind": "ask", "reason": "login_needed"}]}`)
+	if err == nil || !strings.Contains(err.Error(), "press the button") {
+		t.Fatalf("err = %v, want it to say to press the button", err)
+	}
+}
+
+func TestParseReplyReadsPastAThoughtWithBareQuotes(t *testing.T) {
+	r, err := parseReply(`{"thought": "the rule says "checkout" (shape 2), and "actions": [] is a press. Click it.", "actions": [{"kind": "press", "ref": "e6", "intent": "Proceed to checkout"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Actions) != 1 || r.Actions[0].Ref != "e6" {
+		t.Fatalf("actions = %+v, want the press on e6", r.Actions)
+	}
+	if !strings.Contains(r.Thought, "Click it.") {
+		t.Fatalf("thought = %q, want it kept", r.Thought)
+	}
+}
+
+// An answer cut off inside a runaway list of actions gives its first action.
+func TestSalvageFirstAction(t *testing.T) {
+	cut := `{"thought": "close it", "actions": [{"kind": "press", "ref": "e3", "intent": "Pick carryout"}, {"kind": "press", "ref": "e1", "intent": "Close"}, {"kind": "pre`
+	r, ok := salvageFirstAction(cut)
+	if !ok || len(r.Actions) != 1 || r.Actions[0].Ref != "e3" {
+		t.Fatalf("salvaged %+v %v", r, ok)
+	}
+	for _, s := range []string{`{"thought": "I think that`, `{"thought": "x", "actions": [{"kind": "press", "ref": "e`, `{"actions": []}`} {
+		if _, ok := salvageFirstAction(s); ok {
+			t.Errorf("salvaged from %q", s)
+		}
 	}
 }

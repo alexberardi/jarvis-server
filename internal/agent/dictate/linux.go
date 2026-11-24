@@ -212,17 +212,18 @@ func (l *LinuxKeyboard) injector(b string) Injector {
 
 // Key names per tool. ydotool takes evdev keycodes (linux/input-event-codes.h) as code:1/code:0.
 var (
-	xkbKeys = map[Key]string{KeyEnter: "Return", KeyEscape: "Escape", KeyTab: "Tab", KeyShiftTab: "Tab",
+	xkbKeys = map[Key]string{KeyEnter: "Return", KeyShiftEnter: "Return", KeyEscape: "Escape", KeyTab: "Tab", KeyShiftTab: "Tab",
 		KeySpace: "space", KeyUp: "Up", KeyDown: "Down", KeyLeft: "Left", KeyRight: "Right"}
-	evdevKeys = map[Key]int{KeyEnter: 28, KeyEscape: 1, KeyTab: 15, KeyShiftTab: 15, KeySpace: 57,
+	evdevKeys = map[Key]int{KeyEnter: 28, KeyShiftEnter: 28, KeyEscape: 1, KeyTab: 15, KeyShiftTab: 15, KeySpace: 57,
 		KeyUp: 103, KeyDown: 108, KeyLeft: 105, KeyRight: 106}
 )
 
 const evdevLeftShift = 42
 
 // keyStrokes are the keys as keysyms, for the built-in backends.
-var keyStrokes = map[Key]xkb.Stroke{KeyEnter: {Sym: xkb.KeyReturn}, KeyEscape: {Sym: xkb.KeyEscape},
-	KeyTab: {Sym: xkb.KeyTab}, KeyShiftTab: {Sym: xkb.KeyTab, Shift: true}, KeySpace: {Sym: xkb.KeySpace},
+var keyStrokes = map[Key]xkb.Stroke{KeyEnter: {Sym: xkb.KeyReturn}, KeyShiftEnter: {Sym: xkb.KeyReturn, Shift: true},
+	KeyEscape: {Sym: xkb.KeyEscape},
+	KeyTab:    {Sym: xkb.KeyTab}, KeyShiftTab: {Sym: xkb.KeyTab, Shift: true}, KeySpace: {Sym: xkb.KeySpace},
 	KeyUp: {Sym: xkb.KeyUp}, KeyDown: {Sym: xkb.KeyDown}, KeyLeft: {Sym: xkb.KeyLeft}, KeyRight: {Sym: xkb.KeyRight}}
 
 func (l *LinuxKeyboard) Press(ctx context.Context, k Key) error {
@@ -230,7 +231,7 @@ func (l *LinuxKeyboard) Press(ctx context.Context, k Key) error {
 	if !ok {
 		return fmt.Errorf("%w: unknown key %q", errBadArgs, k)
 	}
-	shift := k == KeyShiftTab
+	shift := k.shifted()
 	var c Cmd
 	switch b, why := l.backend(ctx); b {
 	case beWayland, beX11, bePortal:

@@ -44,6 +44,8 @@ func promptKind(p string) string {
 		return "replan"
 	case strings.HasPrefix(p, "You are Jarvis's errand planner."):
 		return "plan"
+	case strings.HasPrefix(p, "You check an errand plan for Jarvis"):
+		return "check"
 	case strings.HasPrefix(p, "You are Jarvis giving the user the FINAL report"):
 		return "compose"
 	case strings.HasPrefix(p, "You are Jarvis, doing a task on the user's computer"):

@@ -90,6 +90,37 @@ func ptr[T any](v T) *T { return &v }
 
 func msg(role, text string) Message { return Message{Role: role, Content: TextContent(text)} }
 
+// A one-off request marks only its system prompt: nothing would read an entry written at its
+// end. A part's CachePrefix splits its text at the mark, and a retry (an assistant turn in
+// the request) marks the end too.
+func TestAnthropicCacheMarks(t *testing.T) {
+	rec := newRecorder(t, canned{body: messageOK}, canned{body: messageOK})
+	s := anthropicService(rec, "", "claude-sonnet-test")
+	user := Message{Role: "user", Content: &Content{Parts: []Part{{Type: "text", Text: "task and source. screen now", CachePrefix: 17}}}}
+	req := ChatRequest{Messages: []Message{msg("system", "sys"), user}}
+	if _, err := s.Chat(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_, _, body := rec.last()
+	want := `"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],"messages":[` +
+		`{"role":"user","content":[{"type":"text","text":"task and source. ","cache_control":{"type":"ephemeral"}},` +
+		`{"type":"text","text":"screen now"}]}],`
+	if !strings.Contains(string(body), want) {
+		t.Fatalf("one-off body\n got %s\nwant %s", body, want)
+	}
+	req.Messages = append(req.Messages, msg("assistant", "bad"), msg("user", "again"))
+	if _, err := s.Chat(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_, _, body = rec.last()
+	if want := `{"type":"text","text":"again","cache_control":{"type":"ephemeral"}}]}],`; !strings.Contains(string(body), want) {
+		t.Fatalf("retry body\n got %s\nwant %s", body, want)
+	}
+	if n := strings.Count(string(body), "cache_control"); n != 3 {
+		t.Fatalf("retry body has %d marks, want 3: %s", n, body)
+	}
+}
+
 // The request body golden: system hoisting, a leading assistant turn dropped, the tool round
 // trip with parallel results merged into one user message, tools and tool_choice translated,
 // no sampling knobs, max_tokens defaulted, thinking disabled.
@@ -125,7 +156,7 @@ func TestAnthropicRequestGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, body := rec.last()
-	want := `{"model":"claude-sonnet-test","system":"You are Jarvis.\n\nBe brief.","messages":[` +
+	want := `{"model":"claude-sonnet-test","system":[{"type":"text","text":"You are Jarvis.","cache_control":{"type":"ephemeral"}},{"type":"text","text":"Be brief."}],"messages":[` +
 		`{"role":"user","content":[{"type":"text","text":"weather in"},{"type":"text","text":" Paris and Rome?"}]},` +
 		`{"role":"assistant","content":[{"type":"text","text":"Checking."},` +
 		`{"type":"tool_use","id":"call_a","name":"get_weather","input":{"city":"Paris"}},` +
@@ -134,7 +165,7 @@ func TestAnthropicRequestGolden(t *testing.T) {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_a","content":"sunny"},` +
 		`{"type":"tool_result","tool_use_id":"call_b","content":"rain"},` +
 		`{"type":"tool_result","tool_use_id":"call_c","content":""},` +
-		`{"type":"text","text":"thanks"}]}],` +
+		`{"type":"text","text":"thanks","cache_control":{"type":"ephemeral"}}]}],` +
 		`"max_tokens":4096,"stream":false,"thinking":{"type":"disabled"},` +
 		`"tools":[{"name":"get_weather","description":"Weather for a city","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}},` +
 		`{"name":"now","input_schema":{"type":"object","properties":{}}}],` +

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
@@ -176,6 +177,8 @@ type Service struct {
 	PhoneDeadline    time.Duration // 60 min from confirm (D40 Q6)
 	// PlannerThinkTimeout overrides errands.planner_think_seconds (0 = the setting; <0 = none).
 	PlannerThinkTimeout time.Duration
+	// thinkOffUntil (unix seconds): until then the planner doesn't think (thinkOffFor).
+	thinkOffUntil atomic.Int64
 
 	driving sync.Map // workflow id → struct{}: runs this process is driving right now
 	// stopRequested: autorun workflow id → the tapping user id (int64); the run stops before its
@@ -234,6 +237,8 @@ const (
 	SettingPlannerMaxTokens = "errands.planner_max_tokens"
 	// SettingPlannerThinkSeconds caps one thinking planning call's wall-clock time.
 	SettingPlannerThinkSeconds = "errands.planner_think_seconds"
+	// SettingPlannerThinkTokens is how many tokens one planning call may think before it answers.
+	SettingPlannerThinkTokens = "errands.planner_think_tokens"
 	// SettingDocumentsFolder is where write_document saves a file named without a folder.
 	SettingDocumentsFolder = "errands.documents_folder"
 	// DefaultDocumentsFolder is its default; the agent creates and edits documents only in it or
@@ -265,6 +270,10 @@ func Definitions() []settings.Definition {
 			Description: "Most seconds one errand planning call may spend thinking before it is stopped and retried " +
 				"without thinking (a rougher plan). When the background model shares the live model's engine, " +
 				"voice and chat replies wait while a plan is thinking, so keep this short. -1 = no limit."},
+		{Key: SettingPlannerThinkTokens, Category: "errands", Type: settings.Int, Default: int64(defaultPlannerThinkTokens),
+			Description: "Most tokens one errand planning call may think before it writes the plan. The model stops " +
+				"thinking there and answers, so a plan always comes; without a limit a small model can think until " +
+				"its time runs out and plan nothing. -1 = no limit."},
 	}
 }
 

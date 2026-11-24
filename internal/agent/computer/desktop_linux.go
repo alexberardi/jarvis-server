@@ -130,12 +130,33 @@ type linuxAX struct {
 	focused   func(pid int) (*computeruse.Element, error)
 }
 
+// Snapshot is the elements of pid's window with the keyboard focus, by the compositor's word
+// (a dialog in front, not the main window behind it), else the app's active window.
 func (a *linuxAX) Snapshot(ctx context.Context, pid, max int) (computeruse.Snapshot, error) {
-	return atspi.Snapshot(ctx, pid, max)
+	title := ""
+	if ws, err := a.windows.List(ctx); err == nil {
+		for _, w := range ws {
+			if w.PID == pid && w.Focused {
+				title = w.Title
+				break
+			}
+		}
+	}
+	return atspi.SnapshotWindow(ctx, pid, title, max)
 }
 func (a *linuxAX) Press(gen int, ref string) error          { return atspi.Press(gen, ref) }
 func (a *linuxAX) SetValue(gen int, ref, text string) error { return atspi.SetValue(gen, ref, text) }
 func (a *linuxAX) Focus(gen int, ref string) error          { return atspi.Focus(gen, ref) }
+
+// Role and Text make linuxAX a typedAX: typing into an element is keystrokes, then checked.
+func (a *linuxAX) Role(gen int, ref string) (string, error) {
+	el, err := atspi.Element(gen, ref)
+	if err != nil {
+		return "", err
+	}
+	return el.Role, nil
+}
+func (a *linuxAX) Text(gen int, ref string) (string, error) { return atspi.Text(gen, ref) }
 
 func (a *linuxAX) At(x, y float64) (*ax.Recorded, error) {
 	if a.getenv("WAYLAND_DISPLAY") != "" {

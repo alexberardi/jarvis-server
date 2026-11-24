@@ -35,11 +35,11 @@ func adapter(name string, conv func(v float64, size int) int) Adapter {
 	}
 }
 
-// AdapterFor is the adapter for a model id: Qwen3.5 and Qwen3.8 answer in thousandths, everything
+// AdapterFor is the adapter for a model id: Qwen3.5, Qwen3.8 and Gemma 4 answer in thousandths, everything
 // else in pixels.
 func AdapterFor(modelID string) Adapter {
 	m := strings.ToLower(modelID)
-	if strings.Contains(m, "qwen3.5") || strings.Contains(m, "qwen3.8") {
+	if strings.Contains(m, "qwen3.5") || strings.Contains(m, "qwen3.8") || strings.Contains(m, "gemma-4") {
 		return Norm1000
 	}
 	return Pixels

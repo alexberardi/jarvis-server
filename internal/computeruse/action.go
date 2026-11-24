@@ -44,6 +44,9 @@ type Action struct {
 	Region    *[4]int  `json:"region,omitempty"` // zoom
 	CaptureID string   `json:"capture_id,omitempty"`
 	Approval  string   `json:"approval,omitempty"` // token minted by cc for this action
+	// Name is the name of the element Ref means, as the model read it off the list: cc checks
+	// it against Ref and clears it, so it is never sent to an executor or part of a digest.
+	Name string `json:"name,omitempty"`
 }
 
 // Target is what a run acts on: a browser tab (Site is its host[:port], the port only when the
@@ -200,7 +203,7 @@ func ValidateBatch(actions []Action) error {
 // fields in declaration order and the struct has no maps, so the same action always marshals to
 // the same bytes on both sides (cc mints, the agent verifies).
 func (a Action) Digest(runID string, t Target) string {
-	a.Approval = ""
+	a.Approval, a.Name = "", ""
 	b, err := json.Marshal(struct {
 		RunID  string `json:"run_id"`
 		Site   string `json:"site"`

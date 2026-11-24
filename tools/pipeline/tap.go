@@ -81,6 +81,25 @@ func withBackgroundPriority(path string, body []byte) []byte {
 	return slices.Concat(body[:i:i], []byte(field), body[i:])
 }
 
+// withMaxTokens gives a chat call its cap as max_tokens too: jarvisd sends a remote
+// max_completion_tokens, which an installed jarvisd older than 2026-11-16 doesn't read, so a
+// sandbox's calls had no cap.
+func withMaxTokens(path string, body []byte) []byte {
+	if !strings.HasSuffix(path, "/chat/completions") {
+		return body
+	}
+	var o map[string]json.RawMessage
+	if json.Unmarshal(body, &o) != nil || o == nil {
+		return body
+	}
+	mc, ok := o["max_completion_tokens"]
+	if _, has := o["max_tokens"]; !ok || has {
+		return body
+	}
+	i := bytes.IndexByte(body, '{') + 1
+	return slices.Concat(body[:i:i], []byte(`"max_tokens":`), mc, []byte(","), body[i:])
+}
+
 // Tap is the proxy. Upstream returns the base URL (scheme://host:port) per request. Header is
 // set on every forwarded request (the installed jarvisd's app-to-app credentials).
 type Tap struct {
@@ -106,6 +125,7 @@ func (t *Tap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !t.Live {
 		body = withBackgroundPriority(r.URL.Path, body)
 	}
+	body = withMaxTokens(r.URL.Path, body)
 	entry := TapEntry{Time: start.UTC(), Path: r.URL.Path}
 	if json.Valid(body) {
 		entry.Request = body

@@ -75,6 +75,10 @@ type Turn struct {
 	// ComputerStopped is the computer task the node's agent stopped itself on this command (a
 	// voice stop phrase): "recording", "controlling" or "paused"; "" none.
 	ComputerStopped string
+	// DesktopVoice: the turn was spoken to a desktop agent's own microphone (not a chat aimed at
+	// the computer): the user is at that computer, so run_errand may work in an app's window
+	// while they watch (errands.DraftRequest.Live).
+	DesktopVoice bool
 }
 
 // Call is one tool call addressed to a server tool.

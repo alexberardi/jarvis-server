@@ -47,6 +47,12 @@ type Endpoint struct {
 	// NoReasoningBudget: the engine refuses reasoning_budget (transformers serve answers 422);
 	// thinking goes by chat_template_kwargs alone.
 	NoReasoningBudget bool
+	// Grammar: the engine holds an answer to a JSON schema as it writes it (ResponseSchema).
+	// A local llama-server, or a remote that takes its controls (enforcesSchema).
+	Grammar bool
+	// ThinkingControls: a remote endpoint that takes llama-server's thinking controls
+	// (remote_thinking: another Jarvis server, a llama-server).
+	ThinkingControls bool
 	// Timeout bounds one request to a remote endpoint (remote_timeout_ms, stt); 0 = none.
 	Timeout time.Duration
 	// Fallback is a remote stt label's fallback setting (off, cpu: Module.ResolveCPU).
@@ -103,6 +109,10 @@ type Part struct {
 	Type     string    `json:"type"`
 	Text     string    `json:"text,omitempty"`
 	ImageURL *ImageURL `json:"image_url,omitempty"`
+	// CachePrefix says the first CachePrefix bytes of Text, and everything before this part,
+	// are the same in the caller's next requests: a provider with a prompt cache keeps them
+	// (the Anthropic dialect; the others ignore it). It must fall on a UTF-8 boundary.
+	CachePrefix int `json:"-"`
 }
 
 // MarshalJSON keeps an empty text part's "text" key.
@@ -216,6 +226,12 @@ func (t *Tool) UnmarshalJSON(b []byte) error {
 	t.Raw = append(json.RawMessage(nil), b...)
 	return nil
 }
+
+// ResponseSchema is ResponseFormat.Type for an answer the engine itself holds to JSONSchema
+// ({"name", "schema"}) as it writes it. Unlike "json_object" (the legacy JSON mode: an
+// instruction, a repair, a retry) nothing is added to the prompt and nothing is repaired; an
+// engine that can't enforce a schema (Endpoint.Grammar false) answers as if none were asked.
+const ResponseSchema = "json_schema"
 
 // ResponseFormat is response_format. JSONSchema is the json_schema object (key order kept).
 type ResponseFormat struct {

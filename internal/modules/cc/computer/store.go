@@ -38,6 +38,7 @@ type Run struct {
 	Pending              *Held        // the batch waiting for a confirmation, or nil
 	Verify               *VerifyState // the result checks so far, or nil
 	Model, Error         string
+	fit                  Fit // the model's (this call only: not stored)
 	CreatedAt, UpdatedAt time.Time
 }
 
@@ -48,7 +49,17 @@ type Entry struct {
 	Kind   string `json:"kind"`
 	Intent string `json:"intent"`
 	Ref    string `json:"ref,omitempty"`
+	// On is the element Ref was on the screen the action was decided on (button "Close"): a ref
+	// means another element on the next screen, so the history names what was acted on.
+	On     string `json:"on,omitempty"`
 	Result string `json:"result"` // ok | failed: <code> <error> | blocked: … | not run
+	// A conversation's (turns.go): the model's thought (on its round's first entry; the whole
+	// answer on a KindSaid entry), the action as the model wrote it (JSON, long text cut), and
+	// what its round changed on the screen (on the round's last entry; what the model was told
+	// on a KindSaid entry).
+	Thought string `json:"thought,omitempty"`
+	Act     string `json:"act,omitempty"`
+	Outcome string `json:"outcome,omitempty"`
 	// A replay's (replay.go): the workflow step (1-based) the action belongs to, whether it
 	// finished that step, and the element the step was healed to.
 	WStep    int              `json:"wstep,omitempty"`

@@ -286,7 +286,7 @@
    "type": "function",
    "function": {
     "name": "run_errand",
-    "description": "Plan a multi-step background task now, for the user to approve ('run an errand to ...'). Future or repeating: schedule_errand.",
+    "description": "Plan a multi-step background task now, for the user to approve ('run an errand to ...'). Also to look something up on a website or service the user names ('on Google Flights, find ...', 'compare ... on Amazon and Best Buy'): it uses the site's own search and filters, which a web search can't. Future or repeating: schedule_errand.",
     "parameters": {
      "type": "object",
      "properties": {

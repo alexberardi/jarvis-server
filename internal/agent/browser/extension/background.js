@@ -1255,32 +1255,47 @@ function snapCollect(gen, max, viewport) {
   // never leak into selection context. Cache by container because many controls share a row.
   const contextCache = new WeakMap();
   const contextLimit = 200;
+  const SMALL_BLOCK = 400; // characters of text in a block small enough to be one card or group
+  const blockText = (parent) => {
+    let text = contextCache.get(parent);
+    if (text === undefined) {
+      const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
+      const chunks = [];
+      let size = 0;
+      let visited = 0;
+      for (let node = walker.nextNode(); node && visited < 40 && size < contextLimit; node = walker.nextNode()) {
+        visited++;
+        const owner = node.parentElement;
+        if (!owner || owner.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [aria-hidden=true], [hidden], [inert], script, style, noscript")) continue;
+        if (!visible(owner)) continue; // display:none or visibility:hidden (A8)
+        const chunk = clean(node.nodeValue);
+        if (!chunk) continue;
+        const part = chunk.slice(0, contextLimit - size);
+        chunks.push(part);
+        size += part.length + 1;
+      }
+      text = clean(chunks.join(" ")).slice(0, contextLimit);
+      contextCache.set(parent, text);
+    }
+    return text;
+  };
   const contextOf = (el) => {
     let parent = el.parentElement;
     for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
       if (!parent.matches("article, li, fieldset, blockquote, [role=article], [role=group], [role=listitem], [role=comment], [role=row]")) continue;
-      let text = contextCache.get(parent);
-      if (text === undefined) {
-        const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
-        const chunks = [];
-        let size = 0;
-        let visited = 0;
-        for (let node = walker.nextNode(); node && visited < 40 && size < contextLimit; node = walker.nextNode()) {
-          visited++;
-          const owner = node.parentElement;
-          if (!owner || owner.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [aria-hidden=true], [hidden], [inert], script, style, noscript")) continue;
-          if (!visible(owner)) continue; // display:none or visibility:hidden (A8)
-          const chunk = clean(node.nodeValue);
-          if (!chunk) continue;
-          const part = chunk.slice(0, contextLimit - size);
-          chunks.push(part);
-          size += part.length + 1;
-        }
-        text = clean(chunks.join(" ")).slice(0, contextLimit);
-        contextCache.set(parent, text);
-      }
+      const text = blockText(parent);
       if (text && text !== nameOf(el)) return short(text);
-      break;
+      return "";
+    }
+    // No semantic container: a small block built of divs (a listing's card, a labelled pair of
+    // fields) still says which "max" a field is and what a listing costs. Craigslist's three
+    // unlabelled min/max pairs and priceless listing links, 2026-11-17.
+    parent = el.parentElement;
+    // A block of only punctuation ("-" between two fields, "$ – $", a gallery's dots) says
+    // nothing: the label is one block further up (Craigslist's gallery view, 2026-11-17).
+    for (let depth = 0; parent && depth < 4 && parent.textContent.length <= SMALL_BLOCK; depth++, parent = parent.parentElement) {
+      const text = blockText(parent);
+      if (/[\p{L}\p{N}]/u.test(text) && text !== nameOf(el)) return short(text);
     }
     return "";
   };
@@ -1341,10 +1356,21 @@ function snapCollect(gen, max, viewport) {
   for (const el of document.querySelectorAll("[data-jarvis-ref]")) el.removeAttribute("data-jarvis-ref");
   const pending = [];
   const elements = [];
-  for (const el of document.querySelectorAll(SEL)) {
-    if (pending.length >= max) break;
+  // Over the cap, what is on screen is kept before what is not, in page order all the same: a
+  // menu a site appends to the end of a long page (Craigslist's sort list, after 400 listing
+  // links) was cut off, and opening it "changed nothing" (2026-11-17).
+  let found = [...document.querySelectorAll(SEL)].filter(
+    (el) => roleOf(el) && visible(el) && !el.closest("[aria-hidden=true], [inert]") && (!viewport || onScreen(el)));
+  if (found.length > max) {
+    const keep = new Set(found.filter(onScreen).slice(0, max));
+    for (const el of found) {
+      if (keep.size >= max) break;
+      keep.add(el);
+    }
+    found = found.filter((el) => keep.has(el));
+  }
+  for (const el of found) {
     const role = roleOf(el);
-    if (!role || !visible(el) || el.closest("[aria-hidden=true], [inert]") || (viewport && !onScreen(el))) continue;
     pending.push(el);
     const e = { k: pending.length, role, name: nameOf(el), type: typeOf(el), autocomplete: clean(el.getAttribute("autocomplete")), state: stateOf(el) };
     // Both snapshot kinds: voice targeting and computer tasks (ELEMENT-LAYER-WORK.md §2).

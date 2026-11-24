@@ -8,10 +8,24 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 )
 
-// months with a statement, newest first: "last month" is 2026-09.
-var months = []string{"2026-09", "2026-08", "2026-07", "2026-06", "2026-05", "2026-04"}
+// months with a statement, newest first: every month from firstStatement to the clock's last
+// month, so "last month" always has one (budget_last_month) and the months the replay cases
+// name (2026-09, 2026-08) stay. Each month's lines are seeded from its name (transactions).
+var months = statementMonths(time.Now())
+
+const firstStatement = "2026-04"
+
+func statementMonths(now time.Time) []string {
+	first, _ := time.Parse("2006-01", firstStatement)
+	var out []string
+	for m := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0); !m.Before(first); m = m.AddDate(0, -1, 0) {
+		out = append(out, m.Format("2006-01"))
+	}
+	return out
+}
 
 // OverBudgetCategory is the one category clearly over budget (at least 1.5×) on every statement,
 // bank and card alike; every other category stays under 85% of its budget.

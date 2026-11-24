@@ -30,6 +30,7 @@ type Activity struct {
 	shows []func(Kind, string)
 	stops map[int]func()
 	next  int
+	gen   uint64 // the stops so far: SetSince sets only what began after the last one
 
 	// showMu orders the indicators' updates: each one shows the state as it is when it runs,
 	// so the last update always shows the latest state.
@@ -61,6 +62,38 @@ func (a *Activity) Set(k Kind, text string) {
 	a.kind, a.text = k, text
 	a.mu.Unlock()
 	a.notify()
+}
+
+// Gen is the stops so far: an action takes it as it begins, and SetSince won't show it once a
+// stop came after (a nil *Activity: 0).
+func (a *Activity) Gen() uint64 {
+	if a == nil {
+		return 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.gen
+}
+
+// SetSince is Set, unless a stop came since gen (what began before it is over) or ok says no to
+// what shows now (nil: anything). It reports whether it set. Check and set are one step, so a
+// stop can't fall between them.
+func (a *Activity) SetSince(gen uint64, k Kind, text string, ok func(Kind) bool) bool {
+	if a == nil {
+		return false
+	}
+	if k == Idle {
+		text = ""
+	}
+	a.mu.Lock()
+	if a.gen != gen || (ok != nil && !ok(a.kind)) {
+		a.mu.Unlock()
+		return false
+	}
+	a.kind, a.text = k, text
+	a.mu.Unlock()
+	a.notify()
+	return true
 }
 
 // Pause shows a task going on as paused, keeping its intent. Nothing going on: nothing.
@@ -129,6 +162,7 @@ func (a *Activity) Stop() bool {
 	a.mu.Lock()
 	was := a.kind != Idle
 	a.kind, a.text = Idle, ""
+	a.gen++
 	var stops []func() // in the order they registered
 	for _, id := range slices.Sorted(maps.Keys(a.stops)) {
 		stops = append(stops, a.stops[id])

@@ -798,3 +798,88 @@ func TestObserveFocusesTheApp(t *testing.T) {
 		t.Errorf("failed act = %v, want its error at the top", res)
 	}
 }
+
+// typedFake is fakeAX as a typedAX: each element's role, and its text as read back.
+type typedFake struct {
+	*fakeAX
+	roles map[string]string
+	text  func(ref string) string
+}
+
+func (f *typedFake) Role(_ int, ref string) (string, error) { return f.roles[ref], nil }
+func (f *typedFake) Text(_ int, ref string) (string, error) { return f.text(ref), nil }
+
+// Typing into an element is the keyboard's, into what took the focus, and is checked: an
+// element action never reports ok when the element shows nothing of it.
+func TestDesktopTypeIntoElementIsCheckedKeystrokes(t *testing.T) {
+	f := newDesktop(t)
+	f.ax.snap.Elements = []computeruse.SnapElement{
+		{Ref: "a1", Role: "button", Name: "Save"},
+		{Ref: "a2", Role: "textbox", Name: "Name"},
+		{Ref: "a3", Role: "document", Name: "Untitled 1"},
+	}
+	texts := map[string]string{"a2": "Untitled 1", "a3": ""}
+	tf := &typedFake{fakeAX: f.ax, roles: map[string]string{"a1": "button", "a2": "textbox", "a3": "document"},
+		text: func(ref string) string { return texts[ref] }}
+	f.tl.Desktop.AX = tf
+	f.observe(t, "Notes")
+
+	// A text field: focused, its old text selected, typed, and it shows the new text.
+	texts["a2"] = "Velmora"
+	res := f.act(t, "Notes", map[string]any{"kind": "type", "intent": "name the file", "ref": "a2", "text": "Velmora"})
+	if res["success"] != true {
+		t.Fatalf("type into a textbox = %v", res)
+	}
+	if got := strings.Join(f.in.posted(), ";"); got != "keys ctrl+a;type Velmora" {
+		t.Errorf("posted %q, want the old text selected and the new typed", got)
+	}
+	if got := strings.Join(f.ax.acts, ";"); got != "focus a2" {
+		t.Errorf("AX acts %q, want only the focus", got)
+	}
+
+	// The field shows something else afterwards: no_effect, after waiting for it.
+	texts["a2"] = "Untitled 1"
+	f.slept = nil
+	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "name the file", "ref": "a2", "text": "Velmora"})
+	if r := firstResult(t, res); r["code"] != "no_effect" || !strings.Contains(r["error"].(string), "Untitled 1") {
+		t.Errorf("type that didn't take = %v, want no_effect naming what it shows", r)
+	}
+	if len(f.slept) != settleTries-1 {
+		t.Errorf("slept %d times, want %d", len(f.slept), settleTries-1)
+	}
+
+	// A button isn't somewhere to type.
+	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "write", "ref": "a1", "text": "hello"})
+	if r := firstResult(t, res); r["code"] != "not_editable" {
+		t.Errorf("type into a button = %v, want not_editable", r)
+	}
+
+	// A document keeps its text (no select-all); unchanged text is no_effect.
+	before := len(f.in.posted())
+	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "write", "ref": "a3", "text": "A summary."})
+	if r := firstResult(t, res); r["code"] != "no_effect" {
+		t.Errorf("type into a document that stayed empty = %v, want no_effect", r)
+	}
+	if got := strings.Join(f.in.posted()[before:], ";"); got != "type A summary." {
+		t.Errorf("posted %q, want only the text", got)
+	}
+	texts["a3"], texts["a2"] = "A summary.", "x"
+	reads := 0
+	tf.text = func(ref string) string { // the document has the new text from the second read on
+		if reads++; ref == "a3" && reads > 1 {
+			return "A summary.More."
+		}
+		return texts[ref]
+	}
+	res = f.act(t, "Notes", map[string]any{"kind": "type", "intent": "write", "ref": "a3", "text": "More."})
+	if res["success"] != true {
+		t.Errorf("type into a document = %v", res)
+	}
+
+	tf.text = func(ref string) string { return texts[ref] }
+	// set_value on a text field that shows something else didn't take either.
+	res = f.act(t, "Notes", map[string]any{"kind": "set_value", "intent": "name", "ref": "a2", "text": "Velmora"})
+	if r := firstResult(t, res); r["code"] != "no_effect" {
+		t.Errorf("set_value that didn't take = %v, want no_effect", r)
+	}
+}

@@ -86,7 +86,7 @@ var appParam = node.Param{Name: "app", Type: "string",
 
 func typeSpec() node.Spec {
 	return node.Spec{Name: ToolType,
-		Description: "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill. A job inside an app ('make a note titled X and save it') is an errand: run_errand.",
+		Description: "Type text into an app on the computer ('type X', 'write X in slack', 'tell claude to X'); it switches to the named app itself, no need to open it first. Web page fields: browser_fill. A job inside an app ('make a note titled X and save it') is an errand: run_errand. At most 2000 characters a call: longer text goes in parts, in order. Line breaks start new lines (never send; spaces in a terminal); only submit sends.",
 		Params: []node.Param{
 			{Name: "text", Type: "string", Required: true, Description: "Only the words to type"},
 			appParam,
@@ -534,10 +534,11 @@ func (t *Tools) typeText(ctx context.Context, args map[string]any) (map[string]a
 		return nil, fmt.Errorf("%w: %s", ErrUnavailable, why)
 	}
 	raw, _ := args["text"].(string)
-	text, err := Sanitize(raw)
+	lines, err := SanitizeLines(raw)
 	if err != nil {
 		return nil, err
 	}
+	text := strings.Join(lines, " ") // for the island, the question and the count
 	submit := BoolArg(args, "submit")
 	app, _ := args["app"].(string)
 	tg, err := t.resolve(ctx, app)
@@ -564,7 +565,13 @@ func (t *Tools) typeText(ctx context.Context, args map[string]any) (map[string]a
 			label = "Typing into " + tg.name
 		}
 		t.show(label + ": " + Preview(text, 120))
-		if err := t.KB.Type(ctx, text); err != nil {
+		var brk Key
+		if len(lines) > 1 {
+			// Chosen from the window that has the focus now, after focus was confirmed.
+			brk = lineBreakKey(t.focusedApps(ctx))
+			out["line_breaks"] = lineBreakName(brk)
+		}
+		if err := typeLines(ctx, t.KB, lines, brk); err != nil {
 			return nil, err
 		}
 		out["typed_chars"], out["into"] = len([]rune(text)), where
@@ -644,6 +651,8 @@ func keyLabel(k Key) string {
 	switch k {
 	case KeyShiftTab:
 		return "Shift+Tab"
+	case KeyShiftEnter:
+		return "Shift+Enter"
 	}
 	s := string(k)
 	return strings.ToUpper(s[:1]) + s[1:]

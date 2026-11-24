@@ -551,6 +551,9 @@ func (s *Service) payload(ctx context.Context, ep Endpoint, label string, req *C
 		}
 	}
 	p.applyThinking(s.budget(ctx, label, req), ep)
+	if rf := req.ResponseFormat; rf != nil && rf.Type == ResponseSchema && ep.Grammar && len(rf.JSONSchema) > 0 {
+		p.ResponseFormat = rf
+	}
 	return p
 }
 

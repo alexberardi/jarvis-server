@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/godbus/dbus/v5"
 
@@ -54,6 +55,7 @@ const (
 	roleToggleButton  = 62
 	roleEntry         = 79
 	roleLink          = 88
+	roleDocumentText  = 94 // a word processor's page (LibreOffice Writer's document)
 	roleTableRow      = 90
 	roleTreeItem      = 91
 	roleSwitch        = 130
@@ -67,7 +69,7 @@ var roleNames = map[uint32]string{
 	roleSpinButton: "spinbutton", roleSlider: "slider", roleMenuItem: "menuitem",
 	roleCheckMenuItem: "menuitemcheckbox", roleRadioMenuItem: "menuitemradio", roleLink: "link",
 	roleListItem: "listitem", roleTreeItem: "treeitem", roleTableCell: "cell", roleTableRow: "row",
-	rolePageTab: "tab",
+	rolePageTab: "tab", roleDocumentText: RoleDocument,
 }
 
 // containerRoles name a group of controls (a toolbar, a dialog, a menu): the nearest named one
@@ -323,6 +325,55 @@ func activeWindow(ctx context.Context, pid int) (obj, error) {
 	return wins[0], nil
 }
 
+// windowTitled is the top-level window named title of an accessible app of pid. A process can
+// be more than one app on the bus (a toolkit's own dialog beside the app's bridge), so every
+// one of pid's is looked through.
+func windowTitled(ctx context.Context, pid int, title string) (obj, bool) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return obj{}, false
+	}
+	c, err := bus(ctx)
+	if err != nil {
+		return obj{}, false
+	}
+	apps, err := obj{c, objRef{registryName, rootPath}}.children(ctx)
+	if err != nil {
+		return obj{}, false
+	}
+	var best obj
+	bestRank := 0
+	for _, a := range apps {
+		var p uint32
+		cctx, cancel := context.WithTimeout(ctx, callTimeout)
+		err := c.BusObject().CallWithContext(cctx, "org.freedesktop.DBus.GetConnectionUnixProcessID", 0, a.ref.Name).Store(&p)
+		cancel()
+		if err != nil || int(p) != pid {
+			continue
+		}
+		wins, _ := a.children(ctx)
+		for _, w := range wins {
+			if strings.TrimSpace(w.name(ctx)) != title {
+				continue
+			}
+			// Two can share a title (a Save dialog opened again while a closed one lingers): the
+			// one in use wins, then one on screen. The first found was a dialog no longer shown,
+			// whose name field read "Velmora" while the one on screen still said "Untitled 2"
+			// and its Save button did nothing (suite on Gemma 4 26B, 2026-11-15).
+			rank := 1
+			if st := w.state(ctx); st.has(stateActive) {
+				rank = 3
+			} else if st.has(stateShowing) {
+				rank = 2
+			}
+			if rank > bestRank {
+				best, bestRank = w, rank
+			}
+		}
+	}
+	return best, bestRank > 0
+}
+
 // findApp is the registry's app whose bus connection belongs to pid.
 func findApp(ctx context.Context, c *dbus.Conn, pid int) (obj, error) {
 	apps, err := obj{c, objRef{registryName, rootPath}}.children(ctx)
@@ -359,8 +410,8 @@ type refTable struct {
 var refs refTable
 
 // snapshotOf walks the pid's active window; showing skips subtrees not on screen.
-func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computeruse.Snapshot, error) {
-	w, err := walk(ctx, pid, max, showing)
+func snapshotOf(ctx context.Context, pid int, max int, showing bool, title string) (computeruse.Snapshot, error) {
+	w, err := walk(ctx, pid, max, showing, title)
 	if err != nil {
 		return computeruse.Snapshot{}, err
 	}
@@ -368,39 +419,64 @@ func snapshotOf(ctx context.Context, pid int, max int, showing bool) (computerus
 	defer refs.mu.Unlock()
 	refs.gen++
 	refs.nodes = w.nodes
-	return computeruse.Snapshot{Gen: refs.gen, Elements: w.out}, nil
+	return computeruse.Snapshot{Gen: refs.gen, Elements: w.els}, nil
 }
 
 // peek is what is on screen in the app's active window, without touching the ref table.
 func peek(ctx context.Context, pid int, max int) ([]computeruse.SnapElement, error) {
-	w, err := walk(ctx, pid, max, true)
+	w, err := walk(ctx, pid, max, true, "")
 	if err != nil {
 		return nil, err
 	}
-	for i := range w.out {
-		w.out[i].Value = "" // a reader of names has no use for what a field holds
+	for i := range w.els {
+		w.els[i].Value = "" // a reader of names has no use for what a field holds
 	}
-	return w.out, nil
+	return w.els, nil
 }
 
 // walk is one depth-first walk of the active window (else the first) of the app with this pid.
-func walk(ctx context.Context, pid int, max int, showing bool) (*walker, error) {
+func walk(ctx context.Context, pid int, max int, showing bool, title string) (*walker, error) {
 	win, err := activeWindow(ctx, pid)
 	if err != nil {
 		return nil, err
+	}
+	if w, ok := windowTitled(ctx, pid, title); ok {
+		win = w
 	}
 	if max <= 0 {
 		max = DefaultMax
 	}
 	w := &walker{ctx: ctx, max: max, nodes: map[string]entry{}, win: win.bounds(ctx), showing: showing}
-	w.visit(win, 0, "", true)
-	return w, w.err
+	w.visit(win, 0, "", true, true)
+	if w.err != nil {
+		return w, w.err
+	}
+	// What is on screen comes first, then what isn't (a closed menu's items, which can still be
+	// pressed) as far as max allows. In walk order LibreOffice Writer's closed menus were all
+	// 300 elements of a task's snapshot, and none of its toolbars, its document or a dialog's
+	// controls (suite on Gemma 4 26B and Qwen3.5-9B, 2026-11-15: 40 rounds without saving).
+	kept := append(w.out, w.late[:min(len(w.late), max-len(w.out))]...)
+	w.els = make([]computeruse.SnapElement, len(kept))
+	for i, k := range kept {
+		k.el.Ref = "a" + strconv.Itoa(i+1)
+		w.els[i] = k.el
+		w.nodes[k.el.Ref] = k.e
+	}
+	return w, nil
+}
+
+// kept is an element of the walk and what acts on it; its ref is given once the order is known.
+type kept struct {
+	el computeruse.SnapElement
+	e  entry
 }
 
 type walker struct {
 	ctx   context.Context
 	max   int
-	out   []computeruse.SnapElement
+	out   []kept                    // on screen, in walk order
+	late  []kept                    // not on screen (in a subtree that isn't SHOWING), in walk order
+	els   []computeruse.SnapElement // out, then late as far as max allows, with their refs (walk)
 	nodes map[string]entry
 	err   error
 	win   *[4]int // the window's screen bounds, for Position; nil when unknown
@@ -413,7 +489,8 @@ func (w *walker) full() bool { return w.err != nil || len(w.out) >= w.max }
 // visit keeps o when it is a control and walks its children; near is the name of the nearest
 // named container above o, and context whether o's ancestry may give one at all: nothing hidden,
 // editable or secret above it (§2, A17 R3).
-func (w *walker) visit(o obj, depth int, near string, context bool) {
+// shown is whether everything above o is on screen.
+func (w *walker) visit(o obj, depth int, near string, context, shown bool) {
 	if err := w.ctx.Err(); err != nil {
 		w.err = err
 		return
@@ -428,12 +505,16 @@ func (w *walker) visit(o obj, depth int, near string, context bool) {
 	}
 	if !st.has(stateShowing) {
 		context = false // hidden: it and everything in it lose context (A15 F7, A17 R3)
+		shown = false
+	}
+	if !shown && len(w.late) >= w.max {
+		return // nothing on screen is inside, and there is no room for more that isn't
 	}
 	if !context {
 		near = ""
 	}
 	if role, ok := roleNames[r]; ok {
-		w.keep(o, role, r == rolePasswordText, near)
+		w.keep(o, role, r == rolePasswordText, near, shown)
 	} else if containerRoles[r] && context {
 		// Only a container on screen names its elements (A15 F7).
 		if n := strings.TrimSpace(o.name(w.ctx)); n != "" {
@@ -451,13 +532,13 @@ func (w *walker) visit(o obj, depth int, near string, context bool) {
 		if w.full() {
 			return
 		}
-		w.visit(k, depth+1, near, context)
+		w.visit(k, depth+1, near, context, shown)
 	}
 }
 
-func (w *walker) keep(o obj, role string, secure bool, near string) {
+func (w *walker) keep(o obj, role string, secure bool, near string, shown bool) {
 	ctx := w.ctx
-	el := computeruse.SnapElement{Ref: "a" + strconv.Itoa(len(w.out)+1), Role: role, Name: o.name(ctx), Bounds: o.bounds(ctx)}
+	el := computeruse.SnapElement{Role: role, Name: o.name(ctx), Bounds: o.bounds(ctx)}
 	if el.Bounds != nil && w.win != nil {
 		el.Position = computeruse.PositionIn(*el.Bounds, *w.win)
 	}
@@ -474,6 +555,8 @@ func (w *walker) keep(o obj, role string, secure bool, near string) {
 		if st.has(stateChecked) {
 			el.State = append(el.State, "checked")
 		}
+	case role == RoleDocument && !w.showing:
+		el.Value = clip(docText(ctx, o, maxText+1)) // how it starts: what a task typed shows here
 	case textRoles[role] && !w.showing: // a voice snapshot never reads what was typed (§2, A15 F6)
 		el.Value = clip(o.text(ctx))
 	}
@@ -488,8 +571,12 @@ func (w *walker) keep(o obj, role string, secure bool, near string) {
 			el.State = append(el.State, s.name)
 		}
 	}
-	w.out = append(w.out, el)
-	w.nodes[el.Ref] = entry{o: o, role: role, name: el.Name, secure: secure}
+	k := kept{el: el, e: entry{o: o, role: role, name: el.Name, secure: secure}}
+	if shown {
+		w.out = append(w.out, k)
+	} else {
+		w.late = append(w.late, k)
+	}
 }
 
 // lookup finds ref in generation gen. It holds the lock while f acts, so a new snapshot can't
@@ -518,6 +605,49 @@ func setValue(gen int, ref, text string) error {
 		}
 		return e.o.do(ifEditableText+".SetTextContents", text)
 	})
+}
+
+// docText is a document's text: its paragraphs' (its children's), a line each, up to about
+// limit runes. The document itself has no Text.
+func docText(ctx context.Context, o obj, limit int) string {
+	kids, _ := o.children(ctx)
+	var b strings.Builder
+	n := 0
+	for _, k := range kids {
+		t := k.text(ctx)
+		if t == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(t)
+		if n += utf8.RuneCountInString(t) + 1; n >= limit {
+			break
+		}
+	}
+	return b.String()
+}
+
+// maxReadText bounds text(): enough to tell whether typing changed a long document.
+const maxReadText = 200_000
+
+func textOf(gen int, ref string) (string, error) {
+	var out string
+	err := refs.lookup(gen, ref, func(e entry) error {
+		if e.secure {
+			return &Error{Code: CodePasswordField, Msg: ref + " is a password text; it is never read"}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		if e.role == RoleDocument {
+			out = docText(ctx, e.o, maxReadText)
+		} else {
+			out = e.o.text(ctx)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func focus(gen int, ref string) error {

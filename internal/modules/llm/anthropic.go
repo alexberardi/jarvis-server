@@ -24,6 +24,14 @@ import (
 // are not (current Claude models reject temperature/top_p).
 // Inbound: text blocks concatenate, tool_use blocks become tool calls with JSON-string
 // arguments, stop_reason maps onto finish_reason, and cache tokens count as prompt tokens.
+//
+// Prompt caching: a cache entry is a prefix (tools, then system, then messages) up to a
+// marked block, read back at a fraction of the input price by the next request that starts
+// with the same bytes. Three places are marked: the first system message (with the tools
+// before it: a conversation's pinned prompt), the end of the request when another request
+// will extend it (a tool round trip), and a part's CachePrefix (the caller's own repeat).
+// Later system messages (a turn's clock and speaker blocks) go in a second system block
+// after the marked one, so they never break the pinned prompt's entry.
 
 // anthropicVersion is the anthropic-version header every request carries.
 const anthropicVersion = "2023-06-01"
@@ -49,7 +57,7 @@ var noForcedToolModels = []string{"sonnet-5-5", "opus-5-5", "fable-5-1", "fable-
 // anthropicRequest is the POST /v1/messages body.
 type anthropicRequest struct {
 	Model      string             `json:"model"`
-	System     string             `json:"system,omitempty"`
+	System     []anthropicBlock   `json:"system,omitempty"`
 	Messages   []anthropicMessage `json:"messages"`
 	MaxTokens  int                `json:"max_tokens"`
 	Stream     bool               `json:"stream"`
@@ -77,8 +85,21 @@ type anthropicBlock struct {
 	Input     json.RawMessage  `json:"input,omitempty"`
 	ToolUseID string           `json:"tool_use_id,omitempty"`
 	// Content is a tool_result's content: a string, or text and image blocks.
-	Content any `json:"content,omitempty"`
+	Content      any             `json:"content,omitempty"`
+	CacheControl *anthropicCache `json:"cache_control,omitempty"`
 }
+
+// anthropicCache marks the end of a cached prefix (the default 5-minute entry: each read
+// renews it, and a longer one costs twice as much to write).
+type anthropicCache struct {
+	Type string `json:"type"`
+}
+
+var cacheMark = &anthropicCache{Type: "ephemeral"}
+
+// maxCachePrefixes is how many CachePrefix marks a request keeps: a request takes four
+// marks, and the system prompt and the request's end have one each.
+const maxCachePrefixes = 2
 
 type anthropicSource struct {
 	Type      string `json:"type"`
@@ -104,6 +125,7 @@ func anthropicBody(p *chatPayload) (*anthropicRequest, error) {
 	if len(msgs) == 0 {
 		return nil, apiErr(400, "invalid_request_error", "Anthropic request needs at least one user or assistant message")
 	}
+	markCache(msgs, len(p.Tools) > 0)
 	r := &anthropicRequest{Model: p.Model, System: system, Messages: msgs, MaxTokens: anthropicDefaultMaxTokens, Stream: p.Stream}
 	if p.MaxTokens != nil && *p.MaxTokens > 0 {
 		r.MaxTokens = *p.MaxTokens
@@ -127,6 +149,30 @@ func anthropicBody(p *chatPayload) (*anthropicRequest, error) {
 	return r, nil
 }
 
+// markCache keeps the first maxCachePrefixes CachePrefix marks and marks the request's last
+// block when a later request will start with this one: it carries tools (the answer may be
+// a tool call, sent back with its result) or already holds an assistant turn. A one-off
+// request gets no end mark: writing an entry costs more than plain input, and nothing would
+// read it.
+func markCache(msgs []anthropicMessage, tools bool) {
+	prefixes, extends := 0, tools
+	for i := range msgs {
+		extends = extends || msgs[i].Role == "assistant"
+		for j := range msgs[i].Content {
+			if b := &msgs[i].Content[j]; b.CacheControl != nil {
+				if prefixes++; prefixes > maxCachePrefixes {
+					b.CacheControl = nil
+				}
+			}
+		}
+	}
+	if !extends {
+		return
+	}
+	last := msgs[len(msgs)-1].Content
+	last[len(last)-1].CacheControl = cacheMark
+}
+
 // modelIn reports whether a model id contains one of the names, ignoring case.
 func modelIn(model string, names []string) bool {
 	m := strings.ToLower(model)
@@ -141,8 +187,9 @@ func forced(choice json.RawMessage) bool {
 	return json.Unmarshal(choice, &o) == nil && (o.Type == "any" || o.Type == "tool")
 }
 
-// anthropicMessages splits OpenAI messages into the system text and Messages turns.
-func anthropicMessages(in []Message) (string, []anthropicMessage, error) {
+// anthropicMessages splits OpenAI messages into the system blocks and Messages turns. The
+// first system message is its own block, marked for the cache; the others join in a second.
+func anthropicMessages(in []Message) ([]anthropicBlock, []anthropicMessage, error) {
 	var system []string
 	var out []anthropicMessage
 	add := func(role string, blocks []anthropicBlock) {
@@ -165,7 +212,7 @@ func anthropicMessages(in []Message) (string, []anthropicMessage, error) {
 			}
 		case "tool":
 			if m.ToolCallID == "" {
-				return "", nil, apiErr(400, "invalid_request_error",
+				return nil, nil, apiErr(400, "invalid_request_error",
 					"Anthropic tool_result requires tool_call_id; a tool message arrived without one")
 			}
 			add("user", []anthropicBlock{{Type: "tool_result", ToolUseID: m.ToolCallID, Content: toolResultContent(m.Content)}})
@@ -185,7 +232,14 @@ func anthropicMessages(in []Message) (string, []anthropicMessage, error) {
 			add("user", anthropicBlocks(m.Content, true))
 		}
 	}
-	return strings.Join(system, "\n\n"), out, nil
+	var blocks []anthropicBlock
+	if len(system) > 0 {
+		blocks = append(blocks, anthropicBlock{Type: "text", Text: system[0], CacheControl: cacheMark})
+	}
+	if len(system) > 1 {
+		blocks = append(blocks, anthropicBlock{Type: "text", Text: strings.Join(system[1:], "\n\n")})
+	}
+	return blocks, out, nil
 }
 
 // anthropicBlocks turns content into text blocks (and image blocks when images is set).
@@ -204,6 +258,9 @@ func anthropicBlocks(c *Content, images bool) []anthropicBlock {
 	var out []anthropicBlock
 	for _, p := range c.Parts {
 		switch {
+		case p.Type == "text" && p.CachePrefix > 0 && p.CachePrefix < len(p.Text) && images:
+			out = append(out, anthropicBlock{Type: "text", Text: p.Text[:p.CachePrefix], CacheControl: cacheMark},
+				anthropicBlock{Type: "text", Text: p.Text[p.CachePrefix:]})
 		case p.Type == "text" && p.Text != "":
 			out = append(out, anthropicBlock{Type: "text", Text: p.Text})
 		case p.Type == "image_url" && p.ImageURL != nil && images:
@@ -376,6 +433,13 @@ func (t *usageTally) merge(u *anthropicUsage) {
 	take(&t.cacheCreation, u.CacheCreation)
 }
 
+// log records what the request cost in input: cache_read is the part billed at the cached
+// price, cache_write the part stored for the next request. A conversation that never reads
+// is paying full price for a prompt it keeps resending.
+func (t usageTally) log(log *slog.Logger) {
+	log.Info("llm: anthropic usage", "input", t.input, "cache_read", t.cacheRead, "cache_write", t.cacheCreation, "output", t.output)
+}
+
 func (t usageTally) usage() Usage {
 	prompt := t.input + t.cacheRead + t.cacheCreation
 	return Usage{PromptTokens: prompt, CompletionTokens: t.output, TotalTokens: prompt + t.output}
@@ -467,6 +531,7 @@ func parseAnthropicMessage(r io.Reader, log *slog.Logger) (completion, error) {
 	c.Content = sb.String()
 	var t usageTally
 	t.merge(out.Usage)
+	t.log(log)
 	c.Usage = t.usage()
 	c.FinishReason = finishReason(out.StopReason)
 	logStop(log, out.StopReason, out.StopDetails)
@@ -621,6 +686,7 @@ func parseAnthropicStream(r io.Reader, onDelta func(string) bool, log *slog.Logg
 		}
 	}
 	res.Content = sb.String()
+	tally.log(log)
 	res.Usage = tally.usage()
 	res.FinishReason = finishReason(stop)
 	if !stopped {

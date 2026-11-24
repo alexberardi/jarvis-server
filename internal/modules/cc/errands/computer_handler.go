@@ -14,6 +14,7 @@ import (
 
 	"github.com/alexberardi/jarvis-server/internal/computeruse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/computer"
+	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/parse"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/policy"
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/servertools"
@@ -64,6 +65,10 @@ type ComputerTasks struct {
 	// Source reads the page a step works from: its address, or words to search for (nil: a
 	// step's source is ignored).
 	Source func(ctx context.Context, householdID, ref string) (computer.Source, error)
+	// OpenPage reads the page open in the browser on nodeID when one of refs (the step's
+	// source, its goal, the errand's goal) means it ("this page", "the open page"); ok false
+	// when none does (nil: never). A desktop task can't look at the browser itself.
+	OpenPage func(ctx context.Context, householdID, nodeID string, userID *int64, refs ...string) (src computer.Source, ok bool, err error)
 }
 
 // computerEntry is computer_task in the planner's menu.
@@ -103,11 +108,13 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	if rc.workflowID == "" {
 		return failed("computer step has no workflow link")
 	}
-	t := computer.Task{HouseholdID: rc.householdID, UserID: rc.userID, WorkflowID: rc.workflowID, Step: i}
+	t := computer.Task{HouseholdID: rc.householdID, UserID: rc.userID, WorkflowID: rc.workflowID, Step: i,
+		Today: s.now().In(zoneOf(rc.timezone)).Format("Monday, January 2, 2006")}
 	// A saved workflow replays (its own goal, targets and success check); anything else is the
 	// loop on the step's goal.
 	run := func(t computer.Task) computer.Outcome { return s.Computer.Loop.Run(ctx, t) }
-	if cmd == cmdRunWorkflow || truthyStr(args, ArgTaughtWorkflow) != "" {
+	replay := cmd == cmdRunWorkflow || truthyStr(args, ArgTaughtWorkflow) != ""
+	if replay {
 		wf, params, msg := s.taughtStep(ctx, rc, args)
 		if msg != "" {
 			return failed(msg)
@@ -115,6 +122,14 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 		run = func(t computer.Task) computer.Outcome { return s.Computer.Loop.Replay(ctx, t, wf, params) }
 	} else {
 		t.Goal = parse.PyStrip(firstNonEmpty(truthyStr(args, "goal"), rc.goal))
+		if req := parse.PyStrip(rc.goal); req != t.Goal {
+			t.Request = req
+		}
+		if rc.wf != nil {
+			t.Plan = planLines(rc.wf.Steps, i)
+		}
+		// The step's goal and the user's own words: the planner may have dropped "last month".
+		t.Dates = dates.New(s.now(), rc.timezone).Explain(t.Goal + " . " + rc.goal)
 		t.Target = computeruse.Target{Kind: "browser", Site: siteOf(truthyStr(args, "site")), App: parse.PyStrip(truthyStr(args, "app"))}
 		if truthyStr(args, "target") == "desktop" {
 			t.Target.Kind = "desktop"
@@ -123,16 +138,15 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 			if t.Target.Site == "" {
 				t.Target.Site = siteOf(t.StartURL)
 			}
+			if t.StartURL == "" && t.Target.Site == "" {
+				// "Find the cheapest listing and add it to my cart" names no website: the task
+				// starts on a web search and goes where that leads.
+				t.StartURL = searchStart
+			}
+			t.Found = PriorResults(*rc.results)
 		}
 		if ok := parse.PyStrip(truthyStr(args, "success")); ok != "" {
 			t.Success = &computer.SuccessCheck{Screen: ok}
-		}
-		if ref := parse.PyStrip(truthyStr(args, "source")); ref != "" && s.Computer.Source != nil {
-			src, err := s.Computer.Source(ctx, rc.householdID, ref)
-			if err != nil {
-				return failed("I couldn't read the source page: " + err.Error())
-			}
-			t.Source = &src
 		}
 	}
 	// A run of this step that hasn't ended is resumed (after its confirmation or question).
@@ -158,6 +172,27 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 				return failed("A desktop task runs only on the computer you ask for it at.")
 			}
 			t.NodeID = rc.nodeID
+		}
+	}
+	if !replay {
+		// The page the task writes from, read once the computer is known: the one open in its
+		// browser when the step or the request means that page, else the address or search.
+		ref := parse.PyStrip(truthyStr(args, "source"))
+		var src computer.Source
+		var ok bool
+		var err error
+		if s.Computer.OpenPage != nil && t.Target.Kind == "desktop" && !strings.HasPrefix(ref, "http") {
+			src, ok, err = s.Computer.OpenPage(ctx, rc.householdID, t.NodeID, rc.userID, ref, t.Goal, rc.goal)
+		}
+		if !ok && err == nil && ref != "" && s.Computer.Source != nil {
+			src, err = s.Computer.Source(ctx, rc.householdID, ref)
+			ok = err == nil
+		}
+		if err != nil {
+			return failed("I couldn't read the source page: " + err.Error())
+		}
+		if ok {
+			t.Source = &src
 		}
 	}
 	w := rc.wf
@@ -210,7 +245,7 @@ func (computerHandler) Run(ctx context.Context, s *Service, rc *runCtx, cmd stri
 	case computer.StateStopped:
 		return Result{Command: cmd, Label: label, Error: firstNonEmpty(out.Summary, "Stopped."), stopped: true}, nil
 	}
-	return failed(firstNonEmpty(out.Summary, "the computer task failed"))
+	return failed(strings.TrimSpace(firstNonEmpty(out.Summary, "the computer task failed") + " " + out.ModelNote))
 }
 
 // computerWait is what a computer step parked on: a confirmation of its held actions (with the
@@ -295,8 +330,8 @@ func (s *Service) withinSpendLimit(ctx context.Context, hh string, out computer.
 		return 0, false
 	}
 	price, ok := priceCents(out.Checkout.Price)
-	if !ok || price > limit {
-		return 0, false
+	if !ok || price > limit || out.Checkout.Warning != "" {
+		return 0, false // an order that may not be the one asked for is never approved unasked
 	}
 	for _, p := range out.Pending {
 		if p.Category != computeruse.CatPay {
@@ -342,6 +377,9 @@ func siteOf(site string) string {
 	return strings.ToLower(site)
 }
 
+// searchStart is where a browser task that names no website starts.
+const searchStart = "https://duckduckgo.com/"
+
 // startURL is where a browser task starts: site when it is a web address, else the first web
 // address on site (any site when it is "") in the goals, the step's then the errand's; "" when
 // there is none (the executor opens https://<site>). The house model shortens the user's
@@ -384,6 +422,9 @@ func ComputerConfirmCard(co *computer.Checkout, pending []computer.PendingAction
 			if l[1] != "" {
 				lines = append(lines, l[0]+": "+l[1])
 			}
+		}
+		if co.Warning != "" {
+			lines = append(lines, "", "⚠️ This may not be what you asked for: "+co.Warning+".")
 		}
 		checkout = map[string]any{"product": co.Product, "price": co.Price, "currency": co.Currency,
 			"seller": co.Seller, "ship_to": co.ShipTo, "card": co.Card}
@@ -509,8 +550,9 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 		return "", nil, false
 	}
 	for _, h := range run.History {
-		// What the task did: not the actions it held for the user, nor the ones that never ran.
-		if h.Intent != "" && h.Result != heldResult && h.Result != "not run" {
+		// What the task did: not the actions it held for the user, nor the ones that never ran,
+		// nor its questions (the question card says those).
+		if h.Intent != "" && h.Kind != "ask" && h.Kind != "wait" && h.Result != heldResult && h.Result != "not run" {
 			intents = append(intents, h.Intent)
 		}
 	}
@@ -525,8 +567,14 @@ func (s *Service) computerProgress(ctx context.Context, w *workflowRow, i int, s
 		if len(intents) > 0 {
 			line += ": " + intents[len(intents)-1]
 		}
-	case computer.RunWaiting, computer.RunPaused:
-		line = "Waiting for you in " + where
+	case computer.RunWaiting:
+		// Held for a confirmation or a question: the card for it is the next one down.
+		line = "Needs your OK to go on in " + where + ": see the card that asks"
+		if run.Pending == nil {
+			line = "Has a question for you about " + where + ": see the card that asks"
+		}
+	case computer.RunPaused:
+		line = "Paused in " + where + " while you use the computer"
 	}
 	return line, intents, true
 }
@@ -581,7 +629,9 @@ func (s *Service) handleAnswerStep(ctx context.Context, c CallbackContext) Callb
 	if !revisionsMatch(c.Data["revision"], w.Revision) {
 		return fail("This errand was updated — open the latest card.")
 	}
-	answer := firstNonEmpty(strings.TrimSpace(dataStr(c.Data, "instruction")), "Carry on.")
+	// Continue with nothing typed: yes to what the question proposed (a purchase still asks
+	// for its own approval).
+	answer := firstNonEmpty(strings.TrimSpace(dataStr(c.Data, "instruction")), "Yes, go ahead as you suggested.")
 	if s.Computer == nil || s.Computer.Loop == nil || s.Computer.Loop.Store == nil {
 		return fail("Computer tasks are unavailable right now.")
 	}
@@ -621,4 +671,25 @@ func (s *Service) stopComputer(ctx context.Context, workflowID string, ended boo
 		s.Computer.Loop.Exec.Stop(ctx, run.ID)
 	}
 	return true
+}
+
+// planLines is an errand's steps for the task doing step at: one a line, the done ones said so
+// and the task's own marked "->". "" for an errand of one step.
+func planLines(steps []Step, at int) string {
+	if len(steps) < 2 {
+		return ""
+	}
+	var b strings.Builder
+	for j, st := range steps {
+		name := strings.Join(strings.Fields(firstNonEmpty(st.Label, st.Command)), " ")
+		switch {
+		case j < at:
+			fmt.Fprintf(&b, "   %d. %s (done)\n", j+1, name)
+		case j == at:
+			fmt.Fprintf(&b, "-> %d. %s\n", j+1, name)
+		default:
+			fmt.Fprintf(&b, "   %d. %s\n", j+1, name)
+		}
+	}
+	return b.String()
 }

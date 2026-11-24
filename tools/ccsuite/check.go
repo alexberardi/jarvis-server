@@ -7,9 +7,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/alexberardi/jarvis-server/tools/ccsites/notesapp"
 )
@@ -19,13 +21,19 @@ import (
 // app's state file, the fake relay's pushes, the cards Jarvis posted and what it said. It is
 // gathered by run.go; the checks are pure functions of it.
 type State struct {
-	Sites  SitesState      `json:"sites"`
-	Docs   []Doc           `json:"docs"`
-	Notes  []notesapp.Note `json:"notes"`
-	Pushes []Push          `json:"pushes"`
-	Cards  []Card          `json:"cards"`
+	Sites SitesState `json:"sites"`
+	Docs  []Doc      `json:"docs"`
+	// Documents is every file in the agent's ~/Documents, folders included (Docs is its
+	// Jarvis folder), as Docs reads them: a document's text.
+	Documents []Doc           `json:"documents"`
+	Notes     []notesapp.Note `json:"notes"`
+	Pushes    []Push          `json:"pushes"`
+	Cards     []Card          `json:"cards"`
 	// Replies is what Jarvis said: the chat's answers and the cards' bodies, in order.
 	Replies []string `json:"replies"`
+	// Watch is the agent's activity and actions while the case ran (interrupt.go; nil without
+	// a desktop session).
+	Watch *Watch `json:"watch,omitempty"`
 }
 
 // SitesState mirrors ccsites' /control/state (tools/ccsites/server.go State; a main package, so
@@ -109,16 +117,20 @@ func (ch Check) Eval(st *State) string {
 		}
 		return "an order was placed: " + orders(st)
 	case "download":
+		want := ch.Month
+		if want == "last" {
+			want = lastMonth(time.Now())
+		}
 		var got []string
 		for _, d := range st.Sites.Downloads {
-			if d.Site == ch.Site && (ch.Month == "" || d.Month == ch.Month) {
+			if d.Site == ch.Site && (want == "" || d.Month == want) {
 				return ""
 			}
 			got = append(got, d.Site+" "+d.Month)
 		}
 		month := ""
-		if ch.Month != "" {
-			month = " for " + ch.Month
+		if want != "" {
+			month = " for " + want
 		}
 		return fmt.Sprintf("no %s statement%s downloaded (downloads: %s)", ch.Site, month, list(got))
 	case "spreadsheet_has":
@@ -135,6 +147,23 @@ func (ch Check) Eval(st *State) string {
 			}
 		}
 		return fmt.Sprintf("no file in ~/Documents/Jarvis%s has all of %q (files: %s)", inGlob(ch.File), ch.Contains, list(names))
+	case "document_has":
+		var names []string
+		for _, d := range st.Documents {
+			if ok, _ := filepath.Match(ch.File, path.Base(d.Path)); !ok {
+				continue
+			}
+			names = append(names, d.Path)
+			words := len(strings.Fields(d.Text))
+			switch {
+			case !containsAll(d.Text, ch.Contains):
+				return fmt.Sprintf("~/Documents/%s has not all of %q", d.Path, ch.Contains)
+			case ch.MaxWords > 0 && words > ch.MaxWords:
+				return fmt.Sprintf("~/Documents/%s has %d words, more than %d: not a summary", d.Path, words, ch.MaxWords)
+			}
+			return ""
+		}
+		return fmt.Sprintf("no file in ~/Documents matching %s (files: %s)", ch.File, list(names))
 	case "form_submitted":
 		for _, f := range st.Sites.Forms {
 			if fieldsMatch(f.Fields, ch.Fields) {
@@ -151,6 +180,17 @@ func (ch Check) Eval(st *State) string {
 			titles = append(titles, n.Title)
 		}
 		return fmt.Sprintf("no note %q with %q in it (notes: %s)", ch.Title, ch.Body, list(titles))
+	case "stopped", "paused", "indicator":
+		return ch.evalWatch(st.Watch)
+	case "no_note":
+		if len(st.Notes) == 0 {
+			return ""
+		}
+		var titles []string
+		for _, n := range st.Notes {
+			titles = append(titles, n.Title)
+		}
+		return "a note was saved: " + list(titles)
 	case "reply_matches":
 		if anyMatch(regexp.MustCompile(ch.Pattern), st.Replies) {
 			return ""
@@ -241,8 +281,9 @@ func anyMatch(re *regexp.Regexp, texts []string) bool {
 	return false
 }
 
-// readDocs reads every file under dir (the agent's ~/Documents/Jarvis) as text: .xlsx by its
-// cells, anything else as it is (CSV, TSV, Markdown); a missing dir is no files.
+// readDocs reads every file under dir (the agent's ~/Documents/Jarvis, or ~/Documents) as text:
+// .xlsx by its cells, .odt and .docx by their paragraphs, anything else as it is (CSV, TSV,
+// Markdown); a missing dir is no files.
 func readDocs(dir string) ([]Doc, error) {
 	var docs []Doc
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -257,9 +298,14 @@ func readDocs(dir string) ([]Doc, error) {
 		}
 		rel, _ := filepath.Rel(dir, p)
 		var text string
-		if strings.EqualFold(filepath.Ext(p), ".xlsx") {
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".xlsx":
 			text, err = xlsxText(p)
-		} else {
+		case ".odt":
+			text, err = paragraphs(p, "content.xml", "p", "h")
+		case ".docx":
+			text, err = paragraphs(p, "word/document.xml", "p")
+		default:
 			var b []byte
 			b, err = os.ReadFile(p)
 			text = string(b)
@@ -321,4 +367,124 @@ func xlsxText(path string) (string, error) {
 		rc.Close()
 	}
 	return strings.Join(parts, " "), nil
+}
+
+// paragraphs is the text of member in the zip at path (a .odt's content.xml, a .docx's
+// word/document.xml), one paragraph per element named one of para, space-separated: what a
+// document says, not how it looks.
+func paragraphs(path, member string, para ...string) (string, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return "", err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if f.Name != member {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		defer rc.Close()
+		var parts []string
+		var cur strings.Builder
+		dec := xml.NewDecoder(rc)
+		for {
+			tok, err := dec.Token()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", fmt.Errorf("%s: %w", member, err)
+			}
+			switch t := tok.(type) {
+			case xml.EndElement:
+				if oneOf(t.Name.Local, para...) && strings.TrimSpace(cur.String()) != "" {
+					parts = append(parts, strings.TrimSpace(cur.String()))
+					cur.Reset()
+				}
+			case xml.CharData:
+				cur.Write(t)
+			}
+		}
+		return strings.Join(parts, " "), nil
+	}
+	return "", fmt.Errorf("%s: no %s", path, member)
+}
+
+// lastMonth is the month before now's, as YYYY-MM: a download check's month "last" (the fixture
+// bank's statements run up to it, tools/ccsites/bank.go).
+func lastMonth(now time.Time) string {
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0).Format("2006-01")
+}
+
+// evalWatch is the checks on what the agent did while the case ran (st.Watch):
+//   - stopped: the interrupt fired, no action succeeded after it, and the indicator was left idle;
+//   - paused: after the interrupt the agent showed paused, with at most one action landing first;
+//   - indicator: it showed the task (controlling or paused) while it ran, and idle at the end.
+func (ch Check) evalWatch(w *Watch) string {
+	if w == nil || len(w.Activity) == 0 {
+		return "the agent was not watched (no desktop session)"
+	}
+	last := w.Activity[len(w.Activity)-1]
+	if ch.Kind == "indicator" {
+		shown := false
+		for _, s := range w.Activity {
+			shown = shown || s.kind() == "controlling" || s.kind() == "paused"
+		}
+		switch {
+		case !shown:
+			return "the indicator never showed the task (activity: " + activity(w) + ")"
+		case last.kind() != "idle":
+			return fmt.Sprintf("the indicator still shows %q after the task (activity: %s)", last.Status, activity(w))
+		}
+		return ""
+	}
+	if w.Interrupted.IsZero() {
+		return fmt.Sprintf("never interrupted: %d actions landed (activity: %s)", len(w.Actions), activity(w))
+	}
+	if w.FireErr != "" {
+		return "the " + w.Interrupt + " failed: " + w.FireErr
+	}
+	after := func(until time.Time) int {
+		n := 0
+		for _, a := range w.Actions {
+			if a.After(w.Interrupted) && (until.IsZero() || a.Before(until)) {
+				n++
+			}
+		}
+		return n
+	}
+	if ch.Kind == "stopped" {
+		// The stop fires as an action begins, and that action is logged when it ends: it was
+		// already under way, so it may land a moment after the stop (3 of 12 runs on
+		// 2026-11-16, each with that one action and no other). Any call past it is the failure.
+		if n := len(w.Actions) - max(w.After, 1); n > 0 && after(time.Time{}) > 0 {
+			return fmt.Sprintf("%d actions landed after the stop", n)
+		}
+		if last.kind() != "idle" {
+			return fmt.Sprintf("the indicator still shows %q after the stop", last.Status)
+		}
+		return ""
+	}
+	for _, s := range w.Activity {
+		if s.Time.Before(w.Interrupted) || s.kind() != "paused" {
+			continue
+		}
+		if n := after(s.Time); n > 1 {
+			return fmt.Sprintf("%d actions landed before it paused", n)
+		}
+		return ""
+	}
+	return "it never showed paused after the user's input (activity: " + activity(w) + ")"
+}
+
+// activity is the watch's activity for a failure: each state, from the start of the case.
+func activity(w *Watch) string {
+	var s []string
+	for _, a := range w.Activity {
+		s = append(s, fmt.Sprintf("+%.1fs %s", a.Time.Sub(w.Activity[0].Time).Seconds(), a.Status))
+	}
+	return strings.Join(s, ", ")
 }

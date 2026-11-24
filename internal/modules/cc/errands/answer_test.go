@@ -169,7 +169,7 @@ func TestCardSummarySkipsLeadIn(t *testing.T) {
 func TestComposePromptSendMeIsTheReport(t *testing.T) {
 	p := ComposePrompt(espressoGoal, []Result{serverOutcome("quick_search", espressoSources())})
 	if !strings.Contains(p, "'send me a summary', 'let me know') is NOT an undone action") ||
-		!strings.Contains(p, "no lead-in line") {
+		!strings.Contains(p, "Start with one plain sentence") {
 		t.Fatalf("compose prompt:\n%s", p)
 	}
 }
@@ -383,7 +383,7 @@ func TestAttachmentWork(t *testing.T) {
 	if p := truthyStr(attachmentWork("x", []Step{save, named}, menu)[1].Args, "path"); p != "Totals.ods" {
 		t.Fatalf("named path %q", p)
 	}
-	if p := truthyStr(attachmentWork("summarize the report", []Step{save, reply}, menu)[1].Args, "path"); p != "q3 hours spreadsheet.odt" {
+	if p := truthyStr(attachmentWork("summarize the report", []Step{save, reply}, menu)[1].Args, "path"); p != "q3 hours spreadsheet.docx" {
 		t.Fatalf("text path %q", p)
 	}
 }
@@ -427,6 +427,22 @@ func TestValidDocumentsFolder(t *testing.T) {
 		"~/Downloads": false, "/etc": false, "~/Documents/../.ssh": false, "~/Documentsx": false, "": false} {
 		if err := validDocumentsFolder(v); (err == nil) != ok {
 			t.Errorf("%q: %v", v, err)
+		}
+	}
+}
+
+// A report's money and big numbers must be ones the steps found, however they are written.
+func TestUnbackedFigure(t *testing.T) {
+	source := "goal: under 15000 dollars\n2006 Honda CR-V 193k mi $4,500\nRoborock $139.99, 34,000 reviews"
+	for report, want := range map[string]string{
+		"The 2006 CR-V has 193,000 miles and costs $4500.":     "",
+		"Under $15,000: the Roborock at $139.99 (34k reviews)": "",
+		"A 2008 CR-V with 142,500 miles for $8,900":            "2008",
+		"The Roborock is $129.99":                              "129.99",
+		"Three were found, the best rated 4.3 stars":           "",
+	} {
+		if got := unbackedFigure(report, source); got != want {
+			t.Errorf("%q: unbacked %q, want %q", report, got, want)
 		}
 	}
 }

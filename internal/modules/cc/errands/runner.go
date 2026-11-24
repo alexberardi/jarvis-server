@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/alexberardi/jarvis-server/internal/modules/cc/dates"
@@ -557,12 +559,50 @@ func (s *Service) execute(ctx context.Context, w *workflowRow, start int, prior 
 			s.updateRanCard(ctx, w, results, "running", "")
 		}
 		if !r.Success {
+			if carriesOn(w.Steps, i, results) {
+				s.log().Info("errands: step failed, the rest don't need it", "index", i, "command", cmd)
+				continue
+			}
 			s.log().Info("errands: fail-fast", "index", i, "command", cmd)
 			break
 		}
 	}
 	agg := s.aggregateAndCompose(ctx, w.Goal, results)
 	return &agg, nil
+}
+
+// actsRe is a goal that buys, sends or changes something rather than looking something up.
+var actsRe = regexp.MustCompile(`(?i)\b(buy|order|purchase|pay|book|reserve|send|submit|post|reply|apply|sign up|subscribe|cancel|delete|remove|change|update|fill|cart|check ?out)\b`)
+
+// carriesOn reports whether the run goes on after steps[failed] failed (user, 2026-11-17): the
+// failed step was a lookup on one website, and all that is left is lookups on other websites
+// and the write-up, which don't need it. Anything that would buy, send or change something
+// stops the run, as does a write-up with nothing found to write from.
+func carriesOn(steps []Step, failed int, results []Result) bool {
+	site := func(st Step) string {
+		if strings.TrimSpace(st.Command) != cmdComputer || st.IsRisky || actsRe.MatchString(objStr(st.Args, "goal")) {
+			return ""
+		}
+		return siteOf(objStr(st.Args, "site"))
+	}
+	seen := map[string]bool{site(steps[failed]): true}
+	if seen[""] || failed+1 >= len(steps) {
+		return false
+	}
+	lookups := false
+	for _, r := range results {
+		lookups = lookups || r.Success
+	}
+	for _, st := range steps[failed+1:] {
+		switch cmd := strings.TrimSpace(st.Command); {
+		case cmd == cmdWriteDoc || cmd == cmdWriteSheet:
+		case site(st) == "" || seen[site(st)]:
+			return false
+		default:
+			seen[site(st)], lookups = true, true
+		}
+	}
+	return lookups
 }
 
 // recordStep logs what the household's rules did to one step of a run.
@@ -733,9 +773,10 @@ func ComposePrompt(goal string, results []Result) string {
 		"step:\n" + strings.Join(lines, "\n") +
 		"\n\nIf the goal asks for information (to find, search, look up, compare, list or " +
 		"summarize something), this report IS the answer the user is waiting for: give it. " +
-		"Name the specific things found with their key facts (names, prices, ratings, times) " +
-		"taken from what the steps found, one per line, starting with the first one (no " +
-		"lead-in line), then one short closing sentence. If fewer were found than asked for, " +
+		"Start with one plain sentence that answers them (their notification shows it), then " +
+		"lay out the rest in whatever shape serves what they asked: you decide (a pick and " +
+		"why, a comparison, the tradeoffs, a list, a table). Use the specifics (names, prices, " +
+		"ratings, times) taken from what the steps found. If fewer were found than asked for, " +
 		"give the ones found and say so. Otherwise write a " +
 		"short, friendly 1-2 sentence summary. Base EVERY statement STRICTLY " +
 		"on the detail shown after each step — quote the useful information (the weather, " +
@@ -744,8 +785,7 @@ func ComposePrompt(goal string, results []Result) string {
 		"do NOT say a joke was told, a message was sent, an item was found, or a task was " +
 		"done unless that detail is actually shown above. The errand is OVER, so NEVER say " +
 		"you 'will' do something and never mention any action not in the steps above. If a " +
-		"step FAILED, say so honestly (a failed step stops the errand, so later steps did " +
-		"NOT run).\n" +
+		"step FAILED, say so honestly; a step that is not listed above did NOT run.\n" +
 		"CRITICAL — the goal may DESCRIBE actions (set a reminder, send a message, make a " +
 		"call, add a to-do) that were NOT performed: ONLY the steps listed above are real. " +
 		"If the goal mentions such an action but there is NO step for it above, you MUST " +
@@ -755,7 +795,7 @@ func ComposePrompt(goal string, results []Result) string {
 		"to the user themselves ('send me a summary', 'let me know') is NOT an undone " +
 		"action: this report is how they get it, so never say it was not sent; saving or noting " +
 		"the result is not sending it either. No " +
-		"preamble, no markdown (plain lines only)."
+		"preamble. Markdown is fine where it helps (a list, a table, bold for the pick)."
 }
 
 // composeErrandMessage LLM-composes the report on the background label (D40 09.Q11; legacy
@@ -764,10 +804,11 @@ func (s *Service) composeErrandMessage(ctx context.Context, goal string, results
 	if s.LLM == nil {
 		return fallback, false
 	}
-	temp, maxTok, off := 0.3, 800, 0
+	prompt := ComposePrompt(goal, results)
+	temp, maxTok, off := 0.3, 2000, 0 // room for a comparison; a short answer stays short
 	resp, err := s.LLM.Chat(ctx, llm.ChatRequest{
 		Label: s.modelSlot(ctx), Temperature: &temp, MaxTokens: &maxTok, ReasoningBudget: &off,
-		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(ComposePrompt(goal, results))}},
+		Messages: []llm.Message{{Role: "user", Content: llm.TextContent(prompt)}},
 	})
 	if err != nil {
 		s.log().Warn("errands: result compose failed; using the plain summary", "err", err)
@@ -778,9 +819,51 @@ func (s *Service) composeErrandMessage(ctx context.Context, goal string, results
 		content = content[i+len("</think>"):]
 	}
 	if content = parse.PyStrip(content); content != "" {
+		if f := unbackedFigure(content, prompt); f != "" {
+			// The model made a number up: the plain roll-up says only what the steps said.
+			s.log().Warn("errands: the report has a figure no step found; using the plain summary", "figure", f)
+			return fallback, false
+		}
 		return content, true
 	}
 	return fallback, false
+}
+
+// figureRe is an amount of money, a number of four digits or more, or a number in thousands
+// ("193k"): what a report must not invent.
+var figureRe = regexp.MustCompile(`(?i)[$€£]\s?\d[\d,]*(?:\.\d+)?k?|\b\d[\d,]{3,}(?:\.\d+)?k?\b|\b\d+(?:\.\d+)?k\b`)
+
+// figures are text's figures, written one way ("$4,500", "4500" and "4.5k" are the same).
+func figures(text string) []string {
+	var out []string
+	for _, f := range figureRe.FindAllString(text, -1) {
+		f = strings.ToLower(strings.NewReplacer("$", "", "€", "", "£", "", ",", "", " ", "").Replace(f))
+		k := strings.HasSuffix(f, "k")
+		n, err := strconv.ParseFloat(strings.TrimSuffix(f, "k"), 64)
+		if err != nil {
+			continue
+		}
+		if k {
+			n *= 1000
+		}
+		out = append(out, strconv.FormatFloat(n, 'f', -1, 64))
+	}
+	return out
+}
+
+// unbackedFigure is the first figure in a report that source (the goal and what the steps
+// found) doesn't hold, "" when every one is there.
+func unbackedFigure(report, source string) string {
+	have := map[string]bool{}
+	for _, f := range figures(source) {
+		have[f] = true
+	}
+	for _, f := range figures(report) {
+		if !have[f] {
+			return f
+		}
+	}
+	return ""
 }
 
 // aggregateAndCompose is aggregate_and_compose: control steps leave the tally and the summary
@@ -813,7 +896,8 @@ func cardSummary(a Aggregate) string {
 	}
 	var first string
 	for _, line := range strings.Split(a.Answer, "\n") {
-		if line = parse.PyStrip(line); line != "" {
+		// The push shows words, not a heading's or a list's marks.
+		if line = strings.Trim(parse.PyStrip(line), "#*->| "); line != "" {
 			if first == "" {
 				first = line
 			}

@@ -1,0 +1,36 @@
+{
+  "name": "t1_writer_summary",
+  "about": "T1 of the computer-use spec: summarize the encyclopedia page the user has open into a LibreOffice document. The suite opens ccsites /wiki/Velmora in a tab first (setup.open), and Say gives no address: the page is read through the computer, as \"this page\" is in real use (the server's own fetch refuses 127.0.0.1). The town is made up (about 560 words), so the facts can only come from the page. Scored from the saved .odt anywhere in ~/Documents: its key facts, and at most 350 words (not the page pasted whole). Flipped by task 6 of PLAN-computer-use.md.",
+  "phase": "browser",
+  "status": "required",
+  "say": "Summarize this wiki page into a LibreOffice document called Velmora.",
+  "target": "browser",
+  "setup": {
+    "login": [],
+    "open": "/wiki/Velmora"
+  },
+  "answers": [
+    {
+      "when": "plan",
+      "tap": "approve"
+    },
+    {
+      "when": "confirm",
+      "tap": "approve"
+    }
+  ],
+  "checks": [
+    {
+      "kind": "document_has",
+      "file": "Velmora*.odt",
+      "contains": [
+        "Velmora",
+        "Lake Orrin",
+        "1287",
+        "Brassfeather"
+      ],
+      "max_words": 350
+    }
+  ],
+  "max_minutes": 10
+}

@@ -7,7 +7,9 @@ button (a screenshot-only app carries its shortcuts on screen), and a
 menu bar (File -> New, Save). With --state FILE every save writes
 {"notes": [{"title": ..., "body": ...}]} to FILE, which is how the suite reads
 back what the agent did. --layout moved swaps the two buttons' positions, for
-the replay cases that expect a button to have moved.
+the replay cases that expect a button to have moved. --layout pointer draws
+New and Save on canvases that only a click works (no menu, no shortcuts,
+nothing focused), for the cases a model must do from pixels.
 
 Python 3 standard library only (Tkinter). See README.md for running it under
 Xvfb and headless sway.
@@ -20,7 +22,27 @@ import tempfile
 import tkinter as tk
 
 TITLE = "Jarvis Test Notes"
-LAYOUTS = ("default", "moved")
+LAYOUTS = ("default", "moved", "pointer")
+
+
+class CanvasButton(tk.Canvas):
+    """A button drawn on a canvas that only a click works: no keyboard focus, no shortcut.
+
+    The pointer layout's New and Save, so a screenshot-only model has to find them on the
+    screen and click them.
+    """
+
+    def __init__(self, master, label, command, **kw):
+        super().__init__(master, width=96, height=34, highlightthickness=0, takefocus=0,
+                         bg=master["bg"], cursor="hand2", **kw)
+        self.label = label
+        self.command = command
+        self.create_rectangle(2, 2, 94, 32, fill="#e8e8e8", outline="#888888", width=1)
+        self.create_text(48, 17, text=label)
+        self.bind("<Button-1>", lambda _e: self.click())
+
+    def click(self):
+        self.command()
 
 
 class NotesApp:
@@ -37,15 +59,17 @@ class NotesApp:
 
         root.title(TITLE)
         root.geometry("720x480")
+        pointer = layout == "pointer"
 
-        menubar = tk.Menu(root)
-        filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="New", command=self.new_note, accelerator="Ctrl+N")
-        filemenu.add_command(label="Save", command=self.save, accelerator="Ctrl+S")
-        menubar.add_cascade(label="File", menu=filemenu)
-        root.config(menu=menubar)
-        root.bind("<Control-n>", lambda _e: self.new_note())
-        root.bind("<Control-s>", lambda _e: self.save())
+        if not pointer:
+            menubar = tk.Menu(root)
+            filemenu = tk.Menu(menubar, tearoff=0)
+            filemenu.add_command(label="New", command=self.new_note, accelerator="Ctrl+N")
+            filemenu.add_command(label="Save", command=self.save, accelerator="Ctrl+S")
+            menubar.add_cascade(label="File", menu=filemenu)
+            root.config(menu=menubar)
+            root.bind("<Control-n>", lambda _e: self.new_note())
+            root.bind("<Control-s>", lambda _e: self.save())
 
         self.left = left = tk.Frame(root, name="left")
         left.pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=8)
@@ -74,6 +98,12 @@ class NotesApp:
         new_parent, save_parent = top_left, bottom_right
         if layout == "moved":
             new_parent, save_parent = bottom_right, top_left
+        if pointer:
+            self.new_button = CanvasButton(new_parent, "New", self.new_note)
+            self.new_button.pack(side=tk.LEFT, pady=(0, 8))
+            self.save_button = CanvasButton(save_parent, "Save", self.save)
+            self.save_button.pack(side=tk.LEFT, pady=(0, 8))
+            return  # nothing focused: the title needs a click too
         self.new_button = tk.Button(new_parent, text="New note (Ctrl+N)", command=self.new_note)
         self.new_button.pack(side=tk.LEFT, pady=(0, 8), ipadx=6, ipady=4)
         self.save_button = tk.Button(save_parent, text="Save (Ctrl+S)", command=self.save)
@@ -87,7 +117,8 @@ class NotesApp:
         self.listbox.selection_clear(0, tk.END)
         self.title_entry.delete(0, tk.END)
         self.body_text.delete("1.0", tk.END)
-        self.title_entry.focus_set()
+        if self.layout != "pointer":
+            self.title_entry.focus_set()
 
     def save(self):
         """Store the editor's note (new or the selected one) and write the state file."""
@@ -144,7 +175,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=TITLE)
     parser.add_argument("--state", metavar="FILE", help="write the notes here as JSON on every save")
     parser.add_argument("--layout", choices=LAYOUTS, default="default",
-                        help="'moved' swaps the New note and Save buttons")
+                        help="'moved' swaps the New note and Save buttons; 'pointer' makes them "
+                             "click-only (no menu or shortcuts)")
     args = parser.parse_args(argv)
     root = tk.Tk()
     NotesApp(root, state_path=args.state, layout=args.layout)
