@@ -159,6 +159,15 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
   - **After ringing:** the button goes back to its normal jobs: read alerts on a short press,
     power off on a 3 s hold.
 
+- **D8 (Q9, 2026-11-23): repeat works like the iOS Clock app.**
+  - **The rule:** an alarm has a set of weekdays, Sunday to Saturday.
+    - An empty set means once: the next time that time comes round.
+    - Otherwise it rings on each chosen day, in the household's time zone.
+  - **Voice:** "weekdays", "weekends" and "every day" are just shorthand for those sets.
+  - **Kept from D2:** skipping the next one ("cancel my 6:50 alarm tomorrow") and turning an alarm
+    off without deleting it.
+  - **Not supported:** every two weeks, monthly or yearly.
+
 ## Questions
 
 Each is one decision. Context and the recommendation are with it; ask in order.
