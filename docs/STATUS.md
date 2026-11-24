@@ -200,6 +200,7 @@ Plan: [autonomy/PLAN.md](autonomy/PLAN.md). Merges into `main` as each phase is 
 - [x] **P2** Watches v1: `web` and `signal` sources, deterministic conditions, voice tools
 - [ ] **P3** Admin Autonomy page: rules, watches, activity log
 - [ ] **P4** Watches v2: calendar/inbox, fuzzy conditions, home state via node `device.state` signals
+  - Home rules (2026-11-23): spec, Q1–Q10 decided and a six-slice build plan in [autonomy/HOME-WATCHES.md](autonomy/HOME-WATCHES.md). Next: slice 1, the engine.
 - [ ] **P5** Goals: wake loop, child errands, budget, weekly card
 - [ ] **P6** Auto-review: a yes/no check before an action runs
 - [ ] **P7** Mobile screens (node-mobile)
