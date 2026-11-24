@@ -8,7 +8,7 @@ the queue is at the end, each with a recommendation. Answers go into **Decided**
 "Full-fledged alarms with plenty of features." Only plain timers exist today. Web notification
 parity came first and is done (STATUS, "Web parity").
 
-## Intent (draft, to confirm: Q1)
+## Intent (confirmed with changes, Q1)
 
 - **Outcome:** a household sets alarms by voice, in the app or on the web ("wake me at 6:30 on
   weekdays in the bedroom"). At the time, a node **rings until someone stops it** (a sound, not one
@@ -73,7 +73,19 @@ that ring the same way, holiday or vacation skip, a gentle pre-alarm light (smar
 
 ## Decided
 
-Nothing yet.
+- **D1 (Q1, 2026-11-23): the core.** An alarm is a room's, set by voice, app or web, and rings until
+  stopped, with these changes from the draft:
+  - It rings in **bursts** with a gap of about a second between them. The node listens for "stop"
+    and "snooze" only in the gaps. The user's reason: wake-word detection already struggles while
+    sound plays, such as music.
+  - **Voice is a convenience, not the guaranteed way out.** The button, the app, the web and a
+    touch display always stop or snooze it, and the app, web and display show **Snooze** and
+    **Stop** prominently while it rings.
+  - **Ring limit: 4 minutes** to start, then it stops by itself and leaves an inbox note.
+  - **Voice ships only if it works:** the lab test measures voice stop and snooze while it rings.
+    If they fail, the first release ships with the button and the app only.
+  - **Testing is quiet:** the lab Pi is near a sleeping child. Before any sound plays, set the
+    node's volume to a quiet level and check it; full-volume runs wait for the user's go-ahead.
 
 ## Questions
 
@@ -97,7 +109,7 @@ Each is one decision. Context and the recommendation are with it; ask in order.
    tones first; a stream ("wake me with the radio") through the playback hub later, with the tone
    as the fallback when the stream doesn't start.
 6. **How it rings.** Loop until stopped, start quiet and ramp to the node's volume over about a
-   minute, stop by itself after a ring limit (10 minutes?) and leave an inbox note. Recommendation:
+   minute, stop by itself after the ring limit (4 minutes, D1) and leave an inbox note. Recommendation:
    that, with the ramp and limit per alarm later if asked.
 7. **Snooze and stop by voice while ringing.** Listen without the wake word for "stop", "snooze",
    "five more minutes" while it rings (the ring pauses for the words), or only with the wake word.
