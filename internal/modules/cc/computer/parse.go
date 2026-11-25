@@ -78,7 +78,13 @@ func parseReply(s string) (Reply, error) {
 			}
 		}
 	}
-	r.Done = r.Done || r.Type == "done"
+	// A schema-held "type": "done" with actions and no summary is a batch: Gemma 4 26B sends it
+	// mid-task, its thought saying what's left (2026-11-25).
+	r.Done = r.Done || r.Type == "done" && (strings.TrimSpace(r.Summary) != "" || len(r.Actions) == 0)
+	if r.Type == "ask" && strings.TrimSpace(r.Ask) == "" && len(r.Actions) == 0 {
+		// Gemma 4 26B names the shape in "type" and puts its question in the thought (2026-11-25).
+		r.Ask = strings.TrimSpace(r.Thought)
+	}
 	if len(r.Actions) == 0 && !r.Done && strings.TrimSpace(r.Ask) == "" {
 		// One action sent bare, without the object around it ({"kind": "press", "ref": "a2",
 		// …}): it is the batch. Gemma 4 26B answered so twice running and the task ended as

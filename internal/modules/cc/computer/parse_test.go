@@ -171,3 +171,22 @@ func TestSalvageFirstAction(t *testing.T) {
 		}
 	}
 }
+
+// Gemma 4 26B under replySchema names the shape in "type" and leaves "ask" out, the question in
+// its thought: every question it asked ended the task as unreadable (2026-11-25, CAPTCHA, zip code).
+func TestParseReplyAskTypeWithTheQuestionInItsThought(t *testing.T) {
+	r, err := parseReply(`{"thought": "The page shows a CAPTCHA I can't solve.", "type": "ask", "reason": "unclear"}`)
+	if err != nil || r.Ask != "The page shows a CAPTCHA I can't solve." || r.Reason != ReasonUnclear || len(r.Actions) != 0 {
+		t.Fatalf("ask = %+v, %v", r, err)
+	}
+}
+
+func TestParseReplyDoneTypeWithActionsIsABatch(t *testing.T) {
+	r, err := parseReply(`{"thought": "Now I need the listings.", "type": "done", "actions": [{"kind": "screenshot", "intent": "See the results"}]}`)
+	if err != nil || r.Done || len(r.Actions) != 1 || r.Actions[0].Kind != "screenshot" {
+		t.Fatalf("reply = %+v, %v", r, err)
+	}
+	if _, err := parseReply(`{"thought": "finished", "type": "done"}`); err == nil || !strings.Contains(err.Error(), "summary") {
+		t.Fatalf("done without a summary or actions: err = %v, want it to ask for a summary", err)
+	}
+}
