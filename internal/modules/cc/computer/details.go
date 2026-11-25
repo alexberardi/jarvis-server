@@ -27,6 +27,17 @@ var autoKeys = map[string]string{
 	"postal-code": "postal_code",
 }
 
+// detailKey reports whether key names a saved detail at all, saved or not. autoKeys' values are
+// every key cc offers (formDetails in computer_errands.go, and the name split in two).
+func detailKey(key string) bool {
+	for _, k := range autoKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 func detail(ds []Detail, key string) (Detail, bool) {
 	for _, d := range ds {
 		if d.Key == key {
@@ -86,15 +97,31 @@ func maskDetails(msgs []llm.Message, ds []Detail) {
 // shortcut: only the newest answer counts, so a detail from an earlier answer is asked for again.
 func placeDetails(said string, ds []Detail, obs Observation, actions []computeruse.Action) ([]computeruse.Action, string) {
 	known := map[string]bool{}
-	for _, w := range wordRe.FindAllString(strings.ToLower(said), -1) {
+	lowSaid := strings.ToLower(said)
+	for _, w := range wordRe.FindAllString(lowSaid, -1) {
 		known[w] = true
 	}
-	out := append([]computeruse.Action(nil), actions...)
-	for i, a := range out {
+	for abbr, state := range usStates { // "Burlington, VT" for "Burlington, Vermont" (weather.gov, 2026-11-25)
+		if strings.Contains(lowSaid, state) {
+			known[abbr] = true
+		}
+	}
+	out := make([]computeruse.Action, 0, len(actions))
+	for _, a := range actions {
 		if a.Kind != "type" && a.Kind != "set_value" {
+			out = append(out, a)
 			continue
 		}
 		e := elementFor(obs, a.Ref)
+		// Text that is only a placeholder for no detail at all types nothing: the field is left
+		// empty, and a form that needs it says so on the next page. Gemma 4 26B typed a field's
+		// ref, "{{e7}}", into an optional Suite/Apt and the task stopped to ask (dominos.com,
+		// 2026-11-25). A real detail that isn't offered here (unsaved, or off the task's site) still asks.
+		if m := detailRe.FindStringSubmatch(strings.TrimSpace(a.Text)); m != nil && m[0] == strings.TrimSpace(a.Text) && !detailKey(m[1]) {
+			continue
+		}
+		out = append(out, a)
+		i := len(out) - 1
 		for _, m := range detailRe.FindAllStringSubmatch(a.Text, -1) {
 			if _, ok := detail(ds, m[1]); !ok {
 				name := m[1]
@@ -108,7 +135,7 @@ func placeDetails(said string, ds []Detail, obs Observation, actions []computeru
 			continue
 		}
 		what := personalField(e)
-		if what == "" {
+		if what == "" || searchRe.MatchString(e.Name) {
 			continue
 		}
 		for _, w := range wordRe.FindAllString(strings.ToLower(detailRe.ReplaceAllString(a.Text, " ")), -1) {
@@ -129,6 +156,24 @@ func placeDetails(said string, ds []Detail, obs Observation, actions []computeru
 		}
 	}
 	return out, ""
+}
+
+// searchRe names a field that looks a place up ("Local forecast by City, St or ZIP code"): what
+// goes in is the task's place, not the user's address.
+var searchRe = regexp.MustCompile(`(?i)\b(search|find|forecast|locations?|near)\b`)
+
+// usStates maps each abbreviation to its state's name, lower case.
+var usStates = map[string]string{
+	"al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas", "ca": "california", "co": "colorado",
+	"ct": "connecticut", "de": "delaware", "fl": "florida", "ga": "georgia", "hi": "hawaii", "id": "idaho",
+	"il": "illinois", "in": "indiana", "ia": "iowa", "ks": "kansas", "ky": "kentucky", "la": "louisiana",
+	"me": "maine", "md": "maryland", "ma": "massachusetts", "mi": "michigan", "mn": "minnesota",
+	"ms": "mississippi", "mo": "missouri", "mt": "montana", "ne": "nebraska", "nv": "nevada",
+	"nh": "new hampshire", "nj": "new jersey", "nm": "new mexico", "ny": "new york", "nc": "north carolina",
+	"nd": "north dakota", "oh": "ohio", "ok": "oklahoma", "or": "oregon", "pa": "pennsylvania",
+	"ri": "rhode island", "sc": "south carolina", "sd": "south dakota", "tn": "tennessee", "tx": "texas",
+	"ut": "utah", "vt": "vermont", "va": "virginia", "wa": "washington", "wv": "west virginia",
+	"wi": "wisconsin", "wy": "wyoming", "dc": "district of columbia",
 }
 
 // detailsLine tells the model which saved details it may type, by name only.
