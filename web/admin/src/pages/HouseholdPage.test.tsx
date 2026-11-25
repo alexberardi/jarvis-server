@@ -20,7 +20,7 @@ const members = [
   { user_id: 7, username: 'sam', display_name: 'Sam', email: 'sam@example.com', role: 'admin', created_at: '' },
   { user_id: 8, username: 'kim', display_name: null, email: 'kim@example.com', role: 'member', created_at: '' },
 ]
-const invite = { id: 3, code: 'ABCD-EFGH', default_role: 'member', max_uses: 1, use_count: 0, expires_at: '2026-11-24T10:00:00', revoked: false, created_at: '' }
+const invite = { id: 3, code: 'ABCD-EFGH', default_role: 'member', max_uses: 1, use_count: 0, expires_at: '2099-01-01T00:00:00', revoked: false, created_at: '' }
 
 function renderPage() {
   render(
