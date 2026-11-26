@@ -290,12 +290,18 @@ const budgetRule = "BUDGETS: for a budget or a spending report from statements, 
 // websiteRule is the decomposition rule's line for computer tasks (plan P3 piece 14): the
 // house model split "order the best watch" into a find step and an order step, and the second
 // task no longer knew what the first had found.
+// Its comparison line (2026-11-25): "compare the price on Amazon and Best Buy" was one quick_search
+// for Gemma 4 26B and Qwen3.5-9B alike, and the report said no prices were found: snippets
+// rarely carry a store's price.
 const websiteRule = "COMPUTER TASKS: everything the user wants done on one website or in one app (find, " +
 	"compare, then order, fill in or download) is ONE computer_task step whose goal is the user's whole " +
 	"request for that site, with every detail they gave. Start the site at the web address they gave. " +
 	"When they name no website (research the best one, find the cheapest listing, add it to my cart), it is still ONE " +
 	"computer_task with no site: it starts on a web search. With quick_search on the menu, put ONE quick_search step " +
-	"before it for the research (what to buy and why); the computer_task is given what it found.\n\n"
+	"before it for the research (what to buy and why); the computer_task is given what it found. " +
+	"To compare prices on websites the user names (Target and Walmart, Amazon and Best Buy), plan ONE computer_task " +
+	"per website, each finding the item's price on its site, never a quick_search: search results don't show a store's " +
+	"current price. The report compares what they found.\n\n"
 
 // documentRule is the computer rules' line for documents (ELEMENT-LAYER-WORK.md C27): typing a
 // document through Writer's window took 15+ rounds and failed at the Save dialog; the file is

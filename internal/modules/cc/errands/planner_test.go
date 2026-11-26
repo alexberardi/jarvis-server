@@ -463,3 +463,11 @@ func TestBalanceJSONPutsBackASkippedCloser(t *testing.T) {
 func thinksAsSet(r llm.ChatRequest) bool {
 	return r.ReasoningBudget != nil && *r.ReasoningBudget == defaultPlannerThinkTokens
 }
+
+func TestWebsiteRuleSendsNamedStoreComparisonsToTheirSites(t *testing.T) {
+	for _, want := range []string{"ONE computer_task per website", "never a quick_search"} {
+		if !strings.Contains(websiteRule, want) {
+			t.Errorf("websiteRule lacks %q", want)
+		}
+	}
+}

@@ -32,17 +32,23 @@ func TestPlaceDetails(t *testing.T) {
 		{Ref: "e2", Role: "textbox", Name: "Search products"},
 		{Ref: "e3", Role: "textbox", Name: "Mobile", Autocomplete: "tel-national"},
 		{Ref: "e4", Role: "textbox", Name: "Company name"},
+		{Ref: "e5", Role: "textbox", Name: "Suite/Apt"},
+		{Ref: "e6", Role: "textbox", Name: `Local forecast by "City, St" or ZIP code`},
+		{Ref: "e7", Role: "textbox", Name: "City"},
 	}}
 	typ := func(ref, text string) []computeruse.Action {
 		return []computeruse.Action{{Kind: "type", Ref: ref, Text: text}}
 	}
-	said := "order a pizza to 12 Elm Street, Springfield"
+	said := "order a pizza to 12 Elm Street, Springfield, Vermont"
 	saved := []Detail{{"callback_number", "Callback number", "555-0199"}, {"street", "Street", "9 Oak Lane"}}
 	text := func(ds []Detail, ref, in string) string {
 		t.Helper()
 		out, q := placeDetails(said, ds, obs, typ(ref, in))
 		if q != "" {
 			return "ASK: " + q
+		}
+		if len(out) == 0 {
+			return "LEFT EMPTY"
 		}
 		return out[0].Text
 	}
@@ -52,7 +58,13 @@ func TestPlaceDetails(t *testing.T) {
 		{"a search is not a detail", "e2", "pepperoni", "pepperoni"},
 		{"an invented phone becomes the saved one by the field's token", "e3", "555-0100", "{{callback_number}}"},
 		{"a saved detail's placeholder is typed", "e1", "{{street}}", "{{street}}"},
-		{"a placeholder for nothing saved asks", "e4", "{{company}}", "ASK"},
+		{"a placeholder for nothing saved in text of its own leaves the field empty", "e4", "{{company}}", "LEFT EMPTY"},
+		// Gemma 4 26B typed the field's ref as a placeholder into an optional Suite/Apt (dominos.com, 2026-11-25).
+		{"a field's ref as a placeholder leaves it empty", "e5", "{{e7}}", "LEFT EMPTY"},
+		{"a placeholder for nothing saved inside other text asks", "e4", "{{company}} Inc", "ASK"},
+		{"a location search is not the user's address", "e6", "19104", "19104"},
+		{"the request's state by its abbreviation", "e7", "Springfield, VT", "Springfield, VT"},
+		{"an abbreviation for a state the request doesn't name asks", "e7", "Springfield, OH", "ASK"},
 	} {
 		if got := text(saved, c.ref, c.in); got != c.want && !(c.want == "ASK" && strings.HasPrefix(got, "ASK")) {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
